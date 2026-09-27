@@ -26,6 +26,7 @@ import type { ClusterDef, Gvk, KubeObject } from '@/types';
 import { copyText, errorText } from '../util';
 import { useActionDialogs } from './dialogStore';
 import { confirmDestructive, runMutation } from './guard';
+import { workloadActions } from './workloadActions';
 
 import {
   openPodLogs,
@@ -178,6 +179,8 @@ export function resourceActions({
             ),
         }),
     });
+  // Workload operations: set image, pause / resume rollout, roll back.
+  workloadActions({ clusterId, cluster, gvk, obj }).forEach(add);
   if (kind === 'Service') {
     const ports = servicePortOptions(obj);
     if (ports.length && asString(spec(obj).type) !== 'ExternalName')

@@ -1,6 +1,6 @@
 import * as i18n from '@/i18n';
 import { useEffect, useMemo, useState } from 'react';
-import { Bell, FileCode2, Info, Loader2, X } from 'lucide-react';
+import { Bell, FileCode2, History, Info, Loader2, X } from 'lucide-react';
 import { ResizeHandle } from '@/components/ui/ResizeHandle';
 import { ipc } from '@/lib/ipc';
 import { resolveRef } from '@/lib/kube/catalog';
@@ -26,8 +26,12 @@ import { DetailsOverview } from './DetailsOverview';
 import { DetailsToolbar } from './DetailsToolbar';
 import { EventsTab } from './EventsTab';
 import { YamlTab } from './YamlTab';
+// Workload operations: rollout history tab, opened by actions through detailsTabs.
+import { hasRollout } from '@/lib/kube/rollout';
+import { requestFor, useDetailsTabRequest } from './detailsTabs';
+import { HistoryTab } from './HistoryTab';
 
-type Tab = 'details' | 'yaml' | 'events';
+type Tab = 'details' | 'yaml' | 'events' | 'history';
 
 const POD_METRIC_KINDS = new Set([
   'Pod',
@@ -83,6 +87,12 @@ export function DetailsPanel({
   );
   const obj = liveObject ?? fetched.data ?? null;
   const close = () => useWorkbenchStore.getState().select(clusterId, kindKey, null);
+  const tabRequest = useDetailsTabRequest((s) =>
+    requestFor(s.request, clusterId, obj?.metadata.uid),
+  );
+  useEffect(() => {
+    if (tabRequest) setTab(tabRequest.tab);
+  }, [tabRequest]);
 
   useEffect(() => {
     if (!isActive) return;
@@ -134,6 +144,9 @@ export function DetailsPanel({
     { id: 'details', label: i18n.t('Details'), icon: Info },
     { id: 'yaml', label: 'YAML', icon: FileCode2 },
     { id: 'events', label: i18n.t('Events'), icon: Bell },
+    ...(obj && hasRollout(obj)
+      ? [{ id: 'history' as const, label: i18n.t('History'), icon: History }]
+      : []),
   ];
 
   return (
@@ -211,10 +224,12 @@ export function DetailsPanel({
             </>
           )}
         </div>
-      ) : tab === 'details' ? (
+      ) : tab === 'details' || (tab === 'history' && !hasRollout(obj)) ? (
         <div className="overlay-scroll min-h-0 flex-1 overflow-auto">
           <DetailsOverview obj={obj} gvk={gvk} ctx={ctx} isActive={isActive} readOnly={readOnly} />
         </div>
+      ) : tab === 'history' ? (
+        <HistoryTab {...{ clusterId, gvk, obj, readOnly, isActive }} />
       ) : tab === 'yaml' ? (
         <YamlTab
           clusterId={clusterId}

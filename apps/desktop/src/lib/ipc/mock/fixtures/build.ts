@@ -13,6 +13,7 @@ import { buildNodes } from './nodes';
 import { buildPolicies } from './policies';
 import { buildRbac } from './rbac';
 import { buildStorage } from './storage';
+import { buildRolloutHistory } from './rollouts';
 import { buildKubeSystem } from './system';
 
 /** Builds one demo cluster. Order matters: later steps reference earlier objects. */
@@ -57,6 +58,7 @@ function buildCluster(db: ClusterDb) {
     });
   buildHelm(db);
   buildEvents(db);
+  buildRolloutHistory(db);
 }
 
 setBuilder(buildCluster);

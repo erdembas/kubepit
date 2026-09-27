@@ -2,6 +2,7 @@ import * as i18n from '@/i18n';
 import { asArray, asObject, asString, isObject, spec } from '@/lib/kube/accessors';
 import { parseSelector, matchesSelector, selectorText } from '@/lib/kube/selectors';
 import { replicaCounts } from '@/lib/kube/workloads';
+import { hasRollout } from '@/lib/kube/rollout';
 import { ChipList, MiniTable, MonoText, Row, Rows, Section } from '../primitives';
 import { PodsMiniTable } from '../PodsMiniTable';
 import { ConditionsTable } from './PodSections';
@@ -54,6 +55,8 @@ export function WorkloadSections({ obj, ctx, isActive }: SectionProps) {
   const strategy = asObject(s.strategy ?? s.updateStrategy);
   const rolling = asObject(strategy.rollingUpdate);
   const isDs = obj.kind === 'DaemonSet';
+  // Strategy, pause state and conditions live in the Rollout section for these kinds.
+  const rollout = hasRollout(obj);
   return (
     <>
       <Section title={obj.kind}>
@@ -77,7 +80,7 @@ export function WorkloadSections({ obj, ctx, isActive }: SectionProps) {
             </span>
           </Row>
           <Row label={i18n.t('Strategy')}>
-            {asString(strategy.type) && (
+            {!rollout && asString(strategy.type) && (
               <span>
                 {asString(strategy.type)}
                 {(rolling.maxSurge !== undefined ||
@@ -102,7 +105,7 @@ export function WorkloadSections({ obj, ctx, isActive }: SectionProps) {
           </Row>
           <Row label={i18n.t('Service')}>{asString(s.serviceName)}</Row>
           <Row label={i18n.t('Pod management')}>{asString(s.podManagementPolicy)}</Row>
-          <Row label={i18n.t('Paused')}>{s.paused === true ? i18n.t('Yes') : null}</Row>
+          <Row label={i18n.t('Paused')}>{!rollout && s.paused === true ? i18n.t('Yes') : null}</Row>
           <Row label={i18n.t('Node selector')}>
             {Object.keys(asObject(asObject(asObject(s.template).spec).nodeSelector)).length > 0 && (
               <ChipList
@@ -114,7 +117,7 @@ export function WorkloadSections({ obj, ctx, isActive }: SectionProps) {
           </Row>
         </Rows>
       </Section>
-      {!isDs && obj.kind !== 'ReplicaSet' && (
+      {!isDs && !rollout && obj.kind !== 'ReplicaSet' && (
         <Section title={i18n.t('Conditions')}>
           <ConditionsTable obj={obj} now={ctx.now} />
         </Section>

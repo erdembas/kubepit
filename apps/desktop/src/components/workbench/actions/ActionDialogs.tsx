@@ -14,6 +14,7 @@ import { copyText, errorText } from '../util';
 import { useActionDialogs, type ActionDialog } from './dialogStore';
 import { runMutation } from './guard';
 import { openExternal } from './openExternal';
+import { SetImageDialog } from './SetImageDialog';
 
 /** Renders the open action dialog for this cluster (scale, port-forward, pickers). */
 export function ActionDialogs({ clusterId }: { clusterId: string }) {
@@ -24,6 +25,7 @@ export function ActionDialogs({ clusterId }: { clusterId: string }) {
   if (dialog.kind === 'menu')
     return <FileContextMenu x={dialog.x} y={dialog.y} items={dialog.items} onClose={close} />;
   if (dialog.kind === 'scale') return <ScaleDialog dialog={dialog} onClose={close} />;
+  if (dialog.kind === 'set-image') return <SetImageDialog dialog={dialog} onClose={close} />;
   return <PortForwardDialog dialog={dialog} onClose={close} />;
 }
 

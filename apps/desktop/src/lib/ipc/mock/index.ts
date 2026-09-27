@@ -2,6 +2,8 @@ import { handlers } from './registry';
 import './app';
 import './resources';
 import './dock';
+// Registered after './resources': it wraps `resource_patch` (resuming a paused rollout).
+import './workloadOps';
 
 export { mockListen } from './bus';
 

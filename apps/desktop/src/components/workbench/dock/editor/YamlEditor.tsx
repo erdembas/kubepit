@@ -14,6 +14,8 @@ interface Props {
   onChange: (value: string) => void;
   /** Cmd/Ctrl+S. */
   onSave: () => void;
+  /** Cmd/Ctrl+Shift+Enter: server-side dry run review. */
+  onReview?: () => void;
   readOnly: boolean;
   fontSize: number;
 }
@@ -22,13 +24,15 @@ interface Props {
  * Monaco YAML editor with RunHQ's theme plumbing, inline syntax markers and
  * Cmd/Ctrl+S. Falls back to a monospace textarea when Monaco cannot load.
  */
-export function YamlEditor({ value, onChange, onSave, readOnly, fontSize }: Props) {
+export function YamlEditor({ value, onChange, onSave, onReview, readOnly, fontSize }: Props) {
   i18n.useLocale();
   const isDark = useIsDark();
   const theme = useMonacoTheme(isDark ? 'dark' : 'light');
   const monaco = useMonacoReady();
   const saveRef = useRef(onSave);
   saveRef.current = onSave;
+  const reviewRef = useRef(onReview);
+  reviewRef.current = onReview;
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<MonacoApi | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -43,6 +47,12 @@ export function YamlEditor({ value, onChange, onSave, readOnly, fontSize }: Prop
       label: i18n.t('Save / apply manifest'),
       keybindings: [api.KeyMod.CtrlCmd | api.KeyCode.KeyS],
       run: () => saveRef.current(),
+    });
+    editor.addAction({
+      id: 'kubepit.dock.review',
+      label: i18n.t('Review changes (server-side dry run)'),
+      keybindings: [api.KeyMod.CtrlCmd | api.KeyMod.Shift | api.KeyCode.Enter],
+      run: () => reviewRef.current?.(),
     });
     setMounted(true);
   }, []);
@@ -76,6 +86,7 @@ export function YamlEditor({ value, onChange, onSave, readOnly, fontSize }: Prop
         value={value}
         onChange={onChange}
         onSave={onSave}
+        onReview={onReview}
         readOnly={readOnly}
         fontSize={fontSize}
       />
@@ -121,7 +132,7 @@ export function YamlEditor({ value, onChange, onSave, readOnly, fontSize }: Prop
   );
 }
 
-function FallbackEditor({ value, onChange, onSave, readOnly, fontSize }: Props) {
+function FallbackEditor({ value, onChange, onSave, onReview, readOnly, fontSize }: Props) {
   return (
     <textarea
       value={value}
@@ -134,6 +145,9 @@ function FallbackEditor({ value, onChange, onSave, readOnly, fontSize }: Props) 
         if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
           e.preventDefault();
           onSave();
+        } else if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'Enter') {
+          e.preventDefault();
+          onReview?.();
         } else if (e.key === 'Tab' && !readOnly) {
           e.preventDefault();
           const el = e.currentTarget;
