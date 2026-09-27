@@ -35,6 +35,7 @@ import {
   Section,
   ToneText,
 } from '../details/primitives';
+import { usePaneFocused } from '@/components/split/paneFocus';
 import { useDragWidth } from '../useDragWidth';
 import { isTypingTarget, useNow } from '../util';
 
@@ -79,8 +80,9 @@ export function HelmDetails({
     refreshPolled(listKey);
   };
 
+  const paneFocused = usePaneFocused();
   useEffect(() => {
-    if (!isActive) return;
+    if (!isActive || !paneFocused) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || isTypingTarget(e.target) || useAppStore.getState().confirm) return;
       if (document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"]')) return;
@@ -89,7 +91,7 @@ export function HelmDetails({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isActive]);
+  }, [isActive, paneFocused]);
 
   const uninstall = () =>
     confirmDestructive({

@@ -86,6 +86,7 @@ export function buildConfig(db: ClusterDb) {
     'application.yaml': `server:\n  port: 8080\n  shutdown: graceful\npayments:\n  provider: stripe\n  currency: EUR\n  retry:\n    max-attempts: 3\n    backoff: 250ms\nmanagement:\n  endpoints:\n    web:\n      exposure:\n        include: health,prometheus\n`,
     'feature-flags': 'apple-pay=true,klarna=false,3ds2=true',
     'log-level': 'INFO',
+    'rate-limits.json': `{\n  "default": { "rps": 50, "burst": 100 },\n  "routes": {\n    "/v1/charges": { "rps": 20, "burst": 40 },\n    "/v1/refunds": { "rps": 5, "burst": 10 }\n  }\n}\n`,
   });
   cm(db, 'web', 'storefront-nginx', {
     'default.conf': `server {\n  listen 80;\n  location / {\n    proxy_pass http://127.0.0.1:3000;\n    proxy_set_header Host $host;\n  }\n  location /healthz { return 200 'ok'; }\n}\n`,

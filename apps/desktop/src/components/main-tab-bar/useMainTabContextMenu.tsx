@@ -2,30 +2,39 @@ import * as i18n from '@/i18n/core';
 import { useCallback, useMemo, useState } from 'react';
 import type React from 'react';
 import {
+  AppWindow,
   ArrowLeft,
   ArrowRight,
   ChevronsLeft,
   ChevronsRight,
+  Columns2,
   ListX,
   Pin,
   PinOff,
+  Rows2,
   Trash2,
   X,
 } from 'lucide-react';
 import type { FileContextMenuEntry } from '@/components/ui/FileContextMenu';
 import { DASHBOARD_TAB_KEY, mainTabKey, type MainTab } from '@/store/useAppStore';
+import type { SplitSide } from '@/store/splitLayout';
 
 interface MainTabContextMenuArgs {
+  /** Tabs of one pane, in strip order. */
   tabs: MainTab[];
   pinnedSet: ReadonlySet<string>;
   closeMainTab: (key: string) => void;
   closeOtherMainTabs: (key: string) => void;
   closeMainTabsToRight: (key: string) => void;
   closeMainTabsToLeft: (key: string) => void;
-  closeAllMainTabs: () => void;
+  closeAllMainTabs: (key: string) => void;
   toggleMainTabPin: (key: string) => void;
   moveMainTabLeft: (key: string) => void;
   moveMainTabRight: (key: string) => void;
+  /** Sides the tab could split its pane on (empty when it cannot). */
+  splitSidesFor: (key: string) => SplitSide[];
+  splitWith: (key: string, side: SplitSide) => void;
+  moveToNewWindow: (key: string) => void;
 }
 
 interface MainTabContextMenuState {
@@ -46,6 +55,9 @@ export function useMainTabContextMenu(args: MainTabContextMenuArgs) {
     toggleMainTabPin,
     moveMainTabLeft,
     moveMainTabRight,
+    splitSidesFor,
+    splitWith,
+    moveToNewWindow,
   } = args;
   const [menu, setMenu] = useState<MainTabContextMenuState | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
@@ -130,6 +142,37 @@ export function useMainTabContextMenu(args: MainTabContextMenuArgs) {
       },
       { id: 'sep-pin', separator: true },
       {
+        id: 'split-right',
+        label: i18n.t('Split Right'),
+        icon: <Columns2 size={12} />,
+        disabled: isDashboard || !splitSidesFor(menu.key).includes('right'),
+        onClick: () => {
+          splitWith(menu.key, 'right');
+          closeMenu();
+        },
+      },
+      {
+        id: 'split-down',
+        label: i18n.t('Split Down'),
+        icon: <Rows2 size={12} />,
+        disabled: isDashboard || !splitSidesFor(menu.key).includes('bottom'),
+        onClick: () => {
+          splitWith(menu.key, 'bottom');
+          closeMenu();
+        },
+      },
+      {
+        id: 'move-to-window',
+        label: i18n.t('Move to New Window'),
+        icon: <AppWindow size={12} />,
+        disabled: isDashboard,
+        onClick: () => {
+          moveToNewWindow(menu.key);
+          closeMenu();
+        },
+      },
+      { id: 'sep-split', separator: true },
+      {
         id: 'close',
         label: i18n.t('Close'),
         icon: <X size={12} />,
@@ -181,7 +224,7 @@ export function useMainTabContextMenu(args: MainTabContextMenuArgs) {
         hint: closeAllCount > 0 ? String(closeAllCount) : undefined,
         tone: 'danger',
         onClick: () => {
-          closeAllMainTabs();
+          closeAllMainTabs(menu.key);
           closeMenu();
         },
       },
@@ -196,7 +239,10 @@ export function useMainTabContextMenu(args: MainTabContextMenuArgs) {
     menu,
     moveMainTabLeft,
     moveMainTabRight,
+    moveToNewWindow,
     pinnedSet,
+    splitSidesFor,
+    splitWith,
     tabs,
     toggleMainTabPin,
     zoneSiblings,

@@ -79,6 +79,24 @@
   box-shadow: none;
 }
 
+/* The resource table's scroller takes focus back when a details panel or
+ * menu closes with Escape, which counts as keyboard focus, so the global
+ * ring outlines the whole table. The active row's accent strip is already
+ * the keyboard indicator. Tailwind's `focus-visible:outline-none` can't win
+ * here: it lives in `@layer utilities` and the global rule is unlayered. */
+.resource-table-scroller:focus,
+.resource-table-scroller:focus-visible {
+  outline: none;
+}
+
+/* View tabs use a roving tabindex: focus always sits on the active tab,
+ * whose own highlight is the keyboard indicator, so the global ring only
+ * adds an accent box around it. Same layering issue as above. */
+.view-tab:focus,
+.view-tab:focus-visible {
+  outline: none;
+}
+
 /* -----------------------------------------------------------------------
  * Quick Action — critical layout anchors (Tailwind-agnostic).
  *

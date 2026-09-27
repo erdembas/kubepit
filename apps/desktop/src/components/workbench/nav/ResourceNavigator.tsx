@@ -106,10 +106,10 @@ export function ResourceNavigator({
     const current = buttons.findIndex((b) => b === document.activeElement);
     const from =
       current >= 0 ? current : buttons.findIndex((b) => b.dataset.navItem === activeKind);
-    const next =
-      buttons[Math.max(0, Math.min(buttons.length - 1, from + (e.key === 'ArrowDown' ? 1 : -1)))];
-    next?.focus();
-    next?.click();
+    // Arrows only move focus; Enter/Space opens the kind so browsing adds no tabs.
+    buttons[
+      Math.max(0, Math.min(buttons.length - 1, from + (e.key === 'ArrowDown' ? 1 : -1)))
+    ]?.focus();
   };
 
   if (collapsedNav) {

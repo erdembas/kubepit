@@ -1,13 +1,7 @@
 import { useLocaleMemo as useMemo } from '@/i18n';
 import * as i18n from '@/i18n';
-import {
-  Activity,
-  Cpu,
-  Languages,
-  MemoryStick,
-  Network,
-  Settings as SettingsIcon,
-} from 'lucide-react';
+import { Activity, Cpu, MemoryStick, Network, Settings as SettingsIcon } from 'lucide-react';
+import { LanguageMenu } from '@/components/LanguageMenu';
 import { ThemeMenu } from '@/components/ThemeMenu';
 import { KubepitMark } from '@/components/ui/KubepitMark';
 import { useAppStore } from '@/store/useAppStore';
@@ -120,15 +114,7 @@ export function StatusBar() {
           <Activity className="text-accent h-3 w-3" />
           <span className="text-fg-dim">{i18n.t('Events')}</span>
         </button>
-        <button
-          type="button"
-          onClick={() => openSettings('general')}
-          className={chip}
-          title={i18n.t('Language')}
-        >
-          <Languages className="h-3 w-3" />
-          <span className="text-fg-dim uppercase">{i18n.getLocale()}</span>
-        </button>
+        <LanguageMenu />
         <button
           type="button"
           onClick={() => openSettings()}

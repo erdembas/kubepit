@@ -22,7 +22,11 @@ pub(crate) fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::
         let _ = handle.emit(EVENT_TERMINAL_EXIT, TerminalExit { id, code });
     }));
 
-    app.manage(AppState { core, terminals });
+    app.manage(AppState {
+        core,
+        terminals,
+        window_terminals: Default::default(),
+    });
     Ok(())
 }
 

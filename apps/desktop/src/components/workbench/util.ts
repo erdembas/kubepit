@@ -60,3 +60,12 @@ export function isTypingTarget(target: EventTarget | null): boolean {
   if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return true;
   return !!target.closest('.monaco-editor, .xterm, [data-dock]');
 }
+
+/** Nearest ancestor that scrolls vertically. */
+export function scrollParent(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const { overflowY } = getComputedStyle(p);
+    if (overflowY === 'auto' || overflowY === 'scroll') return p;
+  }
+  return null;
+}

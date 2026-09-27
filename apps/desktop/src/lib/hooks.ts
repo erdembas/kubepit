@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 const POPOVER_W = 260;
 const GAP = 6;
@@ -58,4 +58,25 @@ export function useClickOutsideClose(
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- click-outside; `refs` and `onClose` are stable refs
   }, [open]);
+}
+
+/**
+ * Width of the element the returned callback ref is attached to, following
+ * resizes (0 until measured). For layouts that depend on their own size
+ * rather than the viewport, such as a workbench in a split pane.
+ */
+export function useElementWidth<T extends HTMLElement>(): [(node: T | null) => void, number] {
+  const [width, setWidth] = useState(0);
+  const observer = useRef<ResizeObserver | null>(null);
+  const ref = useCallback((node: T | null) => {
+    observer.current?.disconnect();
+    observer.current = null;
+    if (!node) return;
+    setWidth(node.getBoundingClientRect().width);
+    observer.current = new ResizeObserver(([entry]) => {
+      if (entry) setWidth(entry.contentRect.width);
+    });
+    observer.current.observe(node);
+  }, []);
+  return [ref, width];
 }

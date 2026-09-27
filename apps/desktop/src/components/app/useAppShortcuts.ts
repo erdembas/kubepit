@@ -1,5 +1,7 @@
 import { useEffect } from 'react';
-import { DASHBOARD_TAB_KEY, mainTabKey, useAppStore } from '@/store/useAppStore';
+import { duplicateWindow } from '@/lib/windowing';
+import { focusedGroup } from '@/store/splitLayout';
+import { DASHBOARD_TAB_KEY, useAppStore } from '@/store/useAppStore';
 
 function isEditable(target: EventTarget | null) {
   const el = target as HTMLElement | null;
@@ -9,8 +11,9 @@ function isEditable(target: EventTarget | null) {
 
 /**
  * Global shortcuts (⌘ on macOS, Ctrl elsewhere):
- *   K palette · N add cluster · , settings · B toggle sidebar
+ *   K palette · N add cluster · Shift+N new window · , settings · B toggle sidebar
  *   W close tab · 1–9 switch tab · Shift+[ / Shift+] previous / next tab
+ * Tab shortcuts act on the focused pane.
  */
 export function useAppShortcuts() {
   useEffect(() => {
@@ -31,6 +34,9 @@ export function useAppShortcuts() {
       if (key === 'n' && !event.shiftKey) {
         event.preventDefault();
         store.openClusterEditor({ mode: 'add' });
+      } else if (key === 'n' && event.shiftKey) {
+        event.preventDefault();
+        void duplicateWindow();
       } else if (key === ',') {
         event.preventDefault();
         store.openSettings();
@@ -40,18 +46,20 @@ export function useAppShortcuts() {
       } else if (key === 'w') {
         if (store.activeMainTabKey === DASHBOARD_TAB_KEY) return;
         event.preventDefault();
-        store.closeMainTab(store.activeMainTabKey);
+        // An empty split pane has no tab to close: close the pane itself.
+        if (store.activeMainTabKey) store.closeMainTab(store.activeMainTabKey);
+        else store.closeMainPane(store.mainLayout.focused);
       } else if (/^[1-9]$/.test(event.key)) {
-        const index = Number(event.key) - 1;
-        const tab = event.key === '9' ? store.mainTabs.at(-1) : store.mainTabs[index];
+        const keys = focusedGroup(store.mainLayout).tabs;
+        const tab = event.key === '9' ? keys.at(-1) : keys[Number(event.key) - 1];
         if (!tab) return;
         event.preventDefault();
-        store.setActiveMainTab(mainTabKey(tab));
+        store.setActiveMainTab(tab);
       } else if (
         event.shiftKey &&
         (event.key === '[' || event.key === ']' || event.key === '{' || event.key === '}')
       ) {
-        const keys = store.mainTabs.map(mainTabKey);
+        const keys = focusedGroup(store.mainLayout).tabs;
         const idx = keys.indexOf(store.activeMainTabKey);
         const step = event.key === '[' || event.key === '{' ? -1 : 1;
         const next = keys[(idx + step + keys.length) % keys.length];

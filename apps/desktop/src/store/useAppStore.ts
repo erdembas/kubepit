@@ -2,8 +2,16 @@ import { create } from 'zustand';
 import type { StateCreator } from 'zustand';
 import { nextSectionColor } from '@/lib/sectionColors';
 import type { ClusterId, Section, SectionId } from '@/types';
+import { clampToZone, mainLayouts, pinBoundary, tabFromKey } from './mainLayout';
 import {
-  DASHBOARD_TAB,
+  focusPane,
+  focusedGroup,
+  groupOf,
+  resizePanes,
+  withPaneTabs,
+  type SplitLayout,
+} from './splitLayout';
+import {
   DASHBOARD_TAB_KEY,
   SETTINGS_TAB_KEY,
   mainTabKey,
@@ -93,26 +101,68 @@ function placeItemKey(
 }
 
 // ---------------------------------------------------------------------------
-// Tab helpers (ported from RunHQ's mainTab slices)
+// Tab helpers (RunHQ's mainTab slices, per split pane)
 // ---------------------------------------------------------------------------
 
-function pinBoundaryIndex(tabs: MainTab[], pinned: ReadonlySet<string>) {
-  let idx = 0;
-  for (let i = 0; i < tabs.length; i++) {
-    const key = mainTabKey(tabs[i]!);
-    if (key === DASHBOARD_TAB_KEY || pinned.has(key)) idx = i + 1;
-    else break;
-  }
-  return idx;
+type TabsState = Pick<
+  AppState,
+  'mainLayout' | 'mainTabs' | 'activeMainTabKey' | 'selectedClusterId' | 'pinnedMainTabKeys'
+>;
+
+/**
+ * State patch storing the main layout and its mirrors: `mainTabs` lists
+ * every open tab in reading order (same array while the set and order hold)
+ * and `activeMainTabKey` is the focused pane's active tab.
+ */
+function commitTabs(s: TabsState, layout: SplitLayout): Partial<AppState> {
+  const keys = layout.groups.flatMap((g) => g.tabs);
+  const same =
+    keys.length === s.mainTabs.length && keys.every((k, i) => k === mainTabKey(s.mainTabs[i]!));
+  const mainTabs = same ? s.mainTabs : keys.map(tabFromKey).filter((t): t is MainTab => !!t);
+  const activeMainTabKey = focusedGroup(layout).active ?? '';
+  const active = tabFromKey(activeMainTabKey);
+  return {
+    mainLayout: layout,
+    mainTabs,
+    activeMainTabKey,
+    selectedClusterId: active?.kind === 'cluster' ? active.refId : null,
+  };
 }
 
-function insertTab(tabs: MainTab[], tab: MainTab) {
-  return [...tabs, tab];
+/**
+ * Close the tabs `pick` matches in the pane holding `key`; when the pane's
+ * active tab was among them, `key` takes over (RunHQ parity).
+ */
+function closeAround(
+  s: TabsState,
+  key: string,
+  pick: (k: string, index: number, at: number, pinned: ReadonlySet<string>) => boolean,
+): Partial<AppState> {
+  const pane = groupOf(s.mainLayout, key);
+  if (!pane) return {};
+  const at = pane.tabs.indexOf(key);
+  const pinned = new Set(s.pinnedMainTabKeys);
+  const result = mainLayouts.closeViews(s.mainLayout, pane.id, (k, i) => pick(k, i, at, pinned));
+  if (!result.closed.length) return {};
+  const layout =
+    pane.active && result.closed.includes(pane.active) && !result.closed.includes(key)
+      ? mainLayouts.openView(result.layout, key)
+      : result.layout;
+  return commitTabs(s, layout);
 }
 
-function selectionFor(tabs: MainTab[], key: string) {
-  const tab = tabs.find((t) => mainTabKey(t) === key);
-  return tab?.kind === 'cluster' ? tab.refId : null;
+/** Swap `key` with its neighbour in its pane when both share a pin zone. */
+function swapInPane(s: TabsState, key: string, step: -1 | 1): Partial<AppState> {
+  const pane = groupOf(s.mainLayout, key);
+  if (!pane || key === DASHBOARD_TAB_KEY) return {};
+  const at = pane.tabs.indexOf(key);
+  const other = pane.tabs[at + step];
+  const pinned = new Set(s.pinnedMainTabKeys);
+  if (!other || other === DASHBOARD_TAB_KEY || pinned.has(other) !== pinned.has(key)) return {};
+  const tabs = [...pane.tabs];
+  tabs[at] = other;
+  tabs[at + step] = key;
+  return commitTabs(s, withPaneTabs(s.mainLayout, pane.id, tabs));
 }
 
 // ---------------------------------------------------------------------------
@@ -132,15 +182,14 @@ const createDataSlice: Slice<DataSlice> = (set) => ({
     set((s) => {
       // Tabs for clusters that no longer exist must not linger.
       const ids = new Set(clusters.map((c) => c.id));
-      const mainTabs = s.mainTabs.filter((t) => t.kind !== 'cluster' || ids.has(t.refId));
-      const activeOk = mainTabs.some((t) => mainTabKey(t) === s.activeMainTabKey);
-      const activeMainTabKey = activeOk ? s.activeMainTabKey : DASHBOARD_TAB_KEY;
-      return {
-        clusters,
-        mainTabs,
-        activeMainTabKey,
-        selectedClusterId: selectionFor(mainTabs, activeMainTabKey),
+      const gone = (key: string) => {
+        const tab = tabFromKey(key);
+        return tab?.kind === 'cluster' && !ids.has(tab.refId);
       };
+      let layout = s.mainLayout;
+      for (const pane of s.mainLayout.groups)
+        layout = mainLayouts.closeViews(layout, pane.id, gone).layout;
+      return { clusters, ...(layout === s.mainLayout ? {} : commitTabs(s, layout)) };
     }),
   setStatus: (status) => set((s) => ({ statuses: { ...s.statuses, [status.id]: status } })),
   setOverview: (id, overview, error) =>
@@ -236,184 +285,117 @@ const createSectionsSlice: Slice<SectionsSlice> = (set, get) => ({
 });
 
 const createTabsSlice: Slice<TabsSlice> = (set, get) => ({
-  mainTabs: [DASHBOARD_TAB],
+  mainLayout: mainLayouts.singleLayout(),
+  mainTabs: [{ kind: 'dashboard' }],
   activeMainTabKey: DASHBOARD_TAB_KEY,
   pinnedMainTabKeys: prefs.pinnedMainTabKeys ?? [],
   selectedClusterId: null,
   openCluster: (id) => get().openMainTab({ kind: 'cluster', refId: id }),
   openMainTab: (tab) =>
-    set((s) => {
-      const key = mainTabKey(tab);
-      const exists = s.mainTabs.some((t) => mainTabKey(t) === key);
-      const mainTabs = exists ? s.mainTabs : insertTab(s.mainTabs, tab);
-      return {
-        mainTabs,
-        activeMainTabKey: key,
-        selectedClusterId: tab.kind === 'cluster' ? tab.refId : null,
-      };
-    }),
-  goHome: () => set({ activeMainTabKey: DASHBOARD_TAB_KEY, selectedClusterId: null }),
+    set((s) => commitTabs(s, mainLayouts.openView(s.mainLayout, mainTabKey(tab)))),
+  goHome: () => set((s) => commitTabs(s, mainLayouts.openView(s.mainLayout, DASHBOARD_TAB_KEY))),
   closeMainTab: (key) =>
-    set((s) => {
-      // The dashboard is the home base and never closes.
-      if (key === DASHBOARD_TAB_KEY) return s;
-      const idx = s.mainTabs.findIndex((t) => mainTabKey(t) === key);
-      if (idx < 0) return s;
-      const next = s.mainTabs.filter((_, i) => i !== idx);
-      let activeKey = s.activeMainTabKey;
-      if (activeKey === key) {
-        // Land on the tab that shifted into the closed slot, then the left neighbour.
-        const fallback = next[idx] ?? next[idx - 1] ?? null;
-        activeKey = fallback ? mainTabKey(fallback) : DASHBOARD_TAB_KEY;
-      }
-      return {
-        mainTabs: next,
-        activeMainTabKey: activeKey,
-        selectedClusterId: selectionFor(next, activeKey),
-      };
-    }),
+    // The dashboard is the home base and never closes.
+    set((s) => (key === DASHBOARD_TAB_KEY ? {} : closeAround(s, key, (k) => k === key))),
   setActiveMainTab: (key) =>
-    set((s) => {
-      if (!s.mainTabs.some((t) => mainTabKey(t) === key)) return s;
-      return { activeMainTabKey: key, selectedClusterId: selectionFor(s.mainTabs, key) };
-    }),
+    set((s) =>
+      groupOf(s.mainLayout, key) ? commitTabs(s, mainLayouts.openView(s.mainLayout, key)) : {},
+    ),
   closeOtherMainTabs: (keepKey) =>
-    set((s) => {
-      const pinned = new Set(s.pinnedMainTabKeys);
-      const next = s.mainTabs.filter((t) => {
-        const k = mainTabKey(t);
-        return k === keepKey || k === DASHBOARD_TAB_KEY || pinned.has(k);
-      });
-      if (next.length === s.mainTabs.length) return s;
-      const activeKey = next.some((t) => mainTabKey(t) === keepKey) ? keepKey : DASHBOARD_TAB_KEY;
-      return {
-        mainTabs: next,
-        activeMainTabKey: activeKey,
-        selectedClusterId: selectionFor(next, activeKey),
-      };
-    }),
+    set((s) =>
+      closeAround(
+        s,
+        keepKey,
+        (k, _i, _at, pinned) => k !== keepKey && k !== DASHBOARD_TAB_KEY && !pinned.has(k),
+      ),
+    ),
   closeMainTabsToRight: (key) =>
-    set((s) => {
-      const idx = s.mainTabs.findIndex((t) => mainTabKey(t) === key);
-      if (idx < 0 || idx === s.mainTabs.length - 1) return s;
-      const pinned = new Set(s.pinnedMainTabKeys);
-      const next = [
-        ...s.mainTabs.slice(0, idx + 1),
-        ...s.mainTabs.slice(idx + 1).filter((t) => pinned.has(mainTabKey(t))),
-      ];
-      const activeKey = next.some((t) => mainTabKey(t) === s.activeMainTabKey)
-        ? s.activeMainTabKey
-        : key;
-      return {
-        mainTabs: next,
-        activeMainTabKey: activeKey,
-        selectedClusterId: selectionFor(next, activeKey),
-      };
-    }),
+    set((s) => closeAround(s, key, (k, i, at, pinned) => i > at && !pinned.has(k))),
   closeMainTabsToLeft: (key) =>
+    set((s) =>
+      closeAround(
+        s,
+        key,
+        (k, i, at, pinned) => i < at && k !== DASHBOARD_TAB_KEY && !pinned.has(k),
+      ),
+    ),
+  closeAllMainTabs: (key) =>
     set((s) => {
-      const idx = s.mainTabs.findIndex((t) => mainTabKey(t) === key);
-      if (idx <= 0) return s;
+      const pane = key ? groupOf(s.mainLayout, key) : focusedGroup(s.mainLayout);
+      if (!pane) return {};
       const pinned = new Set(s.pinnedMainTabKeys);
-      const headPinned = s.mainTabs.slice(0, idx).filter((t) => pinned.has(mainTabKey(t)));
-      const tail = s.mainTabs.slice(idx);
-      const next = [DASHBOARD_TAB, ...headPinned, ...tail.filter((t) => t.kind !== 'dashboard')];
-      const activeKey = next.some((t) => mainTabKey(t) === s.activeMainTabKey)
-        ? s.activeMainTabKey
-        : key;
-      return {
-        mainTabs: next,
-        activeMainTabKey: activeKey,
-        selectedClusterId: selectionFor(next, activeKey),
-      };
-    }),
-  closeAllMainTabs: () =>
-    set((s) => {
-      const pinned = new Set(s.pinnedMainTabKeys);
-      const kept = s.mainTabs.filter(
-        (t) => mainTabKey(t) === DASHBOARD_TAB_KEY || pinned.has(mainTabKey(t)),
+      const result = mainLayouts.closeViews(
+        s.mainLayout,
+        pane.id,
+        (k) => k !== DASHBOARD_TAB_KEY && !pinned.has(k),
       );
-      if (kept.length === s.mainTabs.length) return s;
-      const activeKey = kept.some((t) => mainTabKey(t) === s.activeMainTabKey)
-        ? s.activeMainTabKey
-        : DASHBOARD_TAB_KEY;
-      return {
-        mainTabs: kept,
-        activeMainTabKey: activeKey,
-        selectedClusterId: selectionFor(kept, activeKey),
-      };
+      return result.closed.length ? commitTabs(s, result.layout) : {};
     }),
   toggleMainTabPin: (key) =>
     set((s) => {
-      if (key === DASHBOARD_TAB_KEY) return s;
-      const idx = s.mainTabs.findIndex((t) => mainTabKey(t) === key);
-      const tab = s.mainTabs[idx];
-      if (idx < 0 || !tab) return s;
-      const isPinned = s.pinnedMainTabKeys.includes(key);
-      const withoutTab = [...s.mainTabs.slice(0, idx), ...s.mainTabs.slice(idx + 1)];
-      const nextPinned = isPinned
+      const pane = groupOf(s.mainLayout, key);
+      if (key === DASHBOARD_TAB_KEY || !pane) return {};
+      const nextPinned = s.pinnedMainTabKeys.includes(key)
         ? s.pinnedMainTabKeys.filter((k) => k !== key)
         : [...s.pinnedMainTabKeys, key];
       // Newest pin lands at the right edge of the pinned zone (Chrome parity).
-      const insertAt = pinBoundaryIndex(withoutTab, new Set(nextPinned));
+      const rest = pane.tabs.filter((k) => k !== key);
+      const at = pinBoundary(rest, new Set(nextPinned));
       savePrefs({ pinnedMainTabKeys: nextPinned });
       return {
-        mainTabs: [...withoutTab.slice(0, insertAt), tab, ...withoutTab.slice(insertAt)],
+        ...commitTabs(
+          s,
+          withPaneTabs(s.mainLayout, pane.id, [...rest.slice(0, at), key, ...rest.slice(at)]),
+        ),
         pinnedMainTabKeys: nextPinned,
       };
     }),
-  reorderMainTabs: (activeKey, overKey) =>
+  moveMainTab: (key, paneId, index) =>
     set((s) => {
-      if (activeKey === DASHBOARD_TAB_KEY || activeKey === overKey) return s;
-      const fromIdx = s.mainTabs.findIndex((t) => mainTabKey(t) === activeKey);
-      const tab = s.mainTabs[fromIdx];
-      if (fromIdx < 0 || !tab) return s;
+      const dst = s.mainLayout.groups.find((g) => g.id === paneId);
+      if (key === DASHBOARD_TAB_KEY || !dst || !groupOf(s.mainLayout, key)) return {};
+      const rest = dst.tabs.filter((k) => k !== key);
+      const at = clampToZone(rest, key, index ?? rest.length, new Set(s.pinnedMainTabKeys));
+      return commitTabs(s, mainLayouts.moveView(s.mainLayout, key, paneId, at));
+    }),
+  moveMainTabLeft: (key) => set((s) => swapInPane(s, key, -1)),
+  moveMainTabRight: (key) => set((s) => swapInPane(s, key, 1)),
+  splitMainPane: (paneId, side, key = null) =>
+    set((s) =>
+      key === DASHBOARD_TAB_KEY
+        ? {}
+        : commitTabs(s, mainLayouts.splitView(s.mainLayout, paneId, side, key)),
+    ),
+  closeMainPane: (paneId) =>
+    set((s) => {
+      const panes = s.mainLayout.groups;
+      const at = panes.findIndex((g) => g.id === paneId);
+      const pane = panes[at];
+      const heir = panes[at - 1] ?? panes[at + 1];
+      if (!pane || !heir) return {};
+      // The dashboard and pinned tabs survive: they move to the neighbouring pane.
       const pinned = new Set(s.pinnedMainTabKeys);
-      const activePinned = pinned.has(activeKey);
-      // Dragging never flips pin state; cross-zone drops are refused.
-      if (
-        overKey != null &&
-        (overKey === DASHBOARD_TAB_KEY || pinned.has(overKey) !== activePinned)
-      )
-        return s;
-      const withoutTab = [...s.mainTabs.slice(0, fromIdx), ...s.mainTabs.slice(fromIdx + 1)];
-      let insertAt: number;
-      if (overKey == null) {
-        insertAt = activePinned ? pinBoundaryIndex(withoutTab, pinned) : withoutTab.length;
-      } else {
-        insertAt = withoutTab.findIndex((t) => mainTabKey(t) === overKey);
-        if (insertAt < 0) return s;
-        if (insertAt >= fromIdx) insertAt += 1;
+      let layout = s.mainLayout;
+      for (const key of pane.tabs.filter((k) => k === DASHBOARD_TAB_KEY || pinned.has(k))) {
+        const rest = layout.groups.find((g) => g.id === heir.id)!.tabs;
+        const index = key === DASHBOARD_TAB_KEY ? 0 : pinBoundary(rest, pinned);
+        layout = mainLayouts.moveView(layout, key, heir.id, index);
       }
-      return {
-        mainTabs: [...withoutTab.slice(0, insertAt), tab, ...withoutTab.slice(insertAt)],
-      };
+      return commitTabs(s, mainLayouts.closePane(layout, paneId).layout);
     }),
-  moveMainTabLeft: (key) =>
+  focusMainPane: (paneId) =>
     set((s) => {
-      const idx = s.mainTabs.findIndex((t) => mainTabKey(t) === key);
-      const prev = s.mainTabs[idx - 1];
-      if (key === DASHBOARD_TAB_KEY || idx <= 0 || !prev) return s;
-      const pinned = new Set(s.pinnedMainTabKeys);
-      const prevKey = mainTabKey(prev);
-      if (prevKey === DASHBOARD_TAB_KEY || pinned.has(prevKey) !== pinned.has(key)) return s;
-      const next = [...s.mainTabs];
-      next[idx - 1] = next[idx]!;
-      next[idx] = prev;
-      return { mainTabs: next };
+      const layout = focusPane(s.mainLayout, paneId);
+      return layout === s.mainLayout ? {} : commitTabs(s, layout);
     }),
-  moveMainTabRight: (key) =>
+  focusMainTabPane: (key) =>
     set((s) => {
-      const idx = s.mainTabs.findIndex((t) => mainTabKey(t) === key);
-      const nextTab = s.mainTabs[idx + 1];
-      if (key === DASHBOARD_TAB_KEY || idx < 0 || !nextTab) return s;
-      const pinned = new Set(s.pinnedMainTabKeys);
-      if (pinned.has(mainTabKey(nextTab)) !== pinned.has(key)) return s;
-      const next = [...s.mainTabs];
-      next[idx + 1] = next[idx]!;
-      next[idx] = nextTab;
-      return { mainTabs: next };
+      const pane = groupOf(s.mainLayout, key);
+      const layout = pane ? focusPane(s.mainLayout, pane.id) : s.mainLayout;
+      return layout === s.mainLayout ? {} : commitTabs(s, layout);
     }),
+  resizeMainPanes: (sizes) => set((s) => commitTabs(s, resizePanes(s.mainLayout, sizes))),
+  hydrateMainLayout: (layout) => set((s) => commitTabs(s, layout)),
 });
 
 const createUiSlice: Slice<UiSlice> = (set, get) => ({

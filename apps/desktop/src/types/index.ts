@@ -30,6 +30,12 @@ export interface WorkspaceSnapshot {
   sectionItemOrder: Record<SectionId, string[]>;
 }
 
+/** `workspace://changed`: the window labelled `source` saved `snapshot`. */
+export interface WorkspaceChanged {
+  source: string;
+  snapshot: WorkspaceSnapshot;
+}
+
 // ---------------------------------------------------------------------------
 // Clusters
 // ---------------------------------------------------------------------------

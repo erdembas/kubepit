@@ -45,7 +45,7 @@ export function KindJump({
   };
 
   return (
-    <div className="relative hidden w-56 min-w-28 shrink-[2] lg:block">
+    <div className="relative w-56 min-w-28 shrink-[2]">
       <div className="bg-surface border-border/70 focus-within:border-accent/50 flex h-8 items-center gap-2 rounded-lg border px-2.5 transition-colors">
         <Search className="text-fg-dim h-3.5 w-3.5 shrink-0" />
         <input

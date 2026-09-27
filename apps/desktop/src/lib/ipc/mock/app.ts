@@ -10,7 +10,8 @@ import type {
   TerminalOutput,
   WorkspaceSnapshot,
 } from '@/types';
-import { mockEmit, sleep } from './bus';
+import { windowLabel } from '@/lib/windowSeed';
+import { mockEmit, mockEmitAllWindows, sleep } from './bus';
 import { register, type MockArgs } from './registry';
 import { demoOverview } from './resources';
 
@@ -269,6 +270,16 @@ register({
       localStorage.setItem(WORKSPACE_KEY, JSON.stringify(snapshot));
     } catch {
       /* ignore */
+    }
+    mockEmitAllWindows('workspace://changed', { source: windowLabel, snapshot });
+  },
+  // Another browser window on the same demo; it reads its seed like a Tauri window.
+  window_open: ({ label }: MockArgs) => {
+    const url = new URL(location.href);
+    url.search = '';
+    url.searchParams.set('window', String(label));
+    if (!window.open(url, String(label), 'popup,width=1400,height=900')) {
+      throw new Error('The browser blocked the new window.');
     }
   },
   reveal_path: () => undefined,

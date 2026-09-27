@@ -7,11 +7,13 @@
 //! 2. Implementing [`kubepit_core::EventSink`] on top of Tauri's event bus.
 //! 3. Bridging core stream callbacks to typed `tauri::ipc::Channel`s.
 //! 4. Owning the PTY terminals (RunHQ's pipeline, see [`terminal`]).
+//! 5. Opening extra app windows and cleaning up after them (see `windows`).
 
 mod app_state;
 pub mod ipc;
 mod setup;
 pub mod terminal;
+mod windows;
 
 pub use app_state::AppState;
 
@@ -42,6 +44,8 @@ pub fn run() {
             ipc::workspace_load,
             ipc::workspace_save,
             ipc::reveal_path,
+            // Windows
+            windows::window_open,
             // Kubeconfig discovery
             ipc::kubeconfig_discover,
             ipc::kubeconfig_parse_file,
@@ -97,6 +101,11 @@ pub fn run() {
             terminal::commands::terminal_acknowledge,
             terminal::commands::terminal_destroy,
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                windows::on_window_destroyed(window);
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building Kubepit")
         .run(|app_handle, event| {
