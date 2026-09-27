@@ -382,6 +382,7 @@ impl Kubepit {
         self.metrics_history.stop_cluster(id);
         self.stop_alert_monitor(id);
         self.prometheus.forget(id);
+        self.cost.forget(id);
         self.change_journals.stop_cluster(id);
         self.forwards.stop_cluster(id, self.sink.as_ref());
         self.openapi.forget(id);

@@ -155,6 +155,7 @@ mod tests {
             notes: String::new(),
             created_at: 1,
             last_connected_at: None,
+            cost: Default::default(),
             prometheus: Default::default(),
             proxy_url: None,
         }

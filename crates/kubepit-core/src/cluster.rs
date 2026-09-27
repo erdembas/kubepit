@@ -141,6 +141,7 @@ impl Kubepit {
                     notes: input.notes,
                     created_at: now,
                     last_connected_at: None,
+                    cost: Default::default(),
                     prometheus: Default::default(),
                     proxy_url: proxy::normalize(input.proxy_url.as_deref())?,
                 });
@@ -215,6 +216,7 @@ impl Kubepit {
             notes: cluster.notes,
             created_at: existing.created_at,
             last_connected_at: existing.last_connected_at,
+            cost: cluster.cost.normalized()?,
             prometheus: cluster.prometheus.normalized()?,
             proxy_url,
         };

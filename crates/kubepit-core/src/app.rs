@@ -55,6 +55,8 @@ pub struct Kubepit {
     pub(crate) kubeconfig_watch: parking_lot::Mutex<Option<crate::kubeconfig_watch::WatchHandle>>,
     // Change timeline: per-cluster change journals.
     pub(crate) change_journals: ChangeJournals,
+    // Cost insight: detection and reports per connection.
+    pub(crate) cost: crate::cost::CostState,
 }
 
 impl Kubepit {
@@ -93,6 +95,7 @@ impl Kubepit {
             saved_forwards,
             kubeconfig_watch: parking_lot::Mutex::new(None),
             change_journals: ChangeJournals::default(),
+            cost: crate::cost::CostState::default(),
         };
         // Left behind by a crash while in keychain mode.
         app.remove_transient_run_kubeconfigs();
