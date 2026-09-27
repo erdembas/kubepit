@@ -363,6 +363,7 @@ impl Kubepit {
         self.watches.stop_cluster(id);
         self.log_streams.stop_cluster(id);
         self.metrics_history.stop_cluster(id);
+        self.prometheus.forget(id);
         self.forwards.stop_cluster(id, self.sink.as_ref());
     }
 

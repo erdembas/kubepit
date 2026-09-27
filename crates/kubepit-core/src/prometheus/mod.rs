@@ -211,6 +211,12 @@ impl PrometheusCache {
         );
     }
 
+    /// Drop everything of a cluster (disconnect, removal).
+    pub fn forget(&self, cluster_id: &str) {
+        self.entries.lock().remove(cluster_id);
+        self.clients.lock().remove(cluster_id);
+    }
+
     /// Detect again on the next status request.
     pub fn invalidate(&self, cluster_id: &str) {
         if let Some(entry) = self.entries.lock().get_mut(cluster_id) {
