@@ -1,6 +1,7 @@
 import * as i18n from '@/i18n';
 import { useEffect, useState } from 'react';
 import {
+  ArrowUpCircle,
   FileCode2,
   History,
   Info,
@@ -37,6 +38,8 @@ import {
 } from '../details/primitives';
 import { useDragWidth } from '../useDragWidth';
 import { isTypingTarget, useNow } from '../util';
+import { HelmDeployDialog } from './HelmDeployDialog';
+import { HelmRevisionCompare } from './HelmRevisionCompare';
 
 type Tab = 'overview' | 'values' | 'manifest' | 'history';
 
@@ -55,6 +58,7 @@ export function HelmDetails({
 }) {
   i18n.useLocale();
   const [tab, setTab] = useState<Tab>('overview');
+  const [upgrading, setUpgrading] = useState(false);
   const { cluster, readOnly } = useCluster(clusterId);
   const key = `${clusterId}|helm-detail|${namespace}/${name}`;
   const detail = usePolled<HelmReleaseDetail>(
@@ -144,6 +148,16 @@ export function HelmDetails({
             {release && ` · ${release.chart}-${release.chart_version}`}
           </p>
         </div>
+        <Button
+          size="sm"
+          variant="secondary"
+          leftIcon={<ArrowUpCircle className="h-3.5 w-3.5" />}
+          disabled={!detail.data}
+          title={readOnly ? i18n.t('Read-only cluster: preview only') : undefined}
+          onClick={() => setUpgrading(true)}
+        >
+          {i18n.t('Upgrade…')}
+        </Button>
         <IconButton
           label={readOnly ? i18n.t('Read-only cluster: changes are blocked') : i18n.t('Uninstall')}
           icon={<Trash2 />}
@@ -254,85 +268,101 @@ export function HelmDetails({
       ) : tab === 'manifest' ? (
         <MonacoView value={detail.data.manifest} />
       ) : (
-        <div className="overlay-scroll min-h-0 flex-1 overflow-auto p-4">
-          <MiniTable
-            rows={detail.data.history}
-            rowKey={(r) => String(r.revision)}
-            columns={[
-              {
-                label: i18n.t('Revision'),
-                className: 'tabular-nums',
-                cell: (r) => <span className="text-fg">{r.revision}</span>,
-              },
-              {
-                label: i18n.t('Status'),
-                className: 'whitespace-nowrap',
-                cell: (r) => <ToneText tone={phaseTone(r.status)}>{r.status}</ToneText>,
-              },
-              {
-                label: i18n.t('Chart'),
-                className: 'whitespace-nowrap font-mono text-[11px]',
-                cell: (r) => r.chart_version,
-              },
-              {
-                label: i18n.t('App'),
-                className: 'whitespace-nowrap',
-                cell: (r) => r.app_version ?? '—',
-              },
-              {
-                label: i18n.t('Updated'),
-                className: 'whitespace-nowrap',
-                cell: (r) => formatAge(r.updated, now),
-              },
-              {
-                label: i18n.t('Description'),
-                className: 'min-w-[140px]',
-                cell: (r) => <span className="line-clamp-2">{r.description}</span>,
-              },
-              {
-                label: '',
-                className: 'text-right',
-                cell: (r) =>
-                  r.revision !== detail.data?.release.revision ? (
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      leftIcon={<Undo2 className="h-3 w-3" />}
-                      disabled={readOnly}
-                      onClick={() =>
-                        confirmDestructive({
-                          cluster,
-                          title: i18n.t('Roll back release'),
-                          message: i18n.t('Roll back "{name}" to revision {revision}?', {
-                            name,
-                            revision: r.revision,
-                          }),
-                          confirmLabel: i18n.t('Roll back'),
-                          typeName: name,
-                          run: async () => {
-                            if (
-                              await runMutation(
-                                () => ipc.helmRollback(clusterId, namespace, name, r.revision),
-                                i18n.t('Rolled back {name} to revision {revision}', {
-                                  name,
-                                  revision: r.revision,
-                                }),
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="overlay-scroll max-h-[45%] min-h-24 shrink-0 overflow-auto p-4">
+            <MiniTable
+              rows={detail.data.history}
+              rowKey={(r) => String(r.revision)}
+              columns={[
+                {
+                  label: i18n.t('Revision'),
+                  className: 'tabular-nums',
+                  cell: (r) => <span className="text-fg">{r.revision}</span>,
+                },
+                {
+                  label: i18n.t('Status'),
+                  className: 'whitespace-nowrap',
+                  cell: (r) => <ToneText tone={phaseTone(r.status)}>{r.status}</ToneText>,
+                },
+                {
+                  label: i18n.t('Chart'),
+                  className: 'whitespace-nowrap font-mono text-[11px]',
+                  cell: (r) => r.chart_version,
+                },
+                {
+                  label: i18n.t('App'),
+                  className: 'whitespace-nowrap',
+                  cell: (r) => r.app_version ?? '—',
+                },
+                {
+                  label: i18n.t('Updated'),
+                  className: 'whitespace-nowrap',
+                  cell: (r) => formatAge(r.updated, now),
+                },
+                {
+                  label: i18n.t('Description'),
+                  className: 'min-w-[140px]',
+                  cell: (r) => <span className="line-clamp-2">{r.description}</span>,
+                },
+                {
+                  label: '',
+                  className: 'text-right',
+                  cell: (r) =>
+                    r.revision !== detail.data?.release.revision ? (
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        leftIcon={<Undo2 className="h-3 w-3" />}
+                        disabled={readOnly}
+                        onClick={() =>
+                          confirmDestructive({
+                            cluster,
+                            title: i18n.t('Roll back release'),
+                            message: i18n.t('Roll back "{name}" to revision {revision}?', {
+                              name,
+                              revision: r.revision,
+                            }),
+                            confirmLabel: i18n.t('Roll back'),
+                            typeName: name,
+                            run: async () => {
+                              if (
+                                await runMutation(
+                                  () => ipc.helmRollback(clusterId, namespace, name, r.revision),
+                                  i18n.t('Rolled back {name} to revision {revision}', {
+                                    name,
+                                    revision: r.revision,
+                                  }),
+                                )
                               )
-                            )
-                              refresh();
-                          },
-                        })
-                      }
-                    >
-                      {i18n.t('Rollback')}
-                    </Button>
-                  ) : (
-                    <span className="text-fg-dim text-[11px]">{i18n.t('current')}</span>
-                  ),
-              },
-            ]}
+                                refresh();
+                            },
+                          })
+                        }
+                      >
+                        {i18n.t('Rollback')}
+                      </Button>
+                    ) : (
+                      <span className="text-fg-dim text-[11px]">{i18n.t('current')}</span>
+                    ),
+                },
+              ]}
+            />
+          </div>
+          <HelmRevisionCompare
+            key={detail.data.release.revision}
+            clusterId={clusterId}
+            namespace={namespace}
+            name={name}
+            history={detail.data.history}
           />
         </div>
+      )}
+      {upgrading && detail.data && (
+        <HelmDeployDialog
+          clusterId={clusterId}
+          target={{ mode: 'upgrade', detail: detail.data }}
+          onClose={() => setUpgrading(false)}
+        />
       )}
     </aside>
   );
