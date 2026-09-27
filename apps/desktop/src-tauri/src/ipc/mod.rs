@@ -23,6 +23,8 @@ mod resources;
 mod workloads;
 // Logs & debug: workload logs, log export, debug containers, container files.
 mod logs_debug;
+// In-app updates (inert until release signing is configured).
+mod updater;
 
 pub use access::*;
 pub use app::*;
@@ -35,6 +37,7 @@ pub use logs_debug::*;
 pub use metrics::*;
 pub use portforward::*;
 pub use resources::*;
+pub use updater::*;
 pub use workloads::*;
 
 use kubepit_core::error::to_ipc;

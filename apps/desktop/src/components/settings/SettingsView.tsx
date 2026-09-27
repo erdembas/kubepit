@@ -74,10 +74,10 @@ const CATEGORIES: ReadonlyArray<CategoryDef> = [
   {
     id: 'about',
     get label() {
-      return i18n.t('About');
+      return i18n.t('About & Updates');
     },
     get description() {
-      return i18n.t('Version, data folder and privacy.');
+      return i18n.t('Version, updates, data folder and privacy.');
     },
     icon: Info,
     group: 'system',

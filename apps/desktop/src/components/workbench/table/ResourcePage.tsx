@@ -1,6 +1,6 @@
 import * as i18n from '@/i18n';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Lock, Loader2, Plus, Search, X } from 'lucide-react';
+import { Bookmark, BookmarkX, Download, Lock, Loader2, Plus, Search, X } from 'lucide-react';
 import { FileContextMenu, type FileContextMenuEntry } from '@/components/ui/FileContextMenu';
 import { IconButton } from '@/components/ui/IconButton';
 import { accessCheck } from '@/lib/kube/access';
@@ -9,6 +9,7 @@ import { viewLabel } from '@/lib/kube/nav';
 import { templateFor } from '@/lib/kube/templates';
 import { cn } from '@/lib/cn';
 import { useCan } from '@/store/useAccessStore';
+import { sameObject, useBookmarksStore } from '@/store/useBookmarksStore';
 import { dock } from '@/store/useDockStore';
 import { useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { AccessCheck, ApiResourceInfo, Gvk, KubeObject } from '@/types';
@@ -19,8 +20,14 @@ import { resourceActions } from '../actions/resourceActions';
 import { useCluster } from '../data/hooks';
 import { restartWatch } from '../data/watchCache';
 import { DetailsPanel } from '../details/DetailsPanel';
+import { toggleObjectBookmark } from '../nav/bookmarkActions';
 import { useEvent } from '../util';
 import { ColumnMenu } from './ColumnMenu';
+import { ExportDialog } from './ExportDialog';
+import { requestExport, useTableExport } from './exportStore';
+import { applyDefaultViewOnce, useSaveViewDialog } from './savedViews';
+import { SavedViewsMenu } from './SavedViewsMenu';
+import { SaveViewDialog } from './SaveViewDialog';
 import { ResourceTable } from './ResourceTable';
 import { SELECTION_BAR_INSET, SelectionBar } from './SelectionBar';
 import { TableEmpty, TableError, TableSkeleton } from './TableStates';
@@ -59,6 +66,21 @@ export function ResourcePage({
     setChecked(new Set());
     lastIndex.current = null;
   }, [kindKey, namespaces]);
+  // Saved views: a kind's default view applies the first time its table opens.
+  useEffect(() => applyDefaultViewOnce(clusterId, kindKey), [clusterId, kindKey]);
+  // Dialogs requested for this table must not pop up later when it closes first.
+  useEffect(
+    () => () => {
+      const mine = (t: { clusterId: string; kindKey: string } | null) =>
+        t?.clusterId === clusterId && t.kindKey === kindKey;
+      if (mine(useTableExport.getState().request)) useTableExport.getState().close();
+      if (mine(useSaveViewDialog.getState().target)) useSaveViewDialog.getState().close();
+    },
+    [clusterId, kindKey],
+  );
+  const saveViewOpen = useSaveViewDialog(
+    (s) => s.target?.clusterId === clusterId && s.target.kindKey === kindKey,
+  );
   // Drop checks for objects that disappeared.
   useEffect(() => {
     setChecked((prev) => {
@@ -115,6 +137,10 @@ export function ResourcePage({
     (column: string) => store().setSort(kindKey, column),
     [kindKey, store],
   );
+  const onResizeColumn = useCallback(
+    (column: string, width: number | null) => store().setColumnWidth(kindKey, column, width),
+    [kindKey, store],
+  );
 
   const menuActions = useMemo(
     () => (menu ? resourceActions({ clusterId, cluster, gvk, obj: menu.obj }) : []),
@@ -123,8 +149,18 @@ export function ResourcePage({
   const menuGates = useActionGates(clusterId, menuActions, readOnly);
   const menuItems = useMemo((): FileContextMenuEntry[] => {
     if (!menu) return [];
+    const { name, namespace = null } = menu.obj.metadata;
+    const bookmarked = useBookmarksStore
+      .getState()
+      .bookmarks.some((b) => sameObject(b, clusterId, gvk, namespace, name));
     const entries: FileContextMenuEntry[] = [
       { id: 'open', label: i18n.t('Show details'), onClick: () => onOpen(menu.obj) },
+      {
+        id: 'bookmark',
+        label: bookmarked ? i18n.t('Remove bookmark') : i18n.t('Bookmark'),
+        icon: bookmarked ? <BookmarkX size={12} /> : <Bookmark size={12} />,
+        onClick: () => toggleObjectBookmark(clusterId, gvk, namespace, name),
+      },
       { id: 'sep0', separator: true },
     ];
     menuActions.forEach((a) => {
@@ -148,7 +184,7 @@ export function ResourcePage({
       });
     });
     return entries;
-  }, [menu, menuActions, menuGates, onOpen]);
+  }, [menu, menuActions, menuGates, onOpen, clusterId, gvk]);
 
   const onClearChecked = useEvent(() => setChecked(new Set()));
   const onSelectAll = useEvent(() => setChecked(new Set(t.items.map((o) => o.metadata.uid))));
@@ -157,9 +193,24 @@ export function ResourcePage({
     () => (checked.size ? t.items.filter((o) => checked.has(o.metadata.uid)) : []),
     [checked, t.items],
   );
+  const onExportSelected = useEvent(() =>
+    requestExport({ clusterId, kindKey, format: 'csv', selection: true }),
+  );
   const bulk = useMemo(
-    () => bulkActions({ clusterId, cluster, gvk, label, targets, onDeleted: onClearChecked }),
-    [clusterId, cluster, gvk, label, targets, onClearChecked],
+    () =>
+      bulkActions({
+        clusterId,
+        cluster,
+        gvk,
+        label,
+        targets,
+        onDeleted: onClearChecked,
+        onExport: onExportSelected,
+      }),
+    [clusterId, cluster, gvk, label, targets, onClearChecked, onExportSelected],
+  );
+  const exportRequest = useTableExport((s) =>
+    s.request?.clusterId === clusterId && s.request.kindKey === kindKey ? s.request : null,
   );
 
   const scopeNs =
@@ -190,6 +241,7 @@ export function ResourcePage({
           <span className="bg-surface-muted text-fg-dim shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums">
             {t.filter ? `${t.items.length}/${t.snapshot.items.length}` : t.snapshot.items.length}
           </span>
+          <SavedViewsMenu clusterId={clusterId} kindKey={kindKey} />
           {gvk.namespaced && (
             <span className="text-fg-dim hidden truncate text-[11px] lg:inline">
               {namespaces.length === 0
@@ -225,7 +277,15 @@ export function ResourcePage({
                 </button>
               )}
             </div>
-            <ColumnMenu kind={kindKey} columns={t.kind.columns} hidden={t.hidden} />
+            <IconButton
+              label={i18n.t('Export {kind}…', { kind: label })}
+              icon={<Download />}
+              disabled={!t.items.length}
+              onClick={() =>
+                requestExport({ clusterId, kindKey, format: 'csv', selection: targets.length > 0 })
+              }
+            />
+            <ColumnMenu kind={kindKey} columns={t.orderedColumns} hidden={t.hidden} />
             <IconButton
               label={
                 readOnly
@@ -274,6 +334,7 @@ export function ResourcePage({
             selectable
             revealKey={revealKey}
             bottomInset={targets.length ? SELECTION_BAR_INSET : 0}
+            onResizeColumn={onResizeColumn}
           />
         )}
         {targets.length > 0 && (
@@ -331,6 +392,29 @@ export function ResourcePage({
       )}
       {menu && (
         <FileContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />
+      )}
+      {exportRequest && (
+        <ExportDialog
+          request={exportRequest}
+          clusterName={cluster?.name ?? clusterId}
+          label={label}
+          gvk={gvk}
+          columns={t.visibleColumns}
+          items={t.items}
+          selected={targets}
+          ctx={t.ctx}
+          onClose={() => useTableExport.getState().close()}
+        />
+      )}
+      {saveViewOpen && (
+        <SaveViewDialog
+          clusterId={clusterId}
+          clusterName={cluster?.name ?? clusterId}
+          kindKey={kindKey}
+          label={label}
+          namespaced={gvk.namespaced}
+          onClose={() => useSaveViewDialog.getState().close()}
+        />
       )}
       {explain && (
         <PermissionExplainer

@@ -6,6 +6,7 @@ import type { ColumnContext, ColumnDef } from '@/lib/kube/columns';
 import { cn } from '@/lib/cn';
 import type { SortPref } from '@/store/useWorkbenchStore';
 import type { KubeObject } from '@/types';
+import { ColumnResizer } from './ColumnResizer';
 import { trackMin } from './tableModel';
 
 export const ROW_HEIGHT = 32;
@@ -106,6 +107,8 @@ export interface ResourceTableProps {
   /** Extra scroll space under the last row, e.g. for a floating bar. */
   bottomInset?: number;
   label: string;
+  /** Enables header resize grips; `null` resets a column to its default width. */
+  onResizeColumn?: (column: string, width: number | null) => void;
 }
 
 /** Fixed-row-height windowed table: renders only visible rows, handles 5k+ items. */
@@ -115,6 +118,11 @@ export function ResourceTable(p: ResourceTableProps) {
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState(600);
   const frame = useRef<number | null>(null);
+  // Width of the column being dragged, committed through `onResizeColumn` on release.
+  const [liveWidth, setLiveWidth] = useState<{ id: string; width: number } | null>(null);
+  const columns = liveWidth
+    ? p.columns.map((c) => (c.id === liveWidth.id ? { ...c, width: `${liveWidth.width}px` } : c))
+    : p.columns;
 
   useLayoutEffect(() => {
     const el = scroller.current;
@@ -147,11 +155,10 @@ export function ResourceTable(p: ResourceTableProps) {
 
   const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
   const end = Math.min(p.items.length, Math.ceil((scrollTop + viewport) / ROW_HEIGHT) + OVERSCAN);
-  const template = [p.selectable ? '18px' : null, ...p.columns.map((c) => c.width)]
+  const template = [p.selectable ? '18px' : null, ...columns.map((c) => c.width)]
     .filter(Boolean)
     .join(' ');
-  const minWidth =
-    p.columns.reduce((s, c) => s + trackMin(c.width) + 10, p.selectable ? 28 : 0) + 24;
+  const minWidth = columns.reduce((s, c) => s + trackMin(c.width) + 10, p.selectable ? 28 : 0) + 24;
   const allChecked = p.items.length > 0 && p.items.every((o) => p.checked.has(o.metadata.uid));
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -199,7 +206,7 @@ export function ResourceTable(p: ResourceTableProps) {
                 />
               </div>
             )}
-            {p.columns.map((c) => {
+            {columns.map((c) => {
               const sorted = p.sort.column === c.id;
               return (
                 <div
@@ -207,11 +214,22 @@ export function ResourceTable(p: ResourceTableProps) {
                   role="columnheader"
                   aria-sort={sorted ? (p.sort.desc ? 'descending' : 'ascending') : undefined}
                   className={cn(
-                    'flex min-w-0 items-center',
+                    'relative flex min-w-0 items-center',
                     c.align === 'right' && 'justify-end',
                     c.align === 'center' && 'justify-center',
                   )}
                 >
+                  {p.onResizeColumn && (
+                    <ColumnResizer
+                      label={c.label()}
+                      onResize={(width, done) => {
+                        if (!done) return setLiveWidth({ id: c.id, width });
+                        setLiveWidth(null);
+                        p.onResizeColumn?.(c.id, width);
+                      }}
+                      onReset={() => p.onResizeColumn?.(c.id, null)}
+                    />
+                  )}
                   {c.sort ? (
                     <button
                       type="button"
@@ -245,7 +263,7 @@ export function ResourceTable(p: ResourceTableProps) {
                 key={obj.metadata.uid}
                 obj={obj}
                 index={start + i}
-                columns={p.columns}
+                columns={columns}
                 template={template}
                 ctx={p.ctx}
                 checked={p.checked.has(obj.metadata.uid)}

@@ -33,6 +33,7 @@
 //! | [`workload_logs`] | merged logs of every pod of a workload (stern-style) |
 //! | [`debug_container`] | ephemeral debug containers (`kubectl debug`)       |
 //! | [`pod_fs`]      | container file browser and copy over exec              |
+//! | [`updates`]     | updater config, update IPC types, download progress    |
 //!
 //! Push notifications to the UI go through [`EventSink`]; streams take plain
 //! `Fn(T) -> bool` callbacks (return `false` to stop) that the desktop shell
@@ -77,6 +78,8 @@ pub mod rollout;
 pub mod debug_container;
 pub mod pod_fs;
 pub mod workload_logs;
+// In-app updates (the updater itself lives in the desktop shell).
+pub mod updates;
 
 pub use app::Kubepit;
 pub use events::{EventSink, NullSink};

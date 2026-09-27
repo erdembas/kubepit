@@ -8,7 +8,7 @@ import { usePodMetrics, useNodeMetrics } from '../data/hooks';
 import { usePolled } from '../data/polled';
 import { useWatch } from '../data/watchCache';
 import { useNow } from '../util';
-import { filterItems, resolveSort, sortItems } from './tableModel';
+import { applyWidths, filterItems, orderColumns, resolveSort, sortItems } from './tableModel';
 
 const CRD_GVK = toGvk(BUILTIN.CustomResourceDefinition);
 const METRIC_COLUMNS = new Set(['cpu', 'memory']);
@@ -40,6 +40,8 @@ export function useKindTable({
   );
   const kind = useMemo(() => columnsFor(kindKey, gvk, crd.data), [kindKey, gvk, crd.data]);
   const toggled = useWorkbenchStore((s) => s.hiddenColumns[kindKey]);
+  const order = useWorkbenchStore((s) => s.columnOrder[kindKey]);
+  const widths = useWorkbenchStore((s) => s.columnWidths[kindKey]);
   const sortPref = useWorkbenchStore((s) => s.sort[kindKey]);
   const filter = useWorkbenchStore((s) => s.filters[`${clusterId}|${kindKey}`] ?? '');
   const hidden = useMemo(() => {
@@ -50,9 +52,15 @@ export function useKindTable({
         .map((c) => c.id),
     );
   }, [kind, toggled]);
+  // Every column in the user's order (column menu, exports), then the visible ones sized.
+  const orderedColumns = useMemo(() => orderColumns(kind.columns, order), [kind, order]);
   const visibleColumns = useMemo(
-    () => kind.columns.filter((c) => !hidden.has(c.id)),
-    [kind, hidden],
+    () =>
+      applyWidths(
+        orderedColumns.filter((c) => !hidden.has(c.id)),
+        widths,
+      ),
+    [orderedColumns, hidden, widths],
   );
   const sort = resolveSort(kind, sortPref);
 
@@ -89,5 +97,16 @@ export function useKindTable({
     [filtered, kind, sort.column, sort.desc, sortsByMetric ? ctx : null],
   );
 
-  return { snapshot, kind, hidden, visibleColumns, sort, filter, items, ctx, watchNs };
+  return {
+    snapshot,
+    kind,
+    hidden,
+    orderedColumns,
+    visibleColumns,
+    sort,
+    filter,
+    items,
+    ctx,
+    watchNs,
+  };
 }

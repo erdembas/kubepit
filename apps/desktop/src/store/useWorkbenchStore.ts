@@ -77,6 +77,10 @@ interface WorkbenchState {
   collapsedGroups: Record<string, boolean>;
   pinnedKinds: string[];
   hiddenColumns: Record<string, string[]>;
+  /** Column ids per kind in the user's order (fixed columns keep their place). */
+  columnOrder: Record<string, string[]>;
+  /** Column widths in px per kind, set by dragging a header edge. */
+  columnWidths: Record<string, Record<string, number>>;
   sort: Record<string, SortPref>;
   detailsWidth: number;
 
@@ -104,6 +108,9 @@ interface WorkbenchState {
   togglePinned: (key: string) => void;
   toggleColumn: (kind: string, column: string) => void;
   resetColumns: (kind: string) => void;
+  setColumnOrder: (kind: string, order: string[]) => void;
+  /** `null` restores the column's default width. */
+  setColumnWidth: (kind: string, column: string, width: number | null) => void;
   setSort: (kind: string, column: string) => void;
   setDetailsWidth: (width: number) => void;
   /** Forget session state of a disconnected cluster. */
@@ -120,6 +127,8 @@ const PREF_KEYS = [
   'collapsedGroups',
   'pinnedKinds',
   'hiddenColumns',
+  'columnOrder',
+  'columnWidths',
   'sort',
   'detailsWidth',
 ] as const;
@@ -192,6 +201,8 @@ export const useWorkbenchStore = create<WorkbenchState>()(
       collapsedGroups: {},
       pinnedKinds: [],
       hiddenColumns: {},
+      columnOrder: {},
+      columnWidths: {},
       sort: {},
       detailsWidth: DETAILS_WIDTH.default,
 
@@ -284,8 +295,21 @@ export const useWorkbenchStore = create<WorkbenchState>()(
       resetColumns: (kind) =>
         set((s) => {
           const next = { ...s.hiddenColumns };
+          const order = { ...s.columnOrder };
+          const widths = { ...s.columnWidths };
           delete next[kind];
-          return { hiddenColumns: next };
+          delete order[kind];
+          delete widths[kind];
+          return { hiddenColumns: next, columnOrder: order, columnWidths: widths };
+        }),
+      setColumnOrder: (kind, order) =>
+        set((s) => ({ columnOrder: { ...s.columnOrder, [kind]: order } })),
+      setColumnWidth: (kind, column, width) =>
+        set((s) => {
+          const widths = { ...s.columnWidths[kind] };
+          if (width === null) delete widths[column];
+          else widths[column] = Math.round(width);
+          return { columnWidths: { ...s.columnWidths, [kind]: widths } };
         }),
       setSort: (kind, column) =>
         set((s) => {
@@ -342,6 +366,8 @@ export const useWorkbenchStore = create<WorkbenchState>()(
         collapsedGroups: s.collapsedGroups,
         pinnedKinds: s.pinnedKinds,
         hiddenColumns: s.hiddenColumns,
+        columnOrder: s.columnOrder,
+        columnWidths: s.columnWidths,
         sort: s.sort,
         detailsWidth: s.detailsWidth,
       }),

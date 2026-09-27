@@ -72,3 +72,57 @@ export function trackMin(width: string): number {
   const m = /(\d+)px/.exec(width);
   return m ? Number(m[1]) : 80;
 }
+
+/** Narrowest and widest a dragged column may get. */
+export const COLUMN_WIDTH = { min: 40, max: 1200 };
+
+/**
+ * Columns in the user's order: movable columns follow `order` (ids missing
+ * from it, e.g. new printer columns, keep their default place after the
+ * ordered ones), fixed columns stay where the kind defines them.
+ */
+export function orderColumns<C extends { id: string; fixed?: boolean }>(
+  columns: readonly C[],
+  order: readonly string[] | undefined,
+): C[] {
+  if (!order?.length) return columns as C[];
+  const rank = new Map(order.map((id, i) => [id, i]));
+  const movable = columns
+    .filter((c) => !c.fixed)
+    .map((c, i) => ({ c, key: rank.get(c.id) ?? order.length + i }))
+    .sort((a, b) => a.key - b.key)
+    .map((x) => x.c);
+  let next = 0;
+  return columns.map((c) => (c.fixed ? c : movable[next++]!));
+}
+
+/** Move `id` to `to`'s position among the movable columns; returns the new id order. */
+export function moveColumn<C extends { id: string; fixed?: boolean }>(
+  columns: readonly C[],
+  id: string,
+  to: string,
+): string[] {
+  const ids = columns.filter((c) => !c.fixed).map((c) => c.id);
+  const from = ids.indexOf(id);
+  const target = ids.indexOf(to);
+  if (from < 0 || target < 0 || from === target) return ids;
+  ids.splice(from, 1);
+  ids.splice(target, 0, id);
+  return ids;
+}
+
+/** Replace the grid track of every column the user resized. */
+export function applyWidths<C extends { id: string; width: string }>(
+  columns: readonly C[],
+  widths: Readonly<Record<string, number>> | undefined,
+): C[] {
+  if (!widths || !Object.keys(widths).length) return columns as C[];
+  return columns.map((c) => {
+    const px = widths[c.id];
+    return px ? { ...c, width: `${clampWidth(px)}px` } : c;
+  });
+}
+
+export function clampWidth(px: number): number {
+  return Math.round(Math.min(COLUMN_WIDTH.max, Math.max(COLUMN_WIDTH.min, px)));
+}

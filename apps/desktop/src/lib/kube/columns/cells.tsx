@@ -162,6 +162,7 @@ export const ageColumn: ColumnDef = {
   ),
   // Newest first reads naturally when ascending sorts by age.
   sort: (o) => -createdAt(o),
+  value: (o) => o.metadata.creationTimestamp ?? null,
 };
 
 export function labelsColumn(hidden = true): ColumnDef {
@@ -174,6 +175,7 @@ export function labelsColumn(hidden = true): ColumnDef {
       <Chips values={Object.entries(o.metadata.labels ?? {}).map(([k, v]) => `${k}=${v}`)} />
     ),
     sort: (o) => Object.keys(o.metadata.labels ?? {}).length,
+    value: (o) => o.metadata.labels ?? {},
   };
 }
 

@@ -23,6 +23,7 @@ import { usePolled } from '../data/polled';
 import { usePaneFocused } from '@/components/split/paneFocus';
 import { useDragWidth } from '../useDragWidth';
 import { isTypingTarget, useNow } from '../util';
+import { BookmarkButton } from './BookmarkButton';
 import { DetailsOverview } from './DetailsOverview';
 import { DetailsToolbar } from './DetailsToolbar';
 import { EventsTab } from './EventsTab';
@@ -179,6 +180,12 @@ export function DetailsPanel({
             )}
           </p>
         </div>
+        <BookmarkButton
+          clusterId={clusterId}
+          gvk={gvk}
+          namespace={selection.namespace}
+          name={selection.name}
+        />
         {obj && <DetailsToolbar clusterId={clusterId} actions={actions} readOnly={readOnly} />}
         <span className="bg-border/80 mx-0.5 h-5 w-px shrink-0" aria-hidden />
         <button

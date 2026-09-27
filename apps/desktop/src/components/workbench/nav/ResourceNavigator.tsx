@@ -12,6 +12,7 @@ import type { ApiResourceInfo } from '@/types';
 import { useKindAccess } from '../access/hooks';
 import { useSelectedNamespaces } from '../data/hooks';
 import { useDragWidth } from '../useDragWidth';
+import { BookmarksSection } from './BookmarksSection';
 import { NavItemRow } from './NavItemRow';
 
 function matches(item: NavItem, q: string) {
@@ -262,6 +263,7 @@ export function ResourceNavigator({
           <SearchResults groups={groups} q={q} render={renderItems} />
         ) : (
           <>
+            <BookmarksSection clusterId={clusterId} />
             {pinned.length > 0 && (
               <section>
                 <GroupHeader

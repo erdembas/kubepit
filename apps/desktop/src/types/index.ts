@@ -685,7 +685,37 @@ export interface Settings {
   node_shell_image: string;
   /** Default image for ephemeral debug containers. */
   debug_image: string;
+  /** Check for a new release on startup (only in builds with updates configured). */
+  auto_check_updates: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Updates (tauri-plugin-updater; inert until release signing is configured)
+// ---------------------------------------------------------------------------
+
+export interface UpdaterStatus {
+  /** False for builds without a release signing key: checks are refused. */
+  configured: boolean;
+  current_version: string;
+  endpoint: string;
+}
+
+/** An available update announced by the release feed (`latest.json`). */
+export interface UpdateInfo {
+  version: string;
+  current_version: string;
+  /** `pub_date` of the feed (RFC 3339). */
+  date: string | null;
+  /** Release notes, usually Markdown. */
+  notes: string | null;
+}
+
+/** `update_install` download progress, streamed on its channel. */
+export type UpdateProgress =
+  | { event: 'started'; total: number | null }
+  | { event: 'progress'; downloaded: number; total: number | null }
+  /** Downloaded and verified; the installer runs next. */
+  | { event: 'finished' };
 
 // ---------------------------------------------------------------------------
 // Access (RBAC self-reviews: SelfSubjectAccessReview / RulesReview / Review)

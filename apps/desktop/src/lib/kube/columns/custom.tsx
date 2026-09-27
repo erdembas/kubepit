@@ -46,6 +46,7 @@ export function customColumns(gvk: Gvk, printer: PrinterColumn[]): KindColumns {
         if (c.type === 'date') return -Date.parse(String(v ?? '0'));
         return typeof v === 'number' ? v : String(v ?? '');
       },
+      value: (o: KubeObject) => evalJsonPath(o, c.jsonPath) ?? null,
     }));
   return {
     searchText: (o) => printer.map((c) => jsonPathText(o, c.jsonPath)).join(' '),
