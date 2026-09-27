@@ -8,7 +8,7 @@ import type { ClusterId, Gvk, KubeObject } from '@/types';
  * names the object it shows; the tab consumes `focus` and clears it.
  */
 
-export type DetailsTabId = 'history';
+export type DetailsTabId = 'history' | 'changes';
 
 export interface DetailsTabRequest {
   clusterId: ClusterId;
@@ -47,6 +47,18 @@ export function openRolloutHistory(
 ) {
   navigateTo(clusterId, gvk, obj.metadata.namespace ?? null, obj.metadata.name);
   useDetailsTabRequest.getState().open({ clusterId, uid: obj.metadata.uid, tab: 'history', focus });
+}
+
+/** Select an object (opening its details) on its Changes tab (change timeline). */
+export function openObjectChanges(
+  clusterId: ClusterId,
+  gvk: Gvk,
+  namespace: string | null,
+  name: string,
+  uid: string,
+) {
+  navigateTo(clusterId, gvk, namespace, name);
+  useDetailsTabRequest.getState().open({ clusterId, uid, tab: 'changes' });
 }
 
 /** Cache key of an object's rollout history (shared by the History tab and the Rollout section). */

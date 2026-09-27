@@ -101,6 +101,32 @@ export function GeneralCategory({ description }: { description: string }) {
               className="w-40"
             />
           </SettingsSection>
+          <SettingsSection title={i18n.t('Change timeline')}>
+            <Switch
+              checked={draft.change_journal}
+              onChange={(v) => update('change_journal', v)}
+              label={i18n.t('Record what changes in connected clusters')}
+              description={i18n.t(
+                'Watches workloads, config, network, RBAC, namespaces and nodes while a cluster is connected and keeps the last 24 hours in memory only. Secret values are never stored. Clusters can opt out from their Changes view.',
+              )}
+            />
+            {draft.change_journal && draft.change_journal_disabled.length > 0 && (
+              <p className="text-fg-dim mt-2 text-[11.5px]">
+                {i18n.plural(
+                  '{count} cluster opted out.',
+                  '{count} clusters opted out.',
+                  draft.change_journal_disabled.length,
+                )}{' '}
+                <button
+                  type="button"
+                  className="text-accent hover:underline"
+                  onClick={() => update('change_journal_disabled', [])}
+                >
+                  {i18n.t('Record every cluster')}
+                </button>
+              </p>
+            )}
+          </SettingsSection>
         </>
       ) : (
         <Unavailable />
