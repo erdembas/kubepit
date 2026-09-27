@@ -222,7 +222,7 @@ function fire(clusterId: string, attempt = 0): void {
       window.setTimeout(() => {
         if (statuses()[clusterId]?.state === 'connected')
           emit(clusterId, refOf('pod', pod), podFinding(scenario, pod));
-      }, i * 450);
+      }, i * 120);
     });
     return;
   }
