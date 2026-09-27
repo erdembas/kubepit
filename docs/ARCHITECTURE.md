@@ -53,6 +53,7 @@ that created them (`src-tauri/src/windows.rs`).
 | `clusters.json`         | backend  | `ClusterDef[]`                                      |
 | `settings.json`         | backend  | `Settings`                                          |
 | `workspace.json`        | frontend | `WorkspaceSnapshot` (sections, ordering) — opaque   |
+| `manifests.json`        | backend  | recently opened local manifest sources (≤ 12)       |
 | `kubeconfigs/<id>.yaml` | backend  | pasted kubeconfigs (`managed: true`), mode 0600     |
 | `run/<id>.kubeconfig`   | backend  | single-context kubeconfig for kubectl/helm/terminal |
 
@@ -131,6 +132,43 @@ through `--password-stdin`.
   selectors) and streams results per cluster.
 - Cross-cluster compare and drift are UI-side: `resource_get` on each
   cluster, `lib/kube/normalize.ts` (mode `compare`) and `lib/diff.ts`.
+
+## Local manifests
+
+The "Manifests" dock tab (`dock/manifests/`) diffs local files against one
+or more clusters like `kubectl diff`, then applies the selected changes.
+
+- `manifests/` in the core renders a source into `ManifestDocument`s that
+  keep their source file and line: plain folders are walked directly
+  (`.yaml`/`.yml`/`.json`, hidden folders and `node_modules` skipped,
+  symlinked folders not followed, 5 MiB per file, 5 000 files), Kustomize
+  directories run `kubectl kustomize` (configured kubectl) or
+  `kustomize build`, charts run `helm template` with release, namespace
+  and values files (`# Source:` comments name the template). Nothing touches a
+  cluster. Kustomize folders and charts inside a plain folder are listed as
+  `nested` instead of being read as YAML; skipped files come back as
+  `problems`. `manifests_fingerprint` hashes path/size/mtime so "Watch" can
+  poll for edits; successful renders land in `manifests.json`.
+- `manifests_dry_run` sends each document with `dryRun=All` (same request
+  as `resource_apply_yaml`, concurrently, allowed on read-only clusters).
+  `manifests_apply` refuses read-only clusters, applies in dependency order
+  (Helm's install order: namespaces, CRDs, RBAC and config before
+  workloads, custom resources last), keeps going after a failure and
+  retries custom resources while a CRD from the same batch becomes served.
+- The UI runs one dry run per target cluster (`useFleetReview`) and shows a
+  documents × clusters matrix (`model.ts`): new / changed / unchanged /
+  error per cell with counts and filters, the live → after-apply diff in
+  `edit` normalisation, and selection for apply. Objects rejected only
+  because a namespace or CRD of the same set does not exist yet count as
+  new. Read-only clusters are diffed but excluded from apply; production
+  targets need a typed confirmation. Applies send exactly the reviewed
+  documents and report per cell.
+- "Sync to…" in compare and drift reuses the same review: the source
+  object goes through `lib/kube/syncable.ts` (status, server bookkeeping,
+  owner references, cluster IPs, node names, bound volumes, generated Job
+  selectors, injected token volumes stripped; controller-owned and
+  cluster-state kinds refused) and is dry-run on the chosen clusters and
+  namespace before anything is applied.
 
 ## Access (RBAC)
 
