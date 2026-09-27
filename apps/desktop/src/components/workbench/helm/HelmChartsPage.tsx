@@ -400,7 +400,7 @@ function SearchBox({ source }: { source: ChartSource }) {
         }}
         placeholder={hub ? i18n.t('Search Artifact Hub…') : i18n.t('Filter charts…')}
         aria-label={hub ? i18n.t('Search Artifact Hub') : i18n.t('Filter charts')}
-        className="dashboard-search-input text-fg placeholder:text-fg-dim min-w-0 flex-1 bg-transparent text-[12px] outline-none"
+        className="text-fg placeholder:text-fg-dim min-w-0 flex-1 bg-transparent text-[12px] outline-none"
       />
       {value && (
         <button

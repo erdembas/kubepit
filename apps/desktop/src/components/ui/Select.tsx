@@ -217,9 +217,9 @@ export function Select<V extends string = string>({
         aria-label={ariaLabel}
         disabled={disabled}
         className={cn(
-          'border-border/50 bg-surface text-fg/80 hover:bg-fg/5 focus:ring-accent/40 focus:border-accent/50 inline-flex min-w-0 items-center rounded-md border font-medium transition outline-none focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50',
+          'border-border/50 bg-surface text-fg/80 hover:bg-fg/5 inline-flex min-w-0 items-center rounded-md border font-medium transition outline-none disabled:cursor-not-allowed disabled:opacity-50',
           TRIGGER_SIZE[size],
-          open && 'border-accent/50 ring-accent/40 ring-2',
+          open && 'bg-fg/5 text-fg',
           className,
         )}
       >

@@ -143,7 +143,7 @@ export function MoveToSectionMenu({ itemId, currentSectionId }: Props) {
                   }
                 }}
                 placeholder={i18n.t('Section name')}
-                className="border-border bg-surface rounded-app-sm focus:ring-accent/40 focus:border-accent/50 text-fg min-w-0 flex-1 border px-2 py-1 text-[11.5px] transition outline-none focus:ring-2"
+                className="border-border bg-surface rounded-app-sm focus:border-accent/50 text-fg min-w-0 flex-1 border px-2 py-1 text-[11.5px] transition outline-none"
               />
             </div>
             <div className="flex items-center justify-end gap-1.5">

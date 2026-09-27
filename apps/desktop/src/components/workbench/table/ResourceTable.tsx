@@ -187,7 +187,7 @@ export function ResourceTable(p: ResourceTableProps) {
           setScrollTop(top);
         });
       }}
-      className="resource-table-scroller relative min-h-0 flex-1 overflow-auto"
+      className="relative min-h-0 flex-1 overflow-auto"
     >
       <div style={{ minWidth, paddingBottom: p.bottomInset }}>
         <div role="rowgroup" className="bg-surface/95 sticky top-0 z-10 backdrop-blur-sm">

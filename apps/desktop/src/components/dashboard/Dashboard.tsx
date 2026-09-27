@@ -303,7 +303,7 @@ export function Dashboard({ visible }: { visible: boolean }) {
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={i18n.t('Filter clusters…')}
                 aria-label={i18n.t('Filter clusters')}
-                className="dashboard-search-input text-fg w-full bg-transparent text-[12px] outline-none"
+                className="text-fg w-full bg-transparent text-[12px] outline-none"
               />
               {query && (
                 <button

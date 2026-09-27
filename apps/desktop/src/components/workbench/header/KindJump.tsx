@@ -77,7 +77,7 @@ export function KindJump({
           aria-label={i18n.t('Go to resource kind')}
           role="combobox"
           aria-expanded={open && matches.length > 0}
-          className="dashboard-search-input text-fg placeholder:text-fg-dim min-w-0 flex-1 bg-transparent text-[12px] outline-none"
+          className="text-fg placeholder:text-fg-dim min-w-0 flex-1 bg-transparent text-[12px] outline-none"
         />
       </div>
       {open && matches.length > 0 && (

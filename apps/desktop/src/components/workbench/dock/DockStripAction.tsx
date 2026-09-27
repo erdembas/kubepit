@@ -21,7 +21,6 @@ export function DockStripAction({ icon, label, title, onClick, active, className
       aria-label={label ? undefined : title}
       className={cn(
         'rounded-app-sm flex h-6 shrink-0 items-center gap-1 px-1.5 text-[11px] font-medium whitespace-nowrap transition-colors',
-        'focus-visible:ring-accent/40 focus-visible:ring-2 focus-visible:outline-none',
         active
           ? 'bg-surface-overlay/60 text-fg'
           : 'text-fg-dim hover:text-fg hover:bg-surface-overlay/60',

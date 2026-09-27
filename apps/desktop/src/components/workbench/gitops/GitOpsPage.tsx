@@ -296,7 +296,7 @@ export function GitOpsPage({
                 placeholder={i18n.t('Filter applications…')}
                 aria-label={i18n.t('Filter applications')}
                 title={i18n.t('Matches name, namespace, status, revision, source and message')}
-                className="dashboard-search-input text-fg placeholder:text-fg-dim min-w-0 flex-1 bg-transparent text-[12px] outline-none"
+                className="text-fg placeholder:text-fg-dim min-w-0 flex-1 bg-transparent text-[12px] outline-none"
               />
               {filter && (
                 <button

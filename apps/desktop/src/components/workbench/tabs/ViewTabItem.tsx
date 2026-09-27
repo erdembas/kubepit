@@ -84,9 +84,7 @@ export const ViewTabItem = memo(function ViewTabItem({
       }}
       title={label}
       className={cn(
-        // `view-tab` drops the global focus ring: the active tab is the roving
-        // focus target, so its own highlight already marks keyboard focus.
-        'view-tab group relative flex shrink-0 cursor-pointer items-center gap-1.5 text-[12px] whitespace-nowrap transition-colors select-none',
+        'group relative flex shrink-0 cursor-pointer items-center gap-1.5 text-[12px] whitespace-nowrap transition-colors select-none',
         pill
           ? cn(
               'h-7 rounded-md pl-2',

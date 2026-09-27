@@ -76,7 +76,7 @@ export function HelmPage({
                 onChange={(e) => store().setFilter(clusterId, VIEW.helmReleases, e.target.value)}
                 placeholder={i18n.t('Filter releases…')}
                 aria-label={i18n.t('Filter releases')}
-                className="dashboard-search-input text-fg placeholder:text-fg-dim min-w-0 flex-1 bg-transparent text-[12px] outline-none"
+                className="text-fg placeholder:text-fg-dim min-w-0 flex-1 bg-transparent text-[12px] outline-none"
               />
               {filter && (
                 <button

@@ -515,7 +515,7 @@ function MatrixCell({
       className={cn(
         'flex h-6 min-w-0 items-center rounded-md px-1 text-left transition',
         run?.status === 'done' && 'hover:bg-fg/6',
-        focused && 'ring-accent/60 bg-accent/8 ring-1',
+        focused && 'bg-accent/8',
       )}
     >
       {body}

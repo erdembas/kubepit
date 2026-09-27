@@ -18,7 +18,7 @@ function choice(type: 'checkbox' | 'radio') {
         ref={ref}
         type={type}
         className={cn(
-          'peer border-border-strong bg-surface checked:border-accent checked:bg-accent focus-visible:ring-accent/30 size-4 cursor-pointer appearance-none border shadow-xs transition outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed',
+          'peer border-border-strong bg-surface checked:border-accent checked:bg-accent size-4 cursor-pointer appearance-none border shadow-xs transition outline-none disabled:cursor-not-allowed',
           type === 'checkbox' ? 'rounded-[4px]' : 'rounded-full',
         )}
       />

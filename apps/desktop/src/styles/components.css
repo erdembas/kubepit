@@ -40,63 +40,6 @@
     0 0 80px -20px rgb(var(--accent) / 0.18);
 }
 
-/* The palette's main search input is *always* focused while the window is
- * open, so the global `*:focus-visible` accent ring is pure noise here.
- * This rule lives outside any `@layer`, matching the global focus-visible
- * rule's cascade tier, and wins on specificity (class + pseudo > `*` +
- * pseudo). Both `focus` and `focus-visible` are cleared so browsers that
- * keep the outline on click-focus also stay quiet. */
-.qa-search-input,
-.qa-search-input:focus,
-.qa-search-input:focus-visible {
-  outline: none;
-  box-shadow: none;
-  border-radius: 0;
-}
-
-/* Same story for the AI Chat panel's history-drawer search input — it
- * sits inside a wrapper that already provides its own border, so the
- * global `*:focus-visible` orange outline doubles up as a thick halo.
- * Class-based override wins on specificity over the universal rule. */
-.history-search-input,
-.history-search-input:focus,
-.history-search-input:focus-visible {
-  outline: none;
-  box-shadow: none;
-}
-
-/* Dashboard service search — same composition pattern as the two
- * search inputs above: a bare <input> nested inside a wrapper that
- * draws its own border via `focus-within:`. Without this override
- * the global `*:focus-visible` orange ring stacks an inner halo on
- * top of the wrapper's outer border, producing the "border in a
- * border" look. If a fourth surface ever needs the same treatment
- * it's time to extract a shared `.bare-input` utility class. */
-.dashboard-search-input,
-.dashboard-search-input:focus,
-.dashboard-search-input:focus-visible {
-  outline: none;
-  box-shadow: none;
-}
-
-/* The resource table's scroller takes focus back when a details panel or
- * menu closes with Escape, which counts as keyboard focus, so the global
- * ring outlines the whole table. The active row's accent strip is already
- * the keyboard indicator. Tailwind's `focus-visible:outline-none` can't win
- * here: it lives in `@layer utilities` and the global rule is unlayered. */
-.resource-table-scroller:focus,
-.resource-table-scroller:focus-visible {
-  outline: none;
-}
-
-/* View tabs use a roving tabindex: focus always sits on the active tab,
- * whose own highlight is the keyboard indicator, so the global ring only
- * adds an accent box around it. Same layering issue as above. */
-.view-tab:focus,
-.view-tab:focus-visible {
-  outline: none;
-}
-
 /* -----------------------------------------------------------------------
  * Quick Action — critical layout anchors (Tailwind-agnostic).
  *

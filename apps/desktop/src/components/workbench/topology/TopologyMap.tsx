@@ -184,7 +184,7 @@ export function TopologyMap({
             placeholder={i18n.t('Search the map…')}
             aria-label={i18n.t('Search the map')}
             title={i18n.t('Highlights matching names; Enter jumps to the next match')}
-            className="dashboard-search-input text-fg placeholder:text-fg-dim min-w-0 flex-1 bg-transparent text-[12px] outline-none"
+            className="text-fg placeholder:text-fg-dim min-w-0 flex-1 bg-transparent text-[12px] outline-none"
           />
           {search && (
             <button

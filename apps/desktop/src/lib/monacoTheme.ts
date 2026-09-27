@@ -48,6 +48,9 @@ export function useMonacoTheme(effectiveTheme: 'dark' | 'light'): string {
           'editorIndentGuide.activeBackground': border,
           'editorWidget.background': bg,
           'editorWidget.border': border,
+          // No focus outlines (find widget inputs, suggest list), like the rest of the UI.
+          focusBorder: '#00000000',
+          'list.focusOutline': '#00000000',
           'scrollbarSlider.background': isDark ? '#ffffff14' : '#0000000d',
           'scrollbarSlider.hoverBackground': isDark ? '#ffffff26' : '#00000017',
           'scrollbarSlider.activeBackground': isDark ? '#ffffff33' : '#00000022',

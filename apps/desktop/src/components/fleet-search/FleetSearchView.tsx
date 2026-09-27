@@ -200,7 +200,7 @@ export function FleetSearchView({ visible }: { visible: boolean }) {
           <Kbd className="ml-auto">{SHORTCUT}</Kbd>
         </div>
 
-        <div className="border-border/80 bg-surface-raised/70 focus-within:border-accent/45 flex h-11 items-center gap-2.5 rounded-xl border px-3.5 transition focus-within:shadow-[0_0_0_3px_rgb(var(--accent)/0.10)]">
+        <div className="border-border/80 bg-surface-raised/70 focus-within:border-accent/45 flex h-11 items-center gap-2.5 rounded-xl border px-3.5 transition">
           {running ? (
             <Loader2 className="text-accent h-4 w-4 shrink-0 animate-spin" />
           ) : (

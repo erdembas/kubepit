@@ -115,7 +115,7 @@ export function NamespacePicker({ clusterId, isActive }: { clusterId: string; is
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={i18n.t('Filter namespaces…')}
                 aria-label={i18n.t('Filter namespaces')}
-                className="dashboard-search-input text-fg placeholder:text-fg-dim w-full bg-transparent py-2 text-[12px] outline-none"
+                className="text-fg placeholder:text-fg-dim w-full bg-transparent py-2 text-[12px] outline-none"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && filtered[0]) toggle(filtered[0]);
                 }}

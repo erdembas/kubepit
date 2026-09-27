@@ -124,7 +124,7 @@ export function AddSectionButton({
           }
         }}
         placeholder={i18n.t('e.g. Clients')}
-        className="border-border bg-surface rounded-app-sm focus:ring-accent/40 focus:border-accent/50 text-fg w-full border px-2 py-1.5 text-[12px] transition outline-none focus:ring-2"
+        className="border-border bg-surface rounded-app-sm focus:border-accent/50 text-fg w-full border px-2 py-1.5 text-[12px] transition outline-none"
       />
       <div className="mt-2.5">
         <div className="text-fg-dim mb-1.5 text-[9.5px] font-semibold tracking-[0.14em] uppercase">
@@ -267,7 +267,7 @@ export function SectionOverflowMenu({ section }: { section: Section }) {
                 setRenaming(false);
               }
             }}
-            className="border-border bg-surface rounded-app-sm focus:ring-accent/40 focus:border-accent/50 text-fg w-full border px-2 py-1.5 text-[12px] transition outline-none focus:ring-2"
+            className="border-border bg-surface rounded-app-sm focus:border-accent/50 text-fg w-full border px-2 py-1.5 text-[12px] transition outline-none"
           />
           <div className="mt-2.5 flex items-center justify-end gap-1.5">
             <button

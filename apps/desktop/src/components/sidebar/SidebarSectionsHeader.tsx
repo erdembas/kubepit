@@ -16,12 +16,12 @@ export function SidebarSectionsHeader() {
         title={i18n.t('Show sections')}
         aria-label={i18n.t('Show sections')}
         aria-pressed={active}
-        className="text-fg-muted hover:text-fg focus-visible:ring-accent/40 flex min-w-0 items-center gap-1.5 rounded px-1 py-1 text-[11px] font-medium focus-visible:ring-2 focus-visible:outline-none"
+        className="text-fg-muted hover:text-fg flex min-w-0 items-center gap-1.5 rounded px-1 py-1 text-[11px] font-medium focus-visible:outline-none"
       >
         <span>{i18n.t('Sections')}</span>
         <span className="text-fg-dim text-[10px] tabular-nums">{i18n.number(count)}</span>
       </button>
-      <AddSectionButton className="text-fg-dim hover:bg-fg/5 hover:text-fg focus-visible:ring-accent/40 flex h-6 w-6 items-center justify-center rounded focus-visible:ring-2 focus-visible:outline-none">
+      <AddSectionButton className="text-fg-dim hover:bg-fg/5 hover:text-fg flex h-6 w-6 items-center justify-center rounded focus-visible:outline-none">
         <Plus className="h-3.5 w-3.5" aria-hidden />
       </AddSectionButton>
     </div>

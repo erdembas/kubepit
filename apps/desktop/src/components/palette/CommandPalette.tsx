@@ -220,7 +220,7 @@ export function CommandPalette() {
                 ? i18n.t('Actions for {name}…', { name: drill.name })
                 : i18n.t('Search clusters, resources, actions…')
             }
-            className="qa-search-input text-fg placeholder:text-fg-dim/80 h-7 w-full bg-transparent text-[15px] tracking-[-0.01em]"
+            className="text-fg placeholder:text-fg-dim/80 h-7 w-full bg-transparent text-[15px] tracking-[-0.01em]"
             spellCheck={false}
             autoCorrect="off"
             autoCapitalize="off"

@@ -119,10 +119,11 @@ button:disabled,
   color: rgb(var(--fg));
 }
 
+/* No focus outlines or rings anywhere: active rows, tabs and inputs carry
+ * their own highlight. Unlayered so it beats WebKit's default focus ring. */
+*:focus,
 *:focus-visible {
-  outline: 1.5px solid rgb(var(--accent) / 0.55);
-  outline-offset: 1px;
-  border-radius: 4px;
+  outline: none;
 }
 
 .glass {

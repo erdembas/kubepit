@@ -198,7 +198,7 @@ export function SearchableSelect({
             expand();
           }
         }}
-        className={`text-fg-muted hover:text-fg focus-visible:ring-accent/40 inline-flex min-w-0 items-center gap-2 rounded-lg text-[12px] transition-colors outline-none focus-visible:ring-2 disabled:opacity-40 ${compact ? 'hover:bg-fg/5 h-8 px-2' : 'border-border/70 bg-surface/60 hover:bg-fg/5 border px-3 py-2.5'} ${open ? 'bg-fg/5 text-fg' : ''} ${className}`}
+        className={`text-fg-muted hover:text-fg inline-flex min-w-0 items-center gap-2 rounded-lg text-[12px] transition-colors outline-none disabled:opacity-40 ${compact ? 'hover:bg-fg/5 h-8 px-2' : 'border-border/70 bg-surface/60 hover:bg-fg/5 border px-3 py-2.5'} ${open ? 'bg-fg/5 text-fg' : ''} ${className}`}
       >
         {leading}
         {selected?.color && (

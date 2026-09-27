@@ -212,7 +212,7 @@ export function ResourceNavigator({
             }}
             placeholder={i18n.t('Find a kind…')}
             aria-label={i18n.t('Find a resource kind')}
-            className="dashboard-search-input text-fg placeholder:text-fg-dim min-w-0 flex-1 bg-transparent text-[12px] outline-none"
+            className="text-fg placeholder:text-fg-dim min-w-0 flex-1 bg-transparent text-[12px] outline-none"
           />
           {query && (
             <button

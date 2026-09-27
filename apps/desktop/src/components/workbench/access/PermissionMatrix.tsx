@@ -276,7 +276,7 @@ export function PermissionMatrix({
                 onKeyDown={(e) => e.key === 'Escape' && setQuery('')}
                 placeholder={i18n.t('Filter kinds…')}
                 aria-label={i18n.t('Filter kinds')}
-                className="dashboard-search-input text-fg placeholder:text-fg-dim min-w-0 flex-1 bg-transparent text-[12px] outline-none"
+                className="text-fg placeholder:text-fg-dim min-w-0 flex-1 bg-transparent text-[12px] outline-none"
               />
               {query && (
                 <button

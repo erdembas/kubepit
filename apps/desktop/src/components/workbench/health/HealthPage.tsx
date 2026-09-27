@@ -132,7 +132,7 @@ export function HealthPage({
               onKeyDown={(e) => e.key === 'Escape' && setQuery('')}
               placeholder={i18n.t('Filter findings…')}
               aria-label={i18n.t('Filter findings')}
-              className="dashboard-search-input text-fg placeholder:text-fg-dim min-w-0 flex-1 bg-transparent text-[12px] outline-none"
+              className="text-fg placeholder:text-fg-dim min-w-0 flex-1 bg-transparent text-[12px] outline-none"
             />
             {query && (
               <button
@@ -207,13 +207,7 @@ export function HealthPage({
                 const Icon = SEVERITY_ICON[s];
                 const n = summary?.counts[s] ?? 0;
                 return (
-                  <div
-                    key={s}
-                    className={cn(
-                      'rounded-app grid min-w-0 transition',
-                      severity === s && 'ring-accent/60 ring-2 ring-offset-0',
-                    )}
-                  >
+                  <div key={s} className="rounded-app grid min-w-0">
                     <StatTile
                       icon={<Icon className={SEVERITY_TEXT[s]} />}
                       label={severityLabel(s)}
