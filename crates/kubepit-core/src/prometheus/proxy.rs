@@ -6,56 +6,45 @@
 //!
 //! The cluster's own `kube::Client` sends them, so no port-forward is
 //! needed, credentials never leave the kubeconfig and RBAC applies (the
-//! user needs `get` on `services/proxy`).
+//! user needs `get` on `services/proxy`). The transport is shared with the
+//! other in-cluster integrations ([`crate::service_proxy`]); this file adds
+//! the Prometheus envelope and error bodies.
 
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
-use kube::client::Body;
+use anyhow::Result;
 use kube::Client;
 
 use super::parse::{error_message, parse_response, PromData};
 use crate::error::ApiError;
-use crate::types::{PromScheme, PrometheusService};
+use crate::service_proxy::{self, Endpoint};
+use crate::types::PrometheusService;
+
+pub use crate::service_proxy::{encode_component, PROXY_REASON};
 
 /// Upper bound for one range query.
 pub const QUERY_TIMEOUT: Duration = Duration::from_secs(30);
 /// Upper bound for the detection probe of one candidate.
 pub const PROBE_TIMEOUT: Duration = Duration::from_secs(6);
-/// Longest error body quoted in a message.
-const MAX_ERROR_BODY: usize = 300;
 /// `ApiError::reason` of errors Prometheus itself returned (bad query, …).
 pub const PROMETHEUS_REASON: &str = "Prometheus";
-/// `ApiError::reason` of errors from the proxy path (API server, service).
-pub const PROXY_REASON: &str = "ServiceProxy";
 
-/// Percent-encode everything but RFC 3986 unreserved characters.
-pub fn encode_component(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char)
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
+impl PrometheusService {
+    /// Where the service proxy sends requests for this service.
+    pub fn endpoint(&self) -> Endpoint<'_> {
+        Endpoint {
+            namespace: &self.namespace,
+            service: &self.service,
+            port: self.port,
+            scheme: self.scheme,
+            path_prefix: &self.path_prefix,
         }
     }
-    out
 }
 
 /// `/api/v1/namespaces/{ns}/services/{scheme}:{name}:{port}/proxy{prefix}`.
 pub fn proxy_base(service: &PrometheusService) -> String {
-    let scheme = match service.scheme {
-        PromScheme::Http => "http",
-        PromScheme::Https => "https",
-    };
-    format!(
-        "/api/v1/namespaces/{}/services/{scheme}:{}:{}/proxy{}",
-        encode_component(&service.namespace),
-        encode_component(&service.service),
-        service.port,
-        service.path_prefix.trim_end_matches('/'),
-    )
+    service_proxy::proxy_base(&service.endpoint())
 }
 
 /// Full request path of `endpoint` (`/api/v1/query_range`) with `params`.
@@ -64,42 +53,18 @@ pub fn proxy_path(
     endpoint: &str,
     params: &[(&str, String)],
 ) -> String {
-    let query = params
-        .iter()
-        .map(|(k, v)| format!("{}={}", encode_component(k), encode_component(v)))
-        .collect::<Vec<_>>()
-        .join("&");
-    let base = proxy_base(service);
-    if query.is_empty() {
-        format!("{base}{endpoint}")
-    } else {
-        format!("{base}{endpoint}?{query}")
-    }
+    service_proxy::proxy_path(&service.endpoint(), endpoint, params)
 }
 
 /// GET `path` and parse the Prometheus envelope. Non-2xx answers become an
 /// [`ApiError`] carrying the status code and the most useful message: the
 /// Prometheus error, the API server's `Status` message, or the body.
 pub async fn get(client: &Client, path: &str, timeout: Duration) -> Result<PromData> {
-    let request = http::Request::get(path)
-        .header(http::header::ACCEPT, "application/json")
-        .body(Body::from(Vec::new()))
-        .map_err(|e| anyhow!("invalid Prometheus request: {e}"))?;
-    let exchange = async {
-        let response = client.send(request).await?;
-        let status = response.status();
-        let bytes = response.into_body().collect_bytes().await?;
-        Ok::<_, kube::Error>((status, bytes))
-    };
-    let (status, bytes) = tokio::time::timeout(timeout, exchange)
-        .await
-        .map_err(|_| anyhow!("Prometheus did not answer within {}s", timeout.as_secs()))?
-        .map_err(|e| anyhow!("request to Prometheus failed: {e}"))?;
-    let text = String::from_utf8_lossy(&bytes);
-    if status.is_success() {
-        return parse_response(&text);
+    let response = service_proxy::get(client, path, &[], timeout, "Prometheus").await?;
+    if response.is_success() {
+        return parse_response(&response.body);
     }
-    Err(http_error(status.as_u16(), &text).into())
+    Err(http_error(response.status, &response.body).into())
 }
 
 /// The error of a non-2xx answer.
@@ -111,36 +76,14 @@ pub fn http_error(code: u16, body: &str) -> ApiError {
             message,
         };
     }
-    let message = status_message(body).unwrap_or_else(|| {
-        let body = body.trim();
-        if body.is_empty() {
-            format!("HTTP {code}")
-        } else {
-            let short: String = body.chars().take(MAX_ERROR_BODY).collect();
-            format!("HTTP {code}: {short}")
-        }
-    });
-    ApiError {
-        code,
-        reason: PROXY_REASON.to_string(),
-        message,
-    }
-}
-
-/// The `message` of a Kubernetes `Status` body (proxy errors).
-fn status_message(body: &str) -> Option<String> {
-    let status: serde_json::Value = serde_json::from_str(body).ok()?;
-    if status.get("kind")?.as_str()? != "Status" {
-        return None;
-    }
-    let message = status.get("message")?.as_str()?;
-    (!message.is_empty()).then(|| message.to_string())
+    service_proxy::proxy_error(code, body)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::PrometheusKind;
+    use crate::service_proxy::MAX_ERROR_BODY;
+    use crate::types::{PromScheme, PrometheusKind};
 
     fn service(scheme: PromScheme, prefix: &str) -> PrometheusService {
         PrometheusService {

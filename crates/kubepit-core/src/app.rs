@@ -26,6 +26,7 @@ use crate::portforward::PortForwards;
 use crate::prometheus::PrometheusCache;
 use crate::saved_forwards::SavedForwards;
 use crate::secrets::{DisabledSecretStore, SecretStore};
+use crate::service_proxy::ProxyClients;
 use crate::store::Store;
 use crate::tasks::TaskRegistry;
 use crate::tools;
@@ -47,6 +48,8 @@ pub struct Kubepit {
     pub(crate) alerts: AlertCenter,
     // Prometheus: detection result per connection.
     pub(crate) prometheus: PrometheusCache,
+    // Service proxy (Prometheus, Loki): retry-free client per connection.
+    pub(crate) proxy_clients: ProxyClients,
     // OpenAPI v3 documents per connection (YAML editing, API explorer).
     pub(crate) openapi: OpenApiCache,
     // Connectivity: OS credential store, saved port forwards, kubeconfig watcher.
@@ -88,6 +91,7 @@ impl Kubepit {
             fleet_searches: TaskRegistry::default(),
             alerts,
             prometheus: PrometheusCache::default(),
+            proxy_clients: ProxyClients::default(),
             openapi: OpenApiCache::default(),
             secrets,
             saved_forwards,

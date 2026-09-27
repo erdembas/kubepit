@@ -37,6 +37,7 @@
 //! | [`alerts`]      | transition alerts, dedupe, notification center history |
 //! | [`client_cert`] | kubeconfig client certificate subject and expiry       |
 //! | [`prometheus`]  | Prometheus detection, preset + PromQL range queries    |
+//! | [`service_proxy`] | shared API server service-proxy transport           |
 //! | [`openapi`]     | OpenAPI v3 schemas (YAML editing, API explorer)        |
 //! | [`saved_forwards`] | saved port forwards, start on connect               |
 //! | [`kubeconfig_watch`] | kubeconfig file watching (`kubeconfig://changed`) |
@@ -97,6 +98,7 @@ pub mod alerts;
 pub mod client_cert;
 // Prometheus: provider detection and range queries over the service proxy.
 pub mod prometheus;
+pub mod service_proxy;
 // Schema-aware YAML editing and the API explorer.
 pub mod openapi;
 // Connectivity: saved port forwards, kubeconfig watching, proxies, keychain.
