@@ -17,6 +17,7 @@ import {
   type PaletteItem,
 } from './paletteItems';
 import { fleetSearchItem } from './fleetSearchItem';
+import { updateActions, workbenchItems } from './workbenchItems';
 
 const FILTERS: Array<{ key: PaletteFilter; label: () => string }> = [
   { key: 'all', label: () => i18n.t('All') },
@@ -107,8 +108,10 @@ export function CommandPalette() {
       out.push({ type: 'header', id: 'hdr-fleet', label: i18n.t('Fleet search') });
       out.push(fleetSearchItem(q));
     }
+    // Bookmarks, saved views and exports of the focused table.
+    out.push(...workbenchItems(q, filter));
     if (filter === 'all' || filter === 'actions') {
-      const acts = appActions().filter(
+      const acts = [...appActions(), ...updateActions()].filter(
         (item) => item.type === 'action' && matches(q, item.label, item.keywords),
       );
       if (acts.length) {
