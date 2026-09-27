@@ -17,11 +17,14 @@ mod logs;
 mod metrics;
 mod portforward;
 mod resources;
+// Logs & debug: workload logs, log export, debug containers, container files.
+mod logs_debug;
 
 pub use app::*;
 pub use clusters::*;
 pub use helm::*;
 pub use logs::*;
+pub use logs_debug::*;
 pub use metrics::*;
 pub use portforward::*;
 pub use resources::*;

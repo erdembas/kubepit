@@ -90,6 +90,15 @@ pub fn run() {
             ipc::helm_rollback,
             ipc::helm_uninstall,
             ipc::helm_upgrade_values,
+            // Logs & debug
+            ipc::workload_logs_stream,
+            ipc::workload_logs_stop,
+            ipc::save_text_file,
+            ipc::pod_debug,
+            ipc::pod_fs_list,
+            ipc::pod_fs_read,
+            ipc::pod_fs_download,
+            ipc::pod_fs_upload,
             // Terminal
             terminal::commands::terminal_create,
             terminal::commands::terminal_write,

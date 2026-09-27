@@ -162,6 +162,7 @@ let settings: Settings = {
   log_tail_lines: 1000,
   confirm_destructive: true,
   node_shell_image: 'docker.io/library/alpine:3.20',
+  debug_image: 'docker.io/library/busybox:1.36',
 };
 
 const WORKSPACE_KEY = 'kubepit.demo.workspace';

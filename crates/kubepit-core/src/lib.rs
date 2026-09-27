@@ -23,6 +23,9 @@
 //! | [`portforward`] | local TCP → pod / service forwarding                    |
 //! | [`helm`]        | releases read from secrets, mutations via `helm`        |
 //! | [`terminal`]    | PTY launch plans (local, exec, attach, node shell)      |
+//! | [`workload_logs`] | merged logs of every pod of a workload (stern-style) |
+//! | [`debug_container`] | ephemeral debug containers (`kubectl debug`)       |
+//! | [`pod_fs`]      | container file browser and copy over exec              |
 //!
 //! Push notifications to the UI go through [`EventSink`]; streams take plain
 //! `Fn(T) -> bool` callbacks (return `false` to stop) that the desktop shell
@@ -54,6 +57,11 @@ pub mod terminal;
 pub mod tools;
 pub mod types;
 pub mod watch;
+
+// Logs & debug: merged workload logs, debug containers, container files.
+pub mod debug_container;
+pub mod pod_fs;
+pub mod workload_logs;
 
 pub use app::Kubepit;
 pub use events::{EventSink, NullSink};
