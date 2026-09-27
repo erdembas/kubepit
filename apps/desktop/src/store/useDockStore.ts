@@ -3,8 +3,8 @@ import type { ClusterId, Gvk, TerminalSpec } from '@/types';
 import { useAppStore } from './useAppStore';
 
 /**
- * Bottom dock of a cluster workbench (Freelens-style): terminals, pod logs
- * and YAML editors live here as tabs. Every cluster has its own dock state,
+ * Bottom dock of a cluster workbench (Freelens-style): terminals, pod and
+ * workload logs, YAML editors and container file browsers live here as tabs. Every cluster has its own dock state,
  * kept for the whole app session so switching main tabs never kills a
  * shell or a log stream.
  *
@@ -44,13 +44,41 @@ export type DockTab =
       gvk: Gvk;
       namespace: string | null;
       name: string;
+    }
+  // -- Logs & debug ---------------------------------------------------------
+  | {
+      id: string;
+      kind: 'workload-logs';
+      title: string;
+      namespace: string;
+      /** What the pods belong to (Deployment web, Service api, …). */
+      workload: { kind: string; name: string };
+      /** Label selector of the pods (`app=web,tier in (a,b)`). */
+      selector: string;
+      /** Container names of the pod template, for the filter before pods arrive. */
+      containers: string[];
+      initContainers: string[];
+      /** Pods currently streamed (tab title); null until known. */
+      pods: number | null;
+    }
+  | {
+      id: string;
+      kind: 'files';
+      title: string;
+      namespace: string;
+      pod: string;
+      /** Selected container; null = the pod's default container. */
+      container: string | null;
+      containers: string[];
     };
 
 type DockTabInput =
   | Omit<Extract<DockTab, { kind: 'terminal' }>, 'id'>
   | Omit<Extract<DockTab, { kind: 'logs' }>, 'id'>
   | Omit<Extract<DockTab, { kind: 'editor'; mode: 'create' }>, 'id'>
-  | Omit<Extract<DockTab, { kind: 'editor'; mode: 'edit' }>, 'id'>;
+  | Omit<Extract<DockTab, { kind: 'editor'; mode: 'edit' }>, 'id'>
+  | Omit<Extract<DockTab, { kind: 'workload-logs' }>, 'id'>
+  | Omit<Extract<DockTab, { kind: 'files' }>, 'id'>;
 
 export interface ClusterDock {
   tabs: DockTab[];
@@ -109,6 +137,10 @@ function sameTarget(a: DockTab, b: DockTabInput): boolean {
       a.namespace === b.namespace &&
       a.name === b.name
     );
+  if (a.kind === 'workload-logs' && b.kind === 'workload-logs')
+    return a.namespace === b.namespace && a.selector === b.selector;
+  if (a.kind === 'files' && b.kind === 'files')
+    return a.namespace === b.namespace && a.pod === b.pod;
   return false;
 }
 
@@ -330,5 +362,43 @@ export const dock = {
       gvk,
       namespace,
       name,
+    }),
+  /** Merged logs of every pod matching `selector` (a workload's or a Service's pods). */
+  workloadLogs: (
+    clusterId: ClusterId,
+    target: {
+      namespace: string;
+      kind: string;
+      name: string;
+      selector: string;
+      containers: string[];
+      initContainers: string[];
+    },
+  ) =>
+    useDockStore.getState().openTab(clusterId, {
+      kind: 'workload-logs',
+      title: target.name,
+      namespace: target.namespace,
+      workload: { kind: target.kind, name: target.name },
+      selector: target.selector,
+      containers: target.containers,
+      initContainers: target.initContainers,
+      pods: null,
+    }),
+  /** Container file browser. */
+  files: (
+    clusterId: ClusterId,
+    namespace: string,
+    pod: string,
+    containers: string[],
+    container: string | null = null,
+  ) =>
+    useDockStore.getState().openTab(clusterId, {
+      kind: 'files',
+      title: pod,
+      namespace,
+      pod,
+      containers,
+      container: container ?? containers[0] ?? null,
     }),
 };

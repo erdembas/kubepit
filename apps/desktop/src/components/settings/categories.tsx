@@ -236,6 +236,19 @@ export function TerminalCategory({ description }: { description: string }) {
           onChange={(e) => update('node_shell_image', e.target.value)}
         />
       </SettingsSection>
+      <SettingsSection
+        title={i18n.t('Debug container image')}
+        description={i18n.t(
+          'Default image for ephemeral debug containers (Debug… on a pod). It needs a shell; netshoot is a good pick for network issues.',
+        )}
+      >
+        <Input
+          mono
+          value={draft.debug_image}
+          placeholder="docker.io/library/busybox:1.36"
+          onChange={(e) => update('debug_image', e.target.value)}
+        />
+      </SettingsSection>
     </SettingsPageShell>
   );
 }

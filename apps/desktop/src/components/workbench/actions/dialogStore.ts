@@ -21,7 +21,9 @@ export type ActionDialog =
       ports: PortOption[];
       port?: number;
     }
-  | { kind: 'menu'; clusterId: string; x: number; y: number; items: FileContextMenuEntry[] };
+  | { kind: 'menu'; clusterId: string; x: number; y: number; items: FileContextMenuEntry[] }
+  // Logs & debug: ephemeral debug container for a pod.
+  | { kind: 'debug'; clusterId: string; pod: KubeObject; target?: string | null };
 
 interface DialogState {
   dialog: ActionDialog | null;

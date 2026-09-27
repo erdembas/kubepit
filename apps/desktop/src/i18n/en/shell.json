@@ -107,6 +107,8 @@
   "Cyan": "Cyan",
   "Dark": "Dark",
   "Data folder": "Data folder",
+  "Debug container image": "Debug container image",
+  "Default image for ephemeral debug containers (Debug… on a pod). It needs a shell; netshoot is a good pick for network issues.": "Default image for ephemeral debug containers (Debug… on a pod). It needs a shell; netshoot is a good pick for network issues.",
   "Default namespace": "Default namespace",
   "Delete section \"{value1}\"?\n\nClusters inside will move to \"Unassigned\" — they are not removed.": "Delete section \"{value1}\"?\n\nClusters inside will move to \"Unassigned\" — they are not removed.",
   "Delete, scale to zero, drain and Helm uninstall always ask first. Production clusters additionally require typing the resource name.": "Delete, scale to zero, drain and Helm uninstall always ask first. Production clusters additionally require typing the resource name.",

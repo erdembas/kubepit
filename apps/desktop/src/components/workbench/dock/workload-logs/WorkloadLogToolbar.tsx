@@ -1,47 +1,52 @@
 import * as i18n from '@/i18n';
-import type { ReactNode } from 'react';
 import {
-  ArrowDownToLine,
   Box,
   Clock,
   Copy,
   Download,
   Eraser,
-  History,
+  ListStart,
+  PanelRight,
   Pause,
   Play,
   Search,
   WrapText,
 } from 'lucide-react';
 import { IconButton } from '@/components/ui/IconButton';
-import { Select } from '@/components/ui/Select';
+import { Select, type SelectOption } from '@/components/ui/Select';
 import { cn } from '@/lib/cn';
 import { modChord } from '@/lib/platform';
-import { sinceSelectOptions, tailSelectOptions } from './options';
-import { StreamIndicator } from './StreamIndicator';
-import type { StreamStatus } from './useLogStream';
+import { ToggleChip } from '../logs/LogToolbar';
+import { sinceSelectOptions, tailSelectOptions } from '../logs/options';
+import { StreamIndicator } from '../logs/StreamIndicator';
+import type { StreamStatus } from '../logs/useLogStream';
 
-export interface LogToolbarProps {
+const ALL = '\u0000all';
+
+export interface WorkloadLogToolbarProps {
   status: StreamStatus;
   paused: boolean;
   pending: number;
   lineCount: number;
+  /** Container names offered by the filter. */
   containers: string[];
+  /** Followed container; null = all regular containers. */
   container: string | null;
-  follow: boolean;
+  hasInit: boolean;
+  initContainers: boolean;
   timestamps: boolean;
-  previous: boolean;
   wrap: boolean;
   since: number | null;
   tail: number | null;
   defaultTail: number;
-  onContainer: (container: string) => void;
-  onFollow: (value: boolean) => void;
+  legend: boolean;
+  onContainer: (container: string | null) => void;
+  onInitContainers: (value: boolean) => void;
   onTimestamps: (value: boolean) => void;
-  onPrevious: (value: boolean) => void;
   onWrap: (value: boolean) => void;
   onSince: (value: number | null) => void;
   onTail: (value: number | null) => void;
+  onLegend: (value: boolean) => void;
   onSearch: () => void;
   onPauseToggle: () => void;
   onClear: () => void;
@@ -50,12 +55,13 @@ export interface LogToolbarProps {
   onRetry: () => void;
 }
 
-/** Single-row log toolbar in RunHQ's LogPanelToolbar language (chips, compact selects, icon actions). */
-export function LogToolbar(props: LogToolbarProps) {
+/** Toolbar of the merged workload log view (same language as the pod log toolbar). */
+export function WorkloadLogToolbar(props: WorkloadLogToolbarProps) {
   i18n.useLocale();
-  const sinceOptions = sinceSelectOptions();
-  const tailOptions = tailSelectOptions(props.defaultTail);
-
+  const containerOptions: SelectOption[] = [
+    { value: ALL, label: i18n.t('All containers') },
+    ...props.containers.map((c) => ({ value: c, label: c })),
+  ];
   return (
     <div
       className={cn(
@@ -67,28 +73,20 @@ export function LogToolbar(props: LogToolbarProps) {
         status={props.status}
         paused={props.paused}
         pending={props.pending}
-        follow={props.follow}
+        follow
         onRetry={props.onRetry}
       />
       <span aria-hidden className="bg-border/70 mx-0.5 h-4 w-px shrink-0" />
-      {props.containers.length > 0 && props.container && (
+      {props.containers.length > 1 && (
         <Select
-          value={props.container}
-          onChange={props.onContainer}
-          options={props.containers.map((c) => ({ value: c, label: c }))}
+          value={props.container ?? ALL}
+          onChange={(v) => props.onContainer(v === ALL ? null : v)}
+          options={containerOptions}
           ariaLabel={i18n.t('Container')}
           leading={<Box size={12} />}
           className="h-6.5 max-w-48 shrink-0"
         />
       )}
-      <ToggleChip
-        active={props.follow}
-        onClick={() => props.onFollow(!props.follow)}
-        icon={<ArrowDownToLine />}
-        label={i18n.t('Follow')}
-        title={i18n.t('Keep streaming new lines and stick to the bottom')}
-        disabled={props.previous}
-      />
       <ToggleChip
         active={props.timestamps}
         onClick={() => props.onTimestamps(!props.timestamps)}
@@ -96,13 +94,15 @@ export function LogToolbar(props: LogToolbarProps) {
         label={i18n.t('Timestamps')}
         title={i18n.t('Prefix every line with the time Kubernetes received it')}
       />
-      <ToggleChip
-        active={props.previous}
-        onClick={() => props.onPrevious(!props.previous)}
-        icon={<History />}
-        label={i18n.t('Previous')}
-        title={i18n.t('Show logs of the previous (terminated) container instance')}
-      />
+      {props.hasInit && (
+        <ToggleChip
+          active={props.initContainers}
+          onClick={() => props.onInitContainers(!props.initContainers)}
+          icon={<ListStart />}
+          label={i18n.t('Init containers')}
+          title={i18n.t('Also follow init containers')}
+        />
+      )}
       <ToggleChip
         active={props.wrap}
         onClick={() => props.onWrap(!props.wrap)}
@@ -113,15 +113,15 @@ export function LogToolbar(props: LogToolbarProps) {
       <Select
         value={props.since === null ? 'all' : String(props.since)}
         onChange={(v) => props.onSince(v === 'all' ? null : Number(v))}
-        options={sinceOptions}
+        options={sinceSelectOptions()}
         ariaLabel={i18n.t('Since')}
         className="h-6.5 shrink-0"
       />
       <Select
         value={props.tail === null ? 'all' : String(props.tail)}
         onChange={(v) => props.onTail(v === 'all' ? null : Number(v))}
-        options={tailOptions}
-        ariaLabel={i18n.t('Tail lines')}
+        options={tailSelectOptions(props.defaultTail)}
+        ariaLabel={i18n.t('Tail lines per container')}
         className="h-6.5 shrink-0"
       />
       <div className="ml-auto flex shrink-0 items-center gap-0.5 pl-2">
@@ -150,45 +150,16 @@ export function LogToolbar(props: LogToolbarProps) {
           icon={<Download />}
           onClick={props.onSave}
         />
+        <IconButton
+          size="xs"
+          label={props.legend ? i18n.t('Hide sources') : i18n.t('Show sources')}
+          icon={<PanelRight />}
+          tone={props.legend ? 'accent' : 'default'}
+          className={cn(props.legend && 'text-accent')}
+          aria-pressed={props.legend}
+          onClick={() => props.onLegend(!props.legend)}
+        />
       </div>
     </div>
-  );
-}
-
-export function ToggleChip({
-  active,
-  onClick,
-  icon,
-  label,
-  title,
-  disabled,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: ReactNode;
-  label: string;
-  title: string;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      aria-label={label}
-      onClick={onClick}
-      title={title}
-      disabled={disabled}
-      className={cn(
-        'rounded-app-sm flex h-6.5 shrink-0 items-center gap-1.5 border px-2 text-[11.5px] font-medium whitespace-nowrap transition',
-        'disabled:cursor-not-allowed disabled:opacity-45 [&>svg]:h-3 [&>svg]:w-3',
-        active
-          ? 'border-accent/50 bg-accent/10 text-accent'
-          : 'border-border bg-surface-muted/70 text-fg-muted hover:text-fg hover:bg-surface-overlay',
-      )}
-    >
-      {icon}
-      {/* Narrow docks keep icon-only chips (the title still names them). */}
-      <span className="hidden @5xl:inline">{label}</span>
-    </button>
   );
 }

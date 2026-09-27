@@ -5,7 +5,9 @@ import type { DockTab } from '@/store/useDockStore';
 import type { ClusterId } from '@/types';
 import { CreateEditor } from './editor/CreateEditor';
 import { EditEditor } from './editor/EditEditor';
+import { FileBrowser } from './files/FileBrowser';
 import { LogView } from './logs/LogView';
+import { WorkloadLogView } from './workload-logs/WorkloadLogView';
 import { requestCloseTabs } from './tabs';
 import { TerminalView } from './terminal/TerminalView';
 
@@ -43,6 +45,12 @@ export const DockTabBody = memo(function DockTabBody({ clusterId, tab, active }:
         ) : (
           <EditEditor clusterId={clusterId} tab={tab} />
         );
+      break;
+    case 'workload-logs':
+      body = <WorkloadLogView clusterId={clusterId} tab={tab} active={active} />;
+      break;
+    case 'files':
+      body = <FileBrowser clusterId={clusterId} tab={tab} active={active} />;
       break;
   }
   return <TabErrorBoundary>{body}</TabErrorBoundary>;

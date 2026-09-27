@@ -24,6 +24,14 @@ export function tabTitle(tab: DockTab, clusterName: string | null): string {
       return tab.container && tab.containers.length > 1 ? `${tab.pod} · ${tab.container}` : tab.pod;
     case 'editor':
       return tab.mode === 'create' ? i18n.t('Create resource') : tab.title;
+    case 'workload-logs':
+      return tab.pods === null
+        ? tab.workload.name
+        : i18n.plural('{name} · {count} pod', '{name} · {count} pods', tab.pods, {
+            name: tab.workload.name,
+          });
+    case 'files':
+      return i18n.t('Files · {pod}', { pod: tab.pod });
   }
 }
 
@@ -54,6 +62,15 @@ export function tabTooltip(tab: DockTab, clusterName: string | null): string {
       return tab.mode === 'create'
         ? i18n.t('Create resource in {namespace}', { namespace: tab.namespace ?? 'default' })
         : `${tab.namespace ? `${tab.namespace}/` : ''}${tab.gvk.kind}/${tab.name}`;
+    case 'workload-logs':
+      return i18n.t('Logs of every pod of {target} ({selector})', {
+        target: `${tab.workload.kind}/${tab.namespace}/${tab.workload.name}`,
+        selector: tab.selector,
+      });
+    case 'files':
+      return i18n.t('Files in {target}', {
+        target: `${tab.namespace}/${tab.pod}${tab.container ? ` (${tab.container})` : ''}`,
+      });
   }
 }
 
