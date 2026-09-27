@@ -10,6 +10,7 @@
 //! blocking pool so neither the window event loop nor Tokio's async workers
 //! stall on disk I/O.
 
+mod access;
 mod app;
 mod clusters;
 mod helm;
@@ -18,6 +19,7 @@ mod metrics;
 mod portforward;
 mod resources;
 
+pub use access::*;
 pub use app::*;
 pub use clusters::*;
 pub use helm::*;

@@ -90,6 +90,10 @@ pub fn run() {
             ipc::helm_rollback,
             ipc::helm_uninstall,
             ipc::helm_upgrade_values,
+            // Access (RBAC self-reviews)
+            ipc::access_review,
+            ipc::access_rules,
+            ipc::access_whoami,
             // Terminal
             terminal::commands::terminal_create,
             terminal::commands::terminal_write,
