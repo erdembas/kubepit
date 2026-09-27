@@ -47,6 +47,7 @@ import {
   UserCog,
   Waypoints,
   Webhook,
+  Workflow,
   type LucideIcon,
 } from 'lucide-react';
 import type { NavSectionId } from './catalog';
@@ -68,6 +69,7 @@ export const SECTION_ICONS: Record<NavSectionId | 'pinned', LucideIcon> = {
 const KIND_ICONS: Record<string, LucideIcon> = {
   '@overview': LayoutDashboard,
   '@workloads': LayoutDashboard,
+  '@resource-map': Workflow,
   '@port-forwards': ArrowRightLeft,
   '@helm': Package,
   '@access': ShieldUser,
