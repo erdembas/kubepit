@@ -11,8 +11,20 @@ import type {
   ClusterStatus,
   DeleteOptions,
   Gvk,
+  HelmChartDetail,
+  HelmChartSummary,
+  HelmChartVersion,
+  HelmHubChart,
+  HelmInstallRequest,
+  HelmInstallResult,
   HelmRelease,
   HelmReleaseDetail,
+  HelmRepo,
+  HelmRepoAddOptions,
+  HelmRepoUpdateResult,
+  HelmRevisionDetail,
+  HelmSearchOptions,
+  HelmUpgradeRequest,
   KubeconfigSource,
   KubeObject,
   LogChunk,
@@ -183,6 +195,35 @@ export const ipc = {
     call<void>('helm_uninstall', { clusterId, namespace, name }),
   helmUpgradeValues: (clusterId: ClusterId, namespace: string, name: string, values: string) =>
     call<void>('helm_upgrade_values', { clusterId, namespace, name, values }),
+
+  // -- Helm charts (repositories and catalog are local helm commands) -------
+  helmRepoList: () => call<HelmRepo[]>('helm_repo_list'),
+  helmRepoAdd: (name: string, url: string, options: HelmRepoAddOptions) =>
+    call<void>('helm_repo_add', { name, url, options }),
+  helmRepoRemove: (name: string) => call<void>('helm_repo_remove', { name }),
+  /** Empty `names` updates every repository. */
+  helmRepoUpdate: (names: string[]) => call<HelmRepoUpdateResult[]>('helm_repo_update', { names }),
+  /** Empty `query` lists every chart of the configured repositories. */
+  helmChartSearch: (query: string, options: HelmSearchOptions) =>
+    call<HelmChartSummary[]>('helm_chart_search', { query, options }),
+  /** Newest first, pre-releases included. */
+  helmChartVersions: (chartRef: string) =>
+    call<HelmChartVersion[]>('helm_chart_versions', { chartRef }),
+  /** Queries artifacthub.io; only on user request. */
+  helmHubSearch: (query: string) => call<HelmHubChart[]>('helm_hub_search', { query }),
+  /** `version = null` shows the newest stable version. */
+  helmChartShow: (chartRef: string, version: string | null) =>
+    call<HelmChartDetail>('helm_chart_show', { chartRef, version }),
+  helmInstall: (clusterId: ClusterId, request: HelmInstallRequest) =>
+    call<HelmInstallResult>('helm_install', { clusterId, request }),
+  helmUpgrade: (
+    clusterId: ClusterId,
+    namespace: string,
+    name: string,
+    request: HelmUpgradeRequest,
+  ) => call<HelmInstallResult>('helm_upgrade', { clusterId, namespace, name, request }),
+  helmReleaseRevision: (clusterId: ClusterId, namespace: string, name: string, revision: number) =>
+    call<HelmRevisionDetail>('helm_release_revision', { clusterId, namespace, name, revision }),
 
   // -- Terminal -------------------------------------------------------------
   ...terminalIpc,
