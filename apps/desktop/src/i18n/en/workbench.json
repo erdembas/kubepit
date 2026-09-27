@@ -146,6 +146,7 @@
   "Default": "Default",
   "Definition": "Definition",
   "Definitions": "Definitions",
+  "Degraded": "Degraded",
   "Delete": "Delete",
   "Delete {count} {kind}? This cannot be undone.\n\n{names}": "Delete {count} {kind}? This cannot be undone.\n\n{names}",
   "Delete {count} object": "Delete {count} object",

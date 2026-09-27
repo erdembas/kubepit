@@ -219,6 +219,7 @@ const STATE_TONE: Record<RolloutState, string> = {
   complete: 'text-status-running',
   progressing: 'text-accent',
   paused: 'text-status-starting',
+  degraded: 'text-status-starting',
   failed: 'text-status-error',
   manual: 'text-fg-muted',
 };
@@ -228,7 +229,7 @@ function StateIcon({ state }: { state: RolloutState }) {
   if (state === 'complete') return <CircleCheck className={cls} />;
   if (state === 'progressing') return <Loader2 className={cn(cls, 'animate-spin')} />;
   if (state === 'paused') return <CirclePause className={cls} />;
-  if (state === 'failed') return <AlertTriangle className={cls} />;
+  if (state === 'failed' || state === 'degraded') return <AlertTriangle className={cls} />;
   return <Hand className={cls} />;
 }
 
@@ -238,6 +239,7 @@ function StatusLine({ progress: p, revision }: { progress: RolloutProgress; revi
     complete: i18n.t('Rolled out'),
     progressing: i18n.t('Rolling out…'),
     paused: i18n.t('Paused'),
+    degraded: i18n.t('Degraded'),
     failed: i18n.t('Failed'),
     manual: i18n.t('Waiting for pod deletion'),
   };
@@ -264,7 +266,7 @@ function StatusLine({ progress: p, revision }: { progress: RolloutProgress; revi
 function ProgressBar({ progress: p }: { progress: RolloutProgress }) {
   i18n.useLocale();
   const total = Math.max(p.desired, p.total, 1);
-  const fresh = Math.min(p.updated, p.available);
+  const fresh = p.upToDate;
   const pending = Math.max(0, p.updated - fresh);
   const pct = (n: number) => `${(Math.min(n, total) / total) * 100}%`;
   const segments: Array<[number, string]> = [
@@ -304,7 +306,7 @@ function ProgressBar({ progress: p }: { progress: RolloutProgress }) {
 
 function Legend({ progress: p }: { progress: RolloutProgress }) {
   i18n.useLocale();
-  const fresh = Math.min(p.updated, p.available);
+  const fresh = p.upToDate;
   const pending = Math.max(0, p.updated - fresh);
   const item = (tone: string, label: ReactNode) => (
     <span className="flex items-center gap-1.5">

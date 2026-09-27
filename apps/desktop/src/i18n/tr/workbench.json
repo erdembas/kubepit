@@ -146,6 +146,7 @@
   "Default": "Varsayılan",
   "Definition": "Tanım",
   "Definitions": "Tanımlar",
+  "Degraded": "Sorunlu",
   "Delete": "Sil",
   "Delete {count} {kind}? This cannot be undone.\n\n{names}": "{count} {kind} silinsin mi? Bu işlem geri alınamaz.\n\n{names}",
   "Delete {count} object": "{count} nesneyi sil",

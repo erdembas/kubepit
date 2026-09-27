@@ -23,10 +23,11 @@ export function hasRollout(obj: Pick<KubeObject, 'apiVersion' | 'kind'>): boolea
  * - `complete`    every desired pod runs the current template and is available
  * - `progressing` the controller is replacing pods
  * - `paused`      a paused Deployment (changes wait for resume)
+ * - `degraded`    the rollout finished but some pods are not available
  * - `failed`      progress deadline exceeded / replica failure
  * - `manual`      OnDelete strategy: pods update only when deleted
  */
-export type RolloutState = 'complete' | 'progressing' | 'paused' | 'failed' | 'manual';
+export type RolloutState = 'complete' | 'progressing' | 'paused' | 'degraded' | 'failed' | 'manual';
 
 export interface RolloutStrategy {
   type: string;
@@ -43,6 +44,11 @@ export interface RolloutProgress {
   desired: number;
   /** Pods running the current template. */
   updated: number;
+  /**
+   * Updated pods that are available. Estimated: controllers report
+   * availability across all revisions, so old pods are assumed available first.
+   */
+  upToDate: number;
   ready: number;
   available: number;
   /** Pods of older revisions still around. */
@@ -70,6 +76,11 @@ function strategyOf(obj: KubeObject): RolloutStrategy {
 }
 
 export function rolloutProgress(obj: KubeObject): RolloutProgress {
+  const p = computeProgress(obj);
+  return { ...p, upToDate: Math.min(p.updated, Math.max(0, p.available - p.old)) };
+}
+
+function computeProgress(obj: KubeObject): Omit<RolloutProgress, 'upToDate'> {
   const s = status(obj);
   const strategy = strategyOf(obj);
   const generation = asNumber(obj.metadata.generation);
@@ -159,18 +170,19 @@ export function rolloutProgress(obj: KubeObject): RolloutProgress {
         ),
       };
     }
+    const current = asString(s.currentRevision);
+    const target = asString(s.updateRevision);
     if (ready < desired)
       return {
         ...progress,
-        state: 'progressing',
+        // Every pod already runs the update revision: the rollout is over, pods are unhealthy.
+        state: target && current === target && updated >= desired ? 'degraded' : 'progressing',
         message: i18n.plural(
           'Waiting for {count} pod to be ready',
           'Waiting for {count} pods to be ready',
           desired - ready,
         ),
       };
-    const current = asString(s.currentRevision);
-    const target = asString(s.updateRevision);
     if (target && current && target !== current)
       return {
         ...progress,
@@ -221,10 +233,12 @@ export function rolloutProgress(obj: KubeObject): RolloutProgress {
         total - updated,
       ),
     };
+  const progressing = conditions(obj).find((c) => c.type === 'Progressing');
   if (available < updated)
     return {
       ...progress,
-      state: 'progressing',
+      // The controller reported the new ReplicaSet as rolled out; pods failed since.
+      state: progressing?.reason === 'NewReplicaSetAvailable' ? 'degraded' : 'progressing',
       message: i18n.t(
         'Waiting for rollout to finish: {available} of {updated} updated replicas available',
         { available, updated },

@@ -5,6 +5,7 @@ import type { ApplyMode, ClusterDef, ContainerImage, DryRunResult, Gvk, KubeObje
 import { sleep } from './bus';
 import { find, getDb, list, put, type ClusterDb } from './fixtures/db';
 import { apiResources } from './fixtures/discovery';
+import { syncDeployment } from './fixtures/controllers';
 import { emitEvent } from './fixtures/events';
 import { getObject } from './fixtures/ops';
 import {
@@ -297,12 +298,6 @@ function dryRunOne(
         `Operation cannot be fulfilled on ${plural} "${meta.name}": the object has been modified; please apply your changes to the latest version and try again`,
       );
   }
-  const problems = validate(doc, gvk);
-  if (problems.length)
-    return fail(
-      `${doc.kind}${gvk.group ? `.${gvk.group}` : ''} "${meta.name}" is invalid: ${problems.join(', ')}`,
-    );
-
   const body = clone(doc);
   delete body.status;
   for (const key of ['uid', 'resourceVersion', 'generation', 'creationTimestamp', 'managedFields'])
@@ -325,6 +320,12 @@ function dryRunOne(
     resourceVersion: live?.metadata.resourceVersion,
     generation: live?.metadata.generation,
   };
+  // Validation runs on what would be stored (server-side apply merges into live).
+  const problems = validate(result, gvk);
+  if (problems.length)
+    return fail(
+      `${doc.kind}${gvk.group ? `.${gvk.group}` : ''} "${meta.name}" is invalid: ${problems.join(', ')}`,
+    );
   // Live demo objects predate defaulting; only new objects get server defaults.
   if (!live) result = withDefaults(result, gvk);
   if (live && JSON.stringify(stable(live.spec)) !== JSON.stringify(stable(result.spec)))
@@ -363,7 +364,8 @@ register({
   },
 });
 
-// A resumed Deployment rolls out a template edited while it was paused.
+// The Deployment controller observes patched specs (pause / resume), and a
+// resumed Deployment rolls out a template edited while it was paused.
 const patchResource = handlers.resource_patch;
 if (patchResource)
   register({
@@ -372,6 +374,11 @@ if (patchResource)
       const before = find(db, kindKey(args.gvk), args.namespace, args.name);
       const wasPaused = before?.kind === 'Deployment' && before.spec?.paused === true;
       const result = (await patchResource(args)) as KubeObject;
+      if (result.kind === 'Deployment')
+        window.setTimeout(() => {
+          const dep = find(db, kindKey(args.gvk), args.namespace, args.name);
+          if (dep) syncDeployment(db, dep);
+        }, 600);
       if (wasPaused && result.spec?.paused !== true) {
         const dep = find(db, kindKey(args.gvk), args.namespace, args.name);
         const current = list(db, 'replicasets.apps')

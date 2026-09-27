@@ -1,5 +1,5 @@
 import * as i18n from '@/i18n';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Loader2, RefreshCw, ScanSearch, Send, XCircle } from 'lucide-react';
 import { Badge, type BadgeTone } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -60,6 +60,9 @@ export function ReviewPanel({
   const current: DryRunResult | undefined = results[selected] ?? results[0];
   const sides = useMemo(() => (current ? reviewSides(current) : null), [current]);
   const ready = review.status === 'ready';
+  // Take focus from the (now hidden) editor so Esc returns to it.
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => rootRef.current?.focus({ preventScroll: true }), []);
 
   const applyLabel =
     review.mode === 'replace'
@@ -77,7 +80,9 @@ export function ReviewPanel({
 
   return (
     <div
-      className="flex min-h-0 flex-1 flex-col"
+      ref={rootRef}
+      tabIndex={-1}
+      className="flex min-h-0 flex-1 flex-col outline-none"
       onKeyDown={(e) => {
         if (e.key === 'Escape' && !e.defaultPrevented) {
           e.preventDefault();
@@ -88,7 +93,10 @@ export function ReviewPanel({
       <EditorBar>
         <ScanSearch className="text-accent h-3.5 w-3.5 shrink-0" />
         <span className="text-fg shrink-0 text-[12px] font-medium">{i18n.t('Review changes')}</span>
-        <span className="text-fg-dim shrink-0 text-[11px] whitespace-nowrap">
+        <span
+          className="text-fg-dim min-w-0 truncate text-[11px]"
+          title={i18n.t('Server-side dry run: nothing has been changed yet')}
+        >
           {i18n.t('Server-side dry run: nothing has been changed yet')}
         </span>
         {ready && (
@@ -159,7 +167,7 @@ export function ReviewPanel({
           {results.length > 1 && (
             <ul
               aria-label={i18n.t('Documents')}
-              className="overlay-scroll border-border/60 w-64 shrink-0 space-y-px overflow-y-auto border-r p-1.5"
+              className="overlay-scroll border-border/60 w-72 shrink-0 space-y-px overflow-y-auto border-r p-1.5"
             >
               {results.map((r, i) => {
                 const badge = badgeOf(r);
@@ -179,14 +187,19 @@ export function ReviewPanel({
                       <Badge tone={TONE[badge]} className="min-w-[74px] justify-center">
                         {badgeLabel(badge)}
                       </Badge>
-                      <span className="text-fg min-w-0 flex-1 truncate font-mono text-[11.5px]">
-                        {resultLabel(r, i)}
-                      </span>
-                      {r.namespace && (
-                        <span className="text-fg-dim border-border/70 max-w-20 shrink-0 truncate rounded border px-1 font-mono text-[10px] leading-4">
-                          {r.namespace}
+                      <span className="min-w-0 flex-1">
+                        <span
+                          className="text-fg block truncate font-mono text-[11.5px]"
+                          title={resultLabel(r, i)}
+                        >
+                          {resultLabel(r, i)}
                         </span>
-                      )}
+                        {r.namespace && (
+                          <span className="text-fg-dim block truncate font-mono text-[10px]">
+                            {r.namespace}
+                          </span>
+                        )}
+                      </span>
                     </button>
                   </li>
                 );

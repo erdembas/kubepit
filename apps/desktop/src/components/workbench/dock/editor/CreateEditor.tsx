@@ -38,7 +38,8 @@ export const CreateEditor = memo(function CreateEditor({
   const requestConfirm = useAppStore((s) => s.requestConfirm);
   const setDirty = useDockStore((s) => s.setDirty);
   const readOnly = cluster?.read_only ?? false;
-  const production = cluster?.environment === 'production';
+  // Production clusters review every change first (read-only ones cannot apply anyway).
+  const reviewFirst = cluster?.environment === 'production' && !readOnly;
 
   const [yaml, setYaml] = useState(tab.yaml);
   const [baseline, setBaseline] = useState(tab.yaml);
@@ -139,8 +140,8 @@ export const CreateEditor = memo(function CreateEditor({
   );
   // Production clusters always review before creating or applying (Cmd+S included).
   const commit = useCallback(
-    (mode: ApplyMode) => (production ? startReview(mode) : void run(mode)),
-    [production, run, startReview],
+    (mode: ApplyMode) => (reviewFirst ? startReview(mode) : void run(mode)),
+    [reviewFirst, run, startReview],
   );
   const applyReviewed = async () => {
     if (!review) return;
@@ -182,7 +183,7 @@ export const CreateEditor = memo(function CreateEditor({
             className="h-6.5 max-w-52 shrink-0 font-mono"
           />
           <div className="ml-auto flex shrink-0 items-center gap-1.5 pl-2">
-            {(!production || readOnly) && (
+            {!reviewFirst && (
               <Button
                 size="xs"
                 variant="ghost"
@@ -205,7 +206,7 @@ export const CreateEditor = memo(function CreateEditor({
             >
               {busy === 'create'
                 ? i18n.t('Creating…')
-                : production
+                : reviewFirst
                   ? i18n.t('Review & create')
                   : i18n.t('Create')}
             </Button>
@@ -213,12 +214,12 @@ export const CreateEditor = memo(function CreateEditor({
               size="xs"
               variant="primary"
               leftIcon={
-                production ? <ScanSearch className="h-3 w-3" /> : <Send className="h-3 w-3" />
+                reviewFirst ? <ScanSearch className="h-3 w-3" /> : <Send className="h-3 w-3" />
               }
               disabled={readOnly || busy !== null || !yaml.trim()}
               onClick={() => commit('apply')}
               title={
-                production
+                reviewFirst
                   ? i18n.t(
                       'Production cluster: changes are reviewed before applying ({shortcut})',
                       {
@@ -230,7 +231,7 @@ export const CreateEditor = memo(function CreateEditor({
             >
               {busy === 'apply'
                 ? i18n.t('Applying…')
-                : production
+                : reviewFirst
                   ? i18n.t('Review & apply')
                   : i18n.t('Apply')}
             </Button>

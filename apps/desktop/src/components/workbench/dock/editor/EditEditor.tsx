@@ -39,7 +39,8 @@ export const EditEditor = memo(function EditEditor({
   const requestConfirm = useAppStore((s) => s.requestConfirm);
   const setDirty = useDockStore((s) => s.setDirty);
   const readOnly = cluster?.read_only ?? false;
-  const production = cluster?.environment === 'production';
+  // Production clusters review every change first (read-only ones cannot apply anyway).
+  const reviewFirst = cluster?.environment === 'production' && !readOnly;
   const objectLabel = `${tab.gvk.kind}/${tab.name}`;
 
   const [load, setLoad] = useState<LoadState>({ state: 'loading' });
@@ -145,8 +146,8 @@ export const EditEditor = memo(function EditEditor({
   }, [ready, startDryRun, tab.namespace]);
   // Production clusters always review before saving (Cmd+S included).
   const commit = useCallback(
-    () => (production ? startReview() : void save()),
-    [production, save, startReview],
+    () => (reviewFirst ? startReview() : void save()),
+    [reviewFirst, save, startReview],
   );
   const applyReviewed = async () => {
     await save();
@@ -202,7 +203,7 @@ export const EditEditor = memo(function EditEditor({
             >
               {i18n.t('Reload')}
             </Button>
-            {(!production || readOnly) && (
+            {!reviewFirst && (
               <Button
                 size="xs"
                 variant="secondary"
@@ -223,7 +224,7 @@ export const EditEditor = memo(function EditEditor({
                 leftIcon={
                   saving ? (
                     <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : production ? (
+                  ) : reviewFirst ? (
                     <ScanSearch className="h-3 w-3" />
                   ) : (
                     <Save className="h-3 w-3" />
@@ -232,7 +233,7 @@ export const EditEditor = memo(function EditEditor({
                 onClick={commit}
                 disabled={!dirty || saving}
                 title={
-                  production
+                  reviewFirst
                     ? i18n.t(
                         'Production cluster: changes are reviewed before saving ({shortcut})',
                         { shortcut: modChord('S') },
@@ -240,7 +241,11 @@ export const EditEditor = memo(function EditEditor({
                     : i18n.t('Save ({shortcut})', { shortcut: modChord('S') })
                 }
               >
-                {saving ? i18n.t('Saving…') : production ? i18n.t('Review & save') : i18n.t('Save')}
+                {saving
+                  ? i18n.t('Saving…')
+                  : reviewFirst
+                    ? i18n.t('Review & save')
+                    : i18n.t('Save')}
               </Button>
             )}
           </div>
