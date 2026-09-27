@@ -472,6 +472,150 @@ export interface HelmReleaseDetail {
   notes: string;
 }
 
+// -- Helm charts: repositories, catalog, install / upgrade -------------------
+// Repositories and the catalog are the user's helm configuration (local
+// commands); `helm_hub_search` queries artifacthub.io.
+
+export interface HelmRepo {
+  name: string;
+  url: string;
+}
+
+export interface HelmRepoAddOptions {
+  username: string | null;
+  /** Fed to `helm repo add --password-stdin`; never on the command line. */
+  password: string | null;
+  insecure_skip_tls_verify: boolean;
+  pass_credentials: boolean;
+  /** Replace an existing repository with the same name. */
+  force_update: boolean;
+}
+
+export interface HelmRepoUpdateResult {
+  name: string;
+  ok: boolean;
+  error: string | null;
+}
+
+export interface HelmSearchOptions {
+  /** Every version instead of only the newest per chart. */
+  versions: boolean;
+  /** Include pre-release versions. */
+  devel: boolean;
+}
+
+export interface HelmChartSummary {
+  /** `repo/chart`, the reference `helm install` takes. */
+  name: string;
+  repo: string;
+  chart: string;
+  version: string;
+  app_version: string | null;
+  description: string;
+  deprecated: boolean;
+}
+
+export interface HelmChartVersion {
+  version: string;
+  app_version: string | null;
+}
+
+export interface HelmHubChart {
+  /** Artifact Hub package page. */
+  url: string;
+  version: string;
+  app_version: string | null;
+  description: string;
+  repository_name: string;
+  repository_url: string;
+}
+
+export interface HelmChartMaintainer {
+  name: string;
+  email: string | null;
+  url: string | null;
+}
+
+export interface HelmChartDependency {
+  name: string;
+  version: string | null;
+  repository: string | null;
+  condition: string | null;
+}
+
+/** `Chart.yaml` as `helm show chart` prints it. */
+export interface HelmChartMetadata {
+  name: string;
+  version: string;
+  app_version: string | null;
+  description: string | null;
+  home: string | null;
+  icon: string | null;
+  sources: string[];
+  keywords: string[];
+  maintainers: HelmChartMaintainer[];
+  dependencies: HelmChartDependency[];
+  kube_version: string | null;
+  /** `application` or `library`. */
+  chart_type: string | null;
+  deprecated: boolean;
+}
+
+export interface HelmChartDetail {
+  metadata: HelmChartMetadata;
+  readme: string;
+  values_yaml: string;
+}
+
+export interface HelmInstallRequest {
+  release_name: string;
+  namespace: string;
+  /** `repo/chart` or `oci://…`. */
+  chart_ref: string;
+  /** null installs the newest stable version. */
+  version: string | null;
+  /** User values; '' installs the chart defaults. */
+  values_yaml: string;
+  create_namespace: boolean;
+  wait: boolean;
+  atomic: boolean;
+  timeout_secs: number | null;
+  description: string | null;
+  /** Render against the cluster without changing it (allowed on read-only clusters). */
+  dry_run: boolean;
+}
+
+export interface HelmUpgradeRequest {
+  chart_ref: string;
+  version: string | null;
+  values_yaml: string;
+  reuse_values: boolean;
+  reset_values: boolean;
+  wait: boolean;
+  atomic: boolean;
+  timeout_secs: number | null;
+  dry_run: boolean;
+}
+
+export interface HelmInstallResult {
+  /** The release helm reports (the would-be release for dry runs). */
+  release: HelmRelease | null;
+  manifest: string;
+  notes: string;
+  /** User-supplied values of the (previewed) revision. */
+  values_yaml: string;
+  computed_values_yaml: string;
+}
+
+/** One stored revision of a release. */
+export interface HelmRevisionDetail {
+  release: HelmRelease;
+  values_yaml: string;
+  computed_values_yaml: string;
+  manifest: string;
+  notes: string;
+}
+
 // ---------------------------------------------------------------------------
 // Terminal (RunHQ PTY pipeline, extended for Kubernetes sessions)
 // ---------------------------------------------------------------------------

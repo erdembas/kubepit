@@ -305,7 +305,9 @@ export function ToolsCategory({ description }: { description: string }) {
         draft.helm_path,
         (v) => update('helm_path', v),
         '/opt/homebrew/bin/helm',
-        i18n.t('Used for rollback, uninstall and upgrade. Browsing releases works without it.'),
+        i18n.t(
+          'Used for charts, installs, upgrades, rollback and uninstall. Browsing releases works without it.',
+        ),
       )}
     </SettingsPageShell>
   );

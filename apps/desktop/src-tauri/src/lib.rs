@@ -113,6 +113,18 @@ pub fn run() {
             ipc::pod_fs_read,
             ipc::pod_fs_download,
             ipc::pod_fs_upload,
+            // Helm charts
+            ipc::helm_repo_list,
+            ipc::helm_repo_add,
+            ipc::helm_repo_remove,
+            ipc::helm_repo_update,
+            ipc::helm_chart_search,
+            ipc::helm_chart_versions,
+            ipc::helm_hub_search,
+            ipc::helm_chart_show,
+            ipc::helm_install,
+            ipc::helm_upgrade,
+            ipc::helm_release_revision,
             // Terminal
             terminal::commands::terminal_create,
             terminal::commands::terminal_write,

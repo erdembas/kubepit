@@ -23,6 +23,7 @@
 //! | [`overview`]    | cluster dashboard aggregation                           |
 //! | [`portforward`] | local TCP → pod / service forwarding                    |
 //! | [`helm`]        | releases read from secrets, mutations via `helm`        |
+//! | [`helm_charts`] | repositories, chart catalog, install / upgrade          |
 //! | [`terminal`]    | PTY launch plans (local, exec, attach, node shell)      |
 //! | [`access`]      | RBAC self-reviews (can-i, rules, whoami)                |
 //! | [`rollout`]     | rollout history and undo (ReplicaSets, ControllerRevs)  |
@@ -46,6 +47,7 @@ pub mod error;
 pub mod events;
 pub mod fleet_search;
 pub mod helm;
+pub mod helm_charts;
 pub mod kubeconfig;
 pub mod logs;
 pub mod metrics;

@@ -21,6 +21,7 @@ export const VIEW_KEYS = {
   portForwards: '@port-forwards',
   helmReleases: '@helm',
   myPermissions: '@access',
+  helmCharts: '@helm-charts',
 } as const;
 
 export interface NavItem {
@@ -88,6 +89,7 @@ export function viewLabel(key: string, apiResources?: readonly ApiResourceInfo[]
   if (key === VIEW_KEYS.portForwards) return i18n.t('Port Forwarding');
   if (key === VIEW_KEYS.helmReleases) return i18n.t('Helm Releases');
   if (key === VIEW_KEYS.myPermissions) return i18n.t('My Permissions');
+  if (key === VIEW_KEYS.helmCharts) return i18n.t('Helm Charts');
   const builtin = Object.values(BUILTIN).find((k) => k.key === key);
   if (builtin)
     return builtin.key === BUILTIN.CustomResourceDefinition.key
@@ -174,7 +176,10 @@ export function buildNav(apiResources: readonly ApiResourceInfo[] | null): NavGr
       id: 'helm',
       label: sectionLabel('helm'),
       icon: SECTION_ICONS.helm,
-      items: [viewItem(VIEW_KEYS.helmReleases, i18n.t('Releases'), 'helm releases charts')],
+      items: [
+        viewItem(VIEW_KEYS.helmCharts, i18n.t('Charts'), 'helm charts repositories install hub'),
+        viewItem(VIEW_KEYS.helmReleases, i18n.t('Releases'), 'helm releases charts'),
+      ],
       subgroups: [],
     },
   ];

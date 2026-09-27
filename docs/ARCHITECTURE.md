@@ -75,3 +75,12 @@ channel) is reused verbatim. `TerminalSpec` selects what runs in the PTY:
 
 Releases are read natively from `sh.helm.release.v1.*` secrets
 (base64 → gzip → JSON). Rollback, uninstall and upgrade shell out to `helm`.
+
+Charts (`helm_charts.rs`) use the user's own helm configuration: repositories
+(`helm repo list|add|remove|update`), the catalog (`helm search repo`),
+chart details (`helm show chart|readme|values`, cached for five minutes) and
+Artifact Hub (`helm search hub`, only on demand). Installs and upgrades run
+with `--output json` and reuse the release decoding above; dry runs
+(`--dry-run=server`, `--dry-run` before helm 3.13) are allowed on read-only
+clusters. Values go through a private temp file and repository passwords
+through `--password-stdin`.

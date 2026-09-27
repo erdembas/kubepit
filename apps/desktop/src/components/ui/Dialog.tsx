@@ -10,16 +10,27 @@ interface Props {
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg' | 'xl';
+  /** Replaces the default padded, scrolling body (e.g. for full-height editors). */
+  bodyClassName?: string;
 }
 
 const SIZE = {
   sm: 'max-w-md',
   md: 'max-w-xl',
   lg: 'max-w-3xl',
+  xl: 'max-w-6xl',
 } as const;
 
-export function Dialog({ title, subtitle, onClose, children, footer, size = 'md' }: Props) {
+export function Dialog({
+  title,
+  subtitle,
+  onClose,
+  children,
+  footer,
+  size = 'md',
+  bodyClassName,
+}: Props) {
   i18n.useLocale();
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -56,7 +67,7 @@ export function Dialog({ title, subtitle, onClose, children, footer, size = 'md'
           <IconButton label={i18n.t('Close')} icon={<X />} onClick={onClose} size="md" />
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
+        <div className={bodyClassName ?? 'min-h-0 flex-1 overflow-y-auto p-4'}>{children}</div>
 
         {footer && (
           // Softer action bar: `surface-muted` is a good two-stops-down tint
