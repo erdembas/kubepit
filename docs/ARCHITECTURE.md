@@ -58,7 +58,8 @@ Kubepit never rewrites a user's kubeconfig files.
   needs them (pods for logs/exec, nodes for drain, metrics).
 - `managedFields` are stripped from everything sent to the UI.
 - Watches are batched (~150 ms) into `WatchBatch` messages.
-- `read_only` clusters reject every mutating command in the backend.
+- `read_only` clusters reject every mutating command in the backend (dry runs
+  and RBAC self-reviews only read, so they stay available).
 
 ## Terminals
 
@@ -84,3 +85,54 @@ with `--output json` and reuse the release decoding above; dry runs
 (`--dry-run=server`, `--dry-run` before helm 3.13) are allowed on read-only
 clusters. Values go through a private temp file and repository passwords
 through `--password-stdin`.
+
+## Workload operations
+
+- `rollout.rs` builds rollout history from owned ReplicaSets (Deployments)
+  or ControllerRevisions (StatefulSets, DaemonSets) and undoes to a revision
+  with `kubectl rollout undo` semantics.
+- `images.rs` sets container images with a strategic merge patch at the
+  pod-template path of each kind and records `kubernetes.io/change-cause`.
+- `dry_run.rs` sends every document of a manifest with `dryRun=All` and
+  returns live vs. result per document; the editors show it as a review
+  before applying (always on production clusters). Dry runs never mutate,
+  so they are allowed on read-only clusters.
+
+## Logs & debug
+
+- `workload_logs.rs` watches the pods of a label selector and fans out one
+  follow stream per container (at most 64), batching complete lines of all
+  sources every 100 ms into `WorkloadLogBatch` messages.
+- `debug_container.rs` adds an ephemeral container through the pod's
+  `ephemeralcontainers` subresource and waits until it runs; the UI then
+  attaches a terminal to it.
+- `pod_fs.rs` lists, previews, downloads and uploads container files with
+  POSIX `sh` scripts over exec (GNU coreutils and busybox); folders download
+  as `.tar`.
+
+## Fleet
+
+- `metrics_history.rs` samples metrics-server every 15 s while a cluster is
+  connected and keeps 60 minutes of f32 ring buffers for the cluster, each
+  node and up to 5 000 pods; it stops with the connection.
+- `fleet_search.rs` searches every connected cluster concurrently with
+  metadata-only lists (substring, glob or `/regex/` names, server-side label
+  selectors) and streams results per cluster.
+- Cross-cluster compare and drift are UI-side: `resource_get` on each
+  cluster, `lib/kube/normalize.ts` (mode `compare`) and `lib/diff.ts`.
+
+## Access (RBAC)
+
+`access.rs` wraps SelfSubjectAccessReview, SelfSubjectRulesReview and
+SelfSubjectReview. The UI evaluates the namespace's rules locally
+(`lib/kube/access.ts`, cached in `useAccessStore`) and falls back to
+batched access reviews; actions declare what they need in
+`components/workbench/actions/access.ts`. Unknown answers never block the
+UI — the API server still enforces.
+
+## Diffs
+
+Every diff (apply review, rollout revisions, Helm revisions, compare and
+drift) renders through `components/workbench/common/DiffView.tsx` on top of
+Monaco's diff editor, with `lib/diff.ts` (Myers line diff) for stats and the
+fallback view.

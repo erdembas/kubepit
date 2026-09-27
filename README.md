@@ -30,6 +30,16 @@ and a React UI.
   a cluster-scoped local terminal (`KUBECONFIG` pre-set), create/edit resources in YAML.
 - **Port forwarding** for pods and services, managed from one place.
 - **Helm releases** read straight from the cluster; rollback, uninstall and values upgrades.
+- **Workload operations.** Live rollout status, revision history with diffs and rollback,
+  pause/resume, set image, and a server-side dry-run review before every apply.
+- **Merged logs and debugging.** Logs of every pod of a workload in one stream, ephemeral
+  debug containers (`kubectl debug`) and a container file browser with download/upload.
+- **Helm charts.** Repositories, a chart catalog with Artifact Hub search, READMEs and
+  values, dry-run previews, installs, upgrades and revision diffs.
+- **Fleet tools.** An hour of CPU/memory history without Prometheus, search across every
+  connected cluster (⌘⇧F), and cross-cluster compare and drift checks.
+- **RBAC-aware.** Actions and kinds you may not use are locked with the reason, and
+  _My Permissions_ shows who you are and what you can do, like `kubectl auth can-i`.
 - **Safety.** Read-only clusters, typed confirmation for destructive actions on production.
 - **English and Turkish** UI.
 
