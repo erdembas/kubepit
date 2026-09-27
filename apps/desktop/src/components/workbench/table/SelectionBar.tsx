@@ -5,6 +5,7 @@ import { IconButton } from '@/components/ui/IconButton';
 import { cn } from '@/lib/cn';
 import { useAppStore } from '@/store/useAppStore';
 import type { BulkAction } from '../actions/bulkActions';
+import { LockedIcon, OPEN_GATE, useActionGates } from '../access/gates';
 import { useActionDialogs } from '../actions/dialogStore';
 import { isTypingTarget } from '../util';
 
@@ -13,6 +14,7 @@ export const SELECTION_BAR_INSET = 64;
 
 /** Floating bar over the bottom of a list with the actions for the checked rows. */
 export function SelectionBar({
+  clusterId,
   count,
   total,
   actions,
@@ -21,6 +23,7 @@ export function SelectionBar({
   onSelectAll,
   onClear,
 }: {
+  clusterId: string;
   count: number;
   total: number;
   actions: BulkAction[];
@@ -30,7 +33,7 @@ export function SelectionBar({
   onClear: () => void;
 }) {
   i18n.useLocale();
-  const lockLabel = i18n.t('Read-only cluster: changes are blocked');
+  const gates = useActionGates(clusterId, actions, readOnly);
 
   // Esc clears the selection before it reaches the details panel (capture phase).
   useEffect(() => {
@@ -73,14 +76,14 @@ export function SelectionBar({
         <span className="bg-border mx-1 h-5 w-px shrink-0" aria-hidden />
         {actions.map((a) => {
           const Icon = a.icon;
-          const blocked = a.mutating && readOnly;
+          const gate = gates.get(a.id) ?? OPEN_GATE;
           return (
             <button
               key={a.id}
               type="button"
-              disabled={blocked}
+              disabled={gate.blocked}
               aria-label={a.label}
-              title={blocked ? `${a.label} — ${lockLabel}` : a.label}
+              title={gate.blocked ? `${a.label} — ${gate.message}` : a.label}
               onClick={a.run}
               className={cn(
                 'flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium transition-colors',
@@ -90,7 +93,11 @@ export function SelectionBar({
                   : 'text-fg-muted enabled:hover:bg-fg/8 enabled:hover:text-fg',
               )}
             >
-              <Icon className="h-3.5 w-3.5 shrink-0" />
+              {gate.reason === 'permission' ? (
+                <LockedIcon icon={Icon} badgeClassName="bg-surface-overlay" />
+              ) : (
+                <Icon className="h-3.5 w-3.5 shrink-0" />
+              )}
               <span className="hidden @3xl:inline">{a.label}</span>
             </button>
           );

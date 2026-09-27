@@ -1,9 +1,12 @@
 import * as i18n from '@/i18n';
+import { useMemo } from 'react';
 import { Loader2, Lock, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { ipc } from '@/lib/ipc';
 import { dock } from '@/store/useDockStore';
 import type { Gvk, KubeObject } from '@/types';
+import { useActionGate } from '../access/gates';
+import { requiredAccess } from '../actions/access';
 import { MonacoView } from '../common/MonacoView';
 import { usePolled } from '../data/polled';
 import { CopyButton } from './primitives';
@@ -23,6 +26,11 @@ export function YamlTab({
 }) {
   i18n.useLocale();
   const ns = obj.metadata.namespace ?? null;
+  const edit = useMemo(
+    () => ({ id: 'edit', mutating: true, access: requiredAccess('edit', obj, gvk) }),
+    [obj, gvk],
+  );
+  const editGate = useActionGate(clusterId, edit, readOnly);
   const yaml = usePolled(
     `${clusterId}|yaml|${obj.metadata.uid}|${obj.metadata.resourceVersion ?? ''}`,
     () => ipc.resourceGetYaml(clusterId, gvk, ns, obj.metadata.name),
@@ -40,9 +48,15 @@ export function YamlTab({
           <Button
             size="xs"
             variant="secondary"
-            leftIcon={<Pencil className="h-3 w-3" />}
-            disabled={readOnly}
-            title={readOnly ? i18n.t('Read-only cluster: changes are blocked') : undefined}
+            leftIcon={
+              editGate.reason === 'permission' ? (
+                <Lock className="h-3 w-3" />
+              ) : (
+                <Pencil className="h-3 w-3" />
+              )
+            }
+            disabled={editGate.blocked}
+            title={editGate.message ?? undefined}
             onClick={() => dock.edit(clusterId, gvk, ns, obj.metadata.name)}
           >
             {i18n.t('Edit')}

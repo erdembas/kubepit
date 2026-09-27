@@ -1,5 +1,5 @@
 import * as i18n from '@/i18n';
-import { AlertTriangle, Inbox, RotateCcw, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, CircleHelp, Inbox, RotateCcw, ShieldAlert } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { ROW_HEIGHT } from './ResourceTable';
@@ -106,10 +106,13 @@ export function TableError({
   error,
   forbidden,
   onRetry,
+  onExplain,
 }: {
   error: string;
   forbidden: boolean;
   onRetry: () => void;
+  /** Opens the permission explainer ("Why?") for a forbidden list. */
+  onExplain?: () => void;
 }) {
   i18n.useLocale();
   return (
@@ -125,14 +128,26 @@ export function TableError({
         forbidden ? `${error}\n${i18n.t('Try selecting a namespace you have access to.')}` : error
       }
       action={
-        <Button
-          size="sm"
-          variant="secondary"
-          leftIcon={<RotateCcw className="h-3.5 w-3.5" />}
-          onClick={onRetry}
-        >
-          {i18n.t('Retry')}
-        </Button>
+        <div className="flex items-center gap-2">
+          {forbidden && onExplain && (
+            <Button
+              size="sm"
+              variant="secondary"
+              leftIcon={<CircleHelp className="h-3.5 w-3.5" />}
+              onClick={onExplain}
+            >
+              {i18n.t('Why?')}
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="secondary"
+            leftIcon={<RotateCcw className="h-3.5 w-3.5" />}
+            onClick={onRetry}
+          >
+            {i18n.t('Retry')}
+          </Button>
+        </div>
       }
     />
   );

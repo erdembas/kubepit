@@ -164,7 +164,7 @@ export function DetailsPanel({
             )}
           </p>
         </div>
-        {obj && <DetailsToolbar actions={actions} readOnly={readOnly} />}
+        {obj && <DetailsToolbar clusterId={clusterId} actions={actions} readOnly={readOnly} />}
         <span className="bg-border/80 mx-0.5 h-5 w-px shrink-0" aria-hidden />
         <button
           type="button"

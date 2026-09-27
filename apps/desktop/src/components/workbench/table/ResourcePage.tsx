@@ -1,15 +1,19 @@
 import * as i18n from '@/i18n';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Plus, Search, X } from 'lucide-react';
+import { Lock, Loader2, Plus, Search, X } from 'lucide-react';
 import { FileContextMenu, type FileContextMenuEntry } from '@/components/ui/FileContextMenu';
 import { IconButton } from '@/components/ui/IconButton';
+import { accessCheck } from '@/lib/kube/access';
 import { kindIcon } from '@/lib/kube/icons';
 import { viewLabel } from '@/lib/kube/nav';
 import { templateFor } from '@/lib/kube/templates';
 import { cn } from '@/lib/cn';
+import { useCan } from '@/store/useAccessStore';
 import { dock } from '@/store/useDockStore';
 import { useWorkbenchStore } from '@/store/useWorkbenchStore';
-import type { ApiResourceInfo, Gvk, KubeObject } from '@/types';
+import type { AccessCheck, ApiResourceInfo, Gvk, KubeObject } from '@/types';
+import { deniedMessage, OPEN_GATE, useActionGates } from '../access/gates';
+import { PermissionExplainer } from '../access/PermissionExplainer';
 import { bulkActions } from '../actions/bulkActions';
 import { resourceActions } from '../actions/resourceActions';
 import { useCluster } from '../data/hooks';
@@ -46,6 +50,7 @@ export function ResourcePage({
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
   const lastIndex = useRef<number | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; obj: KubeObject } | null>(null);
+  const [explain, setExplain] = useState<AccessCheck[] | null>(null);
   const label = viewLabel(kindKey, apiResources);
   const Icon = kindIcon(kindKey);
   const store = useWorkbenchStore.getState;
@@ -111,28 +116,39 @@ export function ResourcePage({
     [kindKey, store],
   );
 
+  const menuActions = useMemo(
+    () => (menu ? resourceActions({ clusterId, cluster, gvk, obj: menu.obj }) : []),
+    [menu, clusterId, cluster, gvk],
+  );
+  const menuGates = useActionGates(clusterId, menuActions, readOnly);
   const menuItems = useMemo((): FileContextMenuEntry[] => {
     if (!menu) return [];
-    const actions = resourceActions({ clusterId, cluster, gvk, obj: menu.obj });
     const entries: FileContextMenuEntry[] = [
       { id: 'open', label: i18n.t('Show details'), onClick: () => onOpen(menu.obj) },
       { id: 'sep0', separator: true },
     ];
-    actions.forEach((a) => {
+    menuActions.forEach((a) => {
       if (a.id === 'delete') entries.push({ id: 'sep1', separator: true });
       const Icon = a.icon;
+      const gate = menuGates.get(a.id) ?? OPEN_GATE;
       entries.push({
         id: a.id,
         label: a.label,
-        icon: <Icon size={12} />,
+        icon: gate.reason === 'permission' ? <Lock size={12} /> : <Icon size={12} />,
         tone: a.tone,
-        disabled: a.mutating && readOnly,
-        hint: a.mutating && readOnly ? i18n.t('read-only') : undefined,
+        disabled: gate.blocked,
+        hint:
+          gate.reason === 'read-only'
+            ? i18n.t('read-only')
+            : gate.reason === 'permission'
+              ? i18n.t('no access')
+              : undefined,
+        title: gate.message ?? undefined,
         onClick: () => a.run({ x: menu.x, y: menu.y }),
       });
     });
     return entries;
-  }, [menu, clusterId, cluster, gvk, readOnly, onOpen]);
+  }, [menu, menuActions, menuGates, onOpen]);
 
   const onClearChecked = useEvent(() => setChecked(new Set()));
   const onSelectAll = useEvent(() => setChecked(new Set(t.items.map((o) => o.metadata.uid))));
@@ -150,6 +166,16 @@ export function ResourcePage({
     namespaces.length === 1 ? namespaces[0]! : (cluster?.default_namespace ?? 'default');
   const { status, error, forbidden, synced } = t.snapshot;
   const loading = !synced && status !== 'error';
+  const createCheck = useMemo(
+    () => (readOnly ? null : accessCheck('create', gvk, { namespace: scopeNs })),
+    [readOnly, gvk, scopeNs],
+  );
+  const canCreate = useCan(clusterId, createCheck);
+  // "Why?" on a forbidden list: one check per namespace in scope.
+  const listChecks = () =>
+    gvk.namespaced && namespaces.length
+      ? namespaces.map((namespace) => accessCheck('list', gvk, { namespace }))
+      : [accessCheck('list', gvk)];
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1">
@@ -204,10 +230,12 @@ export function ResourcePage({
               label={
                 readOnly
                   ? i18n.t('Read-only cluster: changes are blocked')
-                  : i18n.t('Create {kind}', { kind: gvk.kind })
+                  : canCreate === 'denied' && createCheck
+                    ? `${i18n.t('Create {kind}', { kind: gvk.kind })} — ${deniedMessage(createCheck)}`
+                    : i18n.t('Create {kind}', { kind: gvk.kind })
               }
               icon={<Plus />}
-              disabled={readOnly}
+              disabled={readOnly || canCreate === 'denied'}
               onClick={() =>
                 dock.create(clusterId, gvk.namespaced ? scopeNs : null, templateFor(gvk, scopeNs))
               }
@@ -219,6 +247,7 @@ export function ResourcePage({
             error={error}
             forbidden={forbidden}
             onRetry={() => restartWatch(clusterId, gvk, t.watchNs)}
+            onExplain={() => setExplain(listChecks())}
           />
         ) : loading && !t.snapshot.items.length ? (
           <TableSkeleton />
@@ -249,6 +278,7 @@ export function ResourcePage({
         )}
         {targets.length > 0 && (
           <SelectionBar
+            clusterId={clusterId}
             count={targets.length}
             total={t.items.length}
             actions={bulk}
@@ -301,6 +331,14 @@ export function ResourcePage({
       )}
       {menu && (
         <FileContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />
+      )}
+      {explain && (
+        <PermissionExplainer
+          clusterId={clusterId}
+          checks={explain}
+          namespaced={gvk.namespaced}
+          onClose={() => setExplain(null)}
+        />
       )}
     </div>
   );

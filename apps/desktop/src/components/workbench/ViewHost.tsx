@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { gvkForKey } from '@/lib/kube/catalog';
 import { VIEW, useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { ApiResourceInfo } from '@/types';
+import { PermissionsPage } from './access/PermissionsPage';
 import { HelmPage } from './helm/HelmPage';
 import { ClusterOverviewPage } from './overview/ClusterOverviewPage';
 import { WorkloadsOverviewPage } from './overview/WorkloadsOverviewPage';
@@ -49,6 +50,15 @@ export function ViewHost({
     return <PortForwardsPage clusterId={clusterId} isActive={isActive} />;
   if (activeKind === VIEW.helmReleases)
     return <HelmPage clusterId={clusterId} namespaces={namespaces} isActive={isActive} />;
+  if (activeKind === VIEW.myPermissions)
+    return (
+      <PermissionsPage
+        clusterId={clusterId}
+        namespaces={namespaces}
+        isActive={isActive}
+        apiResources={apiResources}
+      />
+    );
   if (!gvk) {
     return apiResources ? (
       <div className="flex flex-1 items-center justify-center p-8">

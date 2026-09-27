@@ -17,6 +17,8 @@ export interface FileContextMenuItem {
    *  still responsible for actually gating destructive ops. */
   tone?: 'default' | 'danger';
   disabled?: boolean;
+  /** Tooltip, e.g. why a disabled item is unavailable. */
+  title?: string;
   onClick: () => void;
 }
 
@@ -101,6 +103,7 @@ export function FileContextMenu({ x, y, items, onClose }: FileContextMenuProps) 
             type="button"
             role="menuitem"
             disabled={entry.disabled}
+            title={entry.title}
             onClick={() => {
               if (entry.disabled) return;
               entry.onClick();

@@ -1,6 +1,6 @@
 import * as i18n from '@/i18n';
 import { memo } from 'react';
-import { Star } from 'lucide-react';
+import { Lock, Star } from 'lucide-react';
 import type { NavItem } from '@/lib/kube/nav';
 import { cn } from '@/lib/cn';
 
@@ -9,6 +9,7 @@ export const NavItemRow = memo(function NavItemRow({
   active,
   pinned,
   indent = false,
+  locked = null,
   onSelect,
   onTogglePin,
 }: {
@@ -16,6 +17,8 @@ export const NavItemRow = memo(function NavItemRow({
   active: boolean;
   pinned: boolean;
   indent?: boolean;
+  /** Why the user cannot list this kind (dims the row); null = accessible or unknown. */
+  locked?: string | null;
   onSelect: (key: string) => void;
   onTogglePin: (key: string) => void;
 }) {
@@ -29,12 +32,17 @@ export const NavItemRow = memo(function NavItemRow({
         aria-current={active ? 'page' : undefined}
         onClick={() => onSelect(item.key)}
         title={
-          item.gvk ? `${item.gvk.kind}${item.gvk.group ? ` · ${item.gvk.group}` : ''}` : undefined
+          locked ??
+          (item.gvk ? `${item.gvk.kind}${item.gvk.group ? ` · ${item.gvk.group}` : ''}` : undefined)
         }
         className={cn(
           'relative flex w-full items-center gap-2 rounded-md py-[5px] pr-7 text-left text-[12.5px] transition-colors',
           indent ? 'pl-7' : 'pl-2.5',
-          active ? 'bg-fg/7 text-fg font-medium' : 'text-fg-muted hover:bg-fg/4 hover:text-fg',
+          active
+            ? 'bg-fg/7 text-fg font-medium'
+            : locked
+              ? 'text-fg-dim/70 hover:bg-fg/4 hover:text-fg-muted'
+              : 'text-fg-muted hover:bg-fg/4 hover:text-fg',
         )}
       >
         {active && (
@@ -46,10 +54,15 @@ export const NavItemRow = memo(function NavItemRow({
         <Icon
           className={cn(
             'h-3.5 w-3.5 shrink-0',
-            active ? 'text-accent' : 'text-fg-dim group-hover:text-fg-muted',
+            active
+              ? 'text-accent'
+              : locked
+                ? 'text-fg-dim/60'
+                : 'text-fg-dim group-hover:text-fg-muted',
           )}
         />
         <span className="min-w-0 flex-1 truncate">{item.label}</span>
+        {locked && <Lock className="text-fg-dim/70 h-3 w-3 shrink-0" aria-label={locked} />}
       </button>
       {item.key !== '' && (
         <button

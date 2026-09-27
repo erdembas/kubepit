@@ -1,13 +1,16 @@
 import * as i18n from '@/i18n';
 import { useLocaleMemo as useMemo } from '@/i18n';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { ChevronDown, PanelLeftClose, PanelLeftOpen, Search, X } from 'lucide-react';
+import { ChevronDown, EyeOff, PanelLeftClose, PanelLeftOpen, Search, X } from 'lucide-react';
 import { ResizeHandle } from '@/components/ui/ResizeHandle';
 import { SECTION_ICONS } from '@/lib/kube/icons';
 import { buildNav, flattenNav, type NavGroup, type NavItem } from '@/lib/kube/nav';
 import { cn } from '@/lib/cn';
+import { useAccessStore } from '@/store/useAccessStore';
 import { NAV_WIDTH, useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { ApiResourceInfo } from '@/types';
+import { useKindAccess } from '../access/hooks';
+import { useSelectedNamespaces } from '../data/hooks';
 import { useDragWidth } from '../useDragWidth';
 import { NavItemRow } from './NavItemRow';
 
@@ -76,11 +79,32 @@ export function ResourceNavigator({
     edge: 'right',
   });
 
-  const groups = useMemo(() => buildNav(apiResources), [apiResources]);
-  const all = useMemo(() => flattenNav(groups), [groups]);
+  const allGroups = useMemo(() => buildNav(apiResources), [apiResources]);
+  const all = useMemo(() => flattenNav(allGroups), [allGroups]);
+  // RBAC: kinds the user cannot list in the current scope are dimmed (or hidden).
+  const namespaces = useSelectedNamespaces(clusterId);
+  const access = useKindAccess(clusterId, all, namespaces);
+  const hideLocked = useAccessStore((s) => s.hideInaccessible);
+  const lockedCount = all.filter((i) => access.get(i.key)?.state === 'denied').length;
+  const lockOf = (item: NavItem) => access.get(item.key)?.message ?? null;
+  const groups = useMemo(() => {
+    if (!hideLocked) return allGroups;
+    const keep = (i: NavItem) => i.key === activeKind || access.get(i.key)?.state !== 'denied';
+    return allGroups.map((g) => ({
+      ...g,
+      items: g.items.filter(keep),
+      subgroups: g.subgroups
+        .map((sg) => ({ ...sg, items: sg.items.filter(keep) }))
+        .filter((sg) => sg.items.length),
+    }));
+  }, [allGroups, access, hideLocked, activeKind]);
   const pinned = useMemo(
-    () => pinnedKinds.map((k) => all.find((i) => i.key === k)).filter((i): i is NavItem => !!i),
-    [pinnedKinds, all],
+    () =>
+      pinnedKinds
+        .map((k) => all.find((i) => i.key === k))
+        .filter((i): i is NavItem => !!i)
+        .filter((i) => !hideLocked || access.get(i.key)?.state !== 'denied'),
+    [pinnedKinds, all, hideLocked, access],
   );
   const q = query.trim().toLowerCase();
   const navRef = useRef<HTMLElement>(null);
@@ -163,6 +187,7 @@ export function ResourceNavigator({
         active={item.key === activeKind}
         pinned={pinnedKinds.includes(item.key)}
         indent={indent}
+        locked={lockOf(item)}
         onSelect={select}
         onTogglePin={togglePin}
       />
@@ -199,6 +224,23 @@ export function ResourceNavigator({
             </button>
           )}
         </div>
+        {(lockedCount > 0 || hideLocked) && (
+          <button
+            type="button"
+            aria-pressed={hideLocked}
+            onClick={() => useAccessStore.getState().setHideInaccessible(!hideLocked)}
+            aria-label={i18n.t('Hide inaccessible kinds')}
+            title={
+              hideLocked ? i18n.t('Show inaccessible kinds') : i18n.t('Hide inaccessible kinds')
+            }
+            className={cn(
+              'shrink-0 rounded-md p-1.5 transition-colors',
+              hideLocked ? 'bg-accent/10 text-accent' : 'text-fg-muted hover:bg-fg/5 hover:text-fg',
+            )}
+          >
+            <EyeOff className="h-3.5 w-3.5" />
+          </button>
+        )}
         <button
           type="button"
           onClick={() => store().setNavCollapsed(true)}
@@ -267,11 +309,13 @@ export function ResourceNavigator({
                           </div>
                         );
                       })}
-                      {g.id === 'custom' && apiResources && !g.subgroups.length && (
-                        <p className="text-fg-dim px-2.5 py-1.5 text-[11px]">
-                          {i18n.t('No custom resources installed')}
-                        </p>
-                      )}
+                      {g.id === 'custom' &&
+                        apiResources &&
+                        !allGroups.some((x) => x.id === 'custom' && x.subgroups.length) && (
+                          <p className="text-fg-dim px-2.5 py-1.5 text-[11px]">
+                            {i18n.t('No custom resources installed')}
+                          </p>
+                        )}
                     </>
                   )}
                 </section>
@@ -281,7 +325,17 @@ export function ResourceNavigator({
         )}
       </nav>
       <div className="border-border/60 text-fg-dim flex items-center justify-between border-t px-3 py-2 text-[11px]">
-        <span>{i18n.t('{count} kinds', { count: all.filter((i) => i.gvk).length })}</span>
+        <span>
+          {i18n.t('{count} kinds', { count: all.filter((i) => i.gvk).length })}
+          {lockedCount > 0 && (
+            <>
+              {' · '}
+              {hideLocked
+                ? i18n.t('{count} hidden', { count: lockedCount })
+                : i18n.t('{count} locked', { count: lockedCount })}
+            </>
+          )}
+        </span>
         {!apiResources && <span className="animate-pulse">{i18n.t('Discovering…')}</span>}
       </div>
       <ResizeHandle
