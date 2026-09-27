@@ -72,17 +72,56 @@ fn format_path(segments: &[Segment]) -> String {
 }
 
 /// Short rendering of a value for summaries.
+/// Multi-line strings show their first line.
 pub fn render(value: &Value) -> String {
-    let text = match value {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    };
-    if text.chars().count() <= MAX_VALUE_CHARS {
-        return text;
+    match value {
+        Value::String(s) if s.contains('\n') => {
+            let first = s.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
+            cut(&format!("{} …", first.trim_end()))
+        }
+        Value::String(s) => cut(s),
+        other => cut(&other.to_string()),
     }
-    let mut cut: String = text.chars().take(MAX_VALUE_CHARS - 1).collect();
-    cut.push('…');
-    cut
+}
+
+fn cut(text: &str) -> String {
+    if text.chars().count() <= MAX_VALUE_CHARS {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(MAX_VALUE_CHARS - 1).collect();
+    out.push('…');
+    out
+}
+
+/// Two multi-line strings (config files in ConfigMaps): only the lines
+/// between the common head and tail, joined with ` ⏎ `.
+fn changed_lines(a: &str, b: &str) -> Option<(String, String)> {
+    if !a.contains('\n') && !b.contains('\n') {
+        return None;
+    }
+    let la: Vec<&str> = a.lines().collect();
+    let lb: Vec<&str> = b.lines().collect();
+    let head = la.iter().zip(&lb).take_while(|(x, y)| x == y).count();
+    let room = la.len().min(lb.len()) - head;
+    let tail = la
+        .iter()
+        .rev()
+        .zip(lb.iter().rev())
+        .take(room)
+        .take_while(|(x, y)| x == y)
+        .count();
+    let middle = |lines: &[&str]| {
+        cut(&lines
+            .iter()
+            .map(|l| l.trim())
+            .collect::<Vec<_>>()
+            .join(" ⏎ "))
+    };
+    let (ma, mb) = (
+        middle(&la[head..la.len() - tail]),
+        middle(&lb[head..lb.len() - tail]),
+    );
+    (!(ma.is_empty() && mb.is_empty())).then_some((ma, mb))
 }
 
 fn scalar_key(value: &Value) -> Option<String> {
@@ -121,10 +160,20 @@ impl Walker {
     fn leaf(&mut self, before: Option<&Value>, after: Option<&Value>) {
         let redacted = matches!(self.segments.first(), Some(Segment::Key(root))
             if self.redacted_roots.contains(&root.as_str()));
+        let (before, after) = match (before, after) {
+            (Some(Value::String(a)), Some(Value::String(b))) => match changed_lines(a, b) {
+                Some((a, b)) => (Some(a), Some(b)),
+                None => (
+                    Some(render(&Value::String(a.clone()))),
+                    Some(render(&Value::String(b.clone()))),
+                ),
+            },
+            (a, b) => (a.map(render), b.map(render)),
+        };
         self.out.push(ChangedPath {
             path: format_path(&self.segments),
-            before: before.map(render),
-            after: after.map(render),
+            before,
+            after,
             redacted,
         });
     }
@@ -311,6 +360,26 @@ mod tests {
         assert!(!paths[2].redacted, "labels are not secret");
         // The same shape outside a Secret is not redacted.
         assert!(changed_paths(&a, &b, false).iter().all(|p| !p.redacted));
+    }
+
+    #[test]
+    fn multi_line_values_show_only_the_changed_lines() {
+        let corefile = |ttl: u32| json!({"data": {"Corefile": format!(".:53 {{\n    errors\n    cache {ttl}\n    loop\n}}\n")}});
+        assert_eq!(
+            summary(&changed_paths(&corefile(10), &corefile(30), false)),
+            vec!["data.Corefile: cache 10 → cache 30"]
+        );
+        let added = changed_paths(
+            &json!({"data": {}}),
+            &json!({"data": {"app.yaml": "server:\n  port: 8080\n"}}),
+            false,
+        );
+        assert_eq!(added[0].path, r#"data["app.yaml"]"#);
+        assert_eq!(added[0].after.as_deref(), Some("server: …"));
+        // A line appended at the end: nothing on the left, the new line on the right.
+        let appended = changed_paths(&json!({"v": "a\nb\n"}), &json!({"v": "a\nb\nc\n"}), false);
+        assert_eq!(appended[0].before.as_deref(), Some(""));
+        assert_eq!(appended[0].after.as_deref(), Some("c"));
     }
 
     #[test]
