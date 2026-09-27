@@ -5,6 +5,7 @@ import { formatPercent } from '@/lib/format';
 import {
   areaPath,
   clip,
+  fitTicks,
   localOffset,
   monotonePath,
   nearest,
@@ -175,7 +176,10 @@ export function TimeSeriesChart({
   );
 
   const tickStep = timeStep(span);
-  const xTicks = timeTicks(from, to, tickStep, tickStep >= 3_600_000 ? localOffset(from) : 0);
+  const xTicks = fitTicks(
+    timeTicks(from, to, tickStep, tickStep >= 3_600_000 ? localOffset(from) : 0),
+    plotW,
+  );
   const hovered = hover !== null ? visible[hover] : undefined;
   // Lines are labelled at their latest value, next to the fixed references.
   const refLabels = placeRefLabels(

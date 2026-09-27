@@ -149,7 +149,7 @@ export function HealthPage({
         </div>
       </div>
       <div className="overlay-scroll min-h-0 flex-1 overflow-auto">
-        <div className="mx-auto max-w-6xl space-y-4 p-5">
+        <div className="@container mx-auto max-w-6xl space-y-4 p-5">
           {health.issues.length > 0 && (
             <div className="border-status-starting/30 bg-status-starting/8 text-fg-muted rounded-app flex items-start gap-2.5 border px-4 py-2.5 text-[12px]">
               <ShieldAlert className="text-status-starting mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -164,7 +164,7 @@ export function HealthPage({
               </span>
             </div>
           )}
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1.6fr)_minmax(0,1.2fr)]">
+          <div className="grid gap-3 @4xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1.6fr)_minmax(0,1.2fr)]">
             <Card title={i18n.t('Score')} icon={<HeartPulse />}>
               <div className="flex items-center gap-4 p-4">
                 <ScoreRing
@@ -210,7 +210,7 @@ export function HealthPage({
                   <div
                     key={s}
                     className={cn(
-                      'rounded-app transition',
+                      'rounded-app grid min-w-0 transition',
                       severity === s && 'ring-accent/60 ring-2 ring-offset-0',
                     )}
                   >

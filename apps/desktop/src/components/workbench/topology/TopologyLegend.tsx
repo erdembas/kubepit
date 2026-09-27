@@ -28,7 +28,7 @@ function Line({ family }: { family: EdgeFamily }) {
 /** Collapsible legend in the map's corner: relationship families and status tones. */
 export function TopologyLegend({ families }: { families: ReadonlySet<EdgeFamily> }) {
   i18n.useLocale();
-  const [open, setOpen] = usePersistentBoolean('kubepit.topology.legend', true);
+  const [open, setOpen] = usePersistentBoolean('kubepit.topology.legend', false);
   const shown = EDGE_FAMILIES.filter((f) => families.has(f));
   return (
     <div className="border-border bg-surface-raised/95 absolute bottom-3 left-3 max-w-[calc(100%-5rem)] rounded-lg border shadow-sm backdrop-blur">

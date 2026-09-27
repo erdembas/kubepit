@@ -3,6 +3,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 import {
   clip,
+  fitTicks,
   localOffset,
   monotonePath,
   nearest,
@@ -103,7 +104,10 @@ export function MultiSeriesChart({
   );
 
   const tickStep = timeStep(span);
-  const xTicks = timeTicks(from, to, tickStep, tickStep >= 3_600_000 ? localOffset(from) : 0);
+  const xTicks = fitTicks(
+    timeTicks(from, to, tickStep, tickStep >= 3_600_000 ? localOffset(from) : 0),
+    plotW,
+  );
   const baseline = y(Math.max(scale.min, 0));
 
   // Tooltip rows: every series with a sample near the hovered time.

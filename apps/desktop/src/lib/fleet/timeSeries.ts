@@ -140,6 +140,17 @@ export function timeTicks(from: number, to: number, stepMs: number, offsetMs = 0
   return out;
 }
 
+/**
+ * Keeps every n-th tick so labels roughly `minGapPx` wide never overlap on a
+ * plot `plotWidth` pixels wide (narrow charts, long ranges).
+ */
+export function fitTicks(ticks: number[], plotWidth: number, minGapPx = 64): number[] {
+  const max = Math.max(2, Math.floor(plotWidth / minGapPx));
+  if (ticks.length <= max) return ticks;
+  const every = Math.ceil(ticks.length / max);
+  return ticks.filter((_, i) => i % every === 0);
+}
+
 /** Local time minus UTC at `t`, in ms (for `timeTicks`). */
 export function localOffset(t: number): number {
   return -new Date(t).getTimezoneOffset() * 60_000;
