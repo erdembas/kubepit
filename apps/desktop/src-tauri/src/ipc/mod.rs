@@ -23,6 +23,8 @@ mod resources;
 mod workloads;
 // Logs & debug: workload logs, log export, debug containers, container files.
 mod logs_debug;
+// Insights: kubeconfig client certificate expiry.
+mod insights;
 
 pub use access::*;
 pub use app::*;
@@ -30,6 +32,7 @@ pub use clusters::*;
 pub use fleet::*;
 pub use helm::*;
 pub use helm_charts::*;
+pub use insights::*;
 pub use logs::*;
 pub use logs_debug::*;
 pub use metrics::*;
