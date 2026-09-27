@@ -33,7 +33,18 @@ single source of truth for the frontend ⇄ backend boundary.
   `onOutput`).
 - Global events: `cluster://status` (ClusterStatus), `cluster://list`
   (ClusterDef[]), `portforward://changed` (PortForward[]), `terminal://exit`
-  (`{ id, code }`).
+  (`{ id, code }`), `workspace://changed` (`{ source, snapshot }`, the
+  window label that saved `workspace.json`).
+
+## Windows
+
+`window_open` adds app windows (`win-*`) beside `main`; all of them share
+one backend (connections, port forwards, the PTY manager) and one origin.
+A new window starts as a copy of its opener (`lib/windowSeed.ts`); only
+`main` persists the workbench session, while layout prefs are shared and
+synced live (`store/windowStorage.ts`). Streams are per window (their
+channels belong to the webview); terminals are destroyed with the window
+that created them (`src-tauri/src/windows.rs`).
 
 ## Persistence (`~/.kubepit`, override with `KUBEPIT_HOME`)
 
