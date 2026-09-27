@@ -32,6 +32,8 @@ import { copyText } from '../util';
 import { requiredAccess } from './access';
 import { useActionDialogs } from './dialogStore';
 import { confirmDestructive, runMutation } from './guard';
+import { gitopsActions } from './gitopsActions';
+import { withGitOpsWarning } from '../gitops/owner';
 import { MERGED_LOG_KINDS, openPodDebug, openPodFiles, openWorkloadLogs } from './logsDebugActions';
 import { workloadActions } from './workloadActions';
 
@@ -175,24 +177,29 @@ export function resourceActions({
       mutating: true,
       primary: true,
       run: () =>
-        confirmDestructive({
-          cluster,
-          title: i18n.t('Restart {kind}', { kind }),
-          message: i18n.t(
-            'Roll out a restart of {name}? Pods are replaced according to the update strategy.',
-            { name },
-          ),
-          confirmLabel: i18n.t('Restart'),
-          typeName: name,
-          run: () =>
-            void runMutation(
-              () => ipc.resourceRestart(clusterId, gvk, ns ?? 'default', name),
-              i18n.t('Restarting {name}', { name }),
+        withGitOpsWarning(clusterId, obj, (warning) =>
+          confirmDestructive({
+            cluster,
+            title: i18n.t('Restart {kind}', { kind }),
+            message: i18n.t(
+              'Roll out a restart of {name}? Pods are replaced according to the update strategy.',
+              { name },
             ),
-        }),
+            confirmLabel: i18n.t('Restart'),
+            typeName: name,
+            warning,
+            run: () =>
+              void runMutation(
+                () => ipc.resourceRestart(clusterId, gvk, ns ?? 'default', name),
+                i18n.t('Restarting {name}', { name }),
+              ),
+          }),
+        ),
     });
   // Workload operations: set image, pause / resume rollout, roll back.
   workloadActions({ clusterId, cluster, gvk, obj }).forEach(add);
+  // GitOps: Argo CD sync / refresh / terminate / auto-sync, Flux reconcile / suspend.
+  gitopsActions({ clusterId, cluster, gvk, obj }).forEach(add);
   if (kind === 'Service') {
     const ports = servicePortOptions(obj);
     if (ports.length && asString(spec(obj).type) !== 'ExternalName')
@@ -325,28 +332,31 @@ export function resourceActions({
     mutating: true,
     primary: true,
     run: () =>
-      confirmDestructive({
-        cluster,
-        title: i18n.t('Delete {kind}', { kind }),
-        message: ns
-          ? i18n.t('Delete {kind} "{name}" in namespace {namespace}? This cannot be undone.', {
-              kind,
-              name,
-              namespace: ns,
-            })
-          : i18n.t('Delete {kind} "{name}"? This cannot be undone.', { kind, name }),
-        confirmLabel: i18n.t('Delete'),
-        typeName: name,
-        run: async () => {
-          if (
-            await runMutation(
-              () => ipc.resourceDelete(clusterId, gvk, ns, name),
-              i18n.t('Deleted {name}', { name }),
+      withGitOpsWarning(clusterId, obj, (warning) =>
+        confirmDestructive({
+          cluster,
+          warning,
+          title: i18n.t('Delete {kind}', { kind }),
+          message: ns
+            ? i18n.t('Delete {kind} "{name}" in namespace {namespace}? This cannot be undone.', {
+                kind,
+                name,
+                namespace: ns,
+              })
+            : i18n.t('Delete {kind} "{name}"? This cannot be undone.', { kind, name }),
+          confirmLabel: i18n.t('Delete'),
+          typeName: name,
+          run: async () => {
+            if (
+              await runMutation(
+                () => ipc.resourceDelete(clusterId, gvk, ns, name),
+                i18n.t('Deleted {name}', { name }),
+              )
             )
-          )
-            onDeleted?.();
-        },
-      }),
+              onDeleted?.();
+          },
+        }),
+      ),
   });
   // Permission gating (see ./access.ts); ids without an entry stay ungated.
   for (const a of actions) a.access ??= requiredAccess(a.id, obj, gvk);

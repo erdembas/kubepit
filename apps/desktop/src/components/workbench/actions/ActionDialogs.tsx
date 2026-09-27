@@ -18,6 +18,8 @@ import { useAppStore } from '@/store/useAppStore';
 import { useConnectivityStore } from '@/store/useConnectivityStore';
 import type { PortForward } from '@/types';
 import { copyText, errorText } from '../util';
+import { ArgoSyncDialog, FluxReconcileDialog } from '../gitops/GitOpsDialogs';
+import { GitOpsNotice } from '../gitops/ManagedNotice';
 import { DebugDialog } from './DebugDialog';
 import { useActionDialogs, type ActionDialog } from './dialogStore';
 import { runMutation } from './guard';
@@ -35,6 +37,9 @@ export function ActionDialogs({ clusterId }: { clusterId: string }) {
   if (dialog.kind === 'scale') return <ScaleDialog dialog={dialog} onClose={close} />;
   if (dialog.kind === 'set-image') return <SetImageDialog dialog={dialog} onClose={close} />;
   if (dialog.kind === 'debug') return <DebugDialog dialog={dialog} onClose={close} />;
+  if (dialog.kind === 'argo-sync') return <ArgoSyncDialog dialog={dialog} onClose={close} />;
+  if (dialog.kind === 'flux-reconcile')
+    return <FluxReconcileDialog dialog={dialog} onClose={close} />;
   return <PortForwardDialog dialog={dialog} onClose={close} />;
 }
 
@@ -105,6 +110,7 @@ function ScaleDialog({
       }
     >
       <div className="space-y-4">
+        <GitOpsNotice clusterId={clusterId} obj={obj} />
         <p className="text-fg-muted text-[12px]">
           {i18n.t('Currently {current} desired, {ready} ready.', {
             current,

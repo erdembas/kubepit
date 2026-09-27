@@ -35,6 +35,7 @@ import { HistoryTab } from './HistoryTab';
 // Resource relationship map: the object's neighbourhood.
 import { Workflow } from 'lucide-react';
 import { MapTab } from '../topology/MapTab';
+import { GitOpsBadge } from '../gitops/ManagedNotice';
 
 type Tab = 'details' | 'yaml' | 'events' | 'history' | 'map';
 
@@ -65,7 +66,10 @@ export function DetailsPanel({
   clusterId: string;
   gvk: Gvk;
   kindKey: string;
-  /** View tab whose selection this panel shows (defaults to `kindKey`). */
+  /**
+   * View tab whose selection this panel shows (defaults to `kindKey`; the
+   * resource map and the GitOps overview host details for other kinds).
+   */
   viewKey?: string;
   selection: ObjectSelection;
   liveObject: KubeObject | null;
@@ -186,6 +190,7 @@ export function DetailsPanel({
               <> · {formatAge(obj.metadata.creationTimestamp, now)}</>
             )}
           </p>
+          {obj && <GitOpsBadge clusterId={clusterId} obj={obj} isActive={isActive} />}
         </div>
         <BookmarkButton
           clusterId={clusterId}

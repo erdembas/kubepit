@@ -7,6 +7,8 @@ import './access';
 import './workloadOps';
 // Registered after './workloadOps': it runs on `resource_dry_run_yaml` / `resource_apply_yaml`.
 import './manifests';
+// Wraps `resource_patch` too: demo Argo CD / Flux controllers (GitOps actions).
+import './gitops';
 import './fleet';
 import './logsDebug';
 import './helmCharts';

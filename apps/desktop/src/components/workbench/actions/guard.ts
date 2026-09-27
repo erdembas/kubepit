@@ -17,19 +17,20 @@ export function confirmDestructive(opts: {
   /** Text the user types on production clusters (usually the object name). */
   typeName: string;
   run: () => Promise<void> | void;
+  /** GitOps ownership notice; it always asks (without blocking) so the user sees it. */
+  warning?: string | null;
 }) {
   const store = useAppStore.getState();
   const production = opts.cluster?.environment === 'production';
-  const ask = production || (store.settings?.confirm_destructive ?? true);
+  const ask = production || !!opts.warning || (store.settings?.confirm_destructive ?? true);
   if (!ask) {
     void opts.run();
     return;
   }
+  const message = opts.warning ? `${opts.message}\n\n${opts.warning}` : opts.message;
   store.requestConfirm({
     title: opts.title,
-    message: production
-      ? `${opts.message}\n\n${i18n.t('This is a production cluster.')}`
-      : opts.message,
+    message: production ? `${message}\n\n${i18n.t('This is a production cluster.')}` : message,
     confirmLabel: opts.confirmLabel,
     tone: 'danger',
     typeToConfirm: production ? opts.typeName : undefined,

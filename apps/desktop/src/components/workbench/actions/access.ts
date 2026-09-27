@@ -81,6 +81,15 @@ export const ACTION_ACCESS: Record<string, Requirement> = {
   'set-image': onObject('patch'),
   'pause-rollout': onObject('patch'),
   rollback: onObject('patch'),
+  // GitOps: every Argo CD / Flux action is a patch of the object itself.
+  'argo-sync': onObject('patch'),
+  'argo-refresh': onObject('patch'),
+  'argo-hard-refresh': onObject('patch'),
+  'argo-terminate': onObject('patch'),
+  'argo-auto-sync': onObject('patch'),
+  'flux-reconcile': onObject('patch'),
+  'flux-reconcile-options': onObject('patch'),
+  'flux-suspend': onObject('patch'),
   // Logs & debug: file operations run over exec; a debug container is added
   // through the ephemeralcontainers subresource, then attached to.
   files: podSub('create', 'exec'),

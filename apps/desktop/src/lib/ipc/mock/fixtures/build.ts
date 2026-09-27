@@ -7,6 +7,7 @@ import { setBuilder, type ClusterDb } from './db';
 import { buildEvents } from './events';
 import { buildGatewayApi } from './gateway';
 import { buildHealthDemo } from './health';
+import { buildGitOps } from './gitops';
 import { buildHelm } from './helm';
 import { buildClasses, buildLeaderLeases, buildNamespaces, buildWebhooks } from './infra';
 import { buildMonitoring } from './monitoring';
@@ -63,6 +64,7 @@ function buildCluster(db: ClusterDb) {
     });
   buildHealthDemo(db);
   buildHelm(db);
+  buildGitOps(db);
   buildEvents(db);
   buildRolloutHistory(db);
 }

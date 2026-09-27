@@ -24,7 +24,10 @@ export type ActionDialog =
   | { kind: 'menu'; clusterId: string; x: number; y: number; items: FileContextMenuEntry[] }
   | { kind: 'set-image'; clusterId: string; gvk: Gvk; obj: KubeObject }
   // Logs & debug: ephemeral debug container for a pod.
-  | { kind: 'debug'; clusterId: string; pod: KubeObject; target?: string | null };
+  | { kind: 'debug'; clusterId: string; pod: KubeObject; target?: string | null }
+  // GitOps: Argo CD sync options, Flux reconcile options.
+  | { kind: 'argo-sync'; clusterId: string; gvk: Gvk; obj: KubeObject; revision?: string }
+  | { kind: 'flux-reconcile'; clusterId: string; gvk: Gvk; obj: KubeObject };
 
 interface DialogState {
   dialog: ActionDialog | null;

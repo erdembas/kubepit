@@ -3,7 +3,15 @@ import type { Gvk } from '@/types';
 /** Built-in Kubernetes kinds the workbench lists (group, version, plural, scope, navigator section). */
 
 export type NavSectionId =
-  'cluster' | 'workloads' | 'config' | 'network' | 'storage' | 'access' | 'helm' | 'custom';
+  | 'cluster'
+  | 'workloads'
+  | 'config'
+  | 'network'
+  | 'storage'
+  | 'access'
+  | 'helm'
+  | 'gitops'
+  | 'custom';
 
 export interface KindDef extends Gvk {
   key: string;

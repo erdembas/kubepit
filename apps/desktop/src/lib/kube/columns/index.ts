@@ -3,6 +3,7 @@ import { asArray, asString, isObject, spec } from '../accessors';
 import { BUILTIN } from '../catalog';
 import { eventColumns, namespaceColumns, nodeColumns } from './cluster';
 import { customColumns, crdDefinitionColumns } from './custom';
+import { GITOPS_COLUMNS } from './gitops';
 import {
   configMapColumns,
   hpaColumns,
@@ -83,6 +84,8 @@ const REGISTRY: Record<string, KindColumns> = {
   [BUILTIN.ClusterRoleBinding.key]: bindingColumns(false),
   [BUILTIN.RoleBinding.key]: bindingColumns(true),
   [BUILTIN.CustomResourceDefinition.key]: crdDefinitionColumns,
+  // GitOps (Argo CD, Flux) kinds.
+  ...GITOPS_COLUMNS,
 };
 
 export interface PrinterColumn {
