@@ -47,6 +47,9 @@ const COMPARE_LABELS = ['pod-template-hash', 'controller-revision-hash'];
 /** Service spec values the cluster allocates. */
 const COMPARE_SERVICE_SPEC = ['clusterIP', 'clusterIPs', 'healthCheckNodePort'];
 
+/** Pod spec values the scheduler assigns. */
+const COMPARE_POD_SPEC = ['nodeName'];
+
 const TOP_LEVEL_ORDER = ['apiVersion', 'kind', 'metadata', 'spec', 'data', 'stringData', 'type'];
 
 function isObject(value: unknown): value is JsonObject {
@@ -109,6 +112,9 @@ export function normalizeObject(
   }
   if (mode === 'compare' && copy.kind === 'Service' && isObject(copy.spec)) {
     dropKeys(copy.spec, COMPARE_SERVICE_SPEC);
+  }
+  if (mode === 'compare' && copy.kind === 'Pod' && isObject(copy.spec)) {
+    dropKeys(copy.spec, COMPARE_POD_SPEC);
   }
   if (mode === 'compare') return orderTopLevel(sortDeep(copy) as JsonObject);
   return orderTopLevel(copy);
