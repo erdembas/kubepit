@@ -6,12 +6,6 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@kubepit/desktop", "dev"],
       "port": 1430
-    },
-    {
-      "name": "kubepit-integration",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@kubepit/desktop", "exec", "vite", "--port", "1450", "--strictPort"],
-      "port": 1450
     }
   ]
 }
