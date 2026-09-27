@@ -55,6 +55,10 @@ pub struct ClusterDef {
     pub created_at: i64,
     #[serde(default)]
     pub last_connected_at: Option<i64>,
+    /// Connectivity: proxy for this cluster (`http://`, `https://`,
+    /// `socks5://`, `socks5h://`); overrides the kubeconfig's `proxy-url`.
+    #[serde(default)]
+    pub proxy_url: Option<String>,
 }
 
 /// What the "add cluster" flow sends. Exactly one of `kubeconfig_path` /
@@ -82,6 +86,9 @@ pub struct ClusterInput {
     pub read_only: bool,
     #[serde(default)]
     pub notes: String,
+    /// Connectivity: per-cluster proxy override (see [`ClusterDef::proxy_url`]).
+    #[serde(default)]
+    pub proxy_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -607,6 +614,54 @@ pub struct PortForward {
     pub state: PortForwardState,
     pub error: Option<String>,
     pub created_at: i64,
+    /// The saved definition this forward was started from or saved as.
+    #[serde(default)]
+    pub saved_id: Option<String>,
+}
+
+/// A port forward kept in `~/.kubepit/port_forwards.json`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SavedPortForward {
+    pub id: String,
+    pub cluster_id: String,
+    pub namespace: String,
+    pub kind: PortForwardKind,
+    pub name: String,
+    pub remote_port: u16,
+    /// Fixed local port; `None` picks a free port on every start.
+    #[serde(default)]
+    pub local_port: Option<u16>,
+    #[serde(default)]
+    pub label: Option<String>,
+    /// Start automatically whenever the cluster connects.
+    #[serde(default)]
+    pub start_on_connect: bool,
+    #[serde(default)]
+    pub created_at: i64,
+}
+
+/// What `port_forward_save` sends: a saved forward without backend-owned fields.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SavedPortForwardInput {
+    pub cluster_id: String,
+    pub namespace: String,
+    pub kind: PortForwardKind,
+    pub name: String,
+    pub remote_port: u16,
+    #[serde(default)]
+    pub local_port: Option<u16>,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub start_on_connect: bool,
+}
+
+/// Whether a local port can be bound, with a free alternative when it cannot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalPortStatus {
+    pub port: u16,
+    pub available: bool,
+    pub suggestion: Option<u16>,
 }
 
 // ---------------------------------------------------------------------------
@@ -875,6 +930,10 @@ pub struct Settings {
     pub node_shell_image: String,
     /// Default image for ephemeral debug containers.
     pub debug_image: String,
+    /// Connectivity: keep pasted (managed) kubeconfigs in the OS credential
+    /// store instead of `kubeconfigs/<id>.yaml`. Changed only through
+    /// `kubeconfig_storage_set`, which migrates the existing entries.
+    pub keychain_kubeconfigs: bool,
 }
 
 impl Default for Settings {
@@ -889,8 +948,50 @@ impl Default for Settings {
             confirm_destructive: true,
             node_shell_image: DEFAULT_NODE_SHELL_IMAGE.to_string(),
             debug_image: DEFAULT_DEBUG_IMAGE.to_string(),
+            keychain_kubeconfigs: false,
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Connectivity: kubeconfig watching, proxies
+// ---------------------------------------------------------------------------
+
+/// A context that appeared in a watched kubeconfig and is not registered yet.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KubeconfigNewContext {
+    /// Canonical path of the kubeconfig file.
+    pub path: String,
+    pub context: String,
+    pub server: Option<String>,
+}
+
+/// Payload of `kubeconfig://changed`: watched kubeconfig files changed.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct KubeconfigChanged {
+    /// Canonical paths of the files that changed.
+    pub paths: Vec<String>,
+    pub new_contexts: Vec<KubeconfigNewContext>,
+    /// Connected clusters whose kubeconfig (credentials, server, proxy)
+    /// changed on disk: reconnect to use it.
+    pub reconnect: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProxySource {
+    /// `ClusterDef::proxy_url`.
+    Cluster,
+    /// The context's cluster `proxy-url` in the kubeconfig.
+    Kubeconfig,
+}
+
+/// The proxy a cluster's connections go through (`cluster_proxy_info`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClusterProxyInfo {
+    /// Credentials in the URL are masked (`http://user:***@host`).
+    pub url: Option<String>,
+    pub source: Option<ProxySource>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1134,6 +1235,7 @@ mod tests {
             state: PortForwardState::Active,
             error: None,
             created_at: 1,
+            saved_id: None,
         };
         let v = serde_json::to_value(pf).unwrap();
         assert_eq!(v["kind"], "service");

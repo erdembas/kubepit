@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use kube::config::KubeConfigOptions;
 use kube::Client;
 use parking_lot::{Mutex, RwLock};
@@ -199,9 +199,12 @@ impl Kubepit {
         }
 
         let epoch = self.pool.epoch(id);
-        let server_hint = kubeconfig::load(std::path::Path::new(&cluster.kubeconfig_path))
+        // User file, managed file or OS credential store, proxy applied.
+        let prepared = self.cluster_kubeconfig_async(&cluster).await;
+        let server_hint = prepared
+            .as_ref()
             .ok()
-            .and_then(|kc| kubeconfig::server_for_context(&kc, &cluster.context));
+            .and_then(|kc| kubeconfig::server_for_context(kc, &cluster.context));
         let connecting = ClusterStatus {
             id: id.to_string(),
             state: ConnState::Connecting,
@@ -217,7 +220,10 @@ impl Kubepit {
 
         // A fresh connection re-checks optional APIs such as metrics-server.
         self.metrics_gate.forget(id);
-        let outcome = self.establish(&cluster).await;
+        let outcome = match prepared {
+            Ok(single) => self.establish(&cluster, single).await,
+            Err(e) => Err(e),
+        };
         self.pool.finish_attempt(id);
         match outcome {
             Ok(est) => {
@@ -241,6 +247,7 @@ impl Kubepit {
                 }
                 self.sink.cluster_status(&status);
                 self.touch_last_connected(id, now);
+                self.autostart_saved_forwards(id, sampler_client.clone());
                 self.start_metrics_sampler(id, sampler_client);
                 tracing::info!(cluster = %cluster.name, "connected");
                 Ok(status)
@@ -268,11 +275,11 @@ impl Kubepit {
         }
     }
 
-    async fn establish(&self, cluster: &ClusterDef) -> Result<Established> {
-        let path = std::path::Path::new(&cluster.kubeconfig_path);
-        let kc = kubeconfig::load(path)
-            .with_context(|| format!("failed to read kubeconfig {}", path.display()))?;
-        let single = kubeconfig::single_context(&kc, &cluster.context)?;
+    async fn establish(
+        &self,
+        cluster: &ClusterDef,
+        single: kube::config::Kubeconfig,
+    ) -> Result<Established> {
         // Keep the external-tools kubeconfig in sync with what we connect with.
         if let Err(e) = self.write_run_kubeconfig_from(cluster, &single) {
             tracing::warn!(cluster = %cluster.name, "could not write run kubeconfig: {e:#}");
@@ -350,6 +357,12 @@ impl Kubepit {
     pub fn cluster_disconnect(&self, id: &str) {
         self.stop_cluster_work(id);
         let status = self.pool.disconnect(id);
+        // Keychain mode: the run kubeconfig only lives while connected.
+        if let Some(cluster) = self.store.cluster(id) {
+            if self.run_kubeconfig_is_transient(&cluster) {
+                self.remove_run_kubeconfig(id);
+            }
+        }
         self.sink.cluster_status(&status);
     }
 

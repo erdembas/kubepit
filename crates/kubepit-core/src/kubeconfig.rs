@@ -127,7 +127,7 @@ pub fn discover(sync_paths: &[String]) -> Vec<KubeconfigSource> {
 /// `$KUBECONFIG` of this process, or — for Finder/Dock launches, which do
 /// not inherit shell variables — as the user's login shell exports it.
 /// The shell probe runs at most once per process.
-fn kubeconfig_env() -> Option<OsString> {
+pub(crate) fn kubeconfig_env() -> Option<OsString> {
     static FROM_LOGIN_SHELL: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     std::env::var_os("KUBECONFIG")
         .filter(|v| !v.is_empty())

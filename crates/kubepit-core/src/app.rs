@@ -20,6 +20,8 @@ use crate::metrics_history::MetricsHistory;
 use crate::node_shell::NodeShells;
 use crate::paths::Paths;
 use crate::portforward::PortForwards;
+use crate::saved_forwards::SavedForwards;
+use crate::secrets::{DisabledSecretStore, SecretStore};
 use crate::store::Store;
 use crate::tasks::TaskRegistry;
 use crate::tools;
@@ -37,13 +39,30 @@ pub struct Kubepit {
     // Fleet: per-cluster metrics samplers and running fleet-wide searches.
     pub(crate) metrics_history: MetricsHistory,
     pub(crate) fleet_searches: TaskRegistry,
+    // Connectivity: OS credential store, saved port forwards, kubeconfig watcher.
+    pub(crate) secrets: Arc<dyn SecretStore>,
+    pub(crate) saved_forwards: SavedForwards,
+    pub(crate) kubeconfig_watch: parking_lot::Mutex<Option<crate::kubeconfig_watch::WatchHandle>>,
 }
 
 impl Kubepit {
-    /// Open (or initialise) the data directory at `paths`.
+    /// Open (or initialise) the data directory at `paths`. Managed
+    /// kubeconfigs can only be kept on disk: the OS credential store is
+    /// never reached (see [`Self::open_with_secrets`]).
     pub fn open(paths: Paths, sink: Arc<dyn EventSink>) -> Result<Self> {
+        Self::open_with_secrets(paths, sink, Arc::new(DisabledSecretStore))
+    }
+
+    /// [`Self::open`] with the credential store used for keychain mode
+    /// (the desktop passes the OS keyring, tests an in-memory store).
+    pub fn open_with_secrets(
+        paths: Paths,
+        sink: Arc<dyn EventSink>,
+        secrets: Arc<dyn SecretStore>,
+    ) -> Result<Self> {
         let store = Store::open(paths)?;
-        Ok(Self {
+        let saved_forwards = SavedForwards::open(store.paths().port_forwards_file())?;
+        let app = Self {
             store,
             sink,
             pool: ClientPool::default(),
@@ -54,7 +73,13 @@ impl Kubepit {
             metrics_gate: MetricsGate::default(),
             metrics_history: MetricsHistory::default(),
             fleet_searches: TaskRegistry::default(),
-        })
+            secrets,
+            saved_forwards,
+            kubeconfig_watch: parking_lot::Mutex::new(None),
+        };
+        // Left behind by a crash while in keychain mode.
+        app.remove_transient_run_kubeconfigs();
+        Ok(app)
     }
 
     pub fn paths(&self) -> &Paths {
@@ -127,6 +152,8 @@ impl Kubepit {
         if settings.terminal_font_size == 0 {
             settings.terminal_font_size = Settings::default().terminal_font_size;
         }
+        // Only `kubeconfig_storage_set` flips this, because it migrates.
+        settings.keychain_kubeconfigs = self.settings().keychain_kubeconfigs;
         self.store.set_settings(settings)
     }
 
@@ -141,6 +168,8 @@ impl Kubepit {
     /// Stop background work and delete node-shell helper pods. Called when
     /// the app exits; bounded so a dead cluster cannot block shutdown.
     pub async fn shutdown(&self) {
+        self.stop_kubeconfig_watch();
+        self.remove_transient_run_kubeconfigs();
         self.watches.stop_all();
         self.log_streams.stop_all();
         self.metrics_history.stop_all();

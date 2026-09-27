@@ -2,11 +2,12 @@
 //!
 //! A cluster is "context X in kubeconfig file Y". Existing files are
 //! referenced by absolute path and never modified; pasted kubeconfigs are
-//! stored under `kubeconfigs/<id>.yaml` (mode 0600) and flagged `managed`.
+//! stored under `kubeconfigs/<id>.yaml` (mode 0600) — or in the OS credential
+//! store in keychain mode (`credentials.rs`) — and flagged `managed`.
 //! After every change the full list is emitted on `cluster://list`, and the
 //! derived `run/<id>.kubeconfig` is regenerated.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{anyhow, bail, Context, Result};
 use kube::config::Kubeconfig;
@@ -15,6 +16,7 @@ use crate::app::Kubepit;
 use crate::kubeconfig;
 use crate::objects::now_millis;
 use crate::paths::{atomic_write, expand_tilde};
+use crate::proxy;
 use crate::types::{ClusterDef, ClusterInput};
 
 /// Where a new cluster's kubeconfig comes from.
@@ -61,6 +63,7 @@ fn validate_input(index: usize, input: &ClusterInput) -> Result<(Origin, Kubecon
     if input.context.trim().is_empty() {
         bail!("{label}: a context name is required");
     }
+    proxy::normalize(input.proxy_url.as_deref()).with_context(|| label.clone())?;
     match (
         non_blank(&input.kubeconfig_path),
         non_blank(&input.kubeconfig_text),
@@ -105,7 +108,7 @@ impl Kubepit {
             .collect::<Result<_>>()?;
 
         let now = now_millis();
-        let mut written: Vec<PathBuf> = Vec::new();
+        let mut written: Vec<(String, PathBuf)> = Vec::new();
         let mut defs: Vec<ClusterDef> = Vec::new();
         let write_result: Result<()> = (|| {
             for (input, origin) in validated {
@@ -113,9 +116,8 @@ impl Kubepit {
                 let (kubeconfig_path, managed) = match origin {
                     Origin::File(path) => (path, false),
                     Origin::Pasted(text) => {
-                        let path = self.paths().managed_kubeconfig(&id)?;
-                        atomic_write(&path, text.as_bytes(), true)?;
-                        written.push(path.clone());
+                        let path = self.store_managed(&id, &text)?;
+                        written.push((id.clone(), path.clone()));
                         (path, true)
                     }
                 };
@@ -139,6 +141,7 @@ impl Kubepit {
                     notes: input.notes,
                     created_at: now,
                     last_connected_at: None,
+                    proxy_url: proxy::normalize(input.proxy_url.as_deref())?,
                 });
             }
             Ok(())
@@ -153,13 +156,16 @@ impl Kubepit {
         let list = match commit {
             Ok(((), list)) => list,
             Err(e) => {
-                for path in written {
-                    let _ = std::fs::remove_file(path);
+                for (id, path) in written {
+                    self.delete_managed(&id, &path);
                 }
                 return Err(e);
             }
         };
         for def in &defs {
+            if self.run_kubeconfig_is_transient(def) {
+                continue;
+            }
             if let Err(e) = self.write_run_kubeconfig(def) {
                 tracing::warn!(cluster = %def.name, "could not write run kubeconfig: {e:#}");
             }
@@ -185,13 +191,11 @@ impl Kubepit {
         if context.is_empty() {
             bail!("a context name is required");
         }
+        let proxy_url = proxy::normalize(cluster.proxy_url.as_deref())?;
         let target_changed =
             kubeconfig_path != existing.kubeconfig_path || context != existing.context;
-        if target_changed {
-            let kc = kubeconfig::load(Path::new(&kubeconfig_path))
-                .with_context(|| format!("failed to read {kubeconfig_path}"))?;
-            kubeconfig::ensure_context(&kc, &context)?;
-        }
+        // A new proxy needs a new client, like a new context does.
+        let connection_changed = target_changed || proxy_url != existing.proxy_url;
         let next = ClusterDef {
             id: existing.id.clone(),
             name: match cluster.name.trim() {
@@ -210,7 +214,12 @@ impl Kubepit {
             notes: cluster.notes,
             created_at: existing.created_at,
             last_connected_at: existing.last_connected_at,
+            proxy_url,
         };
+        if target_changed {
+            let kc = self.load_cluster_source(&next)?;
+            kubeconfig::ensure_context(&kc, &next.context)?;
+        }
         let stored = next.clone();
         let ((), list) = self.store.update_clusters(move |list| {
             let slot = list
@@ -220,11 +229,13 @@ impl Kubepit {
             *slot = stored;
             Ok(())
         })?;
-        if let Err(e) = self.write_run_kubeconfig(&next) {
-            tracing::warn!(cluster = %next.name, "could not write run kubeconfig: {e:#}");
-        }
-        if target_changed {
+        if connection_changed {
             self.cluster_disconnect(&next.id);
+        }
+        if !self.run_kubeconfig_is_transient(&next) {
+            if let Err(e) = self.write_run_kubeconfig(&next) {
+                tracing::warn!(cluster = %next.name, "could not write run kubeconfig: {e:#}");
+            }
         }
         self.sink.cluster_list(&list);
         Ok(next)
@@ -244,19 +255,10 @@ impl Kubepit {
             Ok(())
         })?;
         if existing.managed {
-            let path = PathBuf::from(&existing.kubeconfig_path);
-            if self.paths().is_managed_path(&path) {
-                let _ = std::fs::remove_file(&path);
-            } else {
-                tracing::warn!(
-                    "refusing to delete {} — not inside the managed kubeconfig folder",
-                    path.display()
-                );
-            }
+            self.delete_managed(id, &PathBuf::from(&existing.kubeconfig_path));
         }
-        if let Ok(run) = self.paths().run_kubeconfig(id) {
-            let _ = std::fs::remove_file(run);
-        }
+        self.remove_run_kubeconfig(id);
+        self.forget_saved_forwards(id);
         self.sink.cluster_list(&list);
         Ok(())
     }
@@ -269,12 +271,10 @@ impl Kubepit {
         Ok(path.to_string_lossy().to_string())
     }
 
-    /// Regenerate `run/<id>.kubeconfig` from the cluster's source file.
+    /// Regenerate `run/<id>.kubeconfig` from the cluster's kubeconfig (with
+    /// its effective proxy).
     pub(crate) fn write_run_kubeconfig(&self, cluster: &ClusterDef) -> Result<PathBuf> {
-        let source = Path::new(&cluster.kubeconfig_path);
-        let kc = kubeconfig::load(source)
-            .with_context(|| format!("failed to read kubeconfig {}", source.display()))?;
-        let single = kubeconfig::single_context(&kc, &cluster.context)?;
+        let single = self.cluster_kubeconfig(cluster)?;
         self.write_run_kubeconfig_from(cluster, &single)
     }
 
@@ -325,6 +325,7 @@ mod tests {
     use crate::paths::Paths;
     use crate::types::{ClusterStatus, PortForward};
     use parking_lot::Mutex;
+    use std::path::Path;
     use std::sync::Arc;
 
     #[derive(Default)]

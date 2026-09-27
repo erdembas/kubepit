@@ -10,6 +10,7 @@
 //! | `workspace.json`        | opaque UI snapshot owned by the frontend          |
 //! | `kubeconfigs/<id>.yaml` | pasted kubeconfigs (`managed: true`), mode 0600   |
 //! | `run/<id>.kubeconfig`   | generated single-context kubeconfig, mode 0600    |
+//! | `port_forwards.json`    | saved port forwards (`SavedPortForward[]`)        |
 //!
 //! All writes go through [`atomic_write`] so a crash mid-write can never leave
 //! a truncated `clusters.json` behind.
@@ -75,6 +76,11 @@ impl Paths {
 
     pub fn workspace_file(&self) -> PathBuf {
         self.root.join("workspace.json")
+    }
+
+    /// Saved port forwards (connectivity).
+    pub fn port_forwards_file(&self) -> PathBuf {
+        self.root.join("port_forwards.json")
     }
 
     pub fn kubeconfigs_dir(&self) -> PathBuf {

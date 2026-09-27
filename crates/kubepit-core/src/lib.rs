@@ -33,6 +33,11 @@
 //! | [`workload_logs`] | merged logs of every pod of a workload (stern-style) |
 //! | [`debug_container`] | ephemeral debug containers (`kubectl debug`)       |
 //! | [`pod_fs`]      | container file browser and copy over exec              |
+//! | [`saved_forwards`] | saved port forwards, start on connect               |
+//! | [`kubeconfig_watch`] | kubeconfig file watching (`kubeconfig://changed`) |
+//! | [`proxy`]       | per-cluster proxy (`proxy-url` / override)             |
+//! | [`secrets`]     | OS credential store behind `SecretStore`               |
+//! | [`credentials`] | managed kubeconfig storage, keychain migration         |
 //!
 //! Push notifications to the UI go through [`EventSink`]; streams take plain
 //! `Fn(T) -> bool` callbacks (return `false` to stop) that the desktop shell
@@ -77,6 +82,12 @@ pub mod rollout;
 pub mod debug_container;
 pub mod pod_fs;
 pub mod workload_logs;
+// Connectivity: saved port forwards, kubeconfig watching, proxies, keychain.
+pub mod credentials;
+pub mod kubeconfig_watch;
+pub mod proxy;
+pub mod saved_forwards;
+pub mod secrets;
 
 pub use app::Kubepit;
 pub use events::{EventSink, NullSink};
