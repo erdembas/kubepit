@@ -58,6 +58,10 @@ that created them (`src-tauri/src/windows.rs`).
 
 Kubepit never rewrites a user's kubeconfig files.
 
+Layout prefs, saved table views and bookmarks live in the webview's
+localStorage (`kubepit.workbench.v1`, `kubepit.views.v1`,
+`kubepit.bookmarks.v1`), shared by every window (`store/windowStorage.ts`).
+
 ## Kubernetes access
 
 - `kube` 4.x with `ws` (exec/port-forward), `runtime` (watcher), rustls.
@@ -147,3 +151,42 @@ Every diff (apply review, rollout revisions, Helm revisions, compare and
 drift) renders through `components/workbench/common/DiffView.tsx` on top of
 Monaco's diff editor, with `lib/diff.ts` (Myers line diff) for stats and the
 fallback view.
+
+## Tables: columns, export, saved views, bookmarks
+
+- Column prefs per kind — visibility (`hiddenColumns` toggles), order
+  (`columnOrder`, dragged in the column menu; fixed columns keep their
+  place) and widths (`columnWidths`, dragged on a header edge) — are layout
+  prefs of `useWorkbenchStore`; `table/tableModel.ts` applies them.
+- Export (`table/ExportDialog.tsx`, opened through `table/exportStore.ts`
+  from the toolbar, the selection bar or the palette) writes the visible
+  columns in order with the current filter and sort — or only the selected
+  rows — as RFC 4180 CSV (optional Excel mode: BOM + formula guard) or JSON
+  rows, and the objects as multi-document YAML (`lib/kube/normalize.ts`,
+  status and server fields optional). Pure builders are in
+  `lib/tableExport.ts`; cell values come from a column's `text` / `value`
+  or from the text of its cell's element tree (`lib/kube/columns/export.ts`).
+  Files go through the save dialog and `save_text_file`.
+- Saved views (`lib/savedViews.ts`, `store/useSavedViewsStore.ts`,
+  `table/savedViews.ts`) snapshot a kind's filter, namespace selection,
+  column prefs and sort, per cluster or global. A kind's default view (the
+  cluster's own beats the global one) applies the first time its table opens
+  in a session.
+- Bookmarks (`store/useBookmarksStore.ts`) hold objects (cluster + GVK +
+  namespace + name) and views. The navigator's group (`nav/BookmarksSection.tsx`)
+  re-checks objects with `resource_get` every minute while connected; a 404
+  marks them stale. The palette lists bookmarks of every cluster
+  (`palette/workbenchItems.ts`).
+
+## Updates
+
+`tauri-plugin-updater` behind `update_status`, `update_check` and
+`update_install` (download progress on an `onEvent` channel); the UI
+relaunches with `tauri-plugin-process`. The updater is inert until release
+signing is configured: the plugin is registered only when
+`plugins.updater.pubkey` in `tauri.conf.json` is non-empty and every endpoint
+is `https://` (`kubepit_core::updates::UpdaterConfig`); otherwise the
+commands refuse and Settings → About & Updates says updates are not
+configured. The main window checks once after startup when
+`Settings.auto_check_updates` is on. Keys, artifacts and the `latest.json`
+feed are described in `docs/RELEASING.md`.
