@@ -17,6 +17,7 @@ use crate::change_journal::ChangeJournals;
 use crate::connection::ClientPool;
 use crate::error::ReadOnlyError;
 use crate::events::EventSink;
+use crate::loki::LokiCache;
 use crate::metrics::MetricsGate;
 use crate::metrics_history::MetricsHistory;
 use crate::node_shell::NodeShells;
@@ -50,6 +51,8 @@ pub struct Kubepit {
     pub(crate) prometheus: PrometheusCache,
     // Service proxy (Prometheus, Loki): retry-free client per connection.
     pub(crate) proxy_clients: ProxyClients,
+    // Loki: detection result per connection.
+    pub(crate) loki: LokiCache,
     // OpenAPI v3 documents per connection (YAML editing, API explorer).
     pub(crate) openapi: OpenApiCache,
     // Connectivity: OS credential store, saved port forwards, kubeconfig watcher.
@@ -92,6 +95,7 @@ impl Kubepit {
             alerts,
             prometheus: PrometheusCache::default(),
             proxy_clients: ProxyClients::default(),
+            loki: LokiCache::default(),
             openapi: OpenApiCache::default(),
             secrets,
             saved_forwards,

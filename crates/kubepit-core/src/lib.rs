@@ -37,6 +37,7 @@
 //! | [`alerts`]      | transition alerts, dedupe, notification center history |
 //! | [`client_cert`] | kubeconfig client certificate subject and expiry       |
 //! | [`prometheus`]  | Prometheus detection, preset + PromQL range queries    |
+//! | [`loki`]        | Loki detection, LogQL range queries, label browsing    |
 //! | [`service_proxy`] | shared API server service-proxy transport           |
 //! | [`openapi`]     | OpenAPI v3 schemas (YAML editing, API explorer)        |
 //! | [`saved_forwards`] | saved port forwards, start on connect               |
@@ -98,6 +99,8 @@ pub mod alerts;
 pub mod client_cert;
 // Prometheus: provider detection and range queries over the service proxy.
 pub mod prometheus;
+// Loki: historical logs over the same service-proxy transport.
+pub mod loki;
 pub mod service_proxy;
 // Schema-aware YAML editing and the API explorer.
 pub mod openapi;

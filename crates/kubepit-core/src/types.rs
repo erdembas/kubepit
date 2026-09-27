@@ -58,6 +58,9 @@ pub struct ClusterDef {
     /// Where charts read Prometheus metrics from (auto-detect by default).
     #[serde(default)]
     pub prometheus: PrometheusConfig,
+    /// Where historical logs are read from (Loki; auto-detect by default).
+    #[serde(default)]
+    pub loki: LokiConfig,
     /// Connectivity: proxy for this cluster (`http://`, `https://`,
     /// `socks5://`, `socks5h://`); overrides the kubeconfig's `proxy-url`.
     #[serde(default)]
@@ -1416,6 +1419,151 @@ pub struct PromQueryResult {
     pub series: Vec<PromQuerySeries>,
     /// More series came back than are returned.
     pub truncated: bool,
+    pub warnings: Vec<String>,
+}
+
+// -- Loki (historical logs; see `loki/`) --------------------------------------
+
+/// Which part of a Loki installation serves the query API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LokiKind {
+    /// The nginx gateway of the grafana/loki chart (`loki-gateway`).
+    Gateway,
+    /// Single binary / monolithic Loki (`loki`, loki-stack).
+    Loki,
+    /// Read path of the simple scalable deployment (`loki-read`).
+    Read,
+    /// Query frontend of the microservices deployment.
+    QueryFrontend,
+    /// A querier queried directly.
+    Querier,
+    /// Configured by hand in the cluster settings.
+    Custom,
+}
+
+/// A Loki HTTP API reached through the API server's service proxy.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct LokiService {
+    pub kind: LokiKind,
+    pub namespace: String,
+    pub service: String,
+    pub port: u16,
+    #[serde(default)]
+    pub scheme: PromScheme,
+    /// `""` or `/prefix` (no trailing slash).
+    #[serde(default)]
+    pub path_prefix: String,
+}
+
+/// Per-cluster Loki setting (`ClusterDef.loki`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "lowercase")]
+pub enum LokiConfig {
+    /// Detect a well-known service.
+    #[default]
+    Auto,
+    /// Use this service.
+    Service {
+        namespace: String,
+        service: String,
+        port: u16,
+        #[serde(default)]
+        scheme: PromScheme,
+        #[serde(default)]
+        path_prefix: String,
+        /// `X-Scope-OrgID` of a multi-tenant Loki; `""` = none.
+        #[serde(default)]
+        tenant: String,
+    },
+    /// Never look for Loki.
+    Off,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LokiState {
+    Available,
+    /// Detection found no Loki service.
+    NotFound,
+    /// A service was found or configured but did not answer.
+    Unreachable,
+    /// Disabled in the cluster settings.
+    Off,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LokiSource {
+    Detected,
+    Configured,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LokiStatus {
+    pub state: LokiState,
+    /// The service queries go to (`available`), or the one that failed.
+    pub service: Option<LokiService>,
+    pub source: Option<LokiSource>,
+    pub error: Option<String>,
+    /// Services detection considered, best first.
+    pub candidates: Vec<LokiService>,
+    /// Epoch ms of the check.
+    pub checked_at: i64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LokiDirection {
+    /// Newest lines first (what `limit` keeps).
+    #[default]
+    Backward,
+    Forward,
+}
+
+/// A LogQL range query. Times are nanosecond Unix epochs as decimal
+/// strings (JS numbers cannot hold them exactly).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LokiQuery {
+    pub query: String,
+    pub start: String,
+    pub end: String,
+    /// Lines returned at most (log queries); `None` = 1 000.
+    #[serde(default)]
+    pub limit: Option<u32>,
+    #[serde(default)]
+    pub direction: LokiDirection,
+    /// Seconds between points of metric queries; `None` = Loki's default.
+    #[serde(default)]
+    pub step: Option<u64>,
+}
+
+/// One log line of a stream.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LokiLine {
+    /// Index into `LokiQueryResult.streams`.
+    pub stream: u32,
+    /// Nanosecond Unix epoch (decimal string).
+    pub ts: String,
+    pub line: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LokiQueryResult {
+    pub service: LokiService,
+    /// `streams` for log queries; `matrix`, `vector` or `scalar` for metric queries.
+    pub result_type: String,
+    /// Label sets of the returned streams.
+    pub streams: Vec<std::collections::BTreeMap<String, String>>,
+    /// Lines of every stream, merged in `direction` order.
+    pub lines: Vec<LokiLine>,
+    /// Metric query results (`[epoch ms, value]` points).
+    pub series: Vec<PromQuerySeries>,
+    /// The effective line limit.
+    pub limit: u32,
+    /// `limit` lines came back, so more may exist beyond the oldest (backward)
+    /// or newest (forward) one.
+    pub limit_reached: bool,
     pub warnings: Vec<String>,
 }
 

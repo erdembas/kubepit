@@ -120,6 +120,11 @@ pub fn run() {
             ipc::prometheus_status,
             ipc::prometheus_metrics,
             ipc::prometheus_query_range,
+            // Loki historical logs (read-only)
+            ipc::loki_status,
+            ipc::loki_query_range,
+            ipc::loki_labels,
+            ipc::loki_label_values,
             // Port forwarding
             ipc::port_forward_start,
             ipc::port_forward_stop,

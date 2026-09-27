@@ -469,6 +469,7 @@ mod tests {
             created_at: 0,
             last_connected_at: None,
             prometheus: Default::default(),
+            loki: Default::default(),
             proxy_url: None,
         }
     }
