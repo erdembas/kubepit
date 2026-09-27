@@ -11,6 +11,7 @@
 //! reconnect), which keeps both the API server and the logs quiet.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -38,10 +39,11 @@ fn metrics_resource(kind: &str, plural: &str) -> ApiResource {
 /// so a metrics-server installed while Kubepit runs is picked up.
 pub const RECHECK_AFTER: Duration = Duration::from_secs(5 * 60);
 
-/// Per-cluster memory of "metrics.k8s.io is not served here".
-#[derive(Default)]
+/// Per-cluster memory of "metrics.k8s.io is not served here". Clones share
+/// the same state (the metrics-history samplers hold one).
+#[derive(Default, Clone)]
 pub struct MetricsGate {
-    unavailable_since: Mutex<HashMap<String, Instant>>,
+    unavailable_since: Arc<Mutex<HashMap<String, Instant>>>,
 }
 
 impl MetricsGate {
@@ -175,6 +177,13 @@ pub(crate) async fn node_metrics(client: Client) -> Result<Option<Vec<NodeMetric
     Ok(list_metrics(client, "NodeMetrics", "nodes", None)
         .await?
         .map(|items| items.iter().filter_map(parse_node_metric).collect()))
+}
+
+/// Pod usage across all namespaces; `None` when metrics-server is unavailable.
+pub(crate) async fn pod_metrics(client: Client) -> Result<Option<Vec<PodMetric>>> {
+    Ok(list_metrics(client, "PodMetrics", "pods", None)
+        .await?
+        .map(|items| items.iter().filter_map(parse_pod_metric).collect()))
 }
 
 impl Kubepit {

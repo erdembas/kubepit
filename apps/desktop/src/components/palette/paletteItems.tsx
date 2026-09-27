@@ -25,6 +25,7 @@ import { copyText } from '@/components/panels/PortForwardsPanel';
 import { useAppStore } from '@/store/useAppStore';
 import { dock } from '@/store/useDockStore';
 import type { ClusterDef } from '@/types';
+import { fleetSearchAction } from './fleetSearchItem';
 
 export type PaletteFilter = 'all' | 'clusters' | 'resources' | 'actions';
 
@@ -244,5 +245,6 @@ export function appActions(): PaletteItem[] {
       group: 'actions',
       run: () => i18n.setLocale(i18n.getLocale() === 'tr' ? 'en' : 'tr'),
     },
+    fleetSearchAction(),
   ];
 }

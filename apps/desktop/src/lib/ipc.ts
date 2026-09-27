@@ -15,6 +15,8 @@ import type {
   ContainerImage,
   DeleteOptions,
   DryRunResult,
+  FleetSearchEvent,
+  FleetSearchQuery,
   Gvk,
   HelmRelease,
   HelmReleaseDetail,
@@ -22,7 +24,9 @@ import type {
   KubeObject,
   LogChunk,
   LogOptions,
+  MetricsHistoryQuery,
   MetricsResult,
+  MetricsSeries,
   NodeMetric,
   PatchType,
   PodMetric,
@@ -231,6 +235,16 @@ export const ipc = {
     call<AccessRules>('access_rules', { clusterId, namespace }),
   /** SelfSubjectReview; rejects with "not supported by this cluster" before 1.27. */
   accessWhoami: (clusterId: ClusterId) => call<WhoAmI>('access_whoami', { clusterId }),
+  // -- Fleet: metrics history & fleet search -------------------------------
+  /** Last 60 minutes sampled in the background while the cluster is connected. */
+  metricsHistory: (clusterId: ClusterId, query: MetricsHistoryQuery) =>
+    call<MetricsSeries>('metrics_history', { clusterId, query }),
+  /** Cluster totals of every sampled cluster, downsampled to one point per minute. */
+  metricsHistoryFleet: () => call<Record<ClusterId, MetricsSeries>>('metrics_history_fleet'),
+  /** Searches every connected cluster; resolves to the search id, results stream on `onEvent`. */
+  fleetSearch: (query: FleetSearchQuery, onEvent: (event: FleetSearchEvent) => void) =>
+    callWithChannel<string, FleetSearchEvent>('fleet_search', { query }, 'onEvent', onEvent),
+  fleetSearchCancel: (searchId: string) => call<void>('fleet_search_cancel', { searchId }),
 
   // -- Terminal -------------------------------------------------------------
   ...terminalIpc,

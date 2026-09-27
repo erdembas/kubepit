@@ -2487,6 +2487,7 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "parking_lot",
+ "regex",
  "serde",
  "serde_json",
  "serde_yaml",

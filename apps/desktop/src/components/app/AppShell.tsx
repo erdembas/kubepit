@@ -24,6 +24,11 @@ const PortForwardsView = lazy(() =>
     default: m.PortForwardsView,
   })),
 );
+const FleetSearchView = lazy(() =>
+  import('@/components/fleet-search/FleetSearchView').then((m) => ({
+    default: m.FleetSearchView,
+  })),
+);
 
 export function AppShell() {
   i18n.useLocale();
@@ -85,6 +90,7 @@ const MainTabPanel = memo(function MainTabPanel({ tab }: { tab: MainTab }) {
       <Suspense fallback={<p className="text-fg-muted p-5 text-[12px]">{i18n.t('Loading…')}</p>}>
         {tab.kind === 'settings' && <SettingsView />}
         {tab.kind === 'port-forwards' && <PortForwardsView />}
+        {tab.kind === 'search' && <FleetSearchView visible={isActive} />}
       </Suspense>
     </div>
   );

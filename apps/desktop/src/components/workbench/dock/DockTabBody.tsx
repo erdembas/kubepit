@@ -3,6 +3,7 @@ import { Component, memo, useCallback, type ReactNode } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import type { DockTab } from '@/store/useDockStore';
 import type { ClusterId } from '@/types';
+import { CompareView } from './compare/CompareView';
 import { CreateEditor } from './editor/CreateEditor';
 import { EditEditor } from './editor/EditEditor';
 import { LogView } from './logs/LogView';
@@ -43,6 +44,9 @@ export const DockTabBody = memo(function DockTabBody({ clusterId, tab, active }:
         ) : (
           <EditEditor clusterId={clusterId} tab={tab} />
         );
+      break;
+    case 'compare':
+      body = <CompareView clusterId={clusterId} tab={tab} active={active} />;
       break;
   }
   return <TabErrorBoundary>{body}</TabErrorBoundary>;

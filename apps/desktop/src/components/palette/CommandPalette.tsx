@@ -16,6 +16,7 @@ import {
   type PaletteFilter,
   type PaletteItem,
 } from './paletteItems';
+import { fleetSearchItem } from './fleetSearchItem';
 
 const FILTERS: Array<{ key: PaletteFilter; label: () => string }> = [
   { key: 'all', label: () => i18n.t('All') },
@@ -100,6 +101,11 @@ export function CommandPalette() {
         });
         out.push(...jumps);
       }
+    }
+    // Fleet search: any typed text can be searched on every cluster.
+    if (q && (filter === 'all' || filter === 'resources')) {
+      out.push({ type: 'header', id: 'hdr-fleet', label: i18n.t('Fleet search') });
+      out.push(fleetSearchItem(q));
     }
     if (filter === 'all' || filter === 'actions') {
       const acts = appActions().filter(

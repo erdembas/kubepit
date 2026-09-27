@@ -11,6 +11,8 @@ import {
   SquareTerminal,
 } from 'lucide-react';
 import { StatusDot } from '@/components/ui/StatusDot';
+import { useFleetMetricsHistory } from '@/components/workbench/metrics/useMetricsHistory';
+import { Sparkline } from '@/components/workbench/overview/TimeSeriesChart';
 import { connectCluster, disconnectCluster, openAndConnect } from '@/lib/clusterActions';
 import { connState, environmentMeta, isLive, serverLabel } from '@/lib/clusterMeta';
 import { cn } from '@/lib/cn';
@@ -19,7 +21,7 @@ import { usageBarClass } from '@/lib/resourceTone';
 import { useVisibleStore } from '@/lib/useVisibleStore';
 import { useAppStore } from '@/store/useAppStore';
 import { dock } from '@/store/useDockStore';
-import type { ClusterDef, ClusterOverview, KubeObject } from '@/types';
+import type { ClusterDef, ClusterOverview, KubeObject, MetricsSeries } from '@/types';
 
 /**
  * Dashboard card for one cluster — the Kubepit twin of RunHQ's service
@@ -40,6 +42,8 @@ export const ClusterCard = memo(function ClusterCard({
   const openClusterEditor = useAppStore((s) => s.openClusterEditor);
   const state = connState(status);
   const live = isLive(state);
+  // One shared request feeds every card's sparklines.
+  const trend = useFleetMetricsHistory(visible && state === 'connected').data?.[cluster.id];
   const env = environmentMeta(cluster.environment);
   const version = status?.version?.replace(/^v?(\d+\.\d+\.\d+).*/, 'v$1');
 
@@ -208,6 +212,7 @@ export const ClusterCard = memo(function ClusterCard({
         overview={overview}
         overviewError={overviewError}
         lastConnected={cluster.last_connected_at}
+        trend={trend}
       />
     </div>
   );
@@ -219,12 +224,14 @@ function CardTail({
   overview,
   overviewError,
   lastConnected,
+  trend,
 }: {
   state: ReturnType<typeof connState>;
   error: string | null;
   overview: ClusterOverview | undefined;
   overviewError: string | undefined;
   lastConnected: number | null;
+  trend: MetricsSeries | undefined;
 }) {
   i18n.useLocale();
   const shell = 'bg-surface-muted/60 rounded-md px-3 py-2 font-mono text-[11px] leading-[1.6]';
@@ -284,11 +291,15 @@ function CardTail({
             label={i18n.t('CPU')}
             percent={cpuPct}
             detail={formatCpu(overview.usage!.cpu_millicores)}
+            trend={trend}
+            metric="cpu_millicores"
           />
           <UsageBar
             label={i18n.t('MEM')}
             percent={memPct}
             detail={formatBytes(overview.usage!.memory_bytes)}
+            trend={trend}
+            metric="memory_bytes"
           />
         </div>
       ) : (
@@ -303,7 +314,22 @@ function CardTail({
   );
 }
 
-function UsageBar({ label, percent, detail }: { label: string; percent: number; detail: string }) {
+function UsageBar({
+  label,
+  percent,
+  detail,
+  trend,
+  metric,
+}: {
+  label: string;
+  percent: number;
+  detail: string;
+  trend: MetricsSeries | undefined;
+  metric: 'cpu_millicores' | 'memory_bytes';
+}) {
+  i18n.useLocale();
+  const points = trend?.points ?? [];
+  const to = points.at(-1)?.ts ?? 0;
   return (
     <div className="min-w-0" title={`${detail} · ${formatPercent(percent)}`}>
       <div className="text-fg-dim flex items-center justify-between text-[10px]">
@@ -319,6 +345,17 @@ function UsageBar({ label, percent, detail }: { label: string; percent: number; 
           style={{ width: `${Math.min(100, percent)}%` }}
         />
       </div>
+      {points.length > 1 && (
+        <Sparkline
+          className="mt-1.5"
+          height={18}
+          points={points.map((p) => ({ t: p.ts, v: p[metric] }))}
+          from={to - 60 * 60_000}
+          to={to}
+          intervalMs={(trend?.interval_secs ?? 60) * 1000}
+          label={i18n.t('{metric} over the last hour', { metric: label })}
+        />
+      )}
     </div>
   );
 }

@@ -19,6 +19,7 @@
 //! | [`watch`]       | batched watches (`WatchBatch`)                          |
 //! | [`logs`]        | pod log streaming (`LogChunk`)                          |
 //! | [`metrics`]     | metrics-server usage                                    |
+//! | [`metrics_history`] | in-memory usage history (per-cluster samplers)      |
 //! | [`overview`]    | cluster dashboard aggregation                           |
 //! | [`portforward`] | local TCP → pod / service forwarding                    |
 //! | [`helm`]        | releases read from secrets, mutations via `helm`        |
@@ -27,6 +28,7 @@
 //! | [`rollout`]     | rollout history and undo (ReplicaSets, ControllerRevs)  |
 //! | [`images`]      | set image (strategic merge of container images)         |
 //! | [`dry_run`]     | server-side dry run of manifests before apply           |
+//! | [`fleet_search`] | name search across every connected cluster            |
 //!
 //! Push notifications to the UI go through [`EventSink`]; streams take plain
 //! `Fn(T) -> bool` callbacks (return `false` to stop) that the desktop shell
@@ -39,10 +41,12 @@ pub mod connection;
 pub mod discovery;
 pub mod error;
 pub mod events;
+pub mod fleet_search;
 pub mod helm;
 pub mod kubeconfig;
 pub mod logs;
 pub mod metrics;
+pub mod metrics_history;
 pub mod node_shell;
 pub mod nodes;
 pub mod objects;

@@ -476,3 +476,66 @@ export interface WhoAmI {
   groups: string[];
   extra: Record<string, string[]>;
 }
+
+// ---------------------------------------------------------------------------
+// Fleet: metrics history & fleet search
+// ---------------------------------------------------------------------------
+
+/** Which series `metrics_history` returns. Named series are summed per sample. */
+export type MetricsHistoryQuery =
+  | { scope: 'cluster' }
+  | { scope: 'nodes'; names: string[] }
+  /** A workload's series = the sum of its pods. */
+  | { scope: 'pods'; namespace: string; names: string[] };
+
+export interface MetricsPoint extends Quantity {
+  /** Epoch ms. */
+  ts: number;
+}
+
+export interface MetricsSeries {
+  /** Seconds between points: 15 at full resolution, 60 when downsampled. */
+  interval_secs: number;
+  /** False while metrics-server is known to be unavailable. */
+  available: boolean;
+  /** Oldest first, last 60 minutes. Paused sampling shows up as gaps. */
+  points: MetricsPoint[];
+}
+
+export interface FleetSearchQuery {
+  /** Name pattern: substring (default), glob (`web-*`) or `/regex/`; terms are ANDed. */
+  text: string;
+  kinds: Gvk[];
+  /** Empty = every registered cluster; disconnected ones are reported as skipped. */
+  cluster_ids: ClusterId[];
+  namespace: string | null;
+  label_selector: string | null;
+  limit_per_kind: number;
+}
+
+export type FleetSearchEventKind =
+  'results' | 'cluster-done' | 'cluster-error' | 'cluster-skipped' | 'done';
+
+export interface FleetSearchItem {
+  /** The version this cluster serves. */
+  gvk: Gvk;
+  namespace: string | null;
+  name: string;
+  uid: string;
+  /** creationTimestamp (RFC 3339). */
+  created: string | null;
+  labels: Record<string, string>;
+}
+
+export interface FleetSearchEvent {
+  search_id: string;
+  /** Null only on the final `done`. */
+  cluster_id: ClusterId | null;
+  kind: FleetSearchEventKind;
+  items: FleetSearchItem[];
+  /** `results`: more matches than `limit_per_kind`. */
+  truncated: boolean;
+  /** `cluster-done` / `cluster-error`: kinds RBAC did not allow listing. */
+  forbidden_kinds: string[];
+  error: string | null;
+}

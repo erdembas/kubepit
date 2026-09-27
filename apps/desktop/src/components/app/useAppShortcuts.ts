@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { DASHBOARD_TAB_KEY, mainTabKey, useAppStore } from '@/store/useAppStore';
+import { openFleetSearch } from '@/store/useFleetSearchStore';
 
 function isEditable(target: EventTarget | null) {
   const el = target as HTMLElement | null;
@@ -11,6 +12,7 @@ function isEditable(target: EventTarget | null) {
  * Global shortcuts (⌘ on macOS, Ctrl elsewhere):
  *   K palette · N add cluster · , settings · B toggle sidebar
  *   W close tab · 1–9 switch tab · Shift+[ / Shift+] previous / next tab
+ *   Shift+F fleet search (works from text fields too)
  */
 export function useAppShortcuts() {
   useEffect(() => {
@@ -23,6 +25,11 @@ export function useAppShortcuts() {
       if (key === 'k') {
         event.preventDefault();
         store.setPaletteOpen(!store.paletteOpen);
+        return;
+      }
+      if (key === 'f' && event.shiftKey) {
+        event.preventDefault();
+        openFleetSearch();
         return;
       }
       // Editors (Monaco, xterm, inputs) keep their own chords.

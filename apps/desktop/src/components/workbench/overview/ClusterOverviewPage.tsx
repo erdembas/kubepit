@@ -19,6 +19,7 @@ import { useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { ApiResourceInfo, Quantity } from '@/types';
 import { useNow } from '../util';
 import { Card, GaugeRings, Legend, SegmentBar, StatTile, type Gauge, type Segment } from './charts';
+import { ClusterUsageHistory } from './ClusterUsageHistory';
 import { WarningList } from './WarningList';
 
 function ResourceCard({
@@ -322,6 +323,7 @@ export function ClusterOverviewPage({
             </div>
           </Card>
         </div>
+        <ClusterUsageHistory clusterId={clusterId} isActive={isActive} overview={o} />
         <Card title={i18n.t('Pods by phase')} icon={<Box />}>
           <div className="space-y-3 p-4">
             <SegmentBar segments={phases} label={i18n.t('Pods by phase')} />
