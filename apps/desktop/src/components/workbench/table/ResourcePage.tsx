@@ -1,15 +1,17 @@
 import * as i18n from '@/i18n';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Lock, Loader2, Plus, Search, X } from 'lucide-react';
+import { BookOpenText, Lock, Loader2, Plus, Search, X } from 'lucide-react';
 import { FileContextMenu, type FileContextMenuEntry } from '@/components/ui/FileContextMenu';
 import { IconButton } from '@/components/ui/IconButton';
 import { accessCheck } from '@/lib/kube/access';
+import { apiVersionOf } from '@/lib/kube/catalog';
 import { kindIcon } from '@/lib/kube/icons';
 import { viewLabel } from '@/lib/kube/nav';
 import { templateFor } from '@/lib/kube/templates';
 import { cn } from '@/lib/cn';
 import { useCan } from '@/store/useAccessStore';
 import { dock } from '@/store/useDockStore';
+import { openExplain } from '@/store/useExplainStore';
 import { useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { AccessCheck, ApiResourceInfo, Gvk, KubeObject } from '@/types';
 import { deniedMessage, OPEN_GATE, useActionGates } from '../access/gates';
@@ -226,6 +228,13 @@ export function ResourcePage({
               )}
             </div>
             <ColumnMenu kind={kindKey} columns={t.kind.columns} hidden={t.hidden} />
+            <IconButton
+              label={i18n.t('Explain the fields of {kind}', { kind: gvk.kind })}
+              icon={<BookOpenText />}
+              onClick={() =>
+                openExplain(clusterId, { apiVersion: apiVersionOf(gvk), kind: gvk.kind })
+              }
+            />
             <IconButton
               label={
                 readOnly

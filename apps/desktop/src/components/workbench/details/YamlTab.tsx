@@ -71,7 +71,7 @@ export function YamlTab({
           {i18n.t('Loading…')}
         </div>
       ) : (
-        <MonacoView value={yaml.data} />
+        <MonacoView value={yaml.data} clusterId={clusterId} />
       )}
     </div>
   );

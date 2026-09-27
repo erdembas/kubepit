@@ -1,10 +1,11 @@
 import * as i18n from '@/i18n';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FilePlus2, Layers, ScanSearch, Send } from 'lucide-react';
+import { BookOpenText, FilePlus2, Layers, ScanSearch, Send } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
 import { ipc } from '@/lib/ipc';
 import { cn } from '@/lib/cn';
+import { EXPLAIN_SHORTCUT } from '@/lib/kube/schema/monaco';
 import { modChord } from '@/lib/platform';
 import { useAppStore } from '@/store/useAppStore';
 import { useDockStore, type DockTab } from '@/store/useDockStore';
@@ -51,6 +52,7 @@ export const CreateEditor = memo(function CreateEditor({
   const [busy, setBusy] = useState<ApplyMode | null>(null);
   const [results, setResults] = useState<DocResult[] | null>(null);
   const { review, start: startDryRun, rerun, close: closeReview } = useDryRunReview(clusterId);
+  const explainRef = useRef<(() => void) | null>(null);
   const dirty = yaml.trim() !== '' && yaml !== baseline;
   // Read by Cmd+S, which can fire before the re-render after a keystroke.
   const yamlRef = useRef(yaml);
@@ -183,6 +185,17 @@ export const CreateEditor = memo(function CreateEditor({
             className="h-6.5 max-w-52 shrink-0 font-mono"
           />
           <div className="ml-auto flex shrink-0 items-center gap-1.5 pl-2">
+            <Button
+              size="xs"
+              variant="ghost"
+              leftIcon={<BookOpenText className="h-3 w-3" />}
+              onClick={() => explainRef.current?.()}
+              title={i18n.t('Explain the field at the cursor in the API explorer ({shortcut})', {
+                shortcut: EXPLAIN_SHORTCUT,
+              })}
+            >
+              {i18n.t('Explain')}
+            </Button>
             {!reviewFirst && (
               <Button
                 size="xs"
@@ -246,6 +259,8 @@ export const CreateEditor = memo(function CreateEditor({
             onReview={() => startReview('apply')}
             readOnly={readOnly}
             fontSize={fontSize}
+            clusterId={clusterId}
+            explainRef={explainRef}
           />
           {!yaml.trim() && (
             <div className="text-fg-dim pointer-events-none absolute inset-x-0 top-1/3 text-center text-[12px]">

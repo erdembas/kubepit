@@ -28,6 +28,7 @@ import { copyText } from '@/components/panels/PortForwardsPanel';
 import { useAppStore } from '@/store/useAppStore';
 import { dock } from '@/store/useDockStore';
 import type { ClusterDef } from '@/types';
+import { explainAction } from './explainItems';
 import { fleetSearchAction } from './fleetSearchItem';
 
 export type PaletteFilter = 'all' | 'clusters' | 'resources' | 'actions';
@@ -112,6 +113,7 @@ export function clusterActions(cluster: ClusterDef): PaletteItem[] {
         dock.shell(cluster.id, cluster.name);
       },
     },
+    explainAction(cluster, 'cluster'),
     {
       type: 'action',
       id: `edit:${cluster.id}`,
@@ -146,7 +148,7 @@ export function clusterActions(cluster: ClusterDef): PaletteItem[] {
 }
 
 export function resourceJumps(cluster: ClusterDef): PaletteItem[] {
-  return JUMP_KINDS.map((kind) => ({
+  const jumps: PaletteItem[] = JUMP_KINDS.map((kind) => ({
     type: 'action' as const,
     id: `jump:${cluster.id}:${kind}`,
     label: i18n.t('Go to {kind}', { kind: kindPlural(kind) }),
@@ -156,6 +158,7 @@ export function resourceJumps(cluster: ClusterDef): PaletteItem[] {
     group: 'resources' as const,
     run: () => openObject(cluster.id, kind),
   }));
+  return [...jumps, explainAction(cluster, 'resources')];
 }
 
 export function appActions(): PaletteItem[] {

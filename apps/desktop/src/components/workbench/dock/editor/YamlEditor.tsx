@@ -1,9 +1,11 @@
 import * as i18n from '@/i18n';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import type { editor as MonacoEditor } from 'monaco-editor';
+import { EXPLAIN_ACTION_ID, KUBE_YAML_EDITOR_OPTIONS } from '@/lib/kube/schema/monaco';
 import { useMonacoReady } from '@/lib/monacoRuntime';
 import { useMonacoTheme } from '@/lib/monacoTheme';
+import { useKubeYaml } from '../../common/useKubeYaml';
 import { NERD_FONT_STACK, useIsDark } from '../shared/xtermUtils';
 import { yamlIssues } from './documents';
 
@@ -18,13 +20,29 @@ interface Props {
   onReview?: () => void;
   readOnly: boolean;
   fontSize: number;
+  /**
+   * Cluster whose OpenAPI schemas drive completion, hovers, markers and
+   * "Explain field at cursor". Omit for YAML that is not a manifest.
+   */
+  clusterId?: string | null;
+  /** Filled with a function that runs "Explain field at cursor" (toolbar buttons). */
+  explainRef?: MutableRefObject<(() => void) | null>;
 }
 
 /**
  * Monaco YAML editor with RunHQ's theme plumbing, inline syntax markers and
  * Cmd/Ctrl+S. Falls back to a monospace textarea when Monaco cannot load.
  */
-export function YamlEditor({ value, onChange, onSave, onReview, readOnly, fontSize }: Props) {
+export function YamlEditor({
+  value,
+  onChange,
+  onSave,
+  onReview,
+  readOnly,
+  fontSize,
+  clusterId,
+  explainRef,
+}: Props) {
   i18n.useLocale();
   const isDark = useIsDark();
   const theme = useMonacoTheme(isDark ? 'dark' : 'light');
@@ -56,6 +74,21 @@ export function YamlEditor({ value, onChange, onSave, onReview, readOnly, fontSi
     });
     setMounted(true);
   }, []);
+
+  useKubeYaml(mounted, editorRef, monacoRef, clusterId, true);
+  useEffect(() => {
+    if (!explainRef) return;
+    explainRef.current = mounted
+      ? () => {
+          const editor = editorRef.current;
+          editor?.focus();
+          void editor?.getAction(EXPLAIN_ACTION_ID)?.run();
+        }
+      : null;
+    return () => {
+      explainRef.current = null;
+    };
+  }, [explainRef, mounted, clusterId]);
 
   // Syntax markers, debounced so typing stays smooth on large manifests.
   useEffect(() => {
@@ -124,6 +157,7 @@ export function YamlEditor({ value, onChange, onSave, onReview, readOnly, fontSi
         stickyScroll: { enabled: false },
         quickSuggestions: false,
         wordBasedSuggestions: 'off',
+        ...(clusterId ? KUBE_YAML_EDITOR_OPTIONS : null),
         smoothScrolling: true,
         fixedOverflowWidgets: true,
         scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10, useShadows: false },
