@@ -115,6 +115,10 @@ export function ResourcePage({
     (column: string) => store().setSort(kindKey, column),
     [kindKey, store],
   );
+  const onResizeColumn = useCallback(
+    (column: string, width: number | null) => store().setColumnWidth(kindKey, column, width),
+    [kindKey, store],
+  );
 
   const menuActions = useMemo(
     () => (menu ? resourceActions({ clusterId, cluster, gvk, obj: menu.obj }) : []),
@@ -225,7 +229,7 @@ export function ResourcePage({
                 </button>
               )}
             </div>
-            <ColumnMenu kind={kindKey} columns={t.kind.columns} hidden={t.hidden} />
+            <ColumnMenu kind={kindKey} columns={t.orderedColumns} hidden={t.hidden} />
             <IconButton
               label={
                 readOnly
@@ -274,6 +278,7 @@ export function ResourcePage({
             selectable
             revealKey={revealKey}
             bottomInset={targets.length ? SELECTION_BAR_INSET : 0}
+            onResizeColumn={onResizeColumn}
           />
         )}
         {targets.length > 0 && (
