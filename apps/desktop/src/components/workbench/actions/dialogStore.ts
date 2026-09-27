@@ -22,7 +22,9 @@ export type ActionDialog =
       port?: number;
     }
   | { kind: 'menu'; clusterId: string; x: number; y: number; items: FileContextMenuEntry[] }
-  | { kind: 'set-image'; clusterId: string; gvk: Gvk; obj: KubeObject };
+  | { kind: 'set-image'; clusterId: string; gvk: Gvk; obj: KubeObject }
+  // Logs & debug: ephemeral debug container for a pod.
+  | { kind: 'debug'; clusterId: string; pod: KubeObject; target?: string | null };
 
 interface DialogState {
   dialog: ActionDialog | null;

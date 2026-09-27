@@ -2,6 +2,8 @@ import * as i18n from '@/i18n/core';
 import {
   ArrowRightLeft,
   Ban,
+  Bug,
+  FolderTree,
   Copy,
   Link2,
   Pencil,
@@ -26,10 +28,11 @@ import { nodeUnschedulable } from '@/lib/kube/workloads';
 import { useAppStore } from '@/store/useAppStore';
 import { dock } from '@/store/useDockStore';
 import type { ClusterDef, Gvk, KubeObject } from '@/types';
-import { copyText, errorText } from '../util';
+import { copyText } from '../util';
 import { requiredAccess } from './access';
 import { useActionDialogs } from './dialogStore';
 import { confirmDestructive, runMutation } from './guard';
+import { MERGED_LOG_KINDS, openPodDebug, openPodFiles, openWorkloadLogs } from './logsDebugActions';
 import { workloadActions } from './workloadActions';
 
 import {
@@ -61,14 +64,6 @@ export interface ResourceAction {
 
 const SCALABLE = new Set(['Deployment', 'StatefulSet', 'ReplicaSet', 'ReplicationController']);
 export const RESTARTABLE = new Set(['Deployment', 'StatefulSet', 'DaemonSet']);
-const HAS_PODS = new Set([
-  'Deployment',
-  'StatefulSet',
-  'DaemonSet',
-  'ReplicaSet',
-  'ReplicationController',
-  'Job',
-]);
 
 export function resourceActions({
   clusterId,
@@ -133,23 +128,34 @@ export function resourceActions({
             ports,
           }),
       });
+    // Logs & debug: container files and ephemeral debug containers.
+    add({
+      id: 'files',
+      label: i18n.t('Files'),
+      icon: FolderTree,
+      mutating: false,
+      run: () => openPodFiles(clusterId, obj),
+    });
+    add({
+      id: 'debug',
+      label: i18n.t('Debug…'),
+      icon: Bug,
+      mutating: true,
+      run: () => openPodDebug(clusterId, obj),
+    });
   }
-  if (HAS_PODS.has(kind)) {
+  if (
+    MERGED_LOG_KINDS.has(kind) &&
+    (kind !== 'Service' || asString(spec(obj).type) !== 'ExternalName')
+  ) {
+    // Merged logs of every pod the workload (or Service) selects.
     add({
       id: 'logs',
       label: i18n.t('Logs'),
       icon: ScrollText,
       mutating: false,
       primary: true,
-      run: () => {
-        void podsForWorkload(clusterId, obj)
-          .then((pods) => {
-            if (pods[0]) openPodLogs(clusterId, pods[0]);
-            else
-              useAppStore.getState().pushToast('info', i18n.t('{name} has no pods yet', { name }));
-          })
-          .catch((e: unknown) => useAppStore.getState().pushToast('error', errorText(e)));
-      },
+      run: () => openWorkloadLogs(clusterId, obj),
     });
   }
   if (SCALABLE.has(kind))

@@ -262,6 +262,119 @@ export interface LogChunk {
 }
 
 // ---------------------------------------------------------------------------
+// Workload logs, debug containers, container files
+// ---------------------------------------------------------------------------
+
+export interface WorkloadLogOptions {
+  /** Containers to follow in every pod; empty = every regular container. */
+  containers: string[];
+  /** Also follow init containers. */
+  init_containers: boolean;
+  /** Backlog per container when it is first attached. */
+  tail_lines: number | null;
+  since_seconds: number | null;
+  /** Keep the RFC 3339 prefix the API server adds to every line. */
+  timestamps: boolean;
+}
+
+export type WorkloadLogEventKind =
+  /** Complete lines of one source. */
+  | 'lines'
+  /** A stream for pod/container started (again after a restart). */
+  | 'source-added'
+  /** That stream finished (`message` when it failed); a restart re-adds it. */
+  | 'source-ended'
+  /** The pod is gone; nothing follows for this source. */
+  | 'source-removed'
+  /** Not followed: the concurrent stream limit (64) is reached. */
+  | 'source-skipped'
+  /** Stream-level problem that does not end the stream. */
+  | 'warning';
+
+export interface WorkloadLogEvent {
+  kind: WorkloadLogEventKind;
+  /** Empty for stream-level warnings. */
+  pod: string;
+  container: string;
+  /** `lines` only: complete lines without their newline. */
+  lines: string[];
+  message: string | null;
+}
+
+/**
+ * One ~100 ms flush of a workload log stream. Per source, `source-added`
+ * precedes its lines and `source-ended` / `source-removed` follow the last
+ * one; within a batch, lines of different pods are ordered by time.
+ */
+export interface WorkloadLogBatch {
+  stream_id: string;
+  events: WorkloadLogEvent[];
+  /** Last batch of the stream. */
+  done: boolean;
+  /** Set on the last batch when the stream failed as a whole. */
+  error: string | null;
+}
+
+/** `kubectl debug --profile`: general adds nothing, netadmin adds NET_ADMIN/NET_RAW, sysadmin is privileged. */
+export type DebugProfile = 'general' | 'netadmin' | 'sysadmin';
+
+export interface PodDebugRequest {
+  /** Empty = `settings.debug_image`. */
+  image: string;
+  /** Share this container's process namespace. */
+  target_container: string | null;
+  /** Defaults to `debugger-<5 chars>`. */
+  name: string | null;
+  /** Defaults to the image's entrypoint. */
+  command: string[] | null;
+  profile: DebugProfile | null;
+}
+
+export type PodFsKind = 'file' | 'dir' | 'symlink' | 'other';
+
+export interface PodFsEntry {
+  name: string;
+  kind: PodFsKind;
+  size: number | null;
+  /** `ls -l` style, e.g. `drwxr-xr-x`. */
+  mode: string | null;
+  /** Modification time, epoch seconds. */
+  modified: number | null;
+  link_target: string | null;
+  /** Symlink whose target is a directory. */
+  link_to_dir: boolean;
+}
+
+export interface PodDirListing {
+  /** Absolute path of the listed directory. */
+  path: string;
+  /** Directories first, then by name. */
+  entries: PodFsEntry[];
+  /** More entries exist than were returned (5 000 max). */
+  truncated: boolean;
+}
+
+export interface PodFileContent {
+  path: string;
+  size: number | null;
+  /** UTF-8 text (not binary). */
+  text: string | null;
+  /** Raw bytes of binary content. */
+  base64: string | null;
+  /** Only the first `max_bytes` were read. */
+  truncated: boolean;
+  binary: boolean;
+}
+
+export interface PodFsTransfer {
+  /** Local file (download) or remote file (upload) that was written. */
+  path: string;
+  bytes: number;
+  /** The download is a tar archive of a directory. */
+  archive: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Metrics & overview
 // ---------------------------------------------------------------------------
 
@@ -420,6 +533,8 @@ export interface Settings {
   confirm_destructive: boolean;
   /** Image used by node shells. */
   node_shell_image: string;
+  /** Default image for ephemeral debug containers. */
+  debug_image: string;
 }
 
 // ---------------------------------------------------------------------------

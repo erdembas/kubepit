@@ -29,6 +29,10 @@ import type {
   MetricsSeries,
   NodeMetric,
   PatchType,
+  PodDebugRequest,
+  PodDirListing,
+  PodFileContent,
+  PodFsTransfer,
   PodMetric,
   PortForward,
   PortForwardRequest,
@@ -37,6 +41,8 @@ import type {
   Settings,
   WatchBatch,
   WhoAmI,
+  WorkloadLogBatch,
+  WorkloadLogOptions,
   WorkspaceSnapshot,
 } from '@/types';
 
@@ -201,6 +207,81 @@ export const ipc = {
       onChunk,
     ),
   podLogsStop: (streamId: string) => call<void>('pod_logs_stop', { streamId }),
+
+  // -- Logs & debug -------------------------------------------------------
+  /** Merged logs of every pod matching `selector`. Resolves to the stream id. */
+  workloadLogsStream: (
+    clusterId: ClusterId,
+    namespace: string,
+    selector: string,
+    options: WorkloadLogOptions,
+    onEvent: (batch: WorkloadLogBatch) => void,
+  ) =>
+    callWithChannel<string, WorkloadLogBatch>(
+      'workload_logs_stream',
+      { clusterId, namespace, selector, options },
+      'onEvent',
+      onEvent,
+    ),
+  workloadLogsStop: (streamId: string) => call<void>('workload_logs_stop', { streamId }),
+  /** Writes text to a path picked in a save dialog (log export). */
+  saveTextFile: (path: string, contents: string) =>
+    call<void>('save_text_file', { path, contents }),
+  /** Adds an ephemeral debug container; resolves to its name once it runs. */
+  podDebug: (clusterId: ClusterId, namespace: string, pod: string, request: PodDebugRequest) =>
+    call<string>('pod_debug', { clusterId, namespace, pod, request }),
+  /** `path` '' lists the container's working directory. */
+  podFsList: (
+    clusterId: ClusterId,
+    namespace: string,
+    pod: string,
+    container: string | null,
+    path: string,
+  ) => call<PodDirListing>('pod_fs_list', { clusterId, namespace, pod, container, path }),
+  /** First `maxBytes` (default 512 KiB, max 1 MiB) of a file for previews. */
+  podFsRead: (
+    clusterId: ClusterId,
+    namespace: string,
+    pod: string,
+    container: string | null,
+    path: string,
+    maxBytes: number | null = null,
+  ) =>
+    call<PodFileContent>('pod_fs_read', { clusterId, namespace, pod, container, path, maxBytes }),
+  /** A file, or a directory as a `.tar` archive, streamed to `localPath`. */
+  podFsDownload: (
+    clusterId: ClusterId,
+    namespace: string,
+    pod: string,
+    container: string | null,
+    remotePath: string,
+    localPath: string,
+  ) =>
+    call<PodFsTransfer>('pod_fs_download', {
+      clusterId,
+      namespace,
+      pod,
+      container,
+      remotePath,
+      localPath,
+    }),
+  /** Copies one local file into `remoteDir` (replacing a file of the same name). */
+  podFsUpload: (
+    clusterId: ClusterId,
+    namespace: string,
+    pod: string,
+    container: string | null,
+    localPath: string,
+    remoteDir: string,
+  ) =>
+    call<PodFsTransfer>('pod_fs_upload', {
+      clusterId,
+      namespace,
+      pod,
+      container,
+      localPath,
+      remoteDir,
+    }),
 
   // -- Metrics --------------------------------------------------------------
   metricsNodes: (clusterId: ClusterId) =>

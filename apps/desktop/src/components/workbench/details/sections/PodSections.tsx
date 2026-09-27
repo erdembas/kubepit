@@ -14,6 +14,7 @@ import { formatAge, formatBytes, formatCpu } from '@/lib/format';
 import { PodMetricsHistory } from '../MetricsHistoryCard';
 import { ChipList, MiniTable, MonoText, Row, Rows, Section, ToneText } from '../primitives';
 import { ContainerCard } from './ContainerCard';
+import { EphemeralContainersSection } from './EphemeralContainers';
 import type { SectionProps } from './types';
 
 export function ConditionsTable({ obj, now }: { obj: SectionProps['obj']; now: number }) {
@@ -45,7 +46,7 @@ export function ConditionsTable({ obj, now }: { obj: SectionProps['obj']; now: n
   );
 }
 
-export function PodSections({ obj, ctx, isActive }: SectionProps) {
+export function PodSections({ obj, ctx, readOnly, isActive }: SectionProps) {
   i18n.useLocale();
   const s = spec(obj);
   const st = status(obj);
@@ -140,6 +141,12 @@ export function PodSections({ obj, ctx, isActive }: SectionProps) {
           ))}
         </div>
       </Section>
+      <EphemeralContainersSection
+        clusterId={ctx.clusterId}
+        pod={obj}
+        readOnly={readOnly}
+        now={ctx.now}
+      />
       {volumes.length > 0 && (
         <Section title={i18n.t('Volumes')}>
           <MiniTable

@@ -23,7 +23,7 @@ use crate::portforward::PortForwards;
 use crate::store::Store;
 use crate::tasks::TaskRegistry;
 use crate::tools;
-use crate::types::{AppInfo, ClusterDef, Settings, DEFAULT_NODE_SHELL_IMAGE};
+use crate::types::{AppInfo, ClusterDef, Settings, DEFAULT_DEBUG_IMAGE, DEFAULT_NODE_SHELL_IMAGE};
 
 pub struct Kubepit {
     pub(crate) store: Store,
@@ -120,6 +120,9 @@ impl Kubepit {
             .collect();
         if settings.node_shell_image.trim().is_empty() {
             settings.node_shell_image = DEFAULT_NODE_SHELL_IMAGE.to_string();
+        }
+        if settings.debug_image.trim().is_empty() {
+            settings.debug_image = DEFAULT_DEBUG_IMAGE.to_string();
         }
         if settings.terminal_font_size == 0 {
             settings.terminal_font_size = Settings::default().terminal_font_size;

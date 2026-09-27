@@ -7,7 +7,8 @@ import { XTERM_DARK_BG, XTERM_LIGHT_BG } from '@/lib/xtermTheme';
 import { useAppStore } from '@/store/useAppStore';
 import { useDockStore, type DockTab } from '@/store/useDockStore';
 import type { ClusterId, LogOptions } from '@/types';
-import { copyText, downloadText } from '../shared/platform';
+import { copyText } from '../shared/platform';
+import { saveTextAs } from '../shared/saveFile';
 import { isFindShortcut, useIsDark } from '../shared/xtermUtils';
 import { stripAnsi } from './format';
 import { LogBuffer, type LogEntry } from './logBuffer';
@@ -158,10 +159,12 @@ export const LogView = memo(function LogView({ clusterId, tab, active }: Props) 
       .catch((err: unknown) => pushToast('error', String(err)));
   }, [pushToast]);
 
-  const download = useCallback(() => {
+  const save = useCallback(() => {
     const name = `${tab.pod}${tab.container ? `-${tab.container}` : ''}${tab.previous ? '-previous' : ''}.log`;
-    downloadText(name, `${bufferRef.current.text()}\n`);
-  }, [tab.pod, tab.container, tab.previous]);
+    void saveTextAs(name, `${bufferRef.current.text()}\n`)
+      .then((path) => path && pushToast('success', i18n.t('Saved logs to {path}', { path })))
+      .catch((err: unknown) => pushToast('error', String(err)));
+  }, [tab.pod, tab.container, tab.previous, pushToast]);
 
   const onLineMenu = useCallback(
     (seq: number | null, x: number, y: number, selection: string) => {
@@ -232,7 +235,7 @@ export const LogView = memo(function LogView({ clusterId, tab, active }: Props) 
         onPauseToggle={togglePause}
         onClear={clear}
         onCopy={copyAll}
-        onDownload={download}
+        onSave={save}
         onRetry={restart}
       />
       <div className="relative min-h-0 flex-1 overflow-hidden pt-1 pl-2">

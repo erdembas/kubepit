@@ -123,6 +123,8 @@
   "Cyan": "Camgöbeği",
   "Dark": "Koyu",
   "Data folder": "Veri klasörü",
+  "Debug container image": "Debug container imajı",
+  "Default image for ephemeral debug containers (Debug… on a pod). It needs a shell; netshoot is a good pick for network issues.": "Geçici debug container'ları için varsayılan imaj (bir pod'da Debug…). Shell içermesi gerekir; ağ sorunları için netshoot iyi bir seçimdir.",
   "Default namespace": "Varsayılan namespace",
   "Delete section \"{value1}\"?\n\nClusters inside will move to \"Unassigned\" — they are not removed.": "\"{value1}\" bölümü silinsin mi?\n\nİçindeki cluster'lar \"Atanmamış\" altına taşınır — kaldırılmazlar.",
   "Delete, scale to zero, drain and Helm uninstall always ask first. Production clusters additionally require typing the resource name.": "Silme, sıfıra ölçekleme, drain ve Helm kaldırma her zaman önce onay ister. Production cluster'larda ayrıca kaynak adının yazılması gerekir.",

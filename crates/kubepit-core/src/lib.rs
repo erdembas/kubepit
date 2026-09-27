@@ -29,6 +29,9 @@
 //! | [`images`]      | set image (strategic merge of container images)         |
 //! | [`dry_run`]     | server-side dry run of manifests before apply           |
 //! | [`fleet_search`] | name search across every connected cluster            |
+//! | [`workload_logs`] | merged logs of every pod of a workload (stern-style) |
+//! | [`debug_container`] | ephemeral debug containers (`kubectl debug`)       |
+//! | [`pod_fs`]      | container file browser and copy over exec              |
 //!
 //! Push notifications to the UI go through [`EventSink`]; streams take plain
 //! `Fn(T) -> bool` callbacks (return `false` to stop) that the desktop shell
@@ -68,6 +71,10 @@ pub mod watch;
 pub mod dry_run;
 pub mod images;
 pub mod rollout;
+// Logs & debug: merged workload logs, debug containers, container files.
+pub mod debug_container;
+pub mod pod_fs;
+pub mod workload_logs;
 
 pub use app::Kubepit;
 pub use events::{EventSink, NullSink};

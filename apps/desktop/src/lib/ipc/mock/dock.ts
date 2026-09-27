@@ -21,7 +21,7 @@ const hex = (len: number) => Array.from({ length: len }, () => rand(16).toString
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const clock = (d: Date) =>
   `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}.${pad(d.getUTCMilliseconds(), 3)}`;
-const rfc3339Nano = (d: Date) => d.toISOString().replace('Z', `${pad(rand(1_000_000), 6)}Z`);
+export const rfc3339Nano = (d: Date) => d.toISOString().replace('Z', `${pad(rand(1_000_000), 6)}Z`);
 
 const nginx: Generator = (ts) => {
   const time = `${pad(ts.getUTCDate())}/${MONTHS[ts.getUTCMonth()]}/${ts.getUTCFullYear()}:${clock(ts).slice(0, 8)} +0000`;
@@ -193,7 +193,7 @@ const ansi: Generator = (ts) => {
 
 const mix: Generator = (ts) => pick([nginx, java, goJson, klog, ansi, ansi])(ts);
 
-function generatorFor(pod: string, container: string | null): Generator {
+export function generatorFor(pod: string, container: string | null): Generator {
   const key = `${pod} ${container ?? ''}`.toLowerCase();
   if (/nginx|ingress|web|frontend|gateway|envoy|proxy/.test(key)) return nginx;
   if (/java|spring|payment|kafka|billing|jvm|order/.test(key)) return java;

@@ -179,7 +179,7 @@ fn pending_reason(pod: &Pod) -> String {
 }
 
 /// Container waiting reasons that will not fix themselves in 60 seconds.
-fn is_fatal_waiting(reason: &str) -> bool {
+pub(crate) fn is_fatal_waiting(reason: &str) -> bool {
     matches!(
         reason,
         "ErrImagePull"

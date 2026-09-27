@@ -11,6 +11,7 @@ import { replicaCounts } from '@/lib/kube/workloads';
 import { useAppStore } from '@/store/useAppStore';
 import type { PortForward } from '@/types';
 import { copyText, errorText } from '../util';
+import { DebugDialog } from './DebugDialog';
 import { useActionDialogs, type ActionDialog } from './dialogStore';
 import { runMutation } from './guard';
 import { openExternal } from './openExternal';
@@ -26,6 +27,7 @@ export function ActionDialogs({ clusterId }: { clusterId: string }) {
     return <FileContextMenu x={dialog.x} y={dialog.y} items={dialog.items} onClose={close} />;
   if (dialog.kind === 'scale') return <ScaleDialog dialog={dialog} onClose={close} />;
   if (dialog.kind === 'set-image') return <SetImageDialog dialog={dialog} onClose={close} />;
+  if (dialog.kind === 'debug') return <DebugDialog dialog={dialog} onClose={close} />;
   return <PortForwardDialog dialog={dialog} onClose={close} />;
 }
 

@@ -316,6 +316,151 @@ pub struct LogChunk {
 }
 
 // ---------------------------------------------------------------------------
+// Workload logs, debug containers, container files
+// ---------------------------------------------------------------------------
+
+/// Options of a merged workload log stream (`workload_logs_stream`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct WorkloadLogOptions {
+    /// Containers to follow in every pod; empty = every regular container.
+    #[serde(default)]
+    pub containers: Vec<String>,
+    /// Also follow init containers.
+    #[serde(default)]
+    pub init_containers: bool,
+    /// Backlog per container when it is first attached.
+    #[serde(default)]
+    pub tail_lines: Option<i64>,
+    #[serde(default)]
+    pub since_seconds: Option<i64>,
+    /// Keep the RFC 3339 prefix the API server adds to every line.
+    #[serde(default)]
+    pub timestamps: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WorkloadLogEventKind {
+    /// Complete lines of one source.
+    Lines,
+    /// A log stream for pod/container started (again, after a restart).
+    SourceAdded,
+    /// That stream finished (container exited, or the stream failed:
+    /// `message`). A restart sends `source-added` again.
+    SourceEnded,
+    /// The pod is gone (deleted or no longer matched); nothing follows.
+    SourceRemoved,
+    /// Not followed because the concurrent stream limit is reached.
+    SourceSkipped,
+    /// Stream-level problem that does not end the stream (`message`).
+    Warning,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkloadLogEvent {
+    pub kind: WorkloadLogEventKind,
+    /// Empty for stream-level warnings.
+    pub pod: String,
+    pub container: String,
+    /// `lines` only: complete lines without their newline.
+    pub lines: Vec<String>,
+    pub message: Option<String>,
+}
+
+/// One flush (~100 ms) of a workload log stream; `workload_logs.rs`
+/// documents the ordering guarantees.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkloadLogBatch {
+    pub stream_id: String,
+    pub events: Vec<WorkloadLogEvent>,
+    /// Last batch of the stream.
+    pub done: bool,
+    /// Set on the last batch when the stream failed as a whole.
+    pub error: Option<String>,
+}
+
+/// `kubectl debug --profile`: extra privileges for the debug container.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DebugProfile {
+    General,
+    Netadmin,
+    Sysadmin,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PodDebugRequest {
+    pub image: String,
+    /// Share this container's process namespace.
+    #[serde(default)]
+    pub target_container: Option<String>,
+    /// Defaults to `debugger-<5 chars>`.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Defaults to the image's entrypoint.
+    #[serde(default)]
+    pub command: Option<Vec<String>>,
+    #[serde(default)]
+    pub profile: Option<DebugProfile>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PodFsKind {
+    File,
+    Dir,
+    Symlink,
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PodFsEntry {
+    pub name: String,
+    pub kind: PodFsKind,
+    pub size: Option<u64>,
+    /// `ls -l` style, e.g. `drwxr-xr-x`.
+    pub mode: Option<String>,
+    /// Modification time, epoch seconds.
+    pub modified: Option<i64>,
+    pub link_target: Option<String>,
+    /// Symlink whose target is a directory.
+    pub link_to_dir: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PodDirListing {
+    /// Absolute path of the listed directory, as the container's shell sees it.
+    pub path: String,
+    /// Directories first, then by name.
+    pub entries: Vec<PodFsEntry>,
+    /// More entries exist than were returned.
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PodFileContent {
+    pub path: String,
+    /// Size on disk, when the container could report it.
+    pub size: Option<u64>,
+    /// UTF-8 text (not binary).
+    pub text: Option<String>,
+    /// Raw bytes of binary content.
+    pub base64: Option<String>,
+    /// Only the first `max_bytes` were read.
+    pub truncated: bool,
+    pub binary: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PodFsTransfer {
+    /// Local file (download) or remote file (upload) that was written.
+    pub path: String,
+    pub bytes: u64,
+    /// The download is a tar archive of a directory.
+    pub archive: bool,
+}
+
+// ---------------------------------------------------------------------------
 // Metrics & overview
 // ---------------------------------------------------------------------------
 
@@ -550,6 +695,8 @@ pub struct AppInfo {
 
 /// Default image for node shells: small, multi-arch, ships `nsenter` (busybox).
 pub const DEFAULT_NODE_SHELL_IMAGE: &str = "docker.io/library/alpine:3.20";
+/// Default image for ephemeral debug containers (`kubectl debug`).
+pub const DEFAULT_DEBUG_IMAGE: &str = "docker.io/library/busybox:1.36";
 
 /// User preferences. Every field has a default so older or hand-edited
 /// `settings.json` files keep loading after new fields are added.
@@ -564,6 +711,8 @@ pub struct Settings {
     pub log_tail_lines: u32,
     pub confirm_destructive: bool,
     pub node_shell_image: String,
+    /// Default image for ephemeral debug containers.
+    pub debug_image: String,
 }
 
 impl Default for Settings {
@@ -577,6 +726,7 @@ impl Default for Settings {
             log_tail_lines: 1000,
             confirm_destructive: true,
             node_shell_image: DEFAULT_NODE_SHELL_IMAGE.to_string(),
+            debug_image: DEFAULT_DEBUG_IMAGE.to_string(),
         }
     }
 }
@@ -805,6 +955,7 @@ mod tests {
         assert_eq!(s.log_tail_lines, 1000);
         assert!(s.confirm_destructive);
         assert_eq!(s.node_shell_image, DEFAULT_NODE_SHELL_IMAGE);
+        assert_eq!(s.debug_image, DEFAULT_DEBUG_IMAGE);
         assert!(s.kubeconfig_sync_paths.is_empty());
     }
 

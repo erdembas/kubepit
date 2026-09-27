@@ -10,7 +10,7 @@ import { copyText, openExternal } from '../shared/platform';
 import { useXtermSearch } from '../shared/useXtermSearch';
 import { XtermSearchBar } from '../shared/XtermSearchBar';
 import { NERD_FONT_STACK, isDockToggleShortcut, isFindShortcut } from '../shared/xtermUtils';
-import { formatLogLine } from './format';
+import { formatLogLine, type LogFormatOptions } from './format';
 import { MAX_LOG_LINES, type LogEntry } from './logBuffer';
 import {
   appendLineWithMarker,
@@ -37,6 +37,8 @@ interface Props {
   wrap: boolean;
   /** Lines that should be on screen, for re-rendering after wrap / width changes. */
   getEntries: () => LogEntry[];
+  /** Bytes for one entry; defaults to `formatLogLine(entry.text)` (merged logs add a prefix). */
+  formatEntry?: (entry: LogEntry, opts: LogFormatOptions) => string;
   onContextMenu: (seq: number | null, x: number, y: number, selection: string) => void;
 }
 
@@ -54,7 +56,7 @@ interface Engine {
  * right-click resolves to its source line.
  */
 export const LogTerminal = forwardRef<LogTerminalHandle, Props>(function LogTerminal(
-  { active, isDark, fontSize, wrap, getEntries, onContextMenu },
+  { active, isDark, fontSize, wrap, getEntries, formatEntry, onContextMenu },
   ref,
 ) {
   i18n.useLocale();
@@ -72,6 +74,8 @@ export const LogTerminal = forwardRef<LogTerminalHandle, Props>(function LogTerm
   getEntriesRef.current = getEntries;
   const onContextMenuRef = useRef(onContextMenu);
   onContextMenuRef.current = onContextMenu;
+  const formatEntryRef = useRef(formatEntry);
+  formatEntryRef.current = formatEntry;
   const initial = useRef({ isDark, fontSize });
 
   useImperativeHandle(
@@ -156,7 +160,9 @@ export const LogTerminal = forwardRef<LogTerminalHandle, Props>(function LogTerm
         to: batch.length,
         append: (index) => {
           const entry = batch[index]!;
-          appendLineWithMarker(term, entry.seq, formatLogLine(entry.text, opts), markers);
+          const format = formatEntryRef.current;
+          const bytes = format ? format(entry, opts) : formatLogLine(entry.text, opts);
+          appendLineWithMarker(term, entry.seq, bytes, markers);
           return entry.text.length + 16;
         },
         drain: (done) => term.write('', done),
