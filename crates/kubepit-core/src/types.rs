@@ -438,6 +438,168 @@ pub struct HelmReleaseDetail {
     pub notes: String,
 }
 
+// -- Helm charts: repositories, catalog, install / upgrade (helm_charts.rs) --
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HelmRepo {
+    pub name: String,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HelmRepoAddOptions {
+    pub username: Option<String>,
+    /// Fed to `helm repo add --password-stdin`; never on the command line.
+    pub password: Option<String>,
+    pub insecure_skip_tls_verify: bool,
+    pub pass_credentials: bool,
+    /// Replace an existing repository with the same name.
+    pub force_update: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HelmRepoUpdateResult {
+    pub name: String,
+    pub ok: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HelmSearchOptions {
+    /// Every version instead of only the newest per chart.
+    pub versions: bool,
+    /// Include pre-release versions.
+    pub devel: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HelmChartSummary {
+    /// `repo/chart`, the reference `helm install` takes.
+    pub name: String,
+    pub repo: String,
+    pub chart: String,
+    pub version: String,
+    pub app_version: Option<String>,
+    pub description: String,
+    pub deprecated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HelmChartVersion {
+    pub version: String,
+    pub app_version: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HelmHubChart {
+    /// Artifact Hub package page.
+    pub url: String,
+    pub version: String,
+    pub app_version: Option<String>,
+    pub description: String,
+    pub repository_name: String,
+    pub repository_url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HelmChartMaintainer {
+    pub name: String,
+    pub email: Option<String>,
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HelmChartDependency {
+    pub name: String,
+    pub version: Option<String>,
+    pub repository: Option<String>,
+    pub condition: Option<String>,
+}
+
+/// `Chart.yaml` as `helm show chart` prints it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct HelmChartMetadata {
+    pub name: String,
+    pub version: String,
+    pub app_version: Option<String>,
+    pub description: Option<String>,
+    pub home: Option<String>,
+    pub icon: Option<String>,
+    pub sources: Vec<String>,
+    pub keywords: Vec<String>,
+    pub maintainers: Vec<HelmChartMaintainer>,
+    pub dependencies: Vec<HelmChartDependency>,
+    pub kube_version: Option<String>,
+    /// `application` or `library`.
+    pub chart_type: Option<String>,
+    pub deprecated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HelmChartDetail {
+    pub metadata: HelmChartMetadata,
+    pub readme: String,
+    pub values_yaml: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HelmInstallRequest {
+    pub release_name: String,
+    pub namespace: String,
+    /// `repo/chart` or `oci://…`.
+    pub chart_ref: String,
+    /// `None` installs the newest stable version.
+    pub version: Option<String>,
+    /// User values; empty installs the chart defaults.
+    pub values_yaml: String,
+    pub create_namespace: bool,
+    pub wait: bool,
+    pub atomic: bool,
+    pub timeout_secs: Option<u64>,
+    pub description: Option<String>,
+    /// Render against the cluster without changing it (allowed on read-only clusters).
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HelmUpgradeRequest {
+    pub chart_ref: String,
+    pub version: Option<String>,
+    pub values_yaml: String,
+    pub reuse_values: bool,
+    pub reset_values: bool,
+    pub wait: bool,
+    pub atomic: bool,
+    pub timeout_secs: Option<u64>,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HelmInstallResult {
+    /// The release helm reports (the would-be release for dry runs); `None`
+    /// when helm's output was not the expected JSON.
+    pub release: Option<HelmRelease>,
+    pub manifest: String,
+    pub notes: String,
+    /// User-supplied values of the (previewed) revision.
+    pub values_yaml: String,
+    pub computed_values_yaml: String,
+}
+
+/// One stored revision of a release.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HelmRevisionDetail {
+    pub release: HelmRelease,
+    pub values_yaml: String,
+    pub computed_values_yaml: String,
+    pub manifest: String,
+    pub notes: String,
+}
+
 // ---------------------------------------------------------------------------
 // Terminal
 // ---------------------------------------------------------------------------

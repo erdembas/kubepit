@@ -22,6 +22,7 @@
 //! | [`overview`]    | cluster dashboard aggregation                           |
 //! | [`portforward`] | local TCP → pod / service forwarding                    |
 //! | [`helm`]        | releases read from secrets, mutations via `helm`        |
+//! | [`helm_charts`] | repositories, chart catalog, install / upgrade          |
 //! | [`terminal`]    | PTY launch plans (local, exec, attach, node shell)      |
 //!
 //! Push notifications to the UI go through [`EventSink`]; streams take plain
@@ -35,6 +36,7 @@ pub mod discovery;
 pub mod error;
 pub mod events;
 pub mod helm;
+pub mod helm_charts;
 pub mod kubeconfig;
 pub mod logs;
 pub mod metrics;

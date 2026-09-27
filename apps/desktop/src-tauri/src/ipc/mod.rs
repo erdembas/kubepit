@@ -13,6 +13,7 @@
 mod app;
 mod clusters;
 mod helm;
+mod helm_charts;
 mod logs;
 mod metrics;
 mod portforward;
@@ -21,6 +22,7 @@ mod resources;
 pub use app::*;
 pub use clusters::*;
 pub use helm::*;
+pub use helm_charts::*;
 pub use logs::*;
 pub use metrics::*;
 pub use portforward::*;

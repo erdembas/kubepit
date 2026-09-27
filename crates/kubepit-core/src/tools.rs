@@ -91,9 +91,27 @@ pub struct CommandOutput {
 /// Run `program args…` with a timeout. The child is killed if the timeout
 /// fires or the calling future is dropped.
 pub async fn run(program: &Path, args: &[String], timeout: Duration) -> Result<CommandOutput> {
+    run_with_stdin(program, args, None, timeout).await
+}
+
+/// [`run`], optionally feeding `stdin` to the child (then closing it).
+/// Secrets such as `helm repo add --password-stdin` travel this way so they
+/// never appear in the process list, logs or error messages.
+pub async fn run_with_stdin(
+    program: &Path,
+    args: &[String],
+    stdin: Option<&[u8]>,
+    timeout: Duration,
+) -> Result<CommandOutput> {
+    use tokio::io::AsyncWriteExt as _;
+
     let mut cmd = tokio::process::Command::new(program);
     cmd.args(args)
-        .stdin(Stdio::null())
+        .stdin(if stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
@@ -102,10 +120,20 @@ pub async fn run(program: &Path, args: &[String], timeout: Duration) -> Result<C
         // Headless helper: never flash a console window.
         cmd.creation_flags(0x0800_0000);
     }
-    let child = cmd
+    let mut child = cmd
         .spawn()
         .with_context(|| format!("failed to start {}", program.display()))?;
-    let output = tokio::time::timeout(timeout, child.wait_with_output())
+    let input = child.stdin.take();
+    let finished = async move {
+        if let (Some(bytes), Some(mut pipe)) = (stdin, input) {
+            // A child that exits without reading stdin closes the pipe; its
+            // exit status tells the real story, so a broken pipe is ignored.
+            let _ = pipe.write_all(bytes).await;
+            drop(pipe);
+        }
+        child.wait_with_output().await
+    };
+    let output = tokio::time::timeout(timeout, finished)
         .await
         .map_err(|_| {
             anyhow!(
@@ -246,5 +274,31 @@ mod tests {
         )
         .await;
         assert!(slow.unwrap_err().to_string().contains("did not finish"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn run_with_stdin_feeds_the_child() {
+        let sh = PathBuf::from("/bin/sh");
+        let out = run_with_stdin(
+            &sh,
+            &["-c".into(), "read line; echo \"got:$line\"".into()],
+            Some(b"s3cret\n"),
+            PROBE_TIMEOUT,
+        )
+        .await
+        .unwrap();
+        assert!(out.success);
+        assert_eq!(out.stdout.trim(), "got:s3cret");
+        // A child that never reads stdin still finishes normally.
+        let out = run_with_stdin(
+            &sh,
+            &["-c".into(), "exit 0".into()],
+            Some(b"x"),
+            PROBE_TIMEOUT,
+        )
+        .await
+        .unwrap();
+        assert!(out.success);
     }
 }

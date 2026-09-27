@@ -28,7 +28,7 @@ use crate::app::Kubepit;
 use crate::error::kube_error;
 use crate::paths::atomic_write;
 use crate::tools;
-use crate::types::{HelmRelease, HelmReleaseDetail};
+use crate::types::{ClusterDef, HelmRelease, HelmReleaseDetail};
 
 const HELM_SECRET_SELECTOR: &str = "owner=helm";
 const HELM_SECRET_TYPE: &str = "type=helm.sh/release.v1";
@@ -305,17 +305,31 @@ impl Kubepit {
     }
 
     /// Run `helm <args>` against the cluster's single-context kubeconfig.
-    async fn helm_exec(
+    pub(crate) async fn helm_exec(
         &self,
         cluster_id: &str,
+        namespace: &str,
+        action: &str,
+        args: Vec<String>,
+        timeout: Duration,
+    ) -> Result<String> {
+        let cluster = self.ensure_writable(cluster_id, action)?;
+        self.helm_exec_on(&cluster, namespace, action, args, timeout)
+            .await
+    }
+
+    /// [`Self::helm_exec`] without the read-only guard, for invocations that
+    /// cannot change the cluster (dry runs).
+    pub(crate) async fn helm_exec_on(
+        &self,
+        cluster: &ClusterDef,
         namespace: &str,
         action: &str,
         mut args: Vec<String>,
         timeout: Duration,
     ) -> Result<String> {
-        let cluster = self.ensure_writable(cluster_id, action)?;
         let helm = tools::require_helm(self.settings().helm_path.as_deref())?;
-        let kubeconfig = self.write_run_kubeconfig(&cluster)?;
+        let kubeconfig = self.write_run_kubeconfig(cluster)?;
         args.extend([
             "--kubeconfig".to_string(),
             kubeconfig.to_string_lossy().to_string(),
