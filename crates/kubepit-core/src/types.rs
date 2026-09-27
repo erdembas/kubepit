@@ -875,6 +875,8 @@ pub struct Settings {
     pub node_shell_image: String,
     /// Default image for ephemeral debug containers.
     pub debug_image: String,
+    /// Alerts and notifications (see `alerts.rs`).
+    pub alerts: crate::alerts::AlertSettings,
 }
 
 impl Default for Settings {
@@ -889,6 +891,7 @@ impl Default for Settings {
             confirm_destructive: true,
             node_shell_image: DEFAULT_NODE_SHELL_IMAGE.to_string(),
             debug_image: DEFAULT_DEBUG_IMAGE.to_string(),
+            alerts: crate::alerts::AlertSettings::default(),
         }
     }
 }

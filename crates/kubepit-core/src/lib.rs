@@ -33,6 +33,7 @@
 //! | [`workload_logs`] | merged logs of every pod of a workload (stern-style) |
 //! | [`debug_container`] | ephemeral debug containers (`kubectl debug`)       |
 //! | [`pod_fs`]      | container file browser and copy over exec              |
+//! | [`alerts`]      | transition alerts, dedupe, notification center history |
 //!
 //! Push notifications to the UI go through [`EventSink`]; streams take plain
 //! `Fn(T) -> bool` callbacks (return `false` to stop) that the desktop shell
@@ -77,6 +78,8 @@ pub mod rollout;
 pub mod debug_container;
 pub mod pod_fs;
 pub mod workload_logs;
+// Alerts: desktop notifications and the notification center.
+pub mod alerts;
 
 pub use app::Kubepit;
 pub use events::{EventSink, NullSink};

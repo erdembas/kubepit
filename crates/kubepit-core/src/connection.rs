@@ -241,6 +241,7 @@ impl Kubepit {
                 }
                 self.sink.cluster_status(&status);
                 self.touch_last_connected(id, now);
+                self.start_alert_monitor(id, sampler_client.clone());
                 self.start_metrics_sampler(id, sampler_client);
                 tracing::info!(cluster = %cluster.name, "connected");
                 Ok(status)
@@ -356,6 +357,7 @@ impl Kubepit {
     /// Forget a removed cluster entirely.
     pub(crate) fn forget_connection(&self, id: &str) {
         self.stop_cluster_work(id);
+        self.forget_alerts(id);
         self.pool.forget(id);
     }
 
@@ -363,6 +365,7 @@ impl Kubepit {
         self.watches.stop_cluster(id);
         self.log_streams.stop_cluster(id);
         self.metrics_history.stop_cluster(id);
+        self.stop_alert_monitor(id);
         self.forwards.stop_cluster(id, self.sink.as_ref());
     }
 

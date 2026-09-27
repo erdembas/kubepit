@@ -12,6 +12,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Result};
 use serde_json::Value;
 
+use crate::alerts::AlertCenter;
 use crate::connection::ClientPool;
 use crate::error::ReadOnlyError;
 use crate::events::EventSink;
@@ -37,12 +38,15 @@ pub struct Kubepit {
     // Fleet: per-cluster metrics samplers and running fleet-wide searches.
     pub(crate) metrics_history: MetricsHistory,
     pub(crate) fleet_searches: TaskRegistry,
+    // Alerts: per-cluster monitors and the notification center's history.
+    pub(crate) alerts: AlertCenter,
 }
 
 impl Kubepit {
     /// Open (or initialise) the data directory at `paths`.
     pub fn open(paths: Paths, sink: Arc<dyn EventSink>) -> Result<Self> {
         let store = Store::open(paths)?;
+        let alerts = AlertCenter::new(store.settings().alerts);
         Ok(Self {
             store,
             sink,
@@ -54,6 +58,7 @@ impl Kubepit {
             metrics_gate: MetricsGate::default(),
             metrics_history: MetricsHistory::default(),
             fleet_searches: TaskRegistry::default(),
+            alerts,
         })
     }
 
@@ -127,7 +132,10 @@ impl Kubepit {
         if settings.terminal_font_size == 0 {
             settings.terminal_font_size = Settings::default().terminal_font_size;
         }
-        self.store.set_settings(settings)
+        settings.alerts = settings.alerts.normalized();
+        let saved = self.store.set_settings(settings)?;
+        self.apply_alert_settings(&saved.alerts);
+        Ok(saved)
     }
 
     pub fn workspace_load(&self) -> Result<Option<Value>> {
@@ -145,6 +153,7 @@ impl Kubepit {
         self.log_streams.stop_all();
         self.metrics_history.stop_all();
         self.fleet_searches.stop_all();
+        self.alerts.stop_all();
         self.forwards.stop_all(self.sink.as_ref());
         let cleanup = self.cleanup_all_node_shells();
         if tokio::time::timeout(Duration::from_secs(4), cleanup)
