@@ -147,3 +147,47 @@ Every diff (apply review, rollout revisions, Helm revisions, compare and
 drift) renders through `components/workbench/common/DiffView.tsx` on top of
 Monaco's diff editor, with `lib/diff.ts` (Myers line diff) for stats and the
 fallback view.
+
+## Health checks & certificates
+
+- `lib/kube/health/` is a Popeye-style rules engine in pure TS, one file per
+  rule family (containers, pods, workloads, network, config, storage,
+  policy, nodes, certificates). `rules.ts` is the catalog: stable rule ids
+  (persisted in ignores), category, default severity, the lists a rule
+  needs and a fix hint. Every finding points at one object. Pod-spec rules
+  run once per workload template (bare pods only when no loaded controller
+  covers them), so one bad template is one finding, not one per replica.
+- `engine.ts` runs the rule families as passes (the async runner yields
+  between them), caps findings per rule (400) and objects per list
+  (20 000). `summarize` applies ignores and scores 0–100: the mean over
+  kinds of per-object scores (worst finding: critical 0, warning 50,
+  info 90), graded A–F.
+- `components/workbench/health/useHealthScan.ts` feeds the engine from the
+  shared watch cache (the tables' keys, so watches are shared) with 15
+  built-in lists plus cert-manager `Certificate`s when served. A scan runs
+  once every list synced or failed (10 s timeout), at most every 3 s, and is
+  never cancelled by newer data; rules whose lists could not be read (RBAC)
+  are skipped instead of guessing. The last scan per cluster is published
+  to `useHealthStore` for the details panels.
+- UI: the `@health` view (score ring, severity and category counts,
+  filters, findings grouped by rule, ignore / restore), a summary card on
+  the cluster overview (automatic up to 1 500 pods, on request above) and
+  a banner in the details panel (object-local rules evaluated on the live
+  object plus the cross-object findings of the last scan).
+- Ignores are per cluster and rule, optionally per namespace, stored as
+  `healthIgnores` in `workspace.json` (opaque to the backend) and synced
+  across windows with the rest of the workspace snapshot.
+- `lib/kube/x509.ts` is a dependency-free PEM/DER X.509 reader (names,
+  SANs, validity, serial, algorithms, CA flag, bundles). Secrets and
+  ConfigMaps show certificate cards, the Secrets table an "Expires" column,
+  cert-manager `Certificate`s a summary section. Only `CERTIFICATE` blocks
+  are decoded; keys are never parsed or shown, and signatures are not
+  verified.
+- `client_cert.rs` (`cluster_client_certificate`) reads the kubeconfig
+  user's client certificate (inline data or file; the cluster is never
+  contacted) with a minimal DER reader. The cluster card and overview warn
+  from 30 days before expiry.
+- Demo: `mock/fixtures/certs.ts` holds throwaway openssl certificates whose
+  validity is re-stamped relative to the demo boot (so one stays "expiring
+  in 12 days" and one "expired 9 days ago"); `mock/fixtures/health.ts`
+  adds leftovers that trigger the other rules.
