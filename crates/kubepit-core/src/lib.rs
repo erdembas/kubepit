@@ -24,6 +24,9 @@
 //! | [`helm`]        | releases read from secrets, mutations via `helm`        |
 //! | [`terminal`]    | PTY launch plans (local, exec, attach, node shell)      |
 //! | [`access`]      | RBAC self-reviews (can-i, rules, whoami)                |
+//! | [`rollout`]     | rollout history and undo (ReplicaSets, ControllerRevs)  |
+//! | [`images`]      | set image (strategic merge of container images)         |
+//! | [`dry_run`]     | server-side dry run of manifests before apply           |
 //!
 //! Push notifications to the UI go through [`EventSink`]; streams take plain
 //! `Fn(T) -> bool` callbacks (return `false` to stop) that the desktop shell
@@ -56,6 +59,11 @@ pub mod terminal;
 pub mod tools;
 pub mod types;
 pub mod watch;
+
+// Workload operations: rollout history / undo, set image, dry-run review.
+pub mod dry_run;
+pub mod images;
+pub mod rollout;
 
 pub use app::Kubepit;
 pub use events::{EventSink, NullSink};

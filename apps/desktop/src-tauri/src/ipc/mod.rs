@@ -18,6 +18,7 @@ mod logs;
 mod metrics;
 mod portforward;
 mod resources;
+mod workloads;
 
 pub use access::*;
 pub use app::*;
@@ -27,6 +28,7 @@ pub use logs::*;
 pub use metrics::*;
 pub use portforward::*;
 pub use resources::*;
+pub use workloads::*;
 
 use kubepit_core::error::to_ipc;
 

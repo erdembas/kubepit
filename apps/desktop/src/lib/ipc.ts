@@ -12,7 +12,9 @@ import type {
   ClusterInput,
   ClusterOverview,
   ClusterStatus,
+  ContainerImage,
   DeleteOptions,
+  DryRunResult,
   Gvk,
   HelmRelease,
   HelmReleaseDetail,
@@ -27,6 +29,7 @@ import type {
   PortForward,
   PortForwardRequest,
   ResourceList,
+  RolloutRevision,
   Settings,
   WatchBatch,
   WhoAmI,
@@ -146,6 +149,37 @@ export const ipc = {
   /** Cordon + evict every pod except DaemonSet and mirror pods. */
   nodeDrain: (clusterId: ClusterId, name: string, force: boolean) =>
     call<void>('node_drain', { clusterId, name, force }),
+
+  // -- Workload operations --------------------------------------------------
+  /** Revisions of a Deployment / StatefulSet / DaemonSet, newest first. */
+  rolloutHistory: (clusterId: ClusterId, gvk: Gvk, namespace: string, name: string) =>
+    call<RolloutRevision[]>('rollout_history', { clusterId, gvk, namespace, name }),
+  /** `kubectl rollout undo --to-revision`; `revision: 0` = the previous revision. */
+  rolloutUndo: (
+    clusterId: ClusterId,
+    gvk: Gvk,
+    namespace: string,
+    name: string,
+    revision: number,
+  ) => call<void>('rollout_undo', { clusterId, gvk, namespace, name, revision }),
+  /** `kubectl set image`; workloads also record a change-cause. Returns the patched object. */
+  resourceSetImage: (
+    clusterId: ClusterId,
+    gvk: Gvk,
+    namespace: string | null,
+    name: string,
+    images: ContainerImage[],
+  ) => call<KubeObject>('resource_set_image', { clusterId, gvk, namespace, name, images }),
+  /**
+   * The same requests as `resourceApplyYaml`, with `dryRun=All`: one result
+   * per document, failures included. Allowed on read-only clusters.
+   */
+  resourceDryRunYaml: (
+    clusterId: ClusterId,
+    yaml: string,
+    mode: ApplyMode,
+    namespace: string | null,
+  ) => call<DryRunResult[]>('resource_dry_run_yaml', { clusterId, yaml, mode, namespace }),
 
   // -- Logs -----------------------------------------------------------------
   podLogsStream: (

@@ -1,6 +1,6 @@
 import * as i18n from '@/i18n';
-import { useMemo, useRef, useState, type ReactNode } from 'react';
-import { DiffEditor, type MonacoDiffEditor } from '@monaco-editor/react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { DiffEditor, type DiffEditorProps, type MonacoDiffEditor } from '@monaco-editor/react';
 import {
   ArrowRight,
   ChevronDown,
@@ -126,7 +126,7 @@ export function DiffView({
         </div>
       ) : monaco ? (
         <div className="relative min-h-0 flex-1">
-          <DiffEditor
+          <SafeDiffEditor
             original={original}
             modified={modified}
             language={language}
@@ -171,6 +171,36 @@ export function DiffView({
         <UnifiedDiff ops={ops} />
       )}
     </div>
+  );
+}
+
+/**
+ * `DiffEditor` that detaches its models before @monaco-editor/react disposes
+ * them on unmount; otherwise Monaco throws "TextModel got disposed before
+ * DiffEditorWidget model got reset". React runs unmount cleanups parent
+ * first, so this wrapper's cleanup precedes the library's.
+ */
+function SafeDiffEditor({ onMount, ...props }: DiffEditorProps) {
+  const editorRef = useRef<MonacoDiffEditor | null>(null);
+  useEffect(
+    () => () => {
+      const editor = editorRef.current;
+      const model = editor?.getModel();
+      if (!editor || !model) return;
+      editor.setModel(null);
+      model.original.dispose();
+      model.modified.dispose();
+    },
+    [],
+  );
+  return (
+    <DiffEditor
+      {...props}
+      onMount={(editor, monaco) => {
+        editorRef.current = editor;
+        onMount?.(editor, monaco);
+      }}
+    />
   );
 }
 

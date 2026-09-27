@@ -170,8 +170,17 @@ fn events_resource() -> ApiResource {
     }
 }
 
+/// Where one manifest document goes (see [`Kubepit::document_target`]).
+pub(crate) struct DocTarget {
+    pub api: Api<DynamicObject>,
+    pub ar: ApiResource,
+    /// `None` for `generateName` objects.
+    pub name: Option<String>,
+    pub namespace: Option<String>,
+}
+
 /// Api scoped for a *named* object: namespaced kinds need a namespace.
-fn object_api(
+pub(crate) fn object_api(
     client: kube::Client,
     gvk: &Gvk,
     namespace: Option<&str>,
@@ -280,9 +289,13 @@ impl Kubepit {
         let mut results = Vec::with_capacity(total);
         for (index, mut doc) in docs.into_iter().enumerate() {
             let position = index + 1;
-            let result = self
-                .apply_document(&client, cluster_id, &mut doc, mode, namespace)
-                .await;
+            let result = match self
+                .document_target(&client, cluster_id, &mut doc, namespace)
+                .await
+            {
+                Ok(target) => self.apply_document(&target, &mut doc, mode, false).await,
+                Err(e) => Err(e),
+            };
             match result {
                 Ok(obj) => results.push(obj),
                 Err(e) => {
@@ -305,14 +318,16 @@ impl Kubepit {
         Ok(results)
     }
 
-    async fn apply_document(
+    /// Resolve a document's kind through discovery and settle its namespace:
+    /// namespaced objects keep theirs, else get `namespace`, else `default`;
+    /// cluster-scoped objects lose any namespace they carry.
+    pub(crate) async fn document_target(
         &self,
         client: &kube::Client,
         cluster_id: &str,
         doc: &mut Value,
-        mode: ApplyMode,
         namespace: Option<&str>,
-    ) -> Result<KubeObject> {
+    ) -> Result<DocTarget> {
         let api_version = str_field(doc, "/apiVersion")
             .context("missing apiVersion")?
             .to_string();
@@ -342,17 +357,36 @@ impl Kubepit {
         };
         let api = dynamic_api(client.clone(), &ar, info.namespaced, target_ns.as_deref());
         let name = str_field(doc, "/metadata/name").map(str::to_string);
+        Ok(DocTarget {
+            api,
+            ar,
+            name,
+            namespace: target_ns,
+        })
+    }
 
+    /// Send one document to its target. With `dry_run` the server admits,
+    /// validates and defaults the request (`dryRun=All`) without persisting it.
+    pub(crate) async fn apply_document(
+        &self,
+        target: &DocTarget,
+        doc: &mut Value,
+        mode: ApplyMode,
+        dry_run: bool,
+    ) -> Result<KubeObject> {
+        let api = &target.api;
+        let name = target.name.clone();
+        let post = PostParams {
+            dry_run,
+            ..PostParams::default()
+        };
         let result = match mode {
             ApplyMode::Apply => {
                 let name = name.context("missing metadata.name")?;
                 strip_server_fields(doc, false, false);
-                api.patch(
-                    &name,
-                    &PatchParams::apply(FIELD_MANAGER).force(),
-                    &Patch::Apply(&*doc),
-                )
-                .await
+                let mut params = PatchParams::apply(FIELD_MANAGER).force();
+                params.dry_run = dry_run;
+                api.patch(&name, &params, &Patch::Apply(&*doc)).await
             }
             ApplyMode::Replace => {
                 let name = name.context("missing metadata.name")?;
@@ -364,7 +398,7 @@ impl Kubepit {
                 strip_managed_fields(doc);
                 let obj: DynamicObject =
                     serde_json::from_value(doc.clone()).context("invalid object")?;
-                api.replace(&name, &PostParams::default(), &obj).await
+                api.replace(&name, &post, &obj).await
             }
             ApplyMode::Create => {
                 if name.is_none() && str_field(doc, "/metadata/generateName").is_none() {
@@ -373,10 +407,10 @@ impl Kubepit {
                 strip_server_fields(doc, false, true);
                 let obj: DynamicObject =
                     serde_json::from_value(doc.clone()).context("invalid object")?;
-                api.create(&PostParams::default(), &obj).await
+                api.create(&post, &obj).await
             }
         };
-        Ok(to_kube_object(result.map_err(kube_error)?, &ar))
+        Ok(to_kube_object(result.map_err(kube_error)?, &target.ar))
     }
 
     /// `resource_delete`.

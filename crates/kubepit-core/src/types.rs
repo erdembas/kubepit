@@ -236,6 +236,59 @@ pub struct DeleteOptions {
     pub grace_period_seconds: Option<i64>,
 }
 
+// -- Workload operations (rollout history, set image, dry run) ---------------
+
+/// One container's image: listed by rollout history, sent by set image.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContainerImage {
+    pub container: String,
+    pub image: String,
+    #[serde(default)]
+    pub init: bool,
+}
+
+/// One rollout revision: a Deployment's ReplicaSet, or a StatefulSet's /
+/// DaemonSet's ControllerRevision.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RolloutRevision {
+    pub revision: i64,
+    /// Name of the ReplicaSet or ControllerRevision.
+    pub name: String,
+    pub created: Option<String>,
+    pub change_cause: Option<String>,
+    pub images: Vec<ContainerImage>,
+    /// Pod template (`pod-template-hash` / `controller-revision-hash` stripped).
+    pub template: Value,
+    /// ReplicaSets only: `status.replicas` / `status.readyReplicas`.
+    pub replicas: Option<i64>,
+    pub ready_replicas: Option<i64>,
+    /// The revision the workload's spec currently runs.
+    pub current: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DryRunOperation {
+    Create,
+    Update,
+    Unchanged,
+}
+
+/// Outcome of a server-side dry run for one document. `operation` is what
+/// the request would do (create when nothing is live); `error` is set when
+/// the server (or Kubepit) rejected the document.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DryRunResult {
+    pub api_version: String,
+    pub kind: String,
+    pub name: String,
+    pub namespace: Option<String>,
+    pub operation: DryRunOperation,
+    pub live: Option<KubeObject>,
+    pub result: Option<KubeObject>,
+    pub error: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Logs
 // ---------------------------------------------------------------------------

@@ -3,6 +3,8 @@ import './app';
 import './resources';
 import './dock';
 import './access';
+// Registered after './resources': it wraps `resource_patch` (resuming a paused rollout).
+import './workloadOps';
 
 export { mockListen } from './bus';
 

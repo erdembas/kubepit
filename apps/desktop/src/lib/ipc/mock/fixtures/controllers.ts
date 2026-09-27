@@ -101,6 +101,8 @@ export function syncDeployment(db: ClusterDb, dep: KubeObject) {
 export function syncStatefulSet(db: ClusterDb, sts: KubeObject) {
   const pods = podsOf(db, sts).filter(alive);
   const ready = pods.filter(isReady).length;
+  // Keep the revision the rollout recorded (see rollouts.ts) once there is one.
+  const recorded = sts.status?.updateRevision as string | undefined;
   sts.status = {
     observedGeneration: sts.metadata.generation ?? 1,
     replicas: pods.length,
@@ -110,6 +112,7 @@ export function syncStatefulSet(db: ClusterDb, sts: KubeObject) {
     availableReplicas: ready,
     currentRevision: `${sts.metadata.name}-${hexId(db.rand, 10)}`,
     updateRevision: `${sts.metadata.name}-${hexId(db.rand, 10)}`,
+    ...(recorded ? { currentRevision: recorded, updateRevision: recorded } : {}),
     collisionCount: 0,
   };
   put(db, sts);
