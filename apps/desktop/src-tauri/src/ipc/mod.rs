@@ -39,6 +39,9 @@ mod connectivity;
 mod manifests;
 // Change timeline: in-memory change journal.
 mod changes;
+// Upgrade readiness (deprecated APIs), Helm values schemas and upgrade preview.
+mod helm_preview;
+mod upgrade;
 
 pub use access::*;
 pub use alerts::*;
@@ -49,6 +52,7 @@ pub use connectivity::*;
 pub use fleet::*;
 pub use helm::*;
 pub use helm_charts::*;
+pub use helm_preview::*;
 pub use insights::*;
 pub use logs::*;
 pub use logs_debug::*;
@@ -59,6 +63,7 @@ pub use portforward::*;
 pub use prometheus::*;
 pub use resources::*;
 pub use updater::*;
+pub use upgrade::*;
 pub use workloads::*;
 
 use kubepit_core::error::to_ipc;

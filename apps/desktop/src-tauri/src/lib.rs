@@ -152,6 +152,8 @@ pub fn run() {
             // Change timeline
             ipc::changes_list,
             ipc::changes_get,
+            // Upgrade readiness (deprecated APIs)
+            ipc::upgrade_readiness_scan,
             // Logs & debug
             ipc::workload_logs_stream,
             ipc::workload_logs_stop,
@@ -173,6 +175,10 @@ pub fn run() {
             ipc::helm_install,
             ipc::helm_upgrade,
             ipc::helm_release_revision,
+            // Helm values schemas and upgrade preview
+            ipc::helm_release_values_schema,
+            ipc::helm_chart_values_schema,
+            ipc::helm_upgrade_preview,
             // Alerts
             ipc::alerts_list,
             ipc::alerts_mark_read,
