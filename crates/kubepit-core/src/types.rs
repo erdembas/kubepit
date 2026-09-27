@@ -289,6 +289,108 @@ pub struct DryRunResult {
     pub error: Option<String>,
 }
 
+// -- Local manifests: render, diff and apply (manifests/) --------------------
+
+/// How a local folder is turned into objects. `auto` picks `kustomize` for a
+/// folder with a kustomization file, `helm` for a chart, `plain` otherwise.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ManifestSourceKind {
+    #[default]
+    Auto,
+    Plain,
+    Kustomize,
+    Helm,
+}
+
+/// `helm template` inputs; values files are absolute or relative to the chart.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestHelmOptions {
+    #[serde(default)]
+    pub release_name: String,
+    #[serde(default)]
+    pub namespace: Option<String>,
+    #[serde(default)]
+    pub values_files: Vec<String>,
+}
+
+/// What to render: one folder, or several files / folders (absolute paths).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestSource {
+    pub paths: Vec<String>,
+    #[serde(default)]
+    pub kind: ManifestSourceKind,
+    #[serde(default)]
+    pub helm: Option<ManifestHelmOptions>,
+}
+
+/// One rendered object with where it came from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ManifestDocument {
+    /// `group/Kind/namespace/name`, unique within a render (` #2` on repeats).
+    pub id: String,
+    /// Path relative to the render root (`/` separated), or helm's template path.
+    pub source: String,
+    /// Position within `source` (0-based).
+    pub index: usize,
+    /// First line of the document in `source` (1-based; 0 when unknown).
+    pub line: usize,
+    pub api_version: String,
+    pub kind: String,
+    pub name: String,
+    pub namespace: Option<String>,
+    /// The object as YAML (one document).
+    pub yaml: String,
+}
+
+/// A file or document that was skipped, with the reason.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestProblem {
+    pub source: String,
+    pub line: usize,
+    pub message: String,
+}
+
+/// A Kustomize directory or Helm chart found inside a plain folder (not
+/// rendered with it; the UI offers to open it on its own).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestNested {
+    pub path: String,
+    pub relative: String,
+    pub kind: ManifestSourceKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ManifestRender {
+    pub root: String,
+    /// The resolved kind (never `auto`).
+    pub kind: ManifestSourceKind,
+    /// Files read (plain) or rendered by the tool (kustomize / helm: 0).
+    pub files: usize,
+    pub documents: Vec<ManifestDocument>,
+    pub problems: Vec<ManifestProblem>,
+    pub nested: Vec<ManifestNested>,
+    /// The tool invocation, for display (`kubectl kustomize …`, `helm template …`).
+    pub command: Option<String>,
+    /// Changes whenever a file under the source changes (see `manifests_fingerprint`).
+    pub fingerprint: String,
+    pub rendered_at: i64,
+}
+
+/// A recently opened source (`~/.kubepit/manifests.json`), newest first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestRecent {
+    pub source: ManifestSource,
+    pub opened_at: i64,
+}
+
+/// Outcome of applying one document: the stored object or the error.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ManifestApplyResult {
+    pub object: Option<KubeObject>,
+    pub error: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Logs
 // ---------------------------------------------------------------------------
