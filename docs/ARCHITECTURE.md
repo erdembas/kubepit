@@ -34,7 +34,8 @@ single source of truth for the frontend ⇄ backend boundary.
 - Global events: `cluster://status` (ClusterStatus), `cluster://list`
   (ClusterDef[]), `portforward://changed` (PortForward[]), `terminal://exit`
   (`{ id, code }`), `workspace://changed` (`{ source, snapshot }`, the
-  window label that saved `workspace.json`).
+  window label that saved `workspace.json`), `portforward://saved`
+  (SavedPortForward[]), `kubeconfig://changed` (KubeconfigChanged).
 
 ## Windows
 
@@ -55,6 +56,10 @@ that created them (`src-tauri/src/windows.rs`).
 | `workspace.json`        | frontend | `WorkspaceSnapshot` (sections, ordering) — opaque   |
 | `kubeconfigs/<id>.yaml` | backend  | pasted kubeconfigs (`managed: true`), mode 0600     |
 | `run/<id>.kubeconfig`   | backend  | single-context kubeconfig for kubectl/helm/terminal |
+| `port_forwards.json`    | backend  | `SavedPortForward[]` (saved port forwards)          |
+
+With `settings.keychain_kubeconfigs` the pasted kubeconfigs live in the OS
+credential store instead of `kubeconfigs/` (see Connectivity).
 
 Kubepit never rewrites a user's kubeconfig files.
 
@@ -147,3 +152,52 @@ Every diff (apply review, rollout revisions, Helm revisions, compare and
 drift) renders through `components/workbench/common/DiffView.tsx` on top of
 Monaco's diff editor, with `lib/diff.ts` (Myers line diff) for stats and the
 fallback view.
+
+## Connectivity
+
+- **Saved port forwards** (`saved_forwards.rs`, `port_forwards.json`): one
+  definition per target (cluster, namespace, pod or service, remote port)
+  with a local port (`null` = any), an optional label and
+  `start_on_connect`. Live forwards carry `saved_id`; the UI merges both
+  lists (`lib/portForwards.ts`) so stopped saved forwards show as rows.
+  Forwards with `start_on_connect` start in the background after a
+  successful connect; a start that fails (busy local port, missing pod or
+  service) is listed in the `error` state without a listener, and
+  `port_forward_restart` re-binds any forward on the same local port.
+  Service forwards still re-resolve their pod per connection. Busy local
+  ports are detected up front (`port_forward_local_port`, same socket
+  options as the listener) with a nearby free port to offer.
+- **Kubeconfig watching** (`kubeconfig_watch.rs`): `notify` watches the
+  directories of every file discovery reads (`$KUBECONFIG`,
+  `~/.kube/config`, the files in `~/.kube`, sync paths) and of every
+  registered cluster's file, debounced by 500 ms. A change re-runs
+  discovery, reports contexts that appeared in the changed files and are
+  not registered, regenerates the `run/<id>.kubeconfig` of clusters sourced
+  from them and flags connected clusters whose kubeconfig changed, all in
+  one `kubeconfig://changed` event. The UI shows a small notice
+  (`components/connectivity/ConnectivityHost.tsx`) that opens the discover
+  dialog preselected or reconnects. User files are only read; the watch set
+  is re-evaluated every 3 s; roots are injectable (`DiscoveryRoots`) so
+  tests watch temp dirs.
+- **Proxies** (`proxy.rs`): `ClusterDef.proxy_url` (`http`, `https`,
+  `socks5`, `socks5h`, validated on both sides) overrides the kubeconfig
+  cluster's `proxy-url`. The effective URL is written into the
+  single-context kubeconfig, so the Rust client (kube `http-proxy` /
+  `socks5`) and `run/<id>.kubeconfig` agree. `socks5h://` is written as
+  `socks5://`, which client-go and kube both resolve through the proxy.
+  Changing the proxy drops the connection. `cluster_proxy_info` (masked
+  credentials) feeds the connect screen and the cluster overview.
+- **OS keychain** (`secrets.rs`, `credentials.rs`): opt-in
+  `settings.keychain_kubeconfigs`, changed only by `kubeconfig_storage_set`
+  (the regular settings save keeps it). Managed kubeconfigs then live in
+  the macOS Keychain / Windows Credential Manager / Secret Service under
+  service `io.github.erdembas.kubepit`, key `kubeconfig/<id>`, through the
+  `SecretStore` trait (`KeyringSecretStore` in the app, `MemorySecretStore`
+  in tests, `DisabledSecretStore` behind `Kubepit::open`, so tests never
+  reach the OS). Values larger than a store's entry limit (Windows: 2.5 KB)
+  are chunked; the header is written last. Toggling migrates entry by entry
+  (copy, verify, delete the original) and moves everything back if one
+  entry fails; reads fall back to the other location. In keychain mode
+  `run/<id>.kubeconfig` of managed clusters is written on connect (or when
+  a terminal or helm needs it) and deleted on disconnect, on exit and at
+  the next start.
