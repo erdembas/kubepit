@@ -23,10 +23,13 @@ mod resources;
 mod workloads;
 // Logs & debug: workload logs, log export, debug containers, container files.
 mod logs_debug;
+// Connectivity: saved port forwards, proxy info, keychain storage.
+mod connectivity;
 
 pub use access::*;
 pub use app::*;
 pub use clusters::*;
+pub use connectivity::*;
 pub use fleet::*;
 pub use helm::*;
 pub use helm_charts::*;

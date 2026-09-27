@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use kubepit_core::secrets::KeyringSecretStore;
 use kubepit_core::{EventSink, Kubepit, Paths};
 use tauri::{Emitter, Manager};
 
@@ -14,8 +15,14 @@ pub(crate) fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::
 
     let paths = Paths::from_env()?;
     let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app.handle().clone()));
-    let core = Arc::new(Kubepit::open(paths, sink)?);
+    // Keychain mode keeps pasted kubeconfigs in the OS credential store.
+    let core = Arc::new(Kubepit::open_with_secrets(
+        paths,
+        sink,
+        Arc::new(KeyringSecretStore),
+    )?);
     tracing::info!(data_dir = %core.paths().root().display(), "kubepit core ready");
+    core.start_kubeconfig_watch();
 
     let handle = app.handle().clone();
     let terminals = TerminalManager::with_exit_hook(Arc::new(move |id, code| {
