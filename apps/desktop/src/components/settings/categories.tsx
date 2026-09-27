@@ -9,6 +9,7 @@ import { ipc, isTauri } from '@/lib/ipc';
 import { useAppStore } from '@/store/useAppStore';
 import type { Settings } from '@/types';
 import { SettingsPageShell, SettingsSection } from './SettingsView';
+import { UpdatesSection } from './UpdatesSection';
 
 /** Local draft of backend settings with an explicit Save, like RunHQ's settings pages. */
 function useSettingsDraft() {
@@ -316,8 +317,9 @@ export function ToolsCategory({ description }: { description: string }) {
 export function AboutCategory({ description }: { description: string }) {
   i18n.useLocale();
   const appInfo = useAppStore((s) => s.appInfo);
+  const { draft, update, footer } = useSettingsDraft();
   return (
-    <SettingsPageShell description={description}>
+    <SettingsPageShell description={description} footer={footer}>
       <div className="glass mb-6 flex items-center gap-4 p-5">
         <span className="bg-accent/12 text-accent flex h-12 w-12 items-center justify-center rounded-xl">
           <KubepitMark className="h-7 w-7" />
@@ -334,6 +336,10 @@ export function AboutCategory({ description }: { description: string }) {
           )}
         </div>
       </div>
+      <UpdatesSection
+        autoCheck={draft ? draft.auto_check_updates : null}
+        onAutoCheck={(v) => update('auto_check_updates', v)}
+      />
       <SettingsSection
         title={i18n.t('Data folder')}
         description={i18n.t('Cluster registry, settings and workspace layout live here as JSON.')}

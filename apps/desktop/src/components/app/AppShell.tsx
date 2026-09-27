@@ -13,9 +13,11 @@ import { ConfirmHost } from '@/components/app/ConfirmHost';
 import { Toasts } from '@/components/app/Toasts';
 import { GlobalTooltip } from '@/components/ui/GlobalTooltip';
 import { useAppStore } from '@/store/useAppStore';
+import { useStartupUpdateCheck } from '@/store/useUpdaterStore';
 
 export function AppShell() {
   i18n.useLocale();
+  useStartupUpdateCheck();
   return (
     <div className="bg-surface text-fg relative flex h-screen flex-col overflow-hidden">
       <WorkspaceChrome />

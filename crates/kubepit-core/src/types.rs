@@ -875,6 +875,8 @@ pub struct Settings {
     pub node_shell_image: String,
     /// Default image for ephemeral debug containers.
     pub debug_image: String,
+    /// Check for a new release on startup (only in builds with updates configured).
+    pub auto_check_updates: bool,
 }
 
 impl Default for Settings {
@@ -889,6 +891,7 @@ impl Default for Settings {
             confirm_destructive: true,
             node_shell_image: DEFAULT_NODE_SHELL_IMAGE.to_string(),
             debug_image: DEFAULT_DEBUG_IMAGE.to_string(),
+            auto_check_updates: true,
         }
     }
 }

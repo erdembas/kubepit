@@ -30,11 +30,22 @@ pub fn run() {
         .with_target(false)
         .try_init();
 
-    tauri::Builder::default()
+    let context = tauri::generate_context!();
+    // Updates stay inert until a release signing key is configured (docs/RELEASING.md).
+    let updater = ipc::UpdaterState::new(kubepit_core::updates::UpdaterConfig::from_plugin_config(
+        context.config().plugins.0.get("updater"),
+    ));
+    let mut builder = tauri::Builder::default();
+    if updater.enabled() {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .manage(updater)
         .setup(setup_app)
         .invoke_handler(tauri::generate_handler![
             // App
@@ -44,6 +55,10 @@ pub fn run() {
             ipc::workspace_load,
             ipc::workspace_save,
             ipc::reveal_path,
+            // Updates
+            ipc::update_status,
+            ipc::update_check,
+            ipc::update_install,
             // Windows
             windows::window_open,
             // Kubeconfig discovery
@@ -141,7 +156,7 @@ pub fn run() {
                 windows::on_window_destroyed(window);
             }
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building Kubepit")
         .run(|app_handle, event| {
             if let tauri::RunEvent::Exit = event {

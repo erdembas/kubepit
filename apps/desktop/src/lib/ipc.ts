@@ -51,6 +51,9 @@ import type {
   ResourceList,
   RolloutRevision,
   Settings,
+  UpdateInfo,
+  UpdateProgress,
+  UpdaterStatus,
   WatchBatch,
   WhoAmI,
   WorkloadLogBatch,
@@ -75,6 +78,14 @@ export const ipc = {
   /** Saves and broadcasts `workspace://changed` to every window. */
   workspaceSave: (snapshot: WorkspaceSnapshot) => call<void>('workspace_save', { snapshot }),
   revealPath: (path: string) => call<void>('reveal_path', { path }),
+
+  // -- Updates (inert until release signing is configured) -----------------
+  updateStatus: () => call<UpdaterStatus>('update_status'),
+  /** Null when this is the newest version; rejects when updates are not configured. */
+  updateCheck: () => call<UpdateInfo | null>('update_check'),
+  /** Downloads and installs the update found by the last check; relaunch afterwards. */
+  updateInstall: (onEvent: (progress: UpdateProgress) => void) =>
+    callWithChannel<void, UpdateProgress>('update_install', {}, 'onEvent', onEvent),
 
   // -- Windows --------------------------------------------------------------
   /** Open another app window labelled `label` (`win-…`), cascaded from this one. */

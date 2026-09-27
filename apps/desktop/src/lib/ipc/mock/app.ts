@@ -164,6 +164,7 @@ let settings: Settings = {
   confirm_destructive: true,
   node_shell_image: 'docker.io/library/alpine:3.20',
   debug_image: 'docker.io/library/busybox:1.36',
+  auto_check_updates: true,
 };
 
 const WORKSPACE_KEY = 'kubepit.demo.workspace';
