@@ -90,6 +90,19 @@ export function makePod(db: ClusterDb, input: PodInput): KubeObject {
   const variant = input.variant ?? 'ok';
   const name = input.name ?? `${input.generateName}${suffix(db.rand)}`;
   const spec = structuredClone(input.template.spec) as Record<string, unknown>;
+  // Like the StatefulSet controller: each replica mounts its own claims.
+  if (input.owner?.kind === 'StatefulSet') {
+    const claims =
+      (input.owner.spec?.volumeClaimTemplates as Array<{ metadata: { name: string } }>) ?? [];
+    if (claims.length)
+      spec.volumes = [
+        ...((spec.volumes as unknown[] | undefined) ?? []),
+        ...claims.map((c) => ({
+          name: c.metadata.name,
+          persistentVolumeClaim: { claimName: `${c.metadata.name}-${name}` },
+        })),
+      ];
+  }
   const pending = variant === 'pending';
   const nodeName = pending ? null : (input.node ?? scheduleNode(db, input.template));
   if (nodeName) spec.nodeName = nodeName;

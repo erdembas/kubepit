@@ -183,6 +183,7 @@ export function buildStorage(db: ClusterDb) {
   if (db.profile.platform !== 'kind') {
     claim(db, 'monitoring', 'prometheus-server', '100Gi', 120 * DAY, { app: 'prometheus-server' });
     claim(db, 'monitoring', 'storage-loki-0', '20Gi', 45 * DAY, { app: 'loki' });
+    claim(db, 'web', 'image-cache', '20Gi', 70 * DAY, { app: 'image-resizer' });
   }
   claim(db, 'monitoring', 'grafana', '10Gi', 120 * DAY, { app: 'grafana' });
   if (db.profile.troubled)
