@@ -23,6 +23,8 @@ mod resources;
 mod workloads;
 // Logs & debug: workload logs, log export, debug containers, container files.
 mod logs_debug;
+// Local manifests: render folders, diff / apply to clusters.
+mod manifests;
 
 pub use access::*;
 pub use app::*;
@@ -32,6 +34,7 @@ pub use helm::*;
 pub use helm_charts::*;
 pub use logs::*;
 pub use logs_debug::*;
+pub use manifests::*;
 pub use metrics::*;
 pub use portforward::*;
 pub use resources::*;

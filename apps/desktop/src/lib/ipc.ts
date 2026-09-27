@@ -36,6 +36,10 @@ import type {
   KubeObject,
   LogChunk,
   LogOptions,
+  ManifestApplyResult,
+  ManifestRecent,
+  ManifestRender,
+  ManifestSource,
   MetricsHistoryQuery,
   MetricsResult,
   MetricsSeries,
@@ -208,6 +212,22 @@ export const ipc = {
     mode: ApplyMode,
     namespace: string | null,
   ) => call<DryRunResult[]>('resource_dry_run_yaml', { clusterId, yaml, mode, namespace }),
+
+  // -- Local manifests (render locally; diff / apply per cluster) -----------
+  /** Reads a plain folder or runs `kubectl kustomize` / `helm template`; never touches a cluster. */
+  manifestsRender: (source: ManifestSource) => call<ManifestRender>('manifests_render', { source }),
+  /** Changes whenever a file the source depends on changes. */
+  manifestsFingerprint: (source: ManifestSource) =>
+    call<string>('manifests_fingerprint', { source }),
+  manifestsRecentList: () => call<ManifestRecent[]>('manifests_recent_list'),
+  manifestsRecentRemove: (paths: string[]) =>
+    call<ManifestRecent[]>('manifests_recent_remove', { paths }),
+  /** Server-side apply dry run, one result per document (one object each). Allowed on read-only clusters. */
+  manifestsDryRun: (clusterId: ClusterId, documents: string[], namespace: string | null) =>
+    call<DryRunResult[]>('manifests_dry_run', { clusterId, documents, namespace }),
+  /** Server-side apply in dependency order, continuing past failures. Refused on read-only clusters. */
+  manifestsApply: (clusterId: ClusterId, documents: string[], namespace: string | null) =>
+    call<ManifestApplyResult[]>('manifests_apply', { clusterId, documents, namespace }),
 
   // -- Logs -----------------------------------------------------------------
   podLogsStream: (

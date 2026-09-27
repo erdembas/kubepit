@@ -5,6 +5,8 @@ import './dock';
 import './access';
 // Registered after './resources': it wraps `resource_patch` (resuming a paused rollout).
 import './workloadOps';
+// Registered after './workloadOps': it runs on `resource_dry_run_yaml` / `resource_apply_yaml`.
+import './manifests';
 import './fleet';
 import './logsDebug';
 import './helmCharts';
