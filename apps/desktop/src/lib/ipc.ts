@@ -14,6 +14,7 @@ import type {
   ClusterId,
   ClusterInput,
   ClusterOverview,
+  ClusterProxyInfo,
   ClusterStatus,
   ContainerImage,
   DeleteOptions,
@@ -35,8 +36,10 @@ import type {
   HelmRevisionDetail,
   HelmSearchOptions,
   HelmUpgradeRequest,
+  KubeconfigChanged,
   KubeconfigSource,
   KubeObject,
+  LocalPortStatus,
   LogChunk,
   LogOptions,
   MetricsHistoryQuery,
@@ -61,6 +64,8 @@ import type {
   PromQueryResult,
   ResourceList,
   RolloutRevision,
+  SavedPortForward,
+  SavedPortForwardInput,
   Settings,
   UpdateInfo,
   UpdateProgress,
@@ -361,6 +366,27 @@ export const ipc = {
   portForwardStop: (id: string) => call<void>('port_forward_stop', { id }),
   portForwardList: () => call<PortForward[]>('port_forward_list'),
 
+  // -- Connectivity: saved port forwards, proxies, keychain storage ---------
+  portForwardSavedList: () => call<SavedPortForward[]>('port_forward_saved_list'),
+  /** Creates the definition of a target or updates the existing one; links a running forward. */
+  portForwardSave: (input: SavedPortForwardInput) =>
+    call<SavedPortForward>('port_forward_save', { input }),
+  /** Label, local port and start-on-connect only; the target is fixed. */
+  portForwardSavedUpdate: (saved: SavedPortForward) =>
+    call<SavedPortForward>('port_forward_saved_update', { saved }),
+  /** A running forward keeps running, unlinked. */
+  portForwardUnsave: (id: string) => call<void>('port_forward_unsave', { id }),
+  /** Connects the cluster if needed; resolves to the running forward. */
+  portForwardSavedStart: (id: string) => call<PortForward>('port_forward_saved_start', { id }),
+  /** Same target and local port; on failure the forward stays listed as `error`. */
+  portForwardRestart: (id: string) => call<PortForward>('port_forward_restart', { id }),
+  portForwardLocalPort: (port: number) =>
+    call<LocalPortStatus>('port_forward_local_port', { port }),
+  clusterProxyInfo: (id: ClusterId) => call<ClusterProxyInfo>('cluster_proxy_info', { id }),
+  /** Moves every pasted kubeconfig into (true) or out of the OS credential store. */
+  kubeconfigStorageSet: (keychain: boolean) =>
+    call<Settings>('kubeconfig_storage_set', { keychain }),
+
   // -- Helm -----------------------------------------------------------------
   helmReleases: (clusterId: ClusterId, namespace: string | null) =>
     call<HelmRelease[]>('helm_releases', { clusterId, namespace }),
@@ -440,6 +466,10 @@ export const events = {
     listenEvent<ClusterDef[]>('cluster://list', handler),
   onPortForwards: (handler: (forwards: PortForward[]) => void) =>
     listenEvent<PortForward[]>('portforward://changed', handler),
+  onSavedPortForwards: (handler: (saved: SavedPortForward[]) => void) =>
+    listenEvent<SavedPortForward[]>('portforward://saved', handler),
+  onKubeconfigChanged: (handler: (change: KubeconfigChanged) => void) =>
+    listenEvent<KubeconfigChanged>('kubeconfig://changed', handler),
   onTerminalExit: (handler: (payload: { id: string; code: number | null }) => void) =>
     listenEvent<{ id: string; code: number | null }>('terminal://exit', handler),
   onWorkspaceChanged: (handler: (payload: WorkspaceChanged) => void) =>

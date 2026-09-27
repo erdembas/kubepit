@@ -6,7 +6,7 @@
 //! it on top of `AppHandle::emit`, tests use [`NullSink`] or a recorder.
 
 use crate::alerts::AlertEvent;
-use crate::types::{ClusterDef, ClusterStatus, PortForward};
+use crate::types::{ClusterDef, ClusterStatus, KubeconfigChanged, PortForward, SavedPortForward};
 
 pub trait EventSink: Send + Sync + 'static {
     /// `cluster://status` — one cluster's connection state changed.
@@ -20,6 +20,10 @@ pub trait EventSink: Send + Sync + 'static {
     fn alert(&self, _event: &AlertEvent) {}
     /// `alerts://changed` — alerts were marked read or cleared.
     fn alerts_changed(&self) {}
+    /// `portforward://saved` — the full list of saved port forwards.
+    fn saved_port_forwards(&self, _saved: &[SavedPortForward]) {}
+    /// `kubeconfig://changed` — watched kubeconfig files changed.
+    fn kubeconfig_changed(&self, _change: &KubeconfigChanged) {}
 }
 
 /// Sink that drops every event (tests, headless tools).

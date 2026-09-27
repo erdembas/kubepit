@@ -1,12 +1,11 @@
 import * as i18n from '@/i18n';
-import { Copy, ExternalLink, Network, Square } from 'lucide-react';
-import { IconButton } from '@/components/ui/IconButton';
+import { Network } from 'lucide-react';
+import { ForwardRowActions, ForwardStateLabel } from '@/components/port-forwards/ForwardRowParts';
 import { clusterColor } from '@/lib/clusterMeta';
-import { cn } from '@/lib/cn';
 import { formatAge } from '@/lib/format';
-import { ipc } from '@/lib/ipc';
-import { openExternal } from '@/lib/openExternal';
+import { forwardRows, forwardTitle, rowLocalPort } from '@/lib/portForwards';
 import { useAppStore } from '@/store/useAppStore';
+import { useConnectivityStore } from '@/store/useConnectivityStore';
 import type { PortForward } from '@/types';
 
 export function forwardUrl(forward: PortForward) {
@@ -26,8 +25,10 @@ export async function copyText(text: string) {
 export function PortForwardsPanel() {
   i18n.useLocale();
   const forwards = useAppStore((s) => s.portForwards);
+  const saved = useConnectivityStore((s) => s.savedForwards);
   const clusters = useAppStore((s) => s.clusters);
   const openMainTab = useAppStore((s) => s.openMainTab);
+  const rows = forwardRows(forwards, saved);
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col">
@@ -46,26 +47,23 @@ export function PortForwardsPanel() {
         </button>
       </header>
       <div className="overlay-scroll min-h-0 flex-1 overflow-y-auto p-2">
-        {forwards.map((forward) => {
-          const cluster = clusters.find((c) => c.id === forward.cluster_id);
+        {rows.map((row) => {
+          const cluster = clusters.find((c) => c.id === row.cluster_id);
+          const local = rowLocalPort(row);
           return (
-            <div key={forward.id} className="group hover:bg-fg/4 mb-1 rounded-md p-2.5">
+            <div key={row.key} className="group hover:bg-fg/4 mb-1 rounded-md p-2.5">
               <div className="flex items-center gap-2">
-                <span
-                  className={cn(
-                    'h-1.5 w-1.5 shrink-0 rounded-full',
-                    forward.state === 'active'
-                      ? 'bg-status-running'
-                      : forward.state === 'error'
-                        ? 'bg-status-error'
-                        : 'bg-status-starting animate-pulse',
-                  )}
-                />
                 <span className="text-fg min-w-0 flex-1 truncate text-[12px] font-medium">
-                  {forward.kind}/{forward.name}
+                  {forwardTitle({ ...row, label: row.saved?.label })}
                 </span>
-                <span className="text-accent font-mono text-[11px] tabular-nums">
-                  :{forward.local_port}
+                <span
+                  className={
+                    row.live
+                      ? 'text-accent font-mono text-[11px] tabular-nums'
+                      : 'text-fg-dim font-mono text-[11px] tabular-nums'
+                  }
+                >
+                  :{local ?? i18n.t('auto')}
                 </span>
               </div>
               <div className="text-fg-dim mt-1 flex items-center gap-1.5 text-[10.5px]">
@@ -76,39 +74,23 @@ export function PortForwardsPanel() {
                   />
                 )}
                 <span className="truncate">
-                  {cluster?.name ?? forward.cluster_id} · {forward.namespace} ·{' '}
-                  {forward.remote_port}
+                  {cluster?.name ?? row.cluster_id} · {row.namespace} · {row.remote_port}
                 </span>
-                <span className="ml-auto tabular-nums">{formatAge(forward.created_at)}</span>
+                {row.live && (
+                  <span className="ml-auto tabular-nums">{formatAge(row.live.created_at)}</span>
+                )}
               </div>
-              {forward.error && (
-                <p className="text-status-error mt-1 text-[10.5px]">{forward.error}</p>
+              {row.live?.error && (
+                <p className="text-status-error mt-1 text-[10.5px] break-words">{row.live.error}</p>
               )}
-              <div className="mt-1.5 flex items-center gap-0.5">
-                <IconButton
-                  label={i18n.t('Open in browser')}
-                  icon={<ExternalLink />}
-                  size="xs"
-                  onClick={() => void openExternal(forwardUrl(forward))}
-                />
-                <IconButton
-                  label={i18n.t('Copy URL')}
-                  icon={<Copy />}
-                  size="xs"
-                  onClick={() => void copyText(forwardUrl(forward))}
-                />
-                <IconButton
-                  label={i18n.t('Stop')}
-                  icon={<Square />}
-                  size="xs"
-                  tone="danger"
-                  onClick={() => void ipc.portForwardStop(forward.id)}
-                />
+              <div className="mt-1.5 flex items-center gap-1">
+                <ForwardStateLabel row={row} className="text-[10.5px]" />
+                <ForwardRowActions row={row} className="ml-auto" />
               </div>
             </div>
           );
         })}
-        {!forwards.length && (
+        {!rows.length && (
           <p className="text-fg-dim px-3 py-10 text-center text-[12px]">
             {i18n.t('No active port forwards. Start one from a pod or service.')}
           </p>

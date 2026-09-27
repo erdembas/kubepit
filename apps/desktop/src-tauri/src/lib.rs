@@ -117,6 +117,16 @@ pub fn run() {
             ipc::port_forward_start,
             ipc::port_forward_stop,
             ipc::port_forward_list,
+            // Connectivity: saved port forwards, proxy info, keychain storage
+            ipc::port_forward_saved_list,
+            ipc::port_forward_save,
+            ipc::port_forward_saved_update,
+            ipc::port_forward_unsave,
+            ipc::port_forward_saved_start,
+            ipc::port_forward_restart,
+            ipc::port_forward_local_port,
+            ipc::cluster_proxy_info,
+            ipc::kubeconfig_storage_set,
             // Helm
             ipc::helm_releases,
             ipc::helm_release_detail,

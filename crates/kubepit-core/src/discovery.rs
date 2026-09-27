@@ -190,7 +190,8 @@ impl Kubepit {
                 if let Some(ns) = cluster.default_namespace.clone().filter(|n| !n.is_empty()) {
                     return Ok(vec![ns]);
                 }
-                let context_ns = kubeconfig::load(std::path::Path::new(&cluster.kubeconfig_path))
+                let context_ns = self
+                    .load_cluster_source(&cluster)
                     .ok()
                     .and_then(|kc| kubeconfig::namespace_for_context(&kc, &cluster.context));
                 Ok(vec![context_ns.unwrap_or_else(|| "default".to_string())])

@@ -1,38 +1,16 @@
 import * as i18n from '@/i18n';
-import { ArrowRightLeft, Copy, ExternalLink, Square } from 'lucide-react';
-import { IconButton } from '@/components/ui/IconButton';
-import { ipc } from '@/lib/ipc';
+import { ArrowRightLeft } from 'lucide-react';
+import { ForwardRowActions, ForwardStateLabel } from '@/components/port-forwards/ForwardRowParts';
 import { BUILTIN, toGvk } from '@/lib/kube/catalog';
-import { cn } from '@/lib/cn';
 import { formatAge } from '@/lib/format';
+import { forwardRows, forwardTitle, forwardUrl, rowLocalPort } from '@/lib/portForwards';
 import { useAppStore } from '@/store/useAppStore';
+import { useConnectivityStore } from '@/store/useConnectivityStore';
 import { navigateTo } from '@/store/useWorkbenchStore';
-import type { PortForward, PortForwardState } from '@/types';
 import { openExternal } from '../actions/openExternal';
-import { runMutation } from '../actions/guard';
-import { copyText, useNow } from '../util';
+import { useNow } from '../util';
 
-const STATE: Record<PortForwardState, string> = {
-  active: 'text-status-running',
-  starting: 'text-status-starting',
-  error: 'text-status-error',
-  stopped: 'text-fg-dim',
-};
-
-function stateLabel(state: PortForwardState) {
-  switch (state) {
-    case 'active':
-      return i18n.t('Active');
-    case 'starting':
-      return i18n.t('Starting');
-    case 'error':
-      return i18n.t('Error');
-    default:
-      return i18n.t('Stopped');
-  }
-}
-
-/** Active port-forwards of this cluster. */
+/** Port-forwards of this cluster: running ones and saved ones that are stopped. */
 export function PortForwardsPage({
   clusterId,
   isActive,
@@ -41,19 +19,11 @@ export function PortForwardsPage({
   isActive: boolean;
 }) {
   i18n.useLocale();
-  const all = useAppStore((s) => s.portForwards);
-  const forwards = all.filter((f) => f.cluster_id === clusterId);
+  const live = useAppStore((s) => s.portForwards);
+  const saved = useConnectivityStore((s) => s.savedForwards);
+  const rows = forwardRows(live, saved, clusterId);
   const now = useNow(30_000, isActive);
-  const stop = (f: PortForward) =>
-    void runMutation(
-      async () => {
-        await ipc.portForwardStop(f.id);
-        const store = useAppStore.getState();
-        store.setPortForwards(store.portForwards.filter((x) => x.id !== f.id));
-      },
-      i18n.t('Stopped forwarding localhost:{port}', { port: f.local_port }),
-    );
-  const template = 'minmax(180px,2fr) minmax(110px,1fr) 80px minmax(180px,1.3fr) 88px 64px 96px';
+  const template = 'minmax(180px,2fr) minmax(110px,1fr) 80px minmax(180px,1.3fr) 88px 64px 156px';
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -63,10 +33,10 @@ export function PortForwardsPage({
         </span>
         <h2 className="text-fg text-[13px] font-semibold">{i18n.t('Port Forwarding')}</h2>
         <span className="bg-surface-muted text-fg-dim rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums">
-          {forwards.length}
+          {rows.length}
         </span>
       </div>
-      {!forwards.length ? (
+      {!rows.length ? (
         <div className="flex flex-1 items-center justify-center p-8">
           <div className="max-w-sm text-center">
             <div className="bg-fg/5 text-fg-dim mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-xl">
@@ -105,12 +75,13 @@ export function PortForwardsPage({
               {i18n.t('Actions')}
             </span>
           </div>
-          {forwards.map((f) => {
-            const url = `http://localhost:${f.local_port}`;
-            const def = f.kind === 'pod' ? BUILTIN.Pod : BUILTIN.Service;
+          {rows.map((row) => {
+            const def = row.kind === 'pod' ? BUILTIN.Pod : BUILTIN.Service;
+            const local = rowLocalPort(row);
+            const running = row.live && row.live.state !== 'error' && local != null;
             return (
               <div
-                key={f.id}
+                key={row.key}
                 role="row"
                 style={{ gridTemplateColumns: template }}
                 className="border-border/40 hover:bg-fg/4 group grid h-9 items-center gap-x-3 border-b px-4 text-[12px]"
@@ -118,58 +89,39 @@ export function PortForwardsPage({
                 <button
                   type="button"
                   role="cell"
-                  onClick={() => navigateTo(clusterId, toGvk(def), f.namespace, f.name)}
+                  title={`${row.kind}/${row.namespace}/${row.name}`}
+                  onClick={() => navigateTo(clusterId, toGvk(def), row.namespace, row.name)}
                   className="text-accent min-w-0 truncate text-left hover:underline"
                 >
-                  {f.name}
+                  {row.saved?.label ? forwardTitle(row.saved) : row.name}
                 </button>
                 <span role="cell" className="text-fg-muted truncate">
-                  {f.namespace}
+                  {row.namespace}
                 </span>
                 <span role="cell" className="text-fg-muted">
-                  {f.kind === 'pod' ? 'Pod' : 'Service'}
+                  {row.kind === 'pod' ? 'Pod' : 'Service'}
                 </span>
                 <span role="cell" className="text-fg truncate font-mono text-[11.5px] tabular-nums">
-                  {f.remote_port} →{' '}
-                  <button
-                    type="button"
-                    onClick={() => void openExternal(url)}
-                    className="text-accent hover:underline"
-                  >
-                    localhost:{f.local_port}
-                  </button>
+                  {row.remote_port} →{' '}
+                  {running ? (
+                    <button
+                      type="button"
+                      onClick={() => void openExternal(forwardUrl(local))}
+                      className="text-accent hover:underline"
+                    >
+                      localhost:{local}
+                    </button>
+                  ) : (
+                    <span className="text-fg-dim">localhost:{local ?? i18n.t('auto')}</span>
+                  )}
                 </span>
-                <span
-                  role="cell"
-                  className={cn('truncate font-medium', STATE[f.state])}
-                  title={f.error ?? undefined}
-                >
-                  {stateLabel(f.state)}
+                <span role="cell" className="min-w-0">
+                  <ForwardStateLabel row={row} />
                 </span>
                 <span role="cell" className="text-fg-muted text-right tabular-nums">
-                  {formatAge(f.created_at, now)}
+                  {row.live ? formatAge(row.live.created_at, now) : '—'}
                 </span>
-                <span role="cell" className="flex justify-end gap-0.5">
-                  <IconButton
-                    size="xs"
-                    label={i18n.t('Open in browser')}
-                    icon={<ExternalLink />}
-                    onClick={() => void openExternal(url)}
-                  />
-                  <IconButton
-                    size="xs"
-                    label={i18n.t('Copy URL')}
-                    icon={<Copy />}
-                    onClick={() => void copyText(url, url)}
-                  />
-                  <IconButton
-                    size="xs"
-                    tone="danger"
-                    label={i18n.t('Stop')}
-                    icon={<Square />}
-                    onClick={() => stop(f)}
-                  />
-                </span>
+                <ForwardRowActions row={row} />
               </div>
             );
           })}

@@ -38,6 +38,11 @@
 //! | [`client_cert`] | kubeconfig client certificate subject and expiry       |
 //! | [`prometheus`]  | Prometheus detection, preset + PromQL range queries    |
 //! | [`openapi`]     | OpenAPI v3 schemas (YAML editing, API explorer)        |
+//! | [`saved_forwards`] | saved port forwards, start on connect               |
+//! | [`kubeconfig_watch`] | kubeconfig file watching (`kubeconfig://changed`) |
+//! | [`proxy`]       | per-cluster proxy (`proxy-url` / override)             |
+//! | [`secrets`]     | OS credential store behind `SecretStore`               |
+//! | [`credentials`] | managed kubeconfig storage, keychain migration         |
 //!
 //! Push notifications to the UI go through [`EventSink`]; streams take plain
 //! `Fn(T) -> bool` callbacks (return `false` to stop) that the desktop shell
@@ -92,6 +97,12 @@ pub mod client_cert;
 pub mod prometheus;
 // Schema-aware YAML editing and the API explorer.
 pub mod openapi;
+// Connectivity: saved port forwards, kubeconfig watching, proxies, keychain.
+pub mod credentials;
+pub mod kubeconfig_watch;
+pub mod proxy;
+pub mod saved_forwards;
+pub mod secrets;
 
 pub use app::Kubepit;
 pub use events::{EventSink, NullSink};

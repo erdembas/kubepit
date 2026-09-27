@@ -1,14 +1,21 @@
 import * as i18n from '@/i18n';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Copy, ExternalLink, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { FileContextMenu } from '@/components/ui/FileContextMenu';
 import { Field, Input } from '@/components/ui/Input';
 import { Radio } from '@/components/ui/Choice';
+import { LocalPortHint, useLocalPortCheck } from '@/components/port-forwards/LocalPortHint';
+import {
+  SaveForwardFields,
+  type SaveForwardValues,
+} from '@/components/port-forwards/SaveForwardFields';
 import { ipc } from '@/lib/ipc';
 import { replicaCounts } from '@/lib/kube/workloads';
+import { parsePort, sameTarget } from '@/lib/portForwards';
 import { useAppStore } from '@/store/useAppStore';
+import { useConnectivityStore } from '@/store/useConnectivityStore';
 import type { PortForward } from '@/types';
 import { copyText, errorText } from '../util';
 import { DebugDialog } from './DebugDialog';
@@ -150,22 +157,55 @@ function PortForwardDialog({
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PortForward | null>(null);
   const url = result ? `http://localhost:${result.local_port}` : '';
+  // Connectivity: saved forwards and busy local ports.
+  const target = {
+    cluster_id: dialog.clusterId,
+    namespace: dialog.namespace,
+    kind: dialog.target,
+    name: dialog.name,
+    remote_port: port,
+  };
+  const existing = useConnectivityStore((s) => s.savedForwards.find((f) => sameTarget(f, target)));
+  const [save, setSave] = useState<SaveForwardValues>({
+    save: false,
+    label: '',
+    startOnConnect: false,
+  });
+  useEffect(() => {
+    setSave({
+      save: !!existing,
+      label: existing?.label ?? '',
+      startOnConnect: existing?.start_on_connect ?? false,
+    });
+    if (existing?.local_port) setLocal(String(existing.local_port));
+    // Re-seed when the remote port selects another (saved) target.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [existing?.id]);
+  const portStatus = useLocalPortCheck(parsePort(local));
 
   const start = async () => {
     setBusy(true);
     setError(null);
     try {
-      const pf = await ipc.portForwardStart({
-        cluster_id: dialog.clusterId,
-        namespace: dialog.namespace,
-        kind: dialog.target,
-        name: dialog.name,
-        remote_port: port,
-        local_port: Number(local) || null,
-      });
+      const pf = await ipc.portForwardStart({ ...target, local_port: Number(local) || null });
       const store = useAppStore.getState();
       if (!store.portForwards.some((f) => f.id === pf.id))
         store.setPortForwards([...store.portForwards, pf]);
+      if (save.save) {
+        const saved = await ipc.portForwardSave({
+          ...target,
+          local_port: pf.local_port,
+          label: save.label.trim() || null,
+          start_on_connect: save.startOnConnect,
+        });
+        const connectivity = useConnectivityStore.getState();
+        connectivity.setSavedForwards([
+          ...connectivity.savedForwards.filter((f) => f.id !== saved.id),
+          saved,
+        ]);
+      } else if (existing) {
+        await ipc.portForwardUnsave(existing.id);
+      }
       setResult(pf);
     } catch (e) {
       setError(errorText(e));
@@ -269,7 +309,14 @@ function PortForwardDialog({
               className="tabular-nums"
               mono
             />
+            <LocalPortHint status={portStatus} onUse={(p) => setLocal(String(p))} />
           </Field>
+          <SaveForwardFields
+            value={save}
+            onChange={setSave}
+            placeholder={`${dialog.target}/${dialog.name}`}
+            alreadySaved={!!existing}
+          />
           {error && <p className="text-status-error text-[11.5px] break-words">{error}</p>}
         </div>
       )}

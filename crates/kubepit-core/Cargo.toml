@@ -31,6 +31,9 @@ regex = "1"
 # Raw GETs through the API server: the service proxy (Prometheus queries)
 # and `/openapi/v3` documents (already in kube's tree).
 http = "1"
+# Connectivity: kubeconfig file watching, OS credential store (keychain mode).
+notify = "8"
+keyring = "4"
 
 [dev-dependencies]
 tempfile = "3"

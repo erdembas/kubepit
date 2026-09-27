@@ -78,6 +78,11 @@ export interface ClusterDef {
   last_connected_at: number | null;
   /** Where charts read Prometheus metrics from (auto-detected by default). */
   prometheus: PrometheusConfig;
+  /**
+   * Connectivity: proxy for this cluster (`http://`, `https://`, `socks5://`,
+   * `socks5h://`). Overrides the kubeconfig's `proxy-url`; null = none.
+   */
+  proxy_url?: string | null;
 }
 
 export interface ClusterInput {
@@ -94,6 +99,8 @@ export interface ClusterInput {
   accessible_namespaces: string[];
   read_only: boolean;
   notes: string;
+  /** Connectivity: per-cluster proxy override (see `ClusterDef.proxy_url`). */
+  proxy_url?: string | null;
 }
 
 export type ConnState = 'disconnected' | 'connecting' | 'connected' | 'error';
@@ -545,6 +552,33 @@ export interface PortForward extends PortForwardRequest {
   state: PortForwardState;
   error: string | null;
   created_at: number;
+  /** The saved definition this forward was started from or saved as. */
+  saved_id?: string | null;
+}
+
+/** A port forward kept in `~/.kubepit/port_forwards.json` (unique per target). */
+export interface SavedPortForward {
+  id: string;
+  cluster_id: ClusterId;
+  namespace: string;
+  kind: 'pod' | 'service';
+  name: string;
+  remote_port: number;
+  /** Fixed local port; null picks a free port on every start. */
+  local_port: number | null;
+  label: string | null;
+  /** Start automatically whenever the cluster connects. */
+  start_on_connect: boolean;
+  created_at: number;
+}
+
+export type SavedPortForwardInput = Omit<SavedPortForward, 'id' | 'created_at'>;
+
+/** `port_forward_local_port`: whether a local port is free, and a free alternative. */
+export interface LocalPortStatus {
+  port: number;
+  available: boolean;
+  suggestion: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -783,6 +817,39 @@ export interface Settings {
   auto_check_updates: boolean;
   /** Alerts and notifications. */
   alerts: AlertSettings;
+  /**
+   * Connectivity: pasted kubeconfigs live in the OS credential store.
+   * Read-only here: change it with `kubeconfigStorageSet`, which migrates.
+   */
+  keychain_kubeconfigs: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Connectivity: kubeconfig watching, proxies
+// ---------------------------------------------------------------------------
+
+/** A context that appeared in a watched kubeconfig and is not registered yet. */
+export interface KubeconfigNewContext {
+  /** Canonical path of the kubeconfig file (as discovery reports it). */
+  path: string;
+  context: string;
+  server: string | null;
+}
+
+/** `kubeconfig://changed`: watched kubeconfig files changed on disk. */
+export interface KubeconfigChanged {
+  paths: string[];
+  new_contexts: KubeconfigNewContext[];
+  /** Connected clusters whose kubeconfig changed: reconnect to use it. */
+  reconnect: ClusterId[];
+}
+
+export type ProxySource = 'cluster' | 'kubeconfig';
+
+/** The proxy a cluster's connections go through (credentials masked). */
+export interface ClusterProxyInfo {
+  url: string | null;
+  source: ProxySource | null;
 }
 
 // ---------------------------------------------------------------------------

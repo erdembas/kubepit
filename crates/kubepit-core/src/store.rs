@@ -99,12 +99,16 @@ impl Store {
     }
 }
 
-fn write_json<T: Serialize + ?Sized>(path: &Path, value: &T, private: bool) -> Result<()> {
+pub(crate) fn write_json<T: Serialize + ?Sized>(
+    path: &Path,
+    value: &T,
+    private: bool,
+) -> Result<()> {
     let bytes = serde_json::to_vec_pretty(value).context("failed to serialise state")?;
     atomic_write(path, &bytes, private)
 }
 
-fn load_json_or_default<T: DeserializeOwned + Default>(path: &Path) -> Result<T> {
+pub(crate) fn load_json_or_default<T: DeserializeOwned + Default>(path: &Path) -> Result<T> {
     match std::fs::read(path) {
         Ok(bytes) if bytes.iter().all(u8::is_ascii_whitespace) => Ok(T::default()),
         Ok(bytes) => match serde_json::from_slice::<T>(&bytes) {
@@ -152,6 +156,7 @@ mod tests {
             created_at: 1,
             last_connected_at: None,
             prometheus: Default::default(),
+            proxy_url: None,
         }
     }
 

@@ -13,6 +13,8 @@ import './alerts';
 import './insights';
 import './prometheus';
 import './openapi';
+// Registered after './app': it wraps `port_forward_start` and `cluster_connect`.
+import './connectivity';
 
 export { mockListen } from './bus';
 

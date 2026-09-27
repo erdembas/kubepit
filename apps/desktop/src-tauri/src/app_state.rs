@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use kubepit_core::alerts::AlertEvent;
-use kubepit_core::types::{ClusterDef, ClusterStatus, PortForward};
+use kubepit_core::types::{
+    ClusterDef, ClusterStatus, KubeconfigChanged, PortForward, SavedPortForward,
+};
 use kubepit_core::{EventSink, Kubepit};
 use serde::Serialize;
 use tauri::Emitter;
@@ -15,6 +17,10 @@ pub const EVENT_CLUSTER_STATUS: &str = "cluster://status";
 pub const EVENT_CLUSTER_LIST: &str = "cluster://list";
 /// `portforward://changed`
 pub const EVENT_PORT_FORWARDS: &str = "portforward://changed";
+/// `portforward://saved`
+pub const EVENT_PORT_FORWARDS_SAVED: &str = "portforward://saved";
+/// `kubeconfig://changed`
+pub const EVENT_KUBECONFIG_CHANGED: &str = "kubeconfig://changed";
 /// `terminal://exit`
 pub const EVENT_TERMINAL_EXIT: &str = "terminal://exit";
 /// `workspace://changed`
@@ -57,6 +63,14 @@ impl EventSink for TauriEventSink {
 
     fn alerts_changed(&self) {
         crate::ipc::alerts::emit_alerts_changed(&self.app);
+    }
+
+    fn saved_port_forwards(&self, saved: &[SavedPortForward]) {
+        let _ = self.app.emit(EVENT_PORT_FORWARDS_SAVED, saved);
+    }
+
+    fn kubeconfig_changed(&self, change: &KubeconfigChanged) {
+        let _ = self.app.emit(EVENT_KUBECONFIG_CHANGED, change);
     }
 }
 
