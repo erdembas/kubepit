@@ -180,7 +180,11 @@ export function AlertsPanel({ visible }: { visible: boolean }) {
             <section key={clusterId}>
               <div className="flex items-center gap-2 px-2 pt-3 pb-1">
                 <ClusterDot cluster={cluster} id={clusterId} />
-                <span className="text-fg-dim min-w-0 truncate text-[10px] font-semibold tracking-wider uppercase">
+                {/* Cluster names are usually context names: English casing. */}
+                <span
+                  lang="en"
+                  className="text-fg-dim min-w-0 truncate text-[10px] font-semibold tracking-wider uppercase"
+                >
                   {cluster?.name ?? clusterId}
                 </span>
                 <span className="text-fg-dim text-[10px] tabular-nums">{items.length}</span>

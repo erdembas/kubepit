@@ -70,7 +70,11 @@ export function KindList({
         )}
         {groups.map(({ group, kinds: list }) => (
           <div key={group || 'core'} className="pb-1">
-            <div className="text-fg-dim truncate px-3 pt-2 pb-1 text-[10px] font-semibold tracking-[0.08em] uppercase">
+            {/* API groups are identifiers: uppercase them with English rules. */}
+            <div
+              lang="en"
+              className="text-fg-dim truncate px-3 pt-2 pb-1 text-[10px] font-semibold tracking-[0.08em] uppercase"
+            >
               {group || 'core'}
             </div>
             {list.map((kind) => {
