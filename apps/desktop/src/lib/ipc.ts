@@ -1,6 +1,9 @@
 import { call, callWithChannel, listenEvent } from './ipc/invoke';
 import { terminalIpc } from './ipc/terminalIpc';
 import type {
+  AccessCheck,
+  AccessDecision,
+  AccessRules,
   ApiResourceInfo,
   AppInfo,
   ApplyMode,
@@ -26,6 +29,7 @@ import type {
   ResourceList,
   Settings,
   WatchBatch,
+  WhoAmI,
   WorkspaceSnapshot,
 } from '@/types';
 
@@ -183,6 +187,16 @@ export const ipc = {
     call<void>('helm_uninstall', { clusterId, namespace, name }),
   helmUpgradeValues: (clusterId: ClusterId, namespace: string, name: string, values: string) =>
     call<void>('helm_upgrade_values', { clusterId, namespace, name, values }),
+
+  // -- Access (RBAC self-reviews; read-only, allowed on read-only clusters) --
+  /** One SelfSubjectAccessReview per check, in order; failed checks carry `error`. */
+  accessReview: (clusterId: ClusterId, checks: AccessCheck[]) =>
+    call<AccessDecision[]>('access_review', { clusterId, checks }),
+  /** SelfSubjectRulesReview for one namespace. */
+  accessRules: (clusterId: ClusterId, namespace: string) =>
+    call<AccessRules>('access_rules', { clusterId, namespace }),
+  /** SelfSubjectReview; rejects with "not supported by this cluster" before 1.27. */
+  accessWhoami: (clusterId: ClusterId) => call<WhoAmI>('access_whoami', { clusterId }),
 
   // -- Terminal -------------------------------------------------------------
   ...terminalIpc,

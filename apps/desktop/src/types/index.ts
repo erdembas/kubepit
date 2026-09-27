@@ -372,3 +372,58 @@ export interface Settings {
   /** Image used by node shells. */
   node_shell_image: string;
 }
+
+// ---------------------------------------------------------------------------
+// Access (RBAC self-reviews: SelfSubjectAccessReview / RulesReview / Review)
+// ---------------------------------------------------------------------------
+
+/** One `kubectl auth can-i` question. `namespace: null` asks cluster-wide. */
+export interface AccessCheck {
+  verb: string;
+  /** API group; '' is the core group. */
+  group: string;
+  /** Plural resource name (`pods`, `deployments`). */
+  resource: string;
+  subresource?: string | null;
+  namespace?: string | null;
+  name?: string | null;
+}
+
+export interface AccessDecision {
+  allowed: boolean;
+  /** An authorizer explicitly denied (not just "no authorizer allowed"). */
+  denied: boolean;
+  reason: string | null;
+  /** The review itself failed: neither allowed nor denied is known. */
+  error: string | null;
+}
+
+export interface AccessResourceRule {
+  verbs: string[];
+  api_groups: string[];
+  resources: string[];
+  /** Empty = every name. */
+  resource_names: string[];
+}
+
+export interface AccessNonResourceRule {
+  verbs: string[];
+  non_resource_urls: string[];
+}
+
+/** SelfSubjectRulesReview for one namespace (includes cluster-wide grants). */
+export interface AccessRules {
+  resource_rules: AccessResourceRule[];
+  non_resource_rules: AccessNonResourceRule[];
+  /** Some authorizer (typically a webhook) could not list its rules. */
+  incomplete: boolean;
+  evaluation_error: string | null;
+}
+
+/** The authenticated identity (`kubectl auth whoami`). */
+export interface WhoAmI {
+  username: string;
+  uid: string | null;
+  groups: string[];
+  extra: Record<string, string[]>;
+}
