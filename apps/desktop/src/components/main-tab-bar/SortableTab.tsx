@@ -19,6 +19,8 @@ interface SortableTabProps {
   pinnedSet: ReadonlySet<string>;
   closable: boolean;
   isActive: boolean;
+  /** Active in a pane that is not the focused one (dimmer accent). */
+  muted?: boolean;
   activeTabRef?: React.MutableRefObject<HTMLDivElement | null> | undefined;
   onActivate: () => void;
   onClose?: () => void;
@@ -38,6 +40,7 @@ export function SortableTab(props: SortableTabProps) {
     pinnedSet,
     closable,
     isActive,
+    muted = false,
     activeTabRef,
     onActivate,
     onClose,
@@ -54,7 +57,8 @@ export function SortableTab(props: SortableTabProps) {
     isOver && activeId !== id && activeId != null && activeIsPinned === isPinned;
 
   const style: React.CSSProperties = {
-    ...(transform ? { transform: CSS.Transform.toString(transform) } : null),
+    // Strips sort horizontally; a drag into another pane's strip must not shift tabs vertically.
+    ...(transform ? { transform: CSS.Translate.toString({ ...transform, y: 0 }) } : null),
     ...(transition ? { transition } : null),
     ...(isDragging
       ? {
@@ -104,7 +108,9 @@ export function SortableTab(props: SortableTabProps) {
       className={cn(
         'group relative flex shrink-0 cursor-pointer items-center gap-2 border-r px-3 text-[12px] transition select-none',
         'border-border/60 outline-none focus-visible:outline-none',
-        isActive ? 'bg-surface text-fg' : 'text-fg-muted hover:bg-surface/60 hover:text-fg',
+        isActive
+          ? cn('bg-surface', muted ? 'text-fg-muted' : 'text-fg')
+          : 'text-fg-muted hover:bg-surface/60 hover:text-fg',
         isDragging && 'cursor-grabbing opacity-40',
         showDropIndicator && 'bg-accent/8',
       )}
@@ -114,7 +120,7 @@ export function SortableTab(props: SortableTabProps) {
         aria-hidden
         className={cn(
           'pointer-events-none absolute inset-x-0 top-0 h-[2px] transition',
-          isActive ? 'bg-accent' : 'bg-transparent',
+          isActive ? (muted ? 'bg-fg-dim/40' : 'bg-accent') : 'bg-transparent',
           isDragging && 'opacity-50',
         )}
       />

@@ -1,20 +1,28 @@
+import { useMemo } from 'react';
 import { create } from 'zustand';
-import { createJSONStorage, persist } from 'zustand/middleware';
+import { persist } from 'zustand/middleware';
 import { gvkForKey, kindKey, resolveKindName } from '@/lib/kube/catalog';
 import { VIEW_KEYS } from '@/lib/kube/nav';
 import { registerObjectNavigator } from '@/lib/navigation';
+import { windowSeed } from '@/lib/windowSeed';
 import { useAppStore } from '@/store/useAppStore';
 import type { ApiResourceInfo, ClusterId, Gvk } from '@/types';
+import * as layouts from './viewLayout';
+import type { SplitSide, ViewLayout } from './viewLayout';
+import { syncPreferences, windowStorage } from './windowStorage';
 
 /**
  * Cluster workbench UI state. One entry per cluster for navigation
- * (open view tabs, active kind, namespaces, selected object per tab) plus
- * global layout prefs. Layout prefs, namespaces, open tabs and the active
- * kind persist to localStorage (`kubepit.workbench.v1`); selections and
- * discovery data are session-only.
+ * (split panes with their view tabs, active kind, namespaces, selected
+ * object per tab) plus global layout prefs. Layout prefs, namespaces, panes
+ * and the active kind persist to localStorage (`kubepit.workbench.v1`);
+ * with several windows only `main` persists that session and every window
+ * shares the layout prefs (see `windowStorage.ts`);
+ * selections and discovery data are session-only.
  *
  * Every view (kind list or pseudo page) opens in its own tab, at most once
- * per cluster; `activeKind` is the focused tab. Other surfaces (command
+ * per cluster (see `viewLayout.ts`); `activeKind` mirrors the focused
+ * pane's active tab ('' while that pane is empty). Other surfaces (command
  * palette, shell links) drive the workbench through
  * `setActiveKind(clusterId, kindKey)` and `navigateTo(clusterId, gvk, ns, name)`.
  */
@@ -47,8 +55,8 @@ export const DETAILS_WIDTH = { min: 380, max: 1100, default: 560 };
 interface WorkbenchState {
   /** Selected namespaces per cluster; missing = cluster default, [] = all namespaces. */
   namespaces: Record<ClusterId, string[]>;
-  /** Open view tabs per cluster in strip order; read through `openTabs`. */
-  tabs: Record<ClusterId, ViewKey[]>;
+  /** Split panes and their tabs per cluster; read through `useViewLayout`. */
+  layouts: Record<ClusterId, ViewLayout>;
   activeKind: Record<ClusterId, ViewKey>;
   /** Selected object per cluster and view tab (the tab's details panel). */
   selection: Record<ClusterId, Record<ViewKey, ObjectSelection>>;
@@ -73,13 +81,19 @@ interface WorkbenchState {
   detailsWidth: number;
 
   setNamespaces: (clusterId: ClusterId, namespaces: string[]) => void;
-  /** Focus a view's tab, opening it next to the active tab when needed. */
+  /** Focus a view's tab, opening it in the focused pane when needed. */
   setActiveKind: (clusterId: ClusterId, key: ViewKey) => void;
   closeTab: (clusterId: ClusterId, key: ViewKey) => void;
   closeOtherTabs: (clusterId: ClusterId, key: ViewKey) => void;
   closeTabsToRight: (clusterId: ClusterId, key: ViewKey) => void;
-  closeAllTabs: (clusterId: ClusterId) => void;
-  moveTab: (clusterId: ClusterId, key: ViewKey, overKey: ViewKey) => void;
+  closeAllTabs: (clusterId: ClusterId, paneId: string) => void;
+  /** Move a tab into a pane before `index` (end when omitted); reorders within its own pane. */
+  moveTab: (clusterId: ClusterId, key: ViewKey, paneId: string, index?: number) => void;
+  /** Open a pane beside `paneId`, moving `key` into it or leaving it empty. */
+  splitPane: (clusterId: ClusterId, paneId: string, side: SplitSide, key?: ViewKey | null) => void;
+  closePane: (clusterId: ClusterId, paneId: string) => void;
+  focusPane: (clusterId: ClusterId, paneId: string) => void;
+  resizePanes: (clusterId: ClusterId, sizes: Record<string, number>) => void;
   select: (clusterId: ClusterId, key: ViewKey, selection: ObjectSelection | null) => void;
   registerKind: (clusterId: ClusterId, gvk: Gvk) => void;
   setApiResources: (clusterId: ClusterId, resources: ApiResourceInfo[]) => void;
@@ -96,78 +110,76 @@ interface WorkbenchState {
   forgetCluster: (clusterId: ClusterId) => void;
 }
 
+const STORAGE_KEY = 'kubepit.workbench.v1';
+const STORAGE_VERSION = 3;
+/** Persisted per window; the rest of the persisted state is shared layout prefs. */
+const SESSION_KEYS = ['namespaces', 'layouts', 'activeKind'] as const;
+const PREF_KEYS = [
+  'navWidth',
+  'navCollapsed',
+  'collapsedGroups',
+  'pinnedKinds',
+  'hiddenColumns',
+  'sort',
+  'detailsWidth',
+] as const;
+type Persisted = Pick<WorkbenchState, (typeof SESSION_KEYS)[number] | (typeof PREF_KEYS)[number]>;
+
 const clamp = (n: number, min: number, max: number) => Math.round(Math.min(max, Math.max(min, n)));
 
-type TabState = Pick<WorkbenchState, 'tabs' | 'activeKind'>;
-
-/** Open tabs of a cluster; always non-empty and always contains the active kind. */
-export function openTabs(s: TabState, clusterId: ClusterId): ViewKey[] {
-  const active = s.activeKind[clusterId] ?? VIEW.clusterOverview;
-  const tabs = s.tabs[clusterId] ?? [];
-  return tabs.includes(active) ? tabs : [...tabs, active];
-}
-
-/** State patch that focuses `key`, inserting its tab right after the active one. */
-function focusTab(s: TabState, clusterId: ClusterId, key: ViewKey): TabState {
-  const tabs = openTabs(s, clusterId);
-  const next = [...tabs];
-  if (!next.includes(key)) {
-    const active = s.activeKind[clusterId] ?? VIEW.clusterOverview;
-    next.splice(next.indexOf(active) + 1, 0, key);
-  }
-  return {
-    tabs: { ...s.tabs, [clusterId]: next },
-    activeKind: { ...s.activeKind, [clusterId]: key },
-  };
+function layoutOf(s: WorkbenchState, clusterId: ClusterId): ViewLayout {
+  return s.layouts[clusterId] ?? layouts.singleLayout(s.activeKind[clusterId]);
 }
 
 /**
- * State patch that closes the tabs `drop` matches. A closed active tab hands
- * focus to its right neighbour (else the left one); closing every tab
- * leaves the cluster overview. Closed tabs forget their selection and filter.
+ * State patch storing a cluster's layout and its `activeKind` mirror.
+ * Closed tabs that are no longer open anywhere forget their selection and filter.
  */
-function dropTabs(
+function commit(
   s: WorkbenchState,
   clusterId: ClusterId,
-  drop: (key: ViewKey, index: number) => boolean,
+  layout: ViewLayout,
+  closed: readonly ViewKey[] = [],
 ): Partial<WorkbenchState> {
-  const tabs = openTabs(s, clusterId);
-  const closed = tabs.filter(drop);
-  if (!closed.length) return {};
-  const kept = tabs.filter((k) => !closed.includes(k));
-  if (!kept.length) kept.push(VIEW.clusterOverview);
-  const active = s.activeKind[clusterId] ?? VIEW.clusterOverview;
-  let nextActive = active;
-  if (!kept.includes(active)) {
-    const at = tabs.indexOf(active);
-    nextActive =
-      tabs.slice(at + 1).find((k) => kept.includes(k)) ??
-      tabs
-        .slice(0, at)
-        .reverse()
-        .find((k) => kept.includes(k)) ??
-      kept[0]!;
-  }
-  const selection = { ...s.selection[clusterId] };
-  const filters = { ...s.filters };
-  for (const key of closed) {
-    if (kept.includes(key)) continue;
-    delete selection[key];
-    delete filters[`${clusterId}|${key}`];
-  }
-  return {
-    tabs: { ...s.tabs, [clusterId]: kept },
-    activeKind: { ...s.activeKind, [clusterId]: nextActive },
-    selection: { ...s.selection, [clusterId]: selection },
-    filters,
+  const patch: Partial<WorkbenchState> = {
+    layouts: { ...s.layouts, [clusterId]: layout },
+    activeKind: { ...s.activeKind, [clusterId]: layouts.focusedGroup(layout).active ?? '' },
   };
+  const open = layouts.openKeys(layout);
+  const gone = closed.filter((k) => !open.has(k));
+  if (gone.length) {
+    const selection = { ...s.selection[clusterId] };
+    const filters = { ...s.filters };
+    for (const key of gone) {
+      delete selection[key];
+      delete filters[`${clusterId}|${key}`];
+    }
+    patch.selection = { ...s.selection, [clusterId]: selection };
+    patch.filters = filters;
+  }
+  return patch;
+}
+
+/** State patch that closes tabs of the pane holding `key`. */
+function closeIn(
+  s: WorkbenchState,
+  clusterId: ClusterId,
+  key: ViewKey,
+  pick: (k: ViewKey, index: number, at: number) => boolean,
+): Partial<WorkbenchState> {
+  const layout = layoutOf(s, clusterId);
+  const pane = layouts.groupOf(layout, key);
+  if (!pane) return {};
+  const at = pane.tabs.indexOf(key);
+  const result = layouts.closeViews(layout, pane.id, (k, i) => pick(k, i, at));
+  return result.closed.length ? commit(s, clusterId, result.layout, result.closed) : {};
 }
 
 export const useWorkbenchStore = create<WorkbenchState>()(
-  persist(
+  persist<WorkbenchState, [], [], Persisted>(
     (set, get) => ({
       namespaces: {},
-      tabs: {},
+      layouts: {},
       activeKind: {},
       selection: {},
       navRevision: {},
@@ -187,24 +199,38 @@ export const useWorkbenchStore = create<WorkbenchState>()(
         set((s) => ({
           namespaces: { ...s.namespaces, [clusterId]: [...new Set(namespaces)].sort() },
         })),
-      setActiveKind: (clusterId, key) => set((s) => focusTab(s, clusterId, key)),
-      closeTab: (clusterId, key) => set((s) => dropTabs(s, clusterId, (k) => k === key)),
-      closeOtherTabs: (clusterId, key) => set((s) => dropTabs(s, clusterId, (k) => k !== key)),
+      setActiveKind: (clusterId, key) =>
+        set((s) => commit(s, clusterId, layouts.openView(layoutOf(s, clusterId), key))),
+      closeTab: (clusterId, key) => set((s) => closeIn(s, clusterId, key, (k) => k === key)),
+      closeOtherTabs: (clusterId, key) => set((s) => closeIn(s, clusterId, key, (k) => k !== key)),
       closeTabsToRight: (clusterId, key) =>
+        set((s) => closeIn(s, clusterId, key, (_, i, at) => i > at)),
+      closeAllTabs: (clusterId, paneId) =>
         set((s) => {
-          const at = openTabs(s, clusterId).indexOf(key);
-          return at < 0 ? {} : dropTabs(s, clusterId, (_, i) => i > at);
+          const result = layouts.closeViews(layoutOf(s, clusterId), paneId, () => true);
+          return result.closed.length ? commit(s, clusterId, result.layout, result.closed) : {};
         }),
-      closeAllTabs: (clusterId) => set((s) => dropTabs(s, clusterId, () => true)),
-      moveTab: (clusterId, key, overKey) =>
+      moveTab: (clusterId, key, paneId, index) =>
+        set((s) =>
+          commit(s, clusterId, layouts.moveView(layoutOf(s, clusterId), key, paneId, index)),
+        ),
+      splitPane: (clusterId, paneId, side, key = null) =>
+        set((s) =>
+          commit(s, clusterId, layouts.splitView(layoutOf(s, clusterId), paneId, side, key)),
+        ),
+      closePane: (clusterId, paneId) =>
         set((s) => {
-          const tabs = [...openTabs(s, clusterId)];
-          const from = tabs.indexOf(key);
-          const to = tabs.indexOf(overKey);
-          if (from < 0 || to < 0 || from === to) return {};
-          tabs.splice(to, 0, ...tabs.splice(from, 1));
-          return { tabs: { ...s.tabs, [clusterId]: tabs } };
+          const result = layouts.closePane(layoutOf(s, clusterId), paneId);
+          return commit(s, clusterId, result.layout, result.closed);
         }),
+      focusPane: (clusterId, paneId) =>
+        set((s) => {
+          const layout = layoutOf(s, clusterId);
+          const next = layouts.focusPane(layout, paneId);
+          return next === layout ? {} : commit(s, clusterId, next);
+        }),
+      resizePanes: (clusterId, sizes) =>
+        set((s) => commit(s, clusterId, layouts.resizePanes(layoutOf(s, clusterId), sizes))),
       select: (clusterId, key, selection) =>
         set((s) => {
           const current = { ...s.selection[clusterId] };
@@ -279,12 +305,37 @@ export const useWorkbenchStore = create<WorkbenchState>()(
         }),
     }),
     {
-      name: 'kubepit.workbench.v1',
-      version: 1,
-      storage: createJSONStorage(() => localStorage),
+      name: STORAGE_KEY,
+      version: STORAGE_VERSION,
+      storage: windowStorage<Persisted>({
+        session: SESSION_KEYS,
+        seed: windowSeed?.workbench ?? null,
+        version: STORAGE_VERSION,
+      }),
+      // v1 kept one flat tab list per cluster (`tabs`); it becomes a single pane.
+      // v2 laid panes out on one axis; they become one split of the tree.
+      migrate: (persisted, version) => {
+        const state = (persisted ?? {}) as Partial<WorkbenchState> & {
+          tabs?: Record<ClusterId, ViewKey[]>;
+        };
+        if (version < 2) {
+          const next: Record<ClusterId, ViewLayout> = {};
+          for (const [clusterId, active] of Object.entries(state.activeKind ?? {}))
+            next[clusterId] = layouts.singleLayout(active, state.tabs?.[clusterId]);
+          state.layouts = next;
+          delete state.tabs;
+        } else if (version < 3) {
+          const flat = (state.layouts ?? {}) as unknown as Record<ClusterId, layouts.FlatLayout>;
+          const next: Record<ClusterId, ViewLayout> = {};
+          for (const [clusterId, layout] of Object.entries(flat))
+            next[clusterId] = layouts.fromFlatLayout(layout);
+          state.layouts = next;
+        }
+        return state as WorkbenchState;
+      },
       partialize: (s) => ({
         namespaces: s.namespaces,
-        tabs: s.tabs,
+        layouts: s.layouts,
         activeKind: s.activeKind,
         navWidth: s.navWidth,
         navCollapsed: s.navCollapsed,
@@ -298,10 +349,20 @@ export const useWorkbenchStore = create<WorkbenchState>()(
   ),
 );
 
+// Column, sort and navigator prefs changed in another window apply here too.
+syncPreferences<WorkbenchState>(STORAGE_KEY, PREF_KEYS, useWorkbenchStore);
+
 /** Resolve a kind key for a cluster: built-ins, discovery, then link-registered CRDs. */
 export function gvkForCluster(clusterId: ClusterId, key: string): Gvk | null {
   const s = useWorkbenchStore.getState();
   return gvkForKey(key, s.apiResources[clusterId]) ?? s.customKinds[clusterId]?.[key] ?? null;
+}
+
+/** A cluster's split layout (a single overview pane until something opens). */
+export function useViewLayout(clusterId: ClusterId): ViewLayout {
+  const stored = useWorkbenchStore((s) => s.layouts[clusterId]);
+  const active = useWorkbenchStore((s) => s.activeKind[clusterId]);
+  return useMemo(() => stored ?? layouts.singleLayout(active), [stored, active]);
 }
 
 /**
@@ -321,7 +382,7 @@ export function navigateTo(
   const revision = `${clusterId}|${key}`;
   // Without a name the tab keeps whatever it had selected.
   useWorkbenchStore.setState((s) => ({
-    ...focusTab(s, clusterId, key),
+    ...commit(s, clusterId, layouts.openView(layoutOf(s, clusterId), key)),
     ...(name && {
       selection: {
         ...s.selection,

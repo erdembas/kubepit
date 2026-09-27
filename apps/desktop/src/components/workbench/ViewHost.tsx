@@ -1,5 +1,5 @@
 import * as i18n from '@/i18n';
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { Loader2, SearchX } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { gvkForKey } from '@/lib/kube/catalog';
@@ -13,16 +13,20 @@ import { WorkloadsOverviewPage } from './overview/WorkloadsOverviewPage';
 import { PortForwardsPage } from './portforward/PortForwardsPage';
 import { ResourcePage } from './table/ResourcePage';
 
-/** Renders the page for the active navigator entry. */
-export function ViewHost({
+/**
+ * Renders the page of one view tab. Hidden tabs stay mounted with
+ * `isActive` false, so their watches and polls pause but scroll position,
+ * checked rows and the details panel survive tab switches.
+ */
+export const ViewHost = memo(function ViewHost({
   clusterId,
-  activeKind,
+  viewKey: activeKind,
   isActive,
   namespaces,
   apiResources,
 }: {
   clusterId: string;
-  activeKind: string;
+  viewKey: string;
   isActive: boolean;
   namespaces: string[];
   apiResources: ApiResourceInfo[] | null;
@@ -103,4 +107,4 @@ export function ViewHost({
       apiResources={apiResources}
     />
   );
-}
+});

@@ -1,5 +1,6 @@
 import * as i18n from '@/i18n';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import { usePaneFocused } from '@/components/split/paneFocus';
 import { useAppStore } from '@/store/useAppStore';
 import {
   dock as dockOpeners,
@@ -58,6 +59,7 @@ export function ClusterDock({ clusterId, visible }: { clusterId: ClusterId; visi
   const parentHeight = useParentHeight(rootRef);
   const [dragHeight, setDragHeight] = useState<number | null>(null);
   const [focused, setFocused] = useState(false);
+  const paneFocused = usePaneFocused();
 
   const openClusterShell = useCallback(
     () => dockOpeners.shell(clusterId, clusterName ?? clusterId, scopeNamespace(clusterId)),
@@ -74,8 +76,9 @@ export function ClusterDock({ clusterId, visible }: { clusterId: ClusterId; visi
 
   // Ctrl+` toggles the dock of the visible cluster (capture phase, so a
   // focused terminal cannot swallow it). With no tabs it opens a shell.
+  // With clusters side by side, only the focused pane's dock answers.
   useEffect(() => {
-    if (!visible) return;
+    if (!visible || !paneFocused) return;
     const onKey = (event: KeyboardEvent) => {
       if (!isDockToggleShortcut(event) || event.repeat) return;
       event.preventDefault();
@@ -86,7 +89,7 @@ export function ClusterDock({ clusterId, visible }: { clusterId: ClusterId; visi
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [visible, clusterId, openClusterShell]);
+  }, [visible, paneFocused, clusterId, openClusterShell]);
 
   const maxHeight = parentHeight > 0 ? Math.max(MIN_HEIGHT, parentHeight * MAX_FRACTION) : Infinity;
   const clamp = useCallback(

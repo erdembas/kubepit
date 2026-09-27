@@ -1,5 +1,5 @@
 import * as i18n from '@/i18n';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useWorkbenchStore, VIEW } from '@/store/useWorkbenchStore';
 import { ActionDialogs } from './actions/ActionDialogs';
 import { ConnectScreen } from './ConnectScreen';
@@ -8,7 +8,7 @@ import { dropPolledPrefix } from './data/polled';
 import { dropClusterWatches } from './data/watchCache';
 import { ClusterDock } from './dock/ClusterDock';
 import { ResourceNavigator } from './nav/ResourceNavigator';
-import { ViewHost } from './ViewHost';
+import { ViewPanes } from './tabs/ViewPanes';
 import { WorkbenchHeader } from './WorkbenchHeader';
 
 /**
@@ -31,6 +31,8 @@ export function ClusterWorkbench({
   const state = status?.state ?? 'disconnected';
   const connected = state === 'connected' && !!cluster;
   const wasConnected = useRef(false);
+  // Header slot the lone pane's view tabs render into (see `ViewPanes`).
+  const [tabSlot, setTabSlot] = useState<HTMLDivElement | null>(null);
   const apiResources = useApiResources(clusterId, isActive && connected);
   const activeKind = useWorkbenchStore((s) => s.activeKind[clusterId] ?? VIEW.clusterOverview);
   const namespaces = useSelectedNamespaces(clusterId);
@@ -62,6 +64,7 @@ export function ClusterWorkbench({
           isActive={isActive}
           activeKind={activeKind}
           apiResources={apiResources}
+          tabSlotRef={setTabSlot}
         />
       )}
       <div className="flex min-h-0 flex-1">
@@ -75,12 +78,12 @@ export function ClusterWorkbench({
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             {connected ? (
-              <ViewHost
+              <ViewPanes
                 clusterId={clusterId}
-                activeKind={activeKind}
                 isActive={isActive}
                 namespaces={namespaces}
                 apiResources={apiResources}
+                tabSlot={tabSlot}
               />
             ) : (
               <ConnectScreen cluster={cluster} status={status} />

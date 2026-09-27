@@ -31,10 +31,16 @@ pub async fn terminal_create(
     cols: u16,
     rows: u16,
     on_output: Channel<TerminalOutput>,
+    window: tauri::Window,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let core = state.core.clone();
     let terminals = state.terminals.clone();
+    // Closing the window destroys its terminals (see `windows`).
+    let owner = window.label().to_string();
+    if !state.window_terminals.register(&owner, &id) {
+        return Err("window closed".to_string());
+    }
 
     // A restart reuses the id: stop the previous PTY (and its helper pod)
     // before preparing the new session.
@@ -67,12 +73,25 @@ pub async fn terminal_create(
             }
             Err("terminal closed before it was ready".to_string())
         }
-        Ok(launch) => tauri::async_runtime::spawn_blocking(move || {
-            terminals.create(&id, &stream_id, cols, rows, on_output, launch)
-        })
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| format!("{e:#}")),
+        Ok(launch) => {
+            let created = {
+                let terminals = terminals.clone();
+                let id = id.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    terminals.create(&id, &stream_id, cols, rows, on_output, launch)
+                })
+                .await
+                .map_err(|e| e.to_string())?
+                .map_err(|e| format!("{e:#}"))
+            };
+            // The window may have closed while the session was starting; its
+            // cleanup already ran, so nobody else will end this PTY.
+            if created.is_ok() && state.window_terminals.is_closed(&owner) {
+                let _ = tauri::async_runtime::spawn_blocking(move || terminals.destroy(&id)).await;
+                return Err("window closed".to_string());
+            }
+            created
+        }
         Err(err) if is_read_only(&err) => Err(to_ipc(err)),
         Err(err) => {
             let _ = on_output.send(TerminalOutput {

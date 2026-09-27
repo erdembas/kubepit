@@ -1,5 +1,6 @@
 import * as i18n from '@/i18n/core';
 import {
+  AppWindow,
   Boxes,
   Copy,
   FileSearch,
@@ -21,6 +22,8 @@ import { connectCluster, disconnectCluster, openAndConnect } from '@/lib/cluster
 import { connState, isLive } from '@/lib/clusterMeta';
 import { openObject } from '@/lib/navigation';
 import { applyTheme, effectiveTheme } from '@/lib/theme';
+import { duplicateWindow } from '@/lib/windowing';
+import { IS_MAC, modChord } from '@/lib/platform';
 import { copyText } from '@/components/panels/PortForwardsPanel';
 import { useAppStore } from '@/store/useAppStore';
 import { dock } from '@/store/useDockStore';
@@ -186,6 +189,16 @@ export function appActions(): PaletteItem[] {
         store.setSidebarPinned(true);
         return id;
       },
+    },
+    {
+      type: 'action',
+      id: 'new-window',
+      label: i18n.t('New Window'),
+      hint: modChord(IS_MAC ? '⇧N' : 'Shift+N'),
+      icon: AppWindow,
+      keywords: 'window duplicate',
+      group: 'actions',
+      run: () => void duplicateWindow(),
     },
     {
       type: 'action',

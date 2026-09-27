@@ -20,6 +20,7 @@ import { resourceActions } from '../actions/resourceActions';
 import { useActionDialogs } from '../actions/dialogStore';
 import { useCluster, useNodeMetrics, usePodMetrics } from '../data/hooks';
 import { usePolled } from '../data/polled';
+import { usePaneFocused } from '@/components/split/paneFocus';
 import { useDragWidth } from '../useDragWidth';
 import { isTypingTarget, useNow } from '../util';
 import { DetailsOverview } from './DetailsOverview';
@@ -93,9 +94,10 @@ export function DetailsPanel({
   useEffect(() => {
     if (tabRequest) setTab(tabRequest.tab);
   }, [tabRequest]);
+  const paneFocused = usePaneFocused();
 
   useEffect(() => {
-    if (!isActive) return;
+    if (!isActive || !paneFocused) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
       if (
@@ -110,7 +112,7 @@ export function DetailsPanel({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isActive, clusterId]);
+  }, [isActive, paneFocused, clusterId]);
 
   const now = useNow(30_000, isActive);
   const isNode = obj?.kind === 'Node';

@@ -4,6 +4,8 @@ import { cn } from '@/lib/cn';
 
 interface DashboardTabProps {
   isActive: boolean;
+  /** Active in a pane that is not the focused one (dimmer accent). */
+  muted?: boolean;
   activeTabRef?: React.MutableRefObject<HTMLDivElement | null> | undefined;
   onActivate: () => void;
   onContextMenu: (event: React.MouseEvent<HTMLDivElement>) => void;
@@ -13,7 +15,7 @@ interface DashboardTabProps {
 
 export function DashboardTab(props: DashboardTabProps) {
   i18n.useLocale();
-  const { isActive, activeTabRef, onActivate, onContextMenu, icon, label } = props;
+  const { isActive, muted = false, activeTabRef, onActivate, onContextMenu, icon, label } = props;
 
   return (
     <div
@@ -32,7 +34,9 @@ export function DashboardTab(props: DashboardTabProps) {
       className={cn(
         'group relative flex shrink-0 cursor-pointer items-center gap-2 border-r px-3 text-[12px] transition select-none',
         'border-border/60 outline-none focus-visible:outline-none',
-        isActive ? 'bg-surface text-fg' : 'text-fg-muted hover:bg-surface/60 hover:text-fg',
+        isActive
+          ? cn('bg-surface', muted ? 'text-fg-muted' : 'text-fg')
+          : 'text-fg-muted hover:bg-surface/60 hover:text-fg',
       )}
       title={i18n.t('Workspace dashboard')}
     >
@@ -40,7 +44,7 @@ export function DashboardTab(props: DashboardTabProps) {
         aria-hidden
         className={cn(
           'pointer-events-none absolute inset-x-0 top-0 h-[2px] transition',
-          isActive ? 'bg-accent' : 'bg-transparent',
+          isActive ? (muted ? 'bg-fg-dim/40' : 'bg-accent') : 'bg-transparent',
         )}
       />
       <span className="text-fg-dim flex h-3.5 w-3.5 shrink-0 items-center justify-center">

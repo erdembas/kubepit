@@ -1,22 +1,40 @@
 import { useEffect } from 'react';
 import { events, ipc } from '@/lib/ipc';
 import { refreshOverview } from '@/lib/clusterActions';
+import { syncThemeAcrossWindows } from '@/lib/theme';
+import { windowLabel, windowSeed } from '@/lib/windowSeed';
 import { UNASSIGNED_BUCKET, useAppStore } from '@/store/useAppStore';
 import type { WorkspaceSnapshot } from '@/types';
 
 const OVERVIEW_INTERVAL_MS = 30_000;
 const SAVE_DEBOUNCE_MS = 400;
 
+/** Set while applying another window's workspace, so it is not saved back. */
+let applyingRemoteWorkspace = false;
+
+function hydrate(workspace: WorkspaceSnapshot) {
+  useAppStore.getState().hydrateWorkspace({
+    sections: workspace.sections ?? [],
+    clusterSection: workspace.clusterSection ?? {},
+    collapsedSections: workspace.collapsedSections ?? {},
+    sectionItemOrder: workspace.sectionItemOrder ?? {},
+  });
+}
+
 /**
  * Loads app info, settings, the cluster registry and the workspace layout,
  * subscribes to backend events, persists section edits back to
- * `~/.kubepit/workspace.json`, and keeps dashboard overviews fresh for
- * connected clusters.
+ * `~/.kubepit/workspace.json` (and applies the ones other windows save),
+ * and keeps dashboard overviews fresh for connected clusters. A window
+ * opened from another one starts with that window's tabs.
  */
 export function useAppBootstrap() {
+  useEffect(() => syncThemeAcrossWindows(), []);
+
   useEffect(() => {
     let disposed = false;
     const unlisten: Array<() => void> = [];
+    if (windowSeed) useAppStore.getState().hydrateMainLayout(windowSeed.mainLayout);
 
     void (async () => {
       const [appInfo, settings, clusters, statuses, workspace, forwards] = await Promise.all([
@@ -29,14 +47,7 @@ export function useAppBootstrap() {
       ]);
       if (disposed) return;
       const store = useAppStore.getState();
-      if (workspace && workspace.version === 1) {
-        store.hydrateWorkspace({
-          sections: workspace.sections ?? [],
-          clusterSection: workspace.clusterSection ?? {},
-          collapsedSections: workspace.collapsedSections ?? {},
-          sectionItemOrder: workspace.sectionItemOrder ?? {},
-        });
-      }
+      if (workspace && workspace.version === 1) hydrate(workspace);
       store.setClusters(clusters);
       for (const status of Object.values(statuses)) store.setStatus(status);
       store.setPortForwards(forwards);
@@ -55,6 +66,15 @@ export function useAppBootstrap() {
         }),
         await events.onClustersChanged((list) => useAppStore.getState().setClusters(list)),
         await events.onPortForwards((list) => useAppStore.getState().setPortForwards(list)),
+        await events.onWorkspaceChanged(({ source, snapshot }) => {
+          if (source === windowLabel || snapshot.version !== 1) return;
+          applyingRemoteWorkspace = true;
+          try {
+            hydrate(snapshot);
+          } finally {
+            applyingRemoteWorkspace = false;
+          }
+        }),
       );
       if (disposed) unlisten.forEach((fn) => fn());
     })();
@@ -69,7 +89,7 @@ export function useAppBootstrap() {
   useEffect(() => {
     let timer: number | undefined;
     const unsubscribe = useAppStore.subscribe((state, prev) => {
-      if (!state.bootstrapped) return;
+      if (!state.bootstrapped || applyingRemoteWorkspace) return;
       if (
         state.sections === prev.sections &&
         state.clusterSection === prev.clusterSection &&

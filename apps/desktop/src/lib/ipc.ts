@@ -55,6 +55,7 @@ import type {
   WhoAmI,
   WorkloadLogBatch,
   WorkloadLogOptions,
+  WorkspaceChanged,
   WorkspaceSnapshot,
 } from '@/types';
 
@@ -71,8 +72,13 @@ export const ipc = {
   settingsGet: () => call<Settings>('settings_get'),
   settingsSet: (settings: Settings) => call<Settings>('settings_set', { settings }),
   workspaceLoad: () => call<WorkspaceSnapshot | null>('workspace_load'),
+  /** Saves and broadcasts `workspace://changed` to every window. */
   workspaceSave: (snapshot: WorkspaceSnapshot) => call<void>('workspace_save', { snapshot }),
   revealPath: (path: string) => call<void>('reveal_path', { path }),
+
+  // -- Windows --------------------------------------------------------------
+  /** Open another app window labelled `label` (`win-…`), cascaded from this one. */
+  windowOpen: (label: string) => call<void>('window_open', { label }),
 
   // -- Kubeconfig discovery -------------------------------------------------
   kubeconfigDiscover: () => call<KubeconfigSource[]>('kubeconfig_discover'),
@@ -380,4 +386,6 @@ export const events = {
     listenEvent<PortForward[]>('portforward://changed', handler),
   onTerminalExit: (handler: (payload: { id: string; code: number | null }) => void) =>
     listenEvent<{ id: string; code: number | null }>('terminal://exit', handler),
+  onWorkspaceChanged: (handler: (payload: WorkspaceChanged) => void) =>
+    listenEvent<WorkspaceChanged>('workspace://changed', handler),
 };

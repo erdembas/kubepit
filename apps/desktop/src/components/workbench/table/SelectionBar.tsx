@@ -7,6 +7,7 @@ import { useAppStore } from '@/store/useAppStore';
 import type { BulkAction } from '../actions/bulkActions';
 import { LockedIcon, OPEN_GATE, useActionGates } from '../access/gates';
 import { useActionDialogs } from '../actions/dialogStore';
+import { usePaneFocused } from '@/components/split/paneFocus';
 import { isTypingTarget } from '../util';
 
 /** Space the table reserves under its last row while the bar floats over it. */
@@ -36,8 +37,9 @@ export function SelectionBar({
   const gates = useActionGates(clusterId, actions, readOnly);
 
   // Esc clears the selection before it reaches the details panel (capture phase).
+  const paneFocused = usePaneFocused();
   useEffect(() => {
-    if (!isActive) return;
+    if (!isActive || !paneFocused) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
       if (
@@ -52,7 +54,7 @@ export function SelectionBar({
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [isActive, onClear]);
+  }, [isActive, paneFocused, onClear]);
 
   return (
     <div className="@container pointer-events-none absolute inset-x-0 bottom-10 z-20 flex justify-center px-3">

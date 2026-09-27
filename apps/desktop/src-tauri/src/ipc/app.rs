@@ -2,9 +2,10 @@
 
 use kubepit_core::types::{AppInfo, Settings};
 use serde_json::Value;
-use tauri::State;
+use tauri::{Emitter, State};
 
 use super::{blocking, IpcResult};
+use crate::app_state::{WorkspaceChanged, EVENT_WORKSPACE_CHANGED};
 use crate::AppState;
 
 #[tauri::command]
@@ -31,10 +32,23 @@ pub async fn workspace_load(state: State<'_, AppState>) -> IpcResult<Option<Valu
     blocking(move || core.workspace_load()).await
 }
 
+/// Saves the snapshot, then tells the other windows (`workspace://changed`).
 #[tauri::command]
-pub async fn workspace_save(snapshot: Value, state: State<'_, AppState>) -> IpcResult<()> {
+pub async fn workspace_save(
+    snapshot: Value,
+    app: tauri::AppHandle,
+    window: tauri::Window,
+    state: State<'_, AppState>,
+) -> IpcResult<()> {
     let core = state.core.clone();
-    blocking(move || core.workspace_save(&snapshot)).await
+    let saved = snapshot.clone();
+    blocking(move || core.workspace_save(&saved)).await?;
+    let changed = WorkspaceChanged {
+        source: window.label().to_string(),
+        snapshot,
+    };
+    let _ = app.emit(EVENT_WORKSPACE_CHANGED, changed);
+    Ok(())
 }
 
 /// Show `path` selected in Finder / Explorer / the file manager.

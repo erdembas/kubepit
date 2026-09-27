@@ -26,6 +26,19 @@ export function applyTheme(theme: Theme): void {
   window.dispatchEvent(new CustomEvent('kubepit:theme', { detail: theme }));
 }
 
+/** Follow theme changes made in another app window (they share localStorage). */
+export function syncThemeAcrossWindows(): () => void {
+  if (typeof window === 'undefined') return () => {};
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== THEME_STORAGE_KEY && event.key !== null) return;
+    const next = readInitial();
+    document.documentElement.classList.toggle('dark', effectiveTheme(next) === 'dark');
+    window.dispatchEvent(new CustomEvent('kubepit:theme', { detail: next }));
+  };
+  window.addEventListener('storage', onStorage);
+  return () => window.removeEventListener('storage', onStorage);
+}
+
 function readInitial(): Theme {
   try {
     const saved = localStorage.getItem(THEME_STORAGE_KEY);
