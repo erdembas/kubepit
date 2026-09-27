@@ -305,6 +305,7 @@
   "Search all clusters for “{query}”": "Search all clusters for “{query}”",
   "Search clusters": "Search clusters",
   "Search clusters, resources, actions…": "Search clusters, resources, actions…",
+  "Search every connected cluster ({shortcut})": "Search every connected cluster ({shortcut})",
   "Search every connected cluster by name, label, kind…": "Search every connected cluster by name, label, kind…",
   "Search results": "Search results",
   "Search scope": "Search scope",

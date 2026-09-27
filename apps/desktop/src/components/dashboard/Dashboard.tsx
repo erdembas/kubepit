@@ -11,6 +11,7 @@ import {
   MemoryStick,
   Plug,
   Plus,
+  ScanSearch,
   Search,
   Server,
   Boxes,
@@ -23,10 +24,11 @@ import { connectCluster } from '@/lib/clusterActions';
 import { ENVIRONMENTS, isLive, connState } from '@/lib/clusterMeta';
 import { cn } from '@/lib/cn';
 import { formatBytes, formatCpu, formatPercent } from '@/lib/format';
-import { modChord } from '@/lib/platform';
+import { IS_MAC, modChord } from '@/lib/platform';
 import { sectionColor } from '@/lib/sectionColors';
 import { useVisibleStore } from '@/lib/useVisibleStore';
 import { useAppStore } from '@/store/useAppStore';
+import { openFleetSearch } from '@/store/useFleetSearchStore';
 import { ClusterCard } from './ClusterCard';
 import { HeaderAction, SectionHeader } from './SectionHeader';
 import {
@@ -39,6 +41,7 @@ import {
 } from './model';
 
 const GROUP_KEY = 'kubepit.dashboard.group';
+const FLEET_SEARCH_SHORTCUT = IS_MAC ? '⌘⇧F' : 'Ctrl+Shift+F';
 
 function initialGroup(): DashboardGroupBy {
   try {
@@ -205,6 +208,19 @@ export function Dashboard({ visible }: { visible: boolean }) {
               )}
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              {stats.connected > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  leftIcon={<ScanSearch className="h-3.5 w-3.5" />}
+                  onClick={() => openFleetSearch()}
+                  title={i18n.t('Search every connected cluster ({shortcut})', {
+                    shortcut: FLEET_SEARCH_SHORTCUT,
+                  })}
+                >
+                  {i18n.t('Fleet search')}
+                </Button>
+              )}
               <Button
                 variant="secondary"
                 size="sm"

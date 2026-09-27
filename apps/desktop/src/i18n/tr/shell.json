@@ -305,6 +305,7 @@
   "Search all clusters for “{query}”": "Tüm cluster'larda “{query}” ara",
   "Search clusters": "Cluster ara",
   "Search clusters, resources, actions…": "Cluster, kaynak, eylem ara…",
+  "Search every connected cluster ({shortcut})": "Bağlı tüm cluster'larda ara ({shortcut})",
   "Search every connected cluster by name, label, kind…": "Bağlı tüm cluster'larda ada, etikete, türe göre ara…",
   "Search results": "Arama sonuçları",
   "Search scope": "Arama kapsamı",
