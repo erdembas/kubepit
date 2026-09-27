@@ -1,0 +1,66 @@
+{
+  "_comment": "Kubernetes API versions that are deprecated or no longer served. The single source of truth for the upgrade readiness scanner (crates/kubepit-core/src/upgrade/) and the UI (lib/kube/deprecations.ts: editor markers, Manifests tab, demo backend). To update: add one entry per apiVersion + kind from https://kubernetes.io/docs/reference/using-api/deprecation-guide/ (and the release notes of each new minor), with the release that deprecated it, the release that stops serving it (null while no removal is scheduled), the replacement apiVersion (null when there is none) and note codes the UI explains (lib/kube/deprecations.ts NOTE_TEXT). Bump `updated`. `cargo test -p kubepit-core upgrade` checks the file.",
+  "updated": "2026-09-27",
+  "source": "https://kubernetes.io/docs/reference/using-api/deprecation-guide/",
+  "entries": [
+    { "api_version": "extensions/v1beta1", "kind": "DaemonSet", "resource": "daemonsets", "deprecated_in": "1.9", "removed_in": "1.16", "replacement": "apps/v1", "notes": ["selector_required"] },
+    { "api_version": "extensions/v1beta1", "kind": "Deployment", "resource": "deployments", "deprecated_in": "1.9", "removed_in": "1.16", "replacement": "apps/v1", "notes": ["selector_required"] },
+    { "api_version": "extensions/v1beta1", "kind": "ReplicaSet", "resource": "replicasets", "deprecated_in": "1.9", "removed_in": "1.16", "replacement": "apps/v1", "notes": ["selector_required"] },
+    { "api_version": "extensions/v1beta1", "kind": "NetworkPolicy", "resource": "networkpolicies", "deprecated_in": "1.9", "removed_in": "1.16", "replacement": "networking.k8s.io/v1", "notes": [] },
+    { "api_version": "extensions/v1beta1", "kind": "PodSecurityPolicy", "resource": "podsecuritypolicies", "deprecated_in": "1.11", "removed_in": "1.16", "replacement": null, "notes": ["psa"] },
+    { "api_version": "apps/v1beta1", "kind": "Deployment", "resource": "deployments", "deprecated_in": "1.9", "removed_in": "1.16", "replacement": "apps/v1", "notes": ["selector_required"] },
+    { "api_version": "apps/v1beta1", "kind": "StatefulSet", "resource": "statefulsets", "deprecated_in": "1.9", "removed_in": "1.16", "replacement": "apps/v1", "notes": ["selector_required"] },
+    { "api_version": "apps/v1beta1", "kind": "ControllerRevision", "resource": "controllerrevisions", "deprecated_in": "1.9", "removed_in": "1.16", "replacement": "apps/v1", "notes": [] },
+    { "api_version": "apps/v1beta2", "kind": "DaemonSet", "resource": "daemonsets", "deprecated_in": "1.9", "removed_in": "1.16", "replacement": "apps/v1", "notes": ["selector_required"] },
+    { "api_version": "apps/v1beta2", "kind": "Deployment", "resource": "deployments", "deprecated_in": "1.9", "removed_in": "1.16", "replacement": "apps/v1", "notes": ["selector_required"] },
+    { "api_version": "apps/v1beta2", "kind": "ReplicaSet", "resource": "replicasets", "deprecated_in": "1.9", "removed_in": "1.16", "replacement": "apps/v1", "notes": ["selector_required"] },
+    { "api_version": "apps/v1beta2", "kind": "StatefulSet", "resource": "statefulsets", "deprecated_in": "1.9", "removed_in": "1.16", "replacement": "apps/v1", "notes": ["selector_required"] },
+    { "api_version": "apps/v1beta2", "kind": "ControllerRevision", "resource": "controllerrevisions", "deprecated_in": "1.9", "removed_in": "1.16", "replacement": "apps/v1", "notes": [] },
+
+    { "api_version": "admissionregistration.k8s.io/v1beta1", "kind": "MutatingWebhookConfiguration", "resource": "mutatingwebhookconfigurations", "deprecated_in": "1.16", "removed_in": "1.22", "replacement": "admissionregistration.k8s.io/v1", "notes": ["webhook_defaults"] },
+    { "api_version": "admissionregistration.k8s.io/v1beta1", "kind": "ValidatingWebhookConfiguration", "resource": "validatingwebhookconfigurations", "deprecated_in": "1.16", "removed_in": "1.22", "replacement": "admissionregistration.k8s.io/v1", "notes": ["webhook_defaults"] },
+    { "api_version": "apiextensions.k8s.io/v1beta1", "kind": "CustomResourceDefinition", "resource": "customresourcedefinitions", "deprecated_in": "1.16", "removed_in": "1.22", "replacement": "apiextensions.k8s.io/v1", "notes": ["crd_structural"] },
+    { "api_version": "apiregistration.k8s.io/v1beta1", "kind": "APIService", "resource": "apiservices", "deprecated_in": "1.19", "removed_in": "1.22", "replacement": "apiregistration.k8s.io/v1", "notes": [] },
+    { "api_version": "authentication.k8s.io/v1beta1", "kind": "TokenReview", "resource": "tokenreviews", "deprecated_in": "1.19", "removed_in": "1.22", "replacement": "authentication.k8s.io/v1", "notes": [] },
+    { "api_version": "authorization.k8s.io/v1beta1", "kind": "LocalSubjectAccessReview", "resource": "localsubjectaccessreviews", "deprecated_in": "1.19", "removed_in": "1.22", "replacement": "authorization.k8s.io/v1", "notes": ["sar_fields"] },
+    { "api_version": "authorization.k8s.io/v1beta1", "kind": "SelfSubjectAccessReview", "resource": "selfsubjectaccessreviews", "deprecated_in": "1.19", "removed_in": "1.22", "replacement": "authorization.k8s.io/v1", "notes": ["sar_fields"] },
+    { "api_version": "authorization.k8s.io/v1beta1", "kind": "SelfSubjectRulesReview", "resource": "selfsubjectrulesreviews", "deprecated_in": "1.19", "removed_in": "1.22", "replacement": "authorization.k8s.io/v1", "notes": [] },
+    { "api_version": "authorization.k8s.io/v1beta1", "kind": "SubjectAccessReview", "resource": "subjectaccessreviews", "deprecated_in": "1.19", "removed_in": "1.22", "replacement": "authorization.k8s.io/v1", "notes": ["sar_fields"] },
+    { "api_version": "certificates.k8s.io/v1beta1", "kind": "CertificateSigningRequest", "resource": "certificatesigningrequests", "deprecated_in": "1.19", "removed_in": "1.22", "replacement": "certificates.k8s.io/v1", "notes": ["csr_signer"] },
+    { "api_version": "coordination.k8s.io/v1beta1", "kind": "Lease", "resource": "leases", "deprecated_in": "1.19", "removed_in": "1.22", "replacement": "coordination.k8s.io/v1", "notes": [] },
+    { "api_version": "extensions/v1beta1", "kind": "Ingress", "resource": "ingresses", "deprecated_in": "1.14", "removed_in": "1.22", "replacement": "networking.k8s.io/v1", "notes": ["ingress_fields"] },
+    { "api_version": "networking.k8s.io/v1beta1", "kind": "Ingress", "resource": "ingresses", "deprecated_in": "1.19", "removed_in": "1.22", "replacement": "networking.k8s.io/v1", "notes": ["ingress_fields"] },
+    { "api_version": "networking.k8s.io/v1beta1", "kind": "IngressClass", "resource": "ingressclasses", "deprecated_in": "1.19", "removed_in": "1.22", "replacement": "networking.k8s.io/v1", "notes": [] },
+    { "api_version": "rbac.authorization.k8s.io/v1beta1", "kind": "ClusterRole", "resource": "clusterroles", "deprecated_in": "1.17", "removed_in": "1.22", "replacement": "rbac.authorization.k8s.io/v1", "notes": [] },
+    { "api_version": "rbac.authorization.k8s.io/v1beta1", "kind": "ClusterRoleBinding", "resource": "clusterrolebindings", "deprecated_in": "1.17", "removed_in": "1.22", "replacement": "rbac.authorization.k8s.io/v1", "notes": [] },
+    { "api_version": "rbac.authorization.k8s.io/v1beta1", "kind": "Role", "resource": "roles", "deprecated_in": "1.17", "removed_in": "1.22", "replacement": "rbac.authorization.k8s.io/v1", "notes": [] },
+    { "api_version": "rbac.authorization.k8s.io/v1beta1", "kind": "RoleBinding", "resource": "rolebindings", "deprecated_in": "1.17", "removed_in": "1.22", "replacement": "rbac.authorization.k8s.io/v1", "notes": [] },
+    { "api_version": "scheduling.k8s.io/v1beta1", "kind": "PriorityClass", "resource": "priorityclasses", "deprecated_in": "1.14", "removed_in": "1.22", "replacement": "scheduling.k8s.io/v1", "notes": [] },
+    { "api_version": "storage.k8s.io/v1beta1", "kind": "CSIDriver", "resource": "csidrivers", "deprecated_in": "1.19", "removed_in": "1.22", "replacement": "storage.k8s.io/v1", "notes": [] },
+    { "api_version": "storage.k8s.io/v1beta1", "kind": "CSINode", "resource": "csinodes", "deprecated_in": "1.17", "removed_in": "1.22", "replacement": "storage.k8s.io/v1", "notes": [] },
+    { "api_version": "storage.k8s.io/v1beta1", "kind": "StorageClass", "resource": "storageclasses", "deprecated_in": "1.19", "removed_in": "1.22", "replacement": "storage.k8s.io/v1", "notes": [] },
+    { "api_version": "storage.k8s.io/v1beta1", "kind": "VolumeAttachment", "resource": "volumeattachments", "deprecated_in": "1.19", "removed_in": "1.22", "replacement": "storage.k8s.io/v1", "notes": [] },
+
+    { "api_version": "autoscaling/v2beta1", "kind": "HorizontalPodAutoscaler", "resource": "horizontalpodautoscalers", "deprecated_in": "1.22", "removed_in": "1.25", "replacement": "autoscaling/v2", "notes": ["hpa_metrics"] },
+    { "api_version": "batch/v1beta1", "kind": "CronJob", "resource": "cronjobs", "deprecated_in": "1.21", "removed_in": "1.25", "replacement": "batch/v1", "notes": [] },
+    { "api_version": "discovery.k8s.io/v1beta1", "kind": "EndpointSlice", "resource": "endpointslices", "deprecated_in": "1.21", "removed_in": "1.25", "replacement": "discovery.k8s.io/v1", "notes": ["endpointslice_topology"] },
+    { "api_version": "events.k8s.io/v1beta1", "kind": "Event", "resource": "events", "deprecated_in": "1.19", "removed_in": "1.25", "replacement": "events.k8s.io/v1", "notes": ["event_fields"] },
+    { "api_version": "node.k8s.io/v1beta1", "kind": "RuntimeClass", "resource": "runtimeclasses", "deprecated_in": "1.20", "removed_in": "1.25", "replacement": "node.k8s.io/v1", "notes": [] },
+    { "api_version": "policy/v1beta1", "kind": "PodDisruptionBudget", "resource": "poddisruptionbudgets", "deprecated_in": "1.21", "removed_in": "1.25", "replacement": "policy/v1", "notes": ["pdb_selector"] },
+    { "api_version": "policy/v1beta1", "kind": "PodSecurityPolicy", "resource": "podsecuritypolicies", "deprecated_in": "1.21", "removed_in": "1.25", "replacement": null, "notes": ["psa"] },
+
+    { "api_version": "autoscaling/v2beta2", "kind": "HorizontalPodAutoscaler", "resource": "horizontalpodautoscalers", "deprecated_in": "1.23", "removed_in": "1.26", "replacement": "autoscaling/v2", "notes": [] },
+    { "api_version": "flowcontrol.apiserver.k8s.io/v1beta1", "kind": "FlowSchema", "resource": "flowschemas", "deprecated_in": "1.23", "removed_in": "1.26", "replacement": "flowcontrol.apiserver.k8s.io/v1", "notes": [] },
+    { "api_version": "flowcontrol.apiserver.k8s.io/v1beta1", "kind": "PriorityLevelConfiguration", "resource": "prioritylevelconfigurations", "deprecated_in": "1.23", "removed_in": "1.26", "replacement": "flowcontrol.apiserver.k8s.io/v1", "notes": ["flowcontrol_shares"] },
+
+    { "api_version": "storage.k8s.io/v1beta1", "kind": "CSIStorageCapacity", "resource": "csistoragecapacities", "deprecated_in": "1.24", "removed_in": "1.27", "replacement": "storage.k8s.io/v1", "notes": [] },
+
+    { "api_version": "flowcontrol.apiserver.k8s.io/v1beta2", "kind": "FlowSchema", "resource": "flowschemas", "deprecated_in": "1.26", "removed_in": "1.29", "replacement": "flowcontrol.apiserver.k8s.io/v1", "notes": [] },
+    { "api_version": "flowcontrol.apiserver.k8s.io/v1beta2", "kind": "PriorityLevelConfiguration", "resource": "prioritylevelconfigurations", "deprecated_in": "1.26", "removed_in": "1.29", "replacement": "flowcontrol.apiserver.k8s.io/v1", "notes": ["flowcontrol_shares"] },
+
+    { "api_version": "flowcontrol.apiserver.k8s.io/v1beta3", "kind": "FlowSchema", "resource": "flowschemas", "deprecated_in": "1.29", "removed_in": "1.32", "replacement": "flowcontrol.apiserver.k8s.io/v1", "notes": [] },
+    { "api_version": "flowcontrol.apiserver.k8s.io/v1beta3", "kind": "PriorityLevelConfiguration", "resource": "prioritylevelconfigurations", "deprecated_in": "1.29", "removed_in": "1.32", "replacement": "flowcontrol.apiserver.k8s.io/v1", "notes": [] },
+
+    { "api_version": "v1", "kind": "Endpoints", "resource": "endpoints", "deprecated_in": "1.33", "removed_in": null, "replacement": "discovery.k8s.io/v1", "replacement_kind": "EndpointSlice", "notes": ["endpoints_slices"] }
+  ]
+}

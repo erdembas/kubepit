@@ -168,14 +168,14 @@ pub fn pick_repo_chart(search_json: &str, chart: &str, version: &str) -> Option<
 }
 
 /// Secret name, release name, revision — from label metadata only.
-struct RevisionRef {
-    secret: String,
-    namespace: String,
-    release: String,
-    revision: i64,
+pub(crate) struct RevisionRef {
+    pub(crate) secret: String,
+    pub(crate) namespace: String,
+    pub(crate) release: String,
+    pub(crate) revision: i64,
 }
 
-async fn list_revisions(
+pub(crate) async fn list_revisions(
     client: &Client,
     namespace: Option<&str>,
     release: Option<&str>,
@@ -212,7 +212,7 @@ async fn list_revisions(
         .collect())
 }
 
-async fn fetch_release(client: &Client, rev: &RevisionRef) -> Result<Value> {
+pub(crate) async fn fetch_release(client: &Client, rev: &RevisionRef) -> Result<Value> {
     let api: Api<Secret> = Api::namespaced(client.clone(), &rev.namespace);
     let secret = api
         .get(&rev.secret)
