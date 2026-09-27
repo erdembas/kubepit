@@ -1,16 +1,18 @@
+import {
+  ADMISSION_CA,
+  DEMO_TLS_KEY,
+  GRAFANA_LEAF,
+  KUBE_ROOT_CA,
+  STOREFRONT_LEAF,
+  WEBHOOK_CA,
+  issuerCa,
+  stamped,
+} from './certs';
 import { list, put, type ClusterDb } from './db';
 import { namespacesFor } from './infra';
 import { b64, between, DAY, meta, obj } from './util';
 
 /** ConfigMaps, Secrets and ServiceAccounts. */
-
-const FAKE_CA = `-----BEGIN CERTIFICATE-----
-MIIDBTCCAe2gAwIBAgIIQ2VydGlmaWNhdGVGb3JEZW1vT25seTANBgkqhkiG9w0B
-AQsFADAVMRMwEQYDVQQDEwprdWJlcm5ldGVzMB4XDTI1MDEwMTAwMDAwMFoXDTM1
-MDEwMTAwMDAwMFowFTETMBEGA1UEAxMKa3ViZXJuZXRlczCCASIwDQYJKoZIhvcN
-AQEBBQADggEPADCCAQoCggEBAKubepitDemoCertificateNotRealDataOnly
------END CERTIFICATE-----
-`;
 
 function cm(
   db: ClusterDb,
@@ -39,8 +41,9 @@ function secret(
 
 export function buildConfig(db: ClusterDb) {
   const p = db.profile;
+  const rootCa = stamped(KUBE_ROOT_CA, 420, 3230);
   for (const ns of namespacesFor(db)) {
-    cm(db, ns, 'kube-root-ca.crt', { 'ca.crt': FAKE_CA }, 200 * DAY);
+    cm(db, ns, 'kube-root-ca.crt', { 'ca.crt': rootCa }, 200 * DAY);
     put(db, obj('v1', 'ServiceAccount', meta({ name: 'default', namespace: ns, age: 200 * DAY })));
   }
   // Service accounts referenced by pod templates.
@@ -139,26 +142,42 @@ export function buildConfig(db: ClusterDb) {
     'admin-password': 'demo-grafana-password',
     'ldap-toml': '',
   });
-  const tls = {
-    'tls.crt': FAKE_CA,
-    'tls.key':
-      '-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDemoKeyOnly\n-----END PRIVATE KEY-----\n',
-  };
-  secret(db, 'web', 'storefront-tls', 'kubernetes.io/tls', tls, 20 * DAY, {
-    'controller.cert-manager.io/fao': 'true',
-  });
-  secret(db, 'monitoring', 'grafana-tls', 'kubernetes.io/tls', tls, 20 * DAY, {
-    'controller.cert-manager.io/fao': 'true',
-  });
+  // Real certificates (see certs.ts); on troubled clusters Grafana's renewal is stuck and
+  // its certificate expires in 12 days (its cert-manager Certificate is not Ready).
+  const issuer = issuerCa();
+  secret(
+    db,
+    'web',
+    'storefront-tls',
+    'kubernetes.io/tls',
+    { 'tls.crt': stamped(STOREFRONT_LEAF, 20, 70) + issuer, 'tls.key': DEMO_TLS_KEY },
+    20 * DAY,
+    { 'controller.cert-manager.io/fao': 'true' },
+  );
+  secret(
+    db,
+    'monitoring',
+    'grafana-tls',
+    'kubernetes.io/tls',
+    {
+      'tls.crt':
+        (p.troubled ? stamped(GRAFANA_LEAF, 77.5, 12.5) : stamped(GRAFANA_LEAF, 20, 70)) + issuer,
+      'tls.key': DEMO_TLS_KEY,
+    },
+    p.troubled ? 78 * DAY : 20 * DAY,
+    { 'controller.cert-manager.io/fao': 'true' },
+  );
+  const webhookCa = stamped(WEBHOOK_CA, 140, 225);
   secret(db, 'cert-manager', 'cert-manager-webhook-ca', 'Opaque', {
-    'ca.crt': FAKE_CA,
-    'tls.crt': FAKE_CA,
-    'tls.key': tls['tls.key'],
+    'ca.crt': webhookCa,
+    'tls.crt': webhookCa,
+    'tls.key': DEMO_TLS_KEY,
   });
+  const admission = stamped(ADMISSION_CA, 300, 3350);
   secret(db, 'ingress-nginx', 'ingress-nginx-admission', 'Opaque', {
-    ca: FAKE_CA,
-    cert: FAKE_CA,
-    key: tls['tls.key'],
+    ca: admission,
+    cert: admission,
+    key: DEMO_TLS_KEY,
   });
   for (const ns of ['checkout', 'web', 'data']) {
     secret(
