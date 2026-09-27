@@ -77,6 +77,21 @@ export const ACTION_ACCESS: Record<string, Requirement> = {
     ],
   }),
   delete: onObject('delete'),
+  // Workload operations: patches on the object itself (template, spec.paused).
+  'set-image': onObject('patch'),
+  'pause-rollout': onObject('patch'),
+  rollback: onObject('patch'),
+  // Logs & debug: file operations run over exec; a debug container is added
+  // through the ephemeralcontainers subresource, then attached to.
+  files: podSub('create', 'exec'),
+  debug: ({ obj, ns }) => [
+    accessCheck('patch', POD, {
+      namespace: ns,
+      subresource: 'ephemeralcontainers',
+      name: obj.metadata.name,
+    }),
+    accessCheck('create', POD, { namespace: ns, subresource: 'attach', name: obj.metadata.name }),
+  ],
 };
 
 /** What action `actionId` needs on `obj`, or `undefined` when it is not gated. */
