@@ -9,6 +9,7 @@ import { EditEditor } from './editor/EditEditor';
 import { FileBrowser } from './files/FileBrowser';
 import { LogView } from './logs/LogView';
 import { PromqlView } from './promql/PromqlView';
+import { ManifestsView } from './manifests/ManifestsView';
 import { WorkloadLogView } from './workload-logs/WorkloadLogView';
 import { requestCloseTabs } from './tabs';
 import { TerminalView } from './terminal/TerminalView';
@@ -59,6 +60,9 @@ export const DockTabBody = memo(function DockTabBody({ clusterId, tab, active }:
       break;
     case 'promql':
       body = <PromqlView clusterId={clusterId} tab={tab} active={active} />;
+      break;
+    case 'manifests':
+      body = <ManifestsView clusterId={clusterId} tab={tab} active={active} />;
       break;
   }
   return <TabErrorBoundary>{body}</TabErrorBoundary>;

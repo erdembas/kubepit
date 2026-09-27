@@ -9,7 +9,16 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable';
-import { ChevronDown, FilePlus2, ListX, Maximize2, Minimize2, X, XCircle } from 'lucide-react';
+import {
+  ChevronDown,
+  FilePlus2,
+  FolderGit2,
+  ListX,
+  Maximize2,
+  Minimize2,
+  X,
+  XCircle,
+} from 'lucide-react';
 import { FileContextMenu } from '@/components/ui/FileContextMenu';
 import { cn } from '@/lib/cn';
 import { useDockStore, type DockTab } from '@/store/useDockStore';
@@ -29,6 +38,7 @@ interface Props {
   onClusterShell: () => void;
   onLocalShell: () => void;
   onCreate: () => void;
+  onManifests: () => void;
   onToggleMaximize: () => void;
   onMinimize: () => void;
 }
@@ -44,6 +54,7 @@ export function DockTabStrip({
   onClusterShell,
   onLocalShell,
   onCreate,
+  onManifests,
   onToggleMaximize,
   onMinimize,
 }: Props) {
@@ -116,6 +127,12 @@ export function DockTabStrip({
           label={i18n.t('Create')}
           title={i18n.t('Create a resource from YAML')}
           onClick={onCreate}
+        />
+        <DockStripAction
+          icon={<FolderGit2 />}
+          label={i18n.t('Manifests')}
+          title={i18n.t('Diff and apply local manifests to clusters')}
+          onClick={onManifests}
         />
         <span aria-hidden className="bg-border/70 mx-0.5 h-4 w-px" />
         <DockStripAction

@@ -78,7 +78,7 @@ impl Kubepit {
         Ok(results)
     }
 
-    async fn dry_run_document(
+    pub(crate) async fn dry_run_document(
         &self,
         client: &kube::Client,
         cluster_id: &str,

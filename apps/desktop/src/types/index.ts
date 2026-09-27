@@ -348,6 +348,88 @@ export interface DryRunResult {
   error: string | null;
 }
 
+// -- Local manifests: render, diff and apply ---------------------------------
+
+/**
+ * How a local folder becomes objects. `auto` picks `kustomize` for a folder
+ * with a kustomization file, `helm` for a chart (Chart.yaml), `plain` else.
+ */
+export type ManifestSourceKind = 'auto' | 'plain' | 'kustomize' | 'helm';
+
+/** `helm template` inputs; values files are absolute or relative to the chart. */
+export interface ManifestHelmOptions {
+  release_name: string;
+  namespace: string | null;
+  values_files: string[];
+}
+
+/** One folder, or several files / folders (absolute paths). */
+export interface ManifestSource {
+  paths: string[];
+  kind: ManifestSourceKind;
+  helm: ManifestHelmOptions | null;
+}
+
+/** One rendered object and where it came from. */
+export interface ManifestDocument {
+  /** `group/Kind/namespace/name`, unique within a render (` #2` on repeats). */
+  id: string;
+  /** Path relative to the render root, or helm's template path. */
+  source: string;
+  /** Position within `source` (0-based). */
+  index: number;
+  /** First line in `source` (1-based; 0 when unknown). */
+  line: number;
+  api_version: string;
+  kind: string;
+  name: string;
+  namespace: string | null;
+  /** The object as YAML (one document). */
+  yaml: string;
+}
+
+/** A skipped file or document, with the reason. */
+export interface ManifestProblem {
+  source: string;
+  line: number;
+  message: string;
+}
+
+/** A Kustomize directory or chart inside a plain folder (open it on its own). */
+export interface ManifestNested {
+  path: string;
+  relative: string;
+  kind: ManifestSourceKind;
+}
+
+export interface ManifestRender {
+  root: string;
+  /** The resolved kind (never `auto`). */
+  kind: ManifestSourceKind;
+  /** Files read (plain folders; 0 when a tool rendered them). */
+  files: number;
+  documents: ManifestDocument[];
+  problems: ManifestProblem[];
+  nested: ManifestNested[];
+  /** Tool invocation for display (`kubectl kustomize …`, `helm template …`). */
+  command: string | null;
+  /** Compare with `manifestsFingerprint` to notice edits. */
+  fingerprint: string;
+  rendered_at: number;
+}
+
+/** A recently opened source (`~/.kubepit/manifests.json`), newest first. */
+export interface ManifestRecent {
+  source: ManifestSource;
+  opened_at: number;
+}
+
+/** Outcome of applying one document. */
+export interface ManifestApplyResult {
+  object: KubeObject | null;
+  error: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // Logs
 // ---------------------------------------------------------------------------

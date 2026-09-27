@@ -35,6 +35,8 @@ mod prometheus;
 mod openapi;
 // Connectivity: saved port forwards, proxy info, keychain storage.
 mod connectivity;
+// Local manifests: render folders, diff / apply to clusters.
+mod manifests;
 
 pub use access::*;
 pub use alerts::*;
@@ -47,6 +49,7 @@ pub use helm_charts::*;
 pub use insights::*;
 pub use logs::*;
 pub use logs_debug::*;
+pub use manifests::*;
 pub use metrics::*;
 pub use openapi::*;
 pub use portforward::*;

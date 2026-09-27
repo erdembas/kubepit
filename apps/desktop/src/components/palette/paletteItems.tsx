@@ -5,6 +5,7 @@ import {
   ChartSpline,
   Copy,
   FileSearch,
+  FolderGit2,
   FolderPlus,
   Languages,
   LayoutDashboard,
@@ -148,6 +149,19 @@ export function clusterActions(cluster: ClusterDef): PaletteItem[] {
       },
     },
     explainAction(cluster, 'cluster'),
+    {
+      type: 'action',
+      id: `manifests:${cluster.id}`,
+      label: i18n.t('Diff local manifests'),
+      hint: 'kubectl diff',
+      icon: FolderGit2,
+      keywords: 'manifests kustomize helm apply yaml folder',
+      group: 'cluster',
+      run: () => {
+        openAndConnect(cluster.id);
+        dock.manifests(cluster.id);
+      },
+    },
     {
       type: 'action',
       id: `edit:${cluster.id}`,

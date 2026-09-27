@@ -1,6 +1,7 @@
 import * as i18n from '@/i18n';
 import { useEffect, useState } from 'react';
-import { ArrowLeftRight, GitCompareArrows, Loader2, RefreshCw } from 'lucide-react';
+import { ArrowLeftRight, ArrowRightLeft, GitCompareArrows, Loader2, RefreshCw } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
 import { IconButton } from '@/components/ui/IconButton';
 import { Switch } from '@/components/ui/Switch';
 import { cn } from '@/lib/cn';
@@ -11,6 +12,7 @@ import { DiffView } from '../../common/DiffView';
 import { fetchSide, type FetchedSide } from './compareData';
 import { DriftPane } from './DriftPane';
 import { SidePicker } from './SidePicker';
+import { SyncPanel, type SyncRequest } from './SyncPanel';
 
 type CompareTab = Extract<DockTab, { kind: 'compare' }>;
 
@@ -34,6 +36,12 @@ export function CompareView({
   const update = (patch: Partial<CompareTab>) =>
     useDockStore.getState().updateTab(clusterId, tab.id, patch);
   const [refresh, setRefresh] = useState(0);
+  // "Sync to…" replaces the panes until closed; closing refreshes both sides.
+  const [sync, setSync] = useState<SyncRequest | null>(null);
+  const closeSync = () => {
+    setSync(null);
+    setRefresh((n) => n + 1);
+  };
   const object = `${tab.namespace ? `${tab.namespace}/` : ''}${tab.name}`;
 
   return (
@@ -83,13 +91,16 @@ export function CompareView({
           />
         </div>
       </div>
-      {tab.mode === 'compare' ? (
+      {sync ? (
+        <SyncPanel gvk={tab.gvk} request={sync} onClose={closeSync} />
+      ) : tab.mode === 'compare' ? (
         <ComparePane
           clusterId={clusterId}
           tab={tab}
           active={active}
           refresh={refresh}
           onChange={update}
+          onSync={setSync}
         />
       ) : (
         <DriftPane
@@ -99,6 +110,7 @@ export function CompareView({
           refresh={refresh}
           onBaseline={(baseline) => update({ baseline })}
           onOpenDiff={(left, right) => update({ mode: 'compare', left, right })}
+          onSync={setSync}
         />
       )}
     </div>
@@ -149,12 +161,14 @@ function ComparePane({
   active,
   refresh,
   onChange,
+  onSync,
 }: {
   clusterId: ClusterId;
   tab: CompareTab;
   active: boolean;
   refresh: number;
   onChange: (patch: Partial<CompareTab>) => void;
+  onSync: (request: SyncRequest) => void;
 }) {
   i18n.useLocale();
   const clusters = useAppStore((s) => s.clusters);
@@ -198,6 +212,21 @@ function ComparePane({
           <span className="text-fg-dim text-[11.5px]">
             {i18n.t('Connect another cluster to compare with.')}
           </span>
+        )}
+        {right && (
+          <Button
+            size="xs"
+            variant="ghost"
+            className="ml-auto"
+            leftIcon={<ArrowRightLeft className="h-3 w-3" />}
+            disabled={leftData?.state !== 'ok'}
+            title={i18n.t('Make the right side match the left: review, then apply')}
+            onClick={() =>
+              onSync({ source: left, targets: [right.clusterId], namespace: right.namespace })
+            }
+          >
+            {i18n.t('Sync to right…')}
+          </Button>
         )}
       </div>
       {!right ? null : !leftData || !rightData ? (

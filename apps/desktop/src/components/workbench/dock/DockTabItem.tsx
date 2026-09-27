@@ -5,6 +5,7 @@ import { CSS } from '@dnd-kit/utilities';
 import {
   ChartSpline,
   FileCode2,
+  FolderGit2,
   FolderTree,
   GitCompareArrows,
   Logs,
@@ -23,6 +24,7 @@ const TAB_ICON: Record<DockTab['kind'], ComponentType<{ className?: string }>> =
   'workload-logs': Logs,
   files: FolderTree,
   promql: ChartSpline,
+  manifests: FolderGit2,
 };
 
 interface Props {

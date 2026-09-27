@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { PromRangeKey } from '@/lib/prometheus';
-import type { ClusterId, Gvk, TerminalSpec } from '@/types';
+import type { ClusterId, Gvk, ManifestSource, TerminalSpec } from '@/types';
 import { useAppStore } from './useAppStore';
 
 /**
@@ -96,6 +96,14 @@ export type DockTab =
       title: string;
       query: string;
       range: PromRangeKey;
+    }
+  /** Local manifests: render a folder, diff / apply it to clusters (see `dock/manifests/`). */
+  | {
+      id: string;
+      kind: 'manifests';
+      title: string;
+      /** What is open; null until a folder or files are picked. */
+      source: ManifestSource | null;
     };
 
 /** One side of a cross-cluster compare. */
@@ -113,7 +121,8 @@ type DockTabInput =
   | Omit<Extract<DockTab, { kind: 'compare' }>, 'id'>
   | Omit<Extract<DockTab, { kind: 'workload-logs' }>, 'id'>
   | Omit<Extract<DockTab, { kind: 'files' }>, 'id'>
-  | Omit<Extract<DockTab, { kind: 'promql' }>, 'id'>;
+  | Omit<Extract<DockTab, { kind: 'promql' }>, 'id'>
+  | Omit<Extract<DockTab, { kind: 'manifests' }>, 'id'>;
 
 export interface ClusterDock {
   tabs: DockTab[];
@@ -162,6 +171,12 @@ function withoutKeys(record: Record<string, true>, keys: Iterable<string>): Reco
   return next;
 }
 
+/** Same picked paths (order-insensitive); two empty manifests tabs match too. */
+function sameManifestPaths(a: ManifestSource | null, b: ManifestSource | null): boolean {
+  const key = (s: ManifestSource | null) => (s ? [...s.paths].sort().join('\u0000') : '');
+  return key(a) === key(b);
+}
+
 /** Logs and edit tabs are unique per target; terminals are always new. */
 function sameTarget(a: DockTab, b: DockTabInput): boolean {
   if (a.kind === 'logs' && b.kind === 'logs') return a.namespace === b.namespace && a.pod === b.pod;
@@ -177,6 +192,8 @@ function sameTarget(a: DockTab, b: DockTabInput): boolean {
   if (a.kind === 'files' && b.kind === 'files')
     return a.namespace === b.namespace && a.pod === b.pod;
   if (a.kind === 'promql' && b.kind === 'promql') return !!b.query && a.query === b.query;
+  if (a.kind === 'manifests' && b.kind === 'manifests')
+    return sameManifestPaths(a.source, b.source);
   return false;
 }
 
@@ -475,4 +492,11 @@ export const dock = {
   /** PromQL console; `query` prefills (and runs) an expression, e.g. a chart's preset. */
   promql: (clusterId: ClusterId, query = '', range: PromRangeKey = '1h') =>
     useDockStore.getState().openTab(clusterId, { kind: 'promql', title: 'PromQL', query, range }),
+  /** Local manifests workspace; focuses the tab that already has `source` open. */
+  manifests: (clusterId: ClusterId, source: ManifestSource | null = null) =>
+    useDockStore.getState().openTab(clusterId, {
+      kind: 'manifests',
+      title: 'Manifests',
+      source,
+    }),
 };

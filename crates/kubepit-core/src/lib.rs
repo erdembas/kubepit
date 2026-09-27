@@ -43,6 +43,7 @@
 //! | [`proxy`]       | per-cluster proxy (`proxy-url` / override)             |
 //! | [`secrets`]     | OS credential store behind `SecretStore`               |
 //! | [`credentials`] | managed kubeconfig storage, keychain migration         |
+//! | [`manifests`]   | local manifests: render folders, diff / apply to clusters |
 //!
 //! Push notifications to the UI go through [`EventSink`]; streams take plain
 //! `Fn(T) -> bool` callbacks (return `false` to stop) that the desktop shell
@@ -103,6 +104,8 @@ pub mod kubeconfig_watch;
 pub mod proxy;
 pub mod saved_forwards;
 pub mod secrets;
+// Local manifests: render folders / Kustomize / Helm, diff and apply.
+pub mod manifests;
 
 pub use app::Kubepit;
 pub use events::{EventSink, NullSink};

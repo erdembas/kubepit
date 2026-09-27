@@ -103,6 +103,13 @@ pub fn run() {
             ipc::rollout_undo,
             ipc::resource_set_image,
             ipc::resource_dry_run_yaml,
+            // Local manifests
+            ipc::manifests_render,
+            ipc::manifests_fingerprint,
+            ipc::manifests_recent_list,
+            ipc::manifests_recent_remove,
+            ipc::manifests_dry_run,
+            ipc::manifests_apply,
             // Logs
             ipc::pod_logs_stream,
             ipc::pod_logs_stop,
