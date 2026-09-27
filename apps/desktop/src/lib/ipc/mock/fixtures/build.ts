@@ -5,6 +5,7 @@ import { buildCrds } from './crds';
 import { buildData, buildLegacy, buildTeams } from './data';
 import { setBuilder, type ClusterDb } from './db';
 import { buildEvents } from './events';
+import { buildGatewayApi } from './gateway';
 import { buildHelm } from './helm';
 import { buildClasses, buildLeaderLeases, buildNamespaces, buildWebhooks } from './infra';
 import { buildMonitoring } from './monitoring';
@@ -39,6 +40,7 @@ function buildCluster(db: ClusterDb) {
   buildStorage(db);
   buildRbac(db);
   buildCrds(db);
+  buildGatewayApi(db);
   const domain = db.profile.domain;
   if (db.profile.platform !== 'kind')
     buildIngress(db, {

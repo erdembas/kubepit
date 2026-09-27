@@ -196,6 +196,44 @@ batched access reviews; actions declare what they need in
 `components/workbench/actions/access.ts`. Unknown answers never block the
 UI — the API server still enforces.
 
+## Resource map (topology)
+
+The relationship map runs entirely in the UI on top of the shared watches
+the tables use (`components/workbench/data/watchCache.ts`); it needs no
+backend command. Everything under `lib/kube/topology/` is pure and
+deterministic:
+
+- `sources.ts` — the kinds read (a fixed list of built-ins plus Gateway API
+  `Gateway`/`HTTPRoute`/`GRPCRoute` when served), one watch slot each.
+- `build.ts` + `refs.ts` — one node per object (id `kindKey|namespace|name`)
+  and typed edges from referrer to referent: ownerReferences, Service /
+  PodDisruptionBudget / NetworkPolicy selectors, Service → EndpointSlices,
+  Ingress and route backends, parents, TLS secrets and classes, pod spec
+  references (volumes, projected volumes, envFrom, valueFrom,
+  imagePullSecrets, claims, service account, node), PVC → PV →
+  StorageClass, bindings → service accounts / roles, HPA → scale target.
+  Unobserved references become placeholder nodes (`missing` when their kind
+  is synced, so broken references stand out).
+- `view.ts` — scope (a namespace map: namespaced objects plus the
+  cluster-scoped ones they relate to; or an object's neighbourhood of 1–3
+  hops where ownership links are free and hubs such as nodes, service
+  accounts, classes and cluster roles only expand from the root), drop old
+  ReplicaSets and bookkeeping objects, hide kinds (bridging ownership
+  chains), collapse pods per controller into group nodes, and cap the map at
+  400 nodes with one "+N more" node per kind.
+- `layout.ts` — tier columns (entry → route → service → workload →
+  controller → pods → config/storage/identity → bindings → cluster → node),
+  barycenter sweeps against crossings, isotonic (PAV) coordinate passes and
+  cubic edges. The UI memoises the layout on graph structure, so status
+  changes never move nodes.
+
+`components/workbench/topology/` renders it: `TopologyCanvas` (SVG with
+theme tokens, pan / wheel and pinch zoom, hover highlighting, roving
+keyboard focus), `TopologyMap` (search, kind chips, legend, notices),
+`ResourceMapPage` (the `@resource-map` view scoped by the namespace picker,
+with the details panel docked beside the map) and `MapTab` (the details
+panel tab; clicking a node opens that object on its own Map tab).
+
 ## Diffs
 
 Every diff (apply review, rollout revisions, Helm revisions, compare and

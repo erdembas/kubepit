@@ -16,6 +16,7 @@ export function tpl(
     hostNetwork?: boolean;
     tolerations?: Array<Record<string, unknown>>;
     annotations?: Record<string, string>;
+    imagePullSecrets?: string[];
   } = {},
 ): PodTemplate {
   return {
@@ -34,6 +35,9 @@ export function tpl(
       ...(opts.priorityClassName ? { priorityClassName: opts.priorityClassName } : {}),
       ...(opts.hostNetwork ? { hostNetwork: true, hostPID: true } : {}),
       ...(opts.tolerations ? { tolerations: opts.tolerations } : {}),
+      ...(opts.imagePullSecrets
+        ? { imagePullSecrets: opts.imagePullSecrets.map((name) => ({ name })) }
+        : {}),
     },
   };
 }

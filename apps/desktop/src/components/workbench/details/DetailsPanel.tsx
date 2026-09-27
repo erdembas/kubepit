@@ -32,8 +32,11 @@ import { YamlTab } from './YamlTab';
 import { hasRollout } from '@/lib/kube/rollout';
 import { requestFor, useDetailsTabRequest } from './detailsTabs';
 import { HistoryTab } from './HistoryTab';
+// Resource relationship map: the object's neighbourhood.
+import { Workflow } from 'lucide-react';
+import { MapTab } from '../topology/MapTab';
 
-type Tab = 'details' | 'yaml' | 'events' | 'history';
+type Tab = 'details' | 'yaml' | 'events' | 'history' | 'map';
 
 const POD_METRIC_KINDS = new Set([
   'Pod',
@@ -57,10 +60,13 @@ export function DetailsPanel({
   liveObject,
   isActive,
   apiResources,
+  viewKey,
 }: {
   clusterId: string;
   gvk: Gvk;
   kindKey: string;
+  /** View tab whose selection this panel shows (defaults to `kindKey`). */
+  viewKey?: string;
   selection: ObjectSelection;
   liveObject: KubeObject | null;
   isActive: boolean;
@@ -88,7 +94,7 @@ export function DetailsPanel({
     isActive,
   );
   const obj = liveObject ?? fetched.data ?? null;
-  const close = () => useWorkbenchStore.getState().select(clusterId, kindKey, null);
+  const close = () => useWorkbenchStore.getState().select(clusterId, viewKey ?? kindKey, null);
   const tabRequest = useDetailsTabRequest((s) =>
     requestFor(s.request, clusterId, obj?.metadata.uid),
   );
@@ -150,6 +156,7 @@ export function DetailsPanel({
     ...(obj && hasRollout(obj)
       ? [{ id: 'history' as const, label: i18n.t('History'), icon: History }]
       : []),
+    { id: 'map', label: i18n.t('Map'), icon: Workflow },
   ];
 
   return (
@@ -239,6 +246,15 @@ export function DetailsPanel({
         </div>
       ) : tab === 'history' ? (
         <HistoryTab {...{ clusterId, gvk, obj, readOnly, isActive }} />
+      ) : tab === 'map' ? (
+        <MapTab
+          clusterId={clusterId}
+          gvk={gvk}
+          obj={obj}
+          isActive={isActive}
+          apiResources={apiResources}
+          onShowDetails={() => setTab('details')}
+        />
       ) : tab === 'yaml' ? (
         <YamlTab
           clusterId={clusterId}

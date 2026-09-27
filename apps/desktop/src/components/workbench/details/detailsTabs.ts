@@ -8,7 +8,7 @@ import type { ClusterId, Gvk, KubeObject } from '@/types';
  * names the object it shows; the tab consumes `focus` and clears it.
  */
 
-export type DetailsTabId = 'history';
+export type DetailsTabId = 'history' | 'map';
 
 export interface DetailsTabRequest {
   clusterId: ClusterId;

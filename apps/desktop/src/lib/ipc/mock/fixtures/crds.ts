@@ -1,4 +1,5 @@
 import { put, type ClusterDb } from './db';
+import { GATEWAY_CRDS } from './gateway';
 import { buildInstances } from './instances';
 import { DAY, meta, obj } from './util';
 
@@ -12,7 +13,7 @@ interface Column {
   description?: string;
 }
 
-interface CrdInput {
+export interface CrdInput {
   group: string;
   kind: string;
   plural: string;
@@ -146,6 +147,7 @@ export const CRDS: CrdInput[] = [
     categories: ['prometheus-operator'],
     age: 120 * DAY,
   },
+  ...GATEWAY_CRDS,
 ];
 
 export function crdsFor(db: ClusterDb) {

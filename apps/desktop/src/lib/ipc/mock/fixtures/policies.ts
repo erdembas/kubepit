@@ -272,6 +272,13 @@ export function buildPolicies(db: ClusterDb) {
     ready('checkout', 'payment-api'),
   );
   pdb(
+    'web',
+    'storefront',
+    { maxUnavailable: 1 },
+    count('web', 'storefront').length,
+    ready('web', 'storefront'),
+  );
+  pdb(
     'data',
     'postgres',
     { maxUnavailable: 1 },

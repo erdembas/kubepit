@@ -40,6 +40,7 @@ export function buildCheckout(db: ClusterDb) {
           ],
           mounts: [
             ['config', '/etc/payment-api', true],
+            ['certs', '/etc/payment-api/certs', true],
             ['tmp', '/tmp'],
           ],
         },
@@ -65,8 +66,25 @@ export function buildCheckout(db: ClusterDb) {
         ],
         volumes: [
           { name: 'config', configMap: { name: 'payment-api-config' } },
+          {
+            name: 'certs',
+            projected: {
+              sources: [
+                {
+                  configMap: { name: 'payment-api-ca', items: [{ key: 'ca.crt', path: 'ca.crt' }] },
+                },
+                {
+                  secret: {
+                    name: 'payment-api-secrets',
+                    items: [{ key: 'WEBHOOK_SIGNING_SECRET', path: 'webhook.key' }],
+                  },
+                },
+              ],
+            },
+          },
           { name: 'tmp', emptyDir: {} },
         ],
+        imagePullSecrets: ['ghcr-pull'],
         priorityClassName: 'high-priority',
         labels: { team: 'payments', tier: 'backend' },
         annotations: { 'prometheus.io/scrape': 'true', 'prometheus.io/port': '9090' },
@@ -216,6 +234,7 @@ export function buildWeb(db: ClusterDb) {
       ],
       {
         volumes: [{ name: 'nginx-conf', configMap: { name: 'storefront-nginx' } }],
+        imagePullSecrets: ['ghcr-pull'],
         labels: { team: 'web', tier: 'frontend' },
       },
     ),
@@ -257,16 +276,21 @@ export function buildWeb(db: ClusterDb) {
       name: 'image-resizer',
       age: 70 * DAY,
       replicas: 2,
-      template: tpl('image-resizer', [
-        {
-          name: 'image-resizer',
-          image: 'ghcr.io/acme/image-resizer:1.3.2',
-          ports: [8080],
-          cpu: ['500m', '2'],
-          mem: ['512Mi', '2Gi'],
-          probe: 'http',
-        },
-      ]),
+      template: tpl(
+        'image-resizer',
+        [
+          {
+            name: 'image-resizer',
+            image: 'ghcr.io/acme/image-resizer:1.3.2',
+            ports: [8080],
+            cpu: ['500m', '2'],
+            mem: ['512Mi', '2Gi'],
+            probe: 'http',
+            mounts: [['cache', '/var/cache/images']],
+          },
+        ],
+        { volumes: [{ name: 'cache', persistentVolumeClaim: { claimName: 'image-cache' } }] },
+      ),
     });
     buildService(db, {
       namespace: ns,

@@ -16,6 +16,7 @@ import {
   Settings,
   SquareTerminal,
   Unplug,
+  Workflow,
   type LucideIcon,
 } from 'lucide-react';
 import { connectCluster, disconnectCluster, openAndConnect } from '@/lib/clusterActions';
@@ -29,6 +30,25 @@ import { useAppStore } from '@/store/useAppStore';
 import { dock } from '@/store/useDockStore';
 import type { ClusterDef } from '@/types';
 import { fleetSearchAction } from './fleetSearchItem';
+import { VIEW_KEYS } from '@/lib/kube/nav';
+import { useWorkbenchStore } from '@/store/useWorkbenchStore';
+
+/** Resource relationship map of a cluster (namespace picker scope). */
+function resourceMapItem(cluster: ClusterDef, id: string, group: 'resources' | 'cluster') {
+  return {
+    type: 'action' as const,
+    id,
+    label: i18n.t('Open resource map'),
+    hint: group === 'resources' ? cluster.name : undefined,
+    icon: Workflow,
+    keywords: 'resource map topology graph relationships dependencies',
+    group,
+    run: () => {
+      openAndConnect(cluster.id);
+      useWorkbenchStore.getState().setActiveKind(cluster.id, VIEW_KEYS.resourceMap);
+    },
+  };
+}
 
 export type PaletteFilter = 'all' | 'clusters' | 'resources' | 'actions';
 
@@ -112,6 +132,7 @@ export function clusterActions(cluster: ClusterDef): PaletteItem[] {
         dock.shell(cluster.id, cluster.name);
       },
     },
+    resourceMapItem(cluster, `map:${cluster.id}`, 'cluster'),
     {
       type: 'action',
       id: `edit:${cluster.id}`,
@@ -146,16 +167,19 @@ export function clusterActions(cluster: ClusterDef): PaletteItem[] {
 }
 
 export function resourceJumps(cluster: ClusterDef): PaletteItem[] {
-  return JUMP_KINDS.map((kind) => ({
-    type: 'action' as const,
-    id: `jump:${cluster.id}:${kind}`,
-    label: i18n.t('Go to {kind}', { kind: kindPlural(kind) }),
-    hint: cluster.name,
-    icon: Boxes,
-    keywords: kind,
-    group: 'resources' as const,
-    run: () => openObject(cluster.id, kind),
-  }));
+  return [
+    ...JUMP_KINDS.map((kind) => ({
+      type: 'action' as const,
+      id: `jump:${cluster.id}:${kind}`,
+      label: i18n.t('Go to {kind}', { kind: kindPlural(kind) }),
+      hint: cluster.name,
+      icon: Boxes,
+      keywords: kind,
+      group: 'resources' as const,
+      run: () => openObject(cluster.id, kind),
+    })),
+    resourceMapItem(cluster, `jump-map:${cluster.id}`, 'resources'),
+  ];
 }
 
 export function appActions(): PaletteItem[] {

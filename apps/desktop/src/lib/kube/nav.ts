@@ -18,6 +18,7 @@ import { kindIcon, SECTION_ICONS } from './icons';
 export const VIEW_KEYS = {
   clusterOverview: '@overview',
   workloadsOverview: '@workloads',
+  resourceMap: '@resource-map',
   portForwards: '@port-forwards',
   helmReleases: '@helm',
   myPermissions: '@access',
@@ -86,6 +87,7 @@ function viewItem(key: string, label: string, terms: string): NavItem {
 export function viewLabel(key: string, apiResources?: readonly ApiResourceInfo[] | null): string {
   if (key === VIEW_KEYS.clusterOverview) return i18n.t('Cluster Overview');
   if (key === VIEW_KEYS.workloadsOverview) return i18n.t('Workloads Overview');
+  if (key === VIEW_KEYS.resourceMap) return i18n.t('Resource Map');
   if (key === VIEW_KEYS.portForwards) return i18n.t('Port Forwarding');
   if (key === VIEW_KEYS.helmReleases) return i18n.t('Helm Releases');
   if (key === VIEW_KEYS.myPermissions) return i18n.t('My Permissions');
@@ -130,6 +132,11 @@ export function buildNav(apiResources: readonly ApiResourceInfo[] | null): NavGr
       icon: SECTION_ICONS.workloads,
       items: [
         viewItem(VIEW_KEYS.workloadsOverview, i18n.t('Overview'), 'overview workloads'),
+        viewItem(
+          VIEW_KEYS.resourceMap,
+          i18n.t('Resource Map'),
+          'resource map topology graph relationships dependencies',
+        ),
         ...items('workloads'),
       ],
       subgroups: [],
