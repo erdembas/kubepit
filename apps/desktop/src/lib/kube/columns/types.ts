@@ -37,6 +37,10 @@ export interface ColumnDef {
   defaultHidden?: boolean;
   /** Header label is hidden visually (icon-only columns). */
   compact?: boolean;
+  /** Plain text for CSV exports; defaults to the text `cell` renders (see `./export.ts`). */
+  text?: (obj: KubeObject, ctx: ColumnContext) => string;
+  /** Raw value for JSON exports; defaults to `text` with numbers parsed. */
+  value?: (obj: KubeObject, ctx: ColumnContext) => unknown;
 }
 
 export interface KindColumns {

@@ -86,6 +86,18 @@ export const podColumns: KindColumns = {
         </span>
       ),
       sort: (o) => podContainers(o).length,
+      text: (o) => {
+        const main = podContainers(o).filter((c) => !c.init);
+        return `${main.filter((c) => c.ready).length}/${main.length}`;
+      },
+      value: (o) =>
+        podContainers(o).map((c) => ({
+          name: c.name,
+          init: c.init,
+          state: c.state,
+          ready: c.ready,
+          restarts: c.restarts,
+        })),
     },
     {
       id: 'cpu',
@@ -105,6 +117,9 @@ export const podColumns: KindColumns = {
       sort: (o, ctx) =>
         ctx.podMetrics.byKey.get(`${o.metadata.namespace}/${o.metadata.name}`)?.cpu_millicores ??
         -1,
+      value: (o, ctx) =>
+        ctx.podMetrics.byKey.get(`${o.metadata.namespace}/${o.metadata.name}`)?.cpu_millicores ??
+        null,
     },
     {
       id: 'memory',
@@ -123,6 +138,9 @@ export const podColumns: KindColumns = {
       },
       sort: (o, ctx) =>
         ctx.podMetrics.byKey.get(`${o.metadata.namespace}/${o.metadata.name}`)?.memory_bytes ?? -1,
+      value: (o, ctx) =>
+        ctx.podMetrics.byKey.get(`${o.metadata.namespace}/${o.metadata.name}`)?.memory_bytes ??
+        null,
     },
     {
       id: 'restarts',

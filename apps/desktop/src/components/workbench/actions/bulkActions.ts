@@ -5,6 +5,7 @@ import {
   CirclePause,
   CirclePlay,
   Copy,
+  Download,
   Play,
   RotateCcw,
   Trash2,
@@ -81,6 +82,7 @@ export function bulkActions({
   label,
   targets,
   onDeleted,
+  onExport,
 }: {
   clusterId: string;
   cluster: ClusterDef | undefined;
@@ -89,6 +91,8 @@ export function bulkActions({
   label: string;
   targets: KubeObject[];
   onDeleted: () => void;
+  /** Opens the export dialog on the selected rows. */
+  onExport?: () => void;
 }): BulkAction[] {
   if (!targets.length) return [];
   const kind = gvk.kind;
@@ -231,6 +235,15 @@ export function bulkActions({
         i18n.plural('{count} name', '{count} names', count),
       ),
   });
+
+  if (onExport)
+    add({
+      id: 'export',
+      label: i18n.t('Export…'),
+      icon: Download,
+      mutating: false,
+      run: onExport,
+    });
 
   add({
     id: 'delete',

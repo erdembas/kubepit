@@ -1,6 +1,6 @@
 import * as i18n from '@/i18n';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Lock, Loader2, Plus, Search, X } from 'lucide-react';
+import { Download, Lock, Loader2, Plus, Search, X } from 'lucide-react';
 import { FileContextMenu, type FileContextMenuEntry } from '@/components/ui/FileContextMenu';
 import { IconButton } from '@/components/ui/IconButton';
 import { accessCheck } from '@/lib/kube/access';
@@ -21,6 +21,8 @@ import { restartWatch } from '../data/watchCache';
 import { DetailsPanel } from '../details/DetailsPanel';
 import { useEvent } from '../util';
 import { ColumnMenu } from './ColumnMenu';
+import { ExportDialog } from './ExportDialog';
+import { requestExport, useTableExport } from './exportStore';
 import { ResourceTable } from './ResourceTable';
 import { SELECTION_BAR_INSET, SelectionBar } from './SelectionBar';
 import { TableEmpty, TableError, TableSkeleton } from './TableStates';
@@ -161,9 +163,24 @@ export function ResourcePage({
     () => (checked.size ? t.items.filter((o) => checked.has(o.metadata.uid)) : []),
     [checked, t.items],
   );
+  const onExportSelected = useEvent(() =>
+    requestExport({ clusterId, kindKey, format: 'csv', selection: true }),
+  );
   const bulk = useMemo(
-    () => bulkActions({ clusterId, cluster, gvk, label, targets, onDeleted: onClearChecked }),
-    [clusterId, cluster, gvk, label, targets, onClearChecked],
+    () =>
+      bulkActions({
+        clusterId,
+        cluster,
+        gvk,
+        label,
+        targets,
+        onDeleted: onClearChecked,
+        onExport: onExportSelected,
+      }),
+    [clusterId, cluster, gvk, label, targets, onClearChecked, onExportSelected],
+  );
+  const exportRequest = useTableExport((s) =>
+    s.request?.clusterId === clusterId && s.request.kindKey === kindKey ? s.request : null,
   );
 
   const scopeNs =
@@ -229,6 +246,14 @@ export function ResourcePage({
                 </button>
               )}
             </div>
+            <IconButton
+              label={i18n.t('Export {kind}…', { kind: label })}
+              icon={<Download />}
+              disabled={!t.items.length}
+              onClick={() =>
+                requestExport({ clusterId, kindKey, format: 'csv', selection: targets.length > 0 })
+              }
+            />
             <ColumnMenu kind={kindKey} columns={t.orderedColumns} hidden={t.hidden} />
             <IconButton
               label={
@@ -336,6 +361,19 @@ export function ResourcePage({
       )}
       {menu && (
         <FileContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />
+      )}
+      {exportRequest && (
+        <ExportDialog
+          request={exportRequest}
+          clusterName={cluster?.name ?? clusterId}
+          label={label}
+          gvk={gvk}
+          columns={t.visibleColumns}
+          items={t.items}
+          selected={targets}
+          ctx={t.ctx}
+          onClose={() => useTableExport.getState().close()}
+        />
       )}
       {explain && (
         <PermissionExplainer
