@@ -97,6 +97,48 @@ with `--output json` and reuse the release decoding above; dry runs
 clusters. Values go through a private temp file and repository passwords
 through `--password-stdin`.
 
+## GitOps (Argo CD, Flux)
+
+GitOps support is UI-side on top of the generic resource commands; there is
+no backend code and no dependency on the `argocd` or `flux` CLIs.
+
+- Detection is discovery-driven (`lib/kube/gitops/kinds.ts`): Argo CD
+  Applications, ApplicationSets and AppProjects plus every kind of the Flux
+  toolkit groups (`kustomize`, `helm`, `source`, `notification`, `image`).
+  The navigator's GitOps section (moved out of Custom Resources) and the
+  `@gitops` overview only appear when one of them is served.
+- The overview (`components/workbench/gitops/GitOpsPage.tsx`) watches
+  Applications, Kustomizations and HelmReleases cluster-wide (falling back to
+  the selected namespaces when that is forbidden) and normalizes them into
+  one row model (`lib/kube/gitops/model.ts`: sync, health, short revision,
+  source, destination, last sync, suspended, message, status bucket). A row
+  matches the namespace filter through its own or its destination namespace.
+- Details sections (`details/sections/ArgoSections.tsx`, `FluxSections.tsx`)
+  are chosen by API group, not kind name; managed resources (Argo
+  `status.resources`) and Flux inventories (`status.inventory`) render as a
+  namespace → kind tree whose names open the objects.
+- Actions (`actions/gitopsActions.tsx`) are merge patches through
+  `resource_patch`, so `read_only` and RBAC (`ACTION_ACCESS`) apply as for
+  any mutation (`lib/kube/gitops/patches.ts`): Argo refresh / hard refresh
+  (`argocd.argoproj.io/refresh`), sync (the `operation` the Argo CD API sets:
+  revision, prune, dry run, force, sync options, retry), terminate
+  (`status.operationState.phase: Terminating`) and auto-sync / prune /
+  self-heal; Flux reconcile (`reconcile.fluxcd.io/requestedAt`, plus
+  `forceAt` / `resetAt` for HelmReleases, optionally the source first) and
+  suspend / resume (`spec.suspend`).
+- "Managed by GitOps" (`lib/kube/gitops/managed.ts`, `gitops/owner.ts`):
+  Argo tracking ids (`argocd.argoproj.io/tracking-id`, checked against the
+  object's identity), Argo instance labels (only when a matching Application
+  exists) and Flux `kustomize|helm.toolkit.fluxcd.io/name|namespace` labels
+  resolve to the owner. The details header shows a badge linking to it, and
+  edit, scale, set image, restart and delete show what a manual change will
+  run into (self-heal, reconcile interval, drift detection, suspended)
+  without blocking.
+- The demo backend (`mock/fixtures/gitops.ts`) adds Applications in every
+  state, an app of apps, an ApplicationSet and Flux on staging and dev;
+  `mock/gitops.ts` plays the controllers so patched objects move like real
+  ones.
+
 ## Workload operations
 
 - `rollout.rs` builds rollout history from owned ReplicaSets (Deployments)
