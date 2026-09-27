@@ -5,6 +5,8 @@ import './dock';
 import './access';
 // Registered after './resources': it wraps `resource_patch` (resuming a paused rollout).
 import './workloadOps';
+// Wraps `resource_patch` too: demo Argo CD / Flux controllers (GitOps actions).
+import './gitops';
 import './fleet';
 import './logsDebug';
 import './helmCharts';

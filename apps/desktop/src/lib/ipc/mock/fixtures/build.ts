@@ -5,6 +5,7 @@ import { buildCrds } from './crds';
 import { buildData, buildLegacy, buildTeams } from './data';
 import { setBuilder, type ClusterDb } from './db';
 import { buildEvents } from './events';
+import { buildGitOps } from './gitops';
 import { buildHelm } from './helm';
 import { buildClasses, buildLeaderLeases, buildNamespaces, buildWebhooks } from './infra';
 import { buildMonitoring } from './monitoring';
@@ -57,6 +58,7 @@ function buildCluster(db: ClusterDb) {
       paths: [['/', 'argocd-server', 443]],
     });
   buildHelm(db);
+  buildGitOps(db);
   buildEvents(db);
   buildRolloutHistory(db);
 }

@@ -1,4 +1,5 @@
 import { put, type ClusterDb } from './db';
+import { gitopsCrds } from './gitops';
 import { buildInstances } from './instances';
 import { DAY, meta, obj } from './util';
 
@@ -12,7 +13,7 @@ interface Column {
   description?: string;
 }
 
-interface CrdInput {
+export interface CrdInput {
   group: string;
   kind: string;
   plural: string;
@@ -149,7 +150,8 @@ export const CRDS: CrdInput[] = [
 ];
 
 export function crdsFor(db: ClusterDb) {
-  return CRDS.filter((c) => db.profile.argocd || c.group !== 'argoproj.io');
+  // GitOps: ApplicationSet and the Flux CRDs (./gitops.ts).
+  return [...CRDS, ...gitopsCrds(db)].filter((c) => db.profile.argocd || c.group !== 'argoproj.io');
 }
 
 export function buildCrds(db: ClusterDb) {

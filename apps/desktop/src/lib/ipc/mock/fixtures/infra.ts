@@ -1,4 +1,5 @@
 import { put, type ClusterDb } from './db';
+import { hasFlux } from './gitops';
 import { ago, between, DAY, hexId, iso, meta, obj } from './util';
 
 /** Cluster-scoped infrastructure: namespaces, classes, webhooks, leader leases. */
@@ -20,6 +21,7 @@ export function namespacesFor(db: ClusterDb): string[] {
   const p = db.profile;
   const out = [...BASE_NAMESPACES];
   if (p.argocd) out.push('argocd');
+  if (hasFlux(db)) out.push('flux-system');
   if (p.platform === 'kind') out.push('local-path-storage');
   for (const t of p.teams) out.push(`team-${t}`);
   return out;
