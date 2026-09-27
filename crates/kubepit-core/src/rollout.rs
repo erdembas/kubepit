@@ -457,7 +457,7 @@ impl Kubepit {
     /// `rollout_undo`: roll back to `revision` (`0` = previous), see the
     /// module docs. Paused Deployments are refused like kubectl does: the
     /// rollback would not roll out until resumed.
-    pub async fn rollout_undo(
+    pub(crate) async fn rollout_undo_unaudited(
         &self,
         cluster_id: &str,
         gvk: &Gvk,

@@ -222,7 +222,7 @@ pub fn set_image_patch(
 
 impl Kubepit {
     /// `resource_set_image`: returns the patched object.
-    pub async fn resource_set_image(
+    pub(crate) async fn resource_set_image_unaudited(
         &self,
         cluster_id: &str,
         gvk: &Gvk,

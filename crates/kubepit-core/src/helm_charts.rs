@@ -1129,7 +1129,7 @@ impl Kubepit {
 
     /// `helm_install`. With `dry_run` nothing changes and the result is a
     /// preview (rendered manifest, notes, values).
-    pub async fn helm_install(
+    pub(crate) async fn helm_install_unaudited(
         &self,
         cluster_id: &str,
         request: &HelmInstallRequest,
@@ -1166,7 +1166,7 @@ impl Kubepit {
 
     /// `helm_upgrade`: a new revision from `request.chart_ref` (optionally a
     /// dry-run preview).
-    pub async fn helm_upgrade(
+    pub(crate) async fn helm_upgrade_unaudited(
         &self,
         cluster_id: &str,
         namespace: &str,

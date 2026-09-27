@@ -193,7 +193,7 @@ pub(crate) fn is_fatal_waiting(reason: &str) -> bool {
 impl Kubepit {
     /// Create the helper pod for `terminal_id` and wait until it runs.
     /// `progress` receives human-readable lines (already newline-terminated).
-    pub(crate) async fn start_node_shell(
+    pub(crate) async fn start_node_shell_unaudited(
         &self,
         terminal_id: &str,
         cluster_id: &str,

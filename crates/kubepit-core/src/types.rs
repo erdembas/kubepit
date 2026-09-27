@@ -1047,6 +1047,8 @@ pub struct Settings {
     pub change_journal: bool,
     /// Cluster ids that opted out of the change timeline.
     pub change_journal_disabled: Vec<String>,
+    /// Persistent history: audit log, persisted events and changes (`history.rs`).
+    pub history: crate::history::HistorySettings,
 }
 
 impl Default for Settings {
@@ -1066,6 +1068,7 @@ impl Default for Settings {
             keychain_kubeconfigs: false,
             change_journal: true,
             change_journal_disabled: Vec::new(),
+            history: crate::history::HistorySettings::default(),
         }
     }
 }

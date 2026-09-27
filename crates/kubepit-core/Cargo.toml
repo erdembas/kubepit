@@ -34,6 +34,8 @@ http = "1"
 # Connectivity: kubeconfig file watching, OS credential store (keychain mode).
 notify = "8"
 keyring = "4"
+# Persistent history (audit log, events, changes): local SQLite, WAL mode.
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 [dev-dependencies]
 tempfile = "3"

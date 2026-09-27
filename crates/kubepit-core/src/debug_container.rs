@@ -165,7 +165,7 @@ fn explain_patch_error(err: anyhow::Error) -> anyhow::Error {
 impl Kubepit {
     /// `pod_debug`: add an ephemeral debug container to `pod` and wait until
     /// it runs. Returns the container name to attach to.
-    pub async fn pod_debug(
+    pub(crate) async fn pod_debug_unaudited(
         &self,
         cluster_id: &str,
         namespace: &str,

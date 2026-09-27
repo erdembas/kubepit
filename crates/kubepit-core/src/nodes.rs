@@ -77,7 +77,7 @@ fn format_pods(pods: &[(String, String)]) -> String {
 
 impl Kubepit {
     /// `node_cordon`: set `spec.unschedulable`.
-    pub async fn node_cordon(
+    pub(crate) async fn node_cordon_unaudited(
         &self,
         cluster_id: &str,
         name: &str,
@@ -102,9 +102,14 @@ impl Kubepit {
     }
 
     /// `node_drain`.
-    pub async fn node_drain(&self, cluster_id: &str, name: &str, force: bool) -> Result<()> {
+    pub(crate) async fn node_drain_unaudited(
+        &self,
+        cluster_id: &str,
+        name: &str,
+        force: bool,
+    ) -> Result<()> {
         self.ensure_writable(cluster_id, "drain")?;
-        self.node_cordon(cluster_id, name, true).await?;
+        self.node_cordon_unaudited(cluster_id, name, true).await?;
         let client = self.client(cluster_id).await?;
         let all_pods: Api<Pod> = Api::all(client.clone());
         let pods = all_pods

@@ -447,6 +447,27 @@ impl ClusterJournal {
         (page, next)
     }
 
+    /// Epoch ms when this journal started recording.
+    pub fn started_at(&self) -> i64 {
+        self.started_at
+    }
+
+    /// Up to `limit` entries newer than `after`, oldest first, with their
+    /// bodies (history persistence copies them to disk).
+    pub fn details_after(&self, after: u64, limit: usize) -> Vec<ChangeDetail> {
+        let start = self.entries.partition_point(|s| s.summary.id <= after);
+        self.entries
+            .range(start..)
+            .take(limit)
+            .map(|stored| ChangeDetail {
+                summary: stored.summary.clone(),
+                before_yaml: stored.before.as_deref().map(to_yaml),
+                after_yaml: stored.after.as_deref().map(to_yaml),
+                omitted: stored.omitted,
+            })
+            .collect()
+    }
+
     pub fn detail(&self, id: u64) -> Option<ChangeDetail> {
         let stored = self.entries.iter().find(|s| s.summary.id == id)?;
         Some(ChangeDetail {

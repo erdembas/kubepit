@@ -17,6 +17,7 @@ use crate::change_journal::ChangeJournals;
 use crate::connection::ClientPool;
 use crate::error::ReadOnlyError;
 use crate::events::EventSink;
+use crate::history::History;
 use crate::metrics::MetricsGate;
 use crate::metrics_history::MetricsHistory;
 use crate::node_shell::NodeShells;
@@ -55,6 +56,8 @@ pub struct Kubepit {
     pub(crate) kubeconfig_watch: parking_lot::Mutex<Option<crate::kubeconfig_watch::WatchHandle>>,
     // Change timeline: per-cluster change journals.
     pub(crate) change_journals: ChangeJournals,
+    // Persistent history: audit log, persisted events and changes.
+    pub(crate) history: History,
 }
 
 impl Kubepit {
@@ -75,6 +78,7 @@ impl Kubepit {
         let store = Store::open(paths)?;
         let alerts = AlertCenter::new(store.settings().alerts);
         let saved_forwards = SavedForwards::open(store.paths().port_forwards_file())?;
+        let history = History::new(store.paths().history_db());
         let app = Self {
             store,
             sink,
@@ -93,6 +97,7 @@ impl Kubepit {
             saved_forwards,
             kubeconfig_watch: parking_lot::Mutex::new(None),
             change_journals: ChangeJournals::default(),
+            history,
         };
         // Left behind by a crash while in keychain mode.
         app.remove_transient_run_kubeconfigs();
@@ -174,9 +179,11 @@ impl Kubepit {
         settings.keychain_kubeconfigs = self.settings().keychain_kubeconfigs;
         settings.change_journal_disabled.sort();
         settings.change_journal_disabled.dedup();
+        settings.history = settings.history.normalized();
         let saved = self.store.set_settings(settings)?;
         self.apply_alert_settings(&saved.alerts);
         self.sync_change_journals();
+        self.sync_history();
         Ok(saved)
     }
 
@@ -199,6 +206,7 @@ impl Kubepit {
         self.fleet_searches.stop_all();
         self.alerts.stop_all();
         self.change_journals.stop_all();
+        self.history.shutdown();
         self.forwards.stop_all(self.sink.as_ref());
         let cleanup = self.cleanup_all_node_shells();
         if tokio::time::timeout(Duration::from_secs(4), cleanup)
