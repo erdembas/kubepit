@@ -13,6 +13,7 @@ import { useAppStore, type ClusterEditorState } from '@/store/useAppStore';
 import type { ClusterDef, ClusterInput, KubeconfigSource } from '@/types';
 import { ClusterFields, type ClusterFieldValues } from './ClusterFields';
 import { Field } from './Field';
+import { PrometheusFields, prometheusConfig, prometheusDraft } from './PrometheusFields';
 
 type SourceMode = 'file' | 'paste';
 
@@ -67,6 +68,7 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
   const [pasted, setPasted] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [prometheus, setPrometheus] = useState(() => prometheusDraft(editing?.prometheus));
 
   // Offer discovered kubeconfig files as quick picks in add mode.
   useEffect(() => {
@@ -130,6 +132,8 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
     try {
       const store = useAppStore.getState();
       if (editing) {
+        const metrics = prometheusConfig(prometheus);
+        if ('error' in metrics) return setError(metrics.error);
         const saved = await saveCluster({
           ...editing,
           name,
@@ -140,6 +144,7 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
           accessible_namespaces: splitList(fields.accessible_namespaces),
           read_only: fields.read_only,
           notes: fields.notes,
+          prometheus: metrics.config,
         });
         store.assignClusterToSection(saved.id, fields.sectionId);
         store.pushToast('success', i18n.t('Saved {name}', { name: saved.name }));
@@ -335,6 +340,12 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
             )}
           />
         </div>
+
+        {editing && (
+          <div className="border-border/60 border-t pt-4">
+            <PrometheusFields clusterId={editing.id} value={prometheus} onChange={setPrometheus} />
+          </div>
+        )}
       </div>
     </Dialog>
   );

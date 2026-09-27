@@ -68,6 +68,8 @@ export interface ClusterDef {
   notes: string;
   created_at: number;
   last_connected_at: number | null;
+  /** Where charts read Prometheus metrics from (auto-detected by default). */
+  prometheus: PrometheusConfig;
 }
 
 export interface ClusterInput {
@@ -765,6 +767,136 @@ export interface MetricsSeries {
   available: boolean;
   /** Oldest first, last 60 minutes. Paused sampling shows up as gaps. */
   points: MetricsPoint[];
+}
+
+// -- Prometheus metrics (optional, richer source) -----------------------------
+
+export type PromScheme = 'http' | 'https';
+
+export type PrometheusKind =
+  | 'prometheus-operator'
+  | 'prometheus'
+  | 'thanos'
+  | 'victoria-metrics'
+  | 'mimir'
+  | 'openshift'
+  /** Configured by hand in the cluster settings. */
+  | 'custom';
+
+/** A Prometheus HTTP API reached through the API server's service proxy. */
+export interface PrometheusService {
+  kind: PrometheusKind;
+  namespace: string;
+  service: string;
+  port: number;
+  scheme: PromScheme;
+  /** '' or '/prefix' (no trailing slash), e.g. '/select/0/prometheus'. */
+  path_prefix: string;
+}
+
+/** Per-cluster setting (`ClusterDef.prometheus`). */
+export type PrometheusConfig =
+  | { mode: 'auto' }
+  | {
+      mode: 'service';
+      namespace: string;
+      service: string;
+      port: number;
+      scheme: PromScheme;
+      path_prefix: string;
+    }
+  | { mode: 'off' };
+
+export type PrometheusState = 'available' | 'not-found' | 'unreachable' | 'off';
+
+export interface PrometheusStatus {
+  state: PrometheusState;
+  /** The service queries go to (`available`), or the one that failed. */
+  service: PrometheusService | null;
+  source: 'detected' | 'configured' | null;
+  error: string | null;
+  /** Services detection considered, best first. */
+  candidates: PrometheusService[];
+  /** Epoch ms. */
+  checked_at: number;
+}
+
+/** What a preset query is about. */
+export type PrometheusTarget =
+  | { kind: 'cluster' }
+  | { kind: 'node'; name: string }
+  | { kind: 'namespace'; namespace: string }
+  /** Every pod the workload owns, matched by the pod names its kind generates. */
+  | { kind: 'workload'; namespace: string; workload_kind: string; name: string }
+  | { kind: 'pod'; namespace: string; name: string }
+  | { kind: 'container'; namespace: string; pod: string; container: string }
+  | { kind: 'pvc'; namespace: string; name: string };
+
+export type PrometheusMetric =
+  /** Millicores. */
+  | 'cpu_usage'
+  | 'cpu_requests'
+  | 'cpu_limits'
+  /** Bytes (working set). */
+  | 'memory_usage'
+  | 'memory_requests'
+  | 'memory_limits'
+  /** Bytes per second. */
+  | 'network_rx'
+  | 'network_tx'
+  /** Node filesystems / container writable layers, bytes. */
+  | 'fs_usage'
+  | 'fs_capacity'
+  /** Persistent volumes (kubelet volume stats), bytes. */
+  | 'volume_usage'
+  | 'volume_capacity'
+  /** Container restarts within the rate window. */
+  | 'restarts';
+
+/** Epoch ms; `step` in seconds, null = automatic (~240 points). */
+export interface PrometheusRange {
+  start: number;
+  end: number;
+  step: number | null;
+}
+
+/** `[epoch ms, value]`; NaN/Inf samples are dropped (gaps). */
+export type PromPoint = [number, number];
+
+export interface PrometheusSeries {
+  metric: PrometheusMetric;
+  /** The PromQL that produced the points (open it in a PromQL tab). */
+  query: string;
+  points: PromPoint[];
+  /** This series failed; the others may still have data. */
+  error: string | null;
+}
+
+export interface PrometheusMetricsResult {
+  service: PrometheusService;
+  step_secs: number;
+  rate_window_secs: number;
+  start: number;
+  end: number;
+  /** One per requested metric that applies to the target. */
+  series: PrometheusSeries[];
+}
+
+export interface PromQuerySeries {
+  labels: Record<string, string>;
+  points: PromPoint[];
+}
+
+export interface PromQueryResult {
+  service: PrometheusService;
+  step_secs: number;
+  start: number;
+  end: number;
+  result_type: 'matrix' | 'vector' | 'scalar' | 'string';
+  series: PromQuerySeries[];
+  /** More series came back than are returned. */
+  truncated: boolean;
+  warnings: string[];
 }
 
 export interface FleetSearchQuery {

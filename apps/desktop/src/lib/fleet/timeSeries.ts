@@ -128,17 +128,69 @@ export function areaPath(pts: readonly XY[], baseline: number): string {
   return `${monotonePath(pts)}L${last[0]},${baseline}L${first[0]},${baseline}Z`;
 }
 
-/** Time ticks every `stepMs`, aligned to wall-clock multiples, inside `[from, to]`. */
-export function timeTicks(from: number, to: number, stepMs: number): number[] {
+/**
+ * Time ticks every `stepMs`, aligned to wall-clock multiples, inside
+ * `[from, to]`. `offsetMs` shifts the alignment to local time (hour and day
+ * steps land on local midnight, see `localOffset`).
+ */
+export function timeTicks(from: number, to: number, stepMs: number, offsetMs = 0): number[] {
   const out: number[] = [];
-  for (let t = Math.ceil(from / stepMs) * stepMs; t <= to; t += stepMs) out.push(t);
+  const first = Math.ceil((from + offsetMs) / stepMs) * stepMs - offsetMs;
+  for (let t = first; t <= to; t += stepMs) out.push(t);
   return out;
 }
 
-/** Tick spacing for a visible range. */
+/** Local time minus UTC at `t`, in ms (for `timeTicks`). */
+export function localOffset(t: number): number {
+  return -new Date(t).getTimezoneOffset() * 60_000;
+}
+
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+
+/** Tick spacing for a visible range (15 minutes up to several days). */
 export function timeStep(rangeMs: number): number {
-  const minutes = rangeMs / 60_000;
-  return (minutes <= 15 ? 5 : minutes <= 30 ? 10 : 15) * 60_000;
+  const minutes = rangeMs / MINUTE;
+  if (minutes <= 60) return (minutes <= 15 ? 5 : minutes <= 30 ? 10 : 15) * MINUTE;
+  const hours = rangeMs / HOUR;
+  if (hours <= 3) return 30 * MINUTE;
+  if (hours <= 6) return HOUR;
+  if (hours <= 12) return 2 * HOUR;
+  if (hours <= 24) return 4 * HOUR;
+  if (hours <= 72) return 12 * HOUR;
+  if (hours <= 7 * 24) return DAY;
+  return hours <= 14 * 24 ? 2 * DAY : 7 * DAY;
+}
+
+/** Axis label format: clock times, dates once ticks are a day apart. */
+export function tickFormat(stepMs: number): Intl.DateTimeFormatOptions {
+  return stepMs >= DAY
+    ? { month: 'short', day: 'numeric' }
+    : { hour: '2-digit', minute: '2-digit' };
+}
+
+/** Tooltip time format: with the date once the range spans more than a day. */
+export function tooltipFormat(rangeMs: number): Intl.DateTimeFormatOptions {
+  return rangeMs > DAY
+    ? { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }
+    : { hour: '2-digit', minute: '2-digit', second: '2-digit' };
+}
+
+/**
+ * Axis from `min` to `max` with about `target` intervals, for series that
+ * can go negative (PromQL `deriv`, deltas). Non-negative data starts at 0.
+ */
+export function niceRange(min: number, max: number, target = 4): Scale & { min: number } {
+  if (!(min < 0)) return { ...niceScale(max, target), min: 0 };
+  const lo = Number.isFinite(min) ? min : -1;
+  const hi = Number.isFinite(max) && max > lo ? max : lo + 1;
+  const step = niceStep((hi - lo) / target);
+  const start = Math.floor(lo / step - 1e-9) * step;
+  const end = Math.ceil(hi / step - 1e-9) * step;
+  const ticks: number[] = [];
+  for (let v = start; v <= end + step / 2; v += step) ticks.push(Math.abs(v) < step / 1e6 ? 0 : v);
+  return { min: start, max: end, ticks };
 }
 
 export function lastValue(points: readonly SeriesPoint[]): number | null {

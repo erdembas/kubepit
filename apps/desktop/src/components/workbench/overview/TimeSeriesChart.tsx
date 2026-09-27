@@ -5,13 +5,16 @@ import { formatPercent } from '@/lib/format';
 import {
   areaPath,
   clip,
+  localOffset,
   monotonePath,
   nearest,
   niceScale,
   peak,
   segments,
+  tickFormat,
   timeStep,
   timeTicks,
+  tooltipFormat,
   type SeriesPoint,
 } from '@/lib/fleet/timeSeries';
 
@@ -20,7 +23,9 @@ import {
  * with a soft gradient, hairline grid, reference lines (capacity,
  * allocatable, requests, limits) and a hover crosshair with a tooltip.
  * Gaps longer than 2.5 sample intervals break the line instead of
- * pretending the usage was interpolated.
+ * pretending the usage was interpolated. `lines` adds secondary series that
+ * change over time (Prometheus requests / limits, network transmit), drawn
+ * as plain lines and listed in the tooltip.
  */
 
 export interface ChartRef {
@@ -33,11 +38,20 @@ export interface ChartRef {
   dashed?: boolean;
 }
 
+/** A secondary series: a reference that varies over time. */
+export interface ChartLine extends Omit<ChartRef, 'value'> {
+  points: readonly SeriesPoint[];
+  /** Tooltip swatch, e.g. `bg-cat-frontend`. */
+  swatch: string;
+  /** `false`: the main value as a percentage of this line means nothing (tx vs rx). */
+  ratio?: boolean;
+}
+
 const MARGIN = { top: 14, right: 10, bottom: 20, left: 44 };
 /** Refs more than this factor above the data's peak do not stretch the axis. */
 const OFF_SCALE = 4;
 
-function useWidth() {
+export function useWidth() {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   useLayoutEffect(() => {
@@ -55,7 +69,7 @@ function useWidth() {
 }
 
 /** `url(#…)`-safe id (React ids contain colons). */
-function useSvgId(prefix: string) {
+export function useSvgId(prefix: string) {
   return `${prefix}${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
 }
 
@@ -69,6 +83,7 @@ export function TimeSeriesChart({
   binary = false,
   minScale = 1,
   refs = [],
+  lines = [],
   height = 132,
   label,
   overlay,
@@ -84,6 +99,7 @@ export function TimeSeriesChart({
   /** Smallest axis maximum, so an idle series does not look like a wall. */
   minScale?: number;
   refs?: ChartRef[];
+  lines?: ChartLine[];
   height?: number;
   label: string;
   /** Centered message instead of the line (collecting, unavailable). */
@@ -96,19 +112,32 @@ export function TimeSeriesChart({
   const clipId = useSvgId('ts-clip');
 
   const visible = useMemo(() => clip(points, from, to), [points, from, to]);
+  const clippedLines = useMemo(
+    () =>
+      lines
+        .map((l) => {
+          const pts = clip(l.points, from, to);
+          return { ...l, visible: pts, value: pts.length ? peak(pts) : 0 };
+        })
+        .filter((l) => l.visible.length > 0),
+    [lines, from, to],
+  );
   // Reference lines far above the data (a 4-core limit on a 60m pod) would
   // flatten the curve: they stay off the axis and are named at the top edge.
-  const { scale, inScale, offScale } = useMemo(() => {
+  const { scale, inScale, offScale, linesIn, linesOff } = useMemo(() => {
     const top = Math.max(peak(visible) * 1.12, minScale);
-    const fits = (r: ChartRef) => !visible.length || r.value <= top * OFF_SCALE;
+    const fits = (r: { value: number }) => !visible.length || r.value <= top * OFF_SCALE;
     const inScale = refs.filter(fits);
-    const refMax = inScale.reduce((m, r) => Math.max(m, r.value), 0);
+    const linesIn = clippedLines.filter(fits);
+    const refMax = [...inScale, ...linesIn].reduce((m, r) => Math.max(m, r.value), 0);
     return {
       scale: niceScale(Math.max(top, refMax * 1.04), 3, binary),
       inScale,
       offScale: refs.filter((r) => !fits(r)),
+      linesIn,
+      linesOff: clippedLines.filter((l) => !fits(l)),
     };
-  }, [visible, refs, minScale, binary]);
+  }, [visible, refs, clippedLines, minScale, binary]);
 
   const plotW = Math.max(0, width - MARGIN.left - MARGIN.right);
   const plotH = Math.max(0, height - MARGIN.top - MARGIN.bottom);
@@ -132,9 +161,31 @@ export function TimeSeriesChart({
     [visible, intervalMs, width, height, scale.max, from, to],
   );
 
-  const xTicks = timeTicks(from, to, timeStep(span));
+  const linePaths = useMemo(
+    () =>
+      linesIn.map((l) => ({
+        line: l,
+        paths: segments(l.visible, intervalMs * 2.5).map((seg) =>
+          monotonePath(seg.map((p) => [x(p.t), y(p.v)] as [number, number])),
+        ),
+      })),
+    // x/y derive from the listed inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [linesIn, intervalMs, width, height, scale.max, from, to],
+  );
+
+  const tickStep = timeStep(span);
+  const xTicks = timeTicks(from, to, tickStep, tickStep >= 3_600_000 ? localOffset(from) : 0);
   const hovered = hover !== null ? visible[hover] : undefined;
-  const refLabels = placeRefLabels(inScale, y);
+  // Lines are labelled at their latest value, next to the fixed references.
+  const refLabels = placeRefLabels(
+    [...inScale, ...linesIn.map((l) => ({ ...l, value: l.visible[l.visible.length - 1]!.v }))],
+    y,
+  );
+  const offScaleLabels = [
+    ...offScale,
+    ...linesOff.map((l) => ({ ...l, value: l.visible[l.visible.length - 1]!.v })),
+  ];
 
   const onMove = (e: React.MouseEvent<SVGRectElement>) => {
     if (!visible.length || overlay) return;
@@ -196,7 +247,7 @@ export function TimeSeriesChart({
               textAnchor="middle"
               className="fill-fg-dim text-[10px] tabular-nums"
             >
-              {i18n.date(t, { hour: '2-digit', minute: '2-digit' })}
+              {i18n.date(t, tickFormat(tickStep))}
             </text>
           ))}
 
@@ -213,14 +264,14 @@ export function TimeSeriesChart({
               shapeRendering="crispEdges"
             />
           ))}
-          {offScale.length > 0 && (
+          {offScaleLabels.length > 0 && (
             <text
               x={MARGIN.left + plotW - 2}
               y={MARGIN.top - 5}
               textAnchor="end"
               className="text-[9.5px] font-medium"
             >
-              {offScale.map((r, i) => (
+              {offScaleLabels.map((r, i) => (
                 <tspan key={r.key} className={r.text} dx={i ? 8 : 0}>
                   {`${r.label} ${formatValue(r.value)} ↑`}
                 </tspan>
@@ -241,6 +292,19 @@ export function TimeSeriesChart({
 
           {!overlay && (
             <g clipPath={`url(#${clipId})`}>
+              {linePaths.map(({ line, paths: segs }) =>
+                segs.map((d, i) => (
+                  <path
+                    key={`${line.key}-${i}`}
+                    d={d}
+                    fill="none"
+                    strokeWidth={1.25}
+                    strokeLinejoin="round"
+                    strokeDasharray={line.dashed ? '4 3' : undefined}
+                    className={line.stroke}
+                  />
+                )),
+              )}
               {paths.map((p, i) => (
                 <g key={i}>
                   {!p.dot && <path d={p.area} fill={`url(#${gradientId})`} />}
@@ -313,6 +377,7 @@ export function TimeSeriesChart({
           left={x(hovered.t)}
           width={width}
           time={hovered.t}
+          timeFormat={tooltipFormat(span)}
           value={formatValue(hovered.v)}
           label={label}
           refs={refs.map((r) => ({
@@ -320,6 +385,20 @@ export function TimeSeriesChart({
             label: r.label,
             percent: formatPercent(r.value > 0 ? (hovered.v / r.value) * 100 : 0),
           }))}
+          lines={clippedLines.flatMap((l) => {
+            const at = l.visible[nearest(l.visible, hovered.t)];
+            if (!at || Math.abs(at.t - hovered.t) > intervalMs * 1.5) return [];
+            return [
+              {
+                key: l.key,
+                label: l.label,
+                swatch: l.swatch,
+                value: formatValue(at.v),
+                percent:
+                  l.ratio !== false && at.v > 0 ? formatPercent((hovered.v / at.v) * 100) : null,
+              },
+            ];
+          })}
         />
       )}
     </div>
@@ -342,18 +421,28 @@ function ChartTooltip({
   left,
   width,
   time,
+  timeFormat,
   value,
   label,
   refs,
+  lines,
 }: {
   left: number;
   width: number;
   time: number;
+  timeFormat: Intl.DateTimeFormatOptions;
   value: string;
   label: string;
   refs: Array<{ key: string; label: string; percent: string }>;
+  lines: Array<{
+    key: string;
+    label: string;
+    swatch: string;
+    value: string;
+    percent: string | null;
+  }>;
 }) {
-  const boxWidth = 168;
+  const boxWidth = lines.length ? 200 : 168;
   const flip = left + 12 + boxWidth > width;
   return (
     <div
@@ -365,14 +454,20 @@ function ChartTooltip({
         maxWidth: boxWidth,
       }}
     >
-      <p className="text-fg-dim text-[10px] tabular-nums">
-        {i18n.date(time, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-      </p>
+      <p className="text-fg-dim text-[10px] tabular-nums">{i18n.date(time, timeFormat)}</p>
       <p className="mt-0.5 flex items-center gap-1.5 text-[11.5px]">
         <span className="bg-accent h-2 w-2 shrink-0 rounded-sm" aria-hidden />
         <span className="text-fg-muted">{label}</span>
         <span className="text-fg ml-auto font-medium tabular-nums">{value}</span>
       </p>
+      {lines.map((l) => (
+        <p key={l.key} className="mt-0.5 flex items-center gap-1.5 text-[10.5px] tabular-nums">
+          <span className={cn('h-[2px] w-2 shrink-0 rounded-full', l.swatch)} aria-hidden />
+          <span className="text-fg-muted truncate">{l.label}</span>
+          <span className="text-fg ml-auto">{l.value}</span>
+          {l.percent && <span className="text-fg-dim">{l.percent}</span>}
+        </p>
+      ))}
       {refs.slice(0, 3).map((r) => (
         <p key={r.key} className="text-fg-dim mt-0.5 flex gap-2 text-[10.5px] tabular-nums">
           <span className="truncate">{r.label}</span>

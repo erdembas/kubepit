@@ -36,6 +36,10 @@ export function tabTitle(tab: DockTab, clusterName: string | null): string {
           });
     case 'files':
       return i18n.t('Files · {pod}', { pod: tab.pod });
+    case 'promql':
+      return tab.query
+        ? `PromQL · ${tab.query.length > 28 ? `${tab.query.slice(0, 27)}…` : tab.query}`
+        : 'PromQL';
   }
 }
 
@@ -80,6 +84,8 @@ export function tabTooltip(tab: DockTab, clusterName: string | null): string {
       return i18n.t('Files in {target}', {
         target: `${tab.namespace}/${tab.pod}${tab.container ? ` (${tab.container})` : ''}`,
       });
+    case 'promql':
+      return tab.query || i18n.t('PromQL query against the cluster’s Prometheus');
   }
 }
 

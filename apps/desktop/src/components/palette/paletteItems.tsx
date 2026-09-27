@@ -2,6 +2,7 @@ import * as i18n from '@/i18n/core';
 import {
   AppWindow,
   Boxes,
+  ChartSpline,
   Copy,
   FileSearch,
   FolderPlus,
@@ -110,6 +111,18 @@ export function clusterActions(cluster: ClusterDef): PaletteItem[] {
       run: () => {
         openAndConnect(cluster.id);
         dock.shell(cluster.id, cluster.name);
+      },
+    },
+    {
+      type: 'action',
+      id: `promql:${cluster.id}`,
+      label: i18n.t('Open PromQL console'),
+      hint: 'Prometheus',
+      icon: ChartSpline,
+      group: 'cluster',
+      run: () => {
+        openAndConnect(cluster.id);
+        dock.promql(cluster.id);
       },
     },
     {

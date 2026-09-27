@@ -48,6 +48,12 @@ import type {
   PodMetric,
   PortForward,
   PortForwardRequest,
+  PrometheusMetric,
+  PrometheusMetricsResult,
+  PrometheusRange,
+  PrometheusStatus,
+  PrometheusTarget,
+  PromQueryResult,
   ResourceList,
   RolloutRevision,
   Settings,
@@ -306,6 +312,21 @@ export const ipc = {
     call<MetricsResult<NodeMetric>>('metrics_nodes', { clusterId }),
   metricsPods: (clusterId: ClusterId, namespace: string | null) =>
     call<MetricsResult<PodMetric>>('metrics_pods', { clusterId, namespace }),
+
+  // -- Prometheus metrics (optional source; read-only) ----------------------
+  /** Detection result cached per connection; `refresh` detects again. */
+  prometheusStatus: (clusterId: ClusterId, refresh = false) =>
+    call<PrometheusStatus>('prometheus_status', { clusterId, refresh }),
+  /** Preset series of `target`; empty `metrics` = every metric that applies. */
+  prometheusMetrics: (
+    clusterId: ClusterId,
+    target: PrometheusTarget,
+    metrics: PrometheusMetric[],
+    range: PrometheusRange,
+  ) => call<PrometheusMetricsResult>('prometheus_metrics', { clusterId, target, metrics, range }),
+  /** Ad-hoc PromQL range query (PromQL dock tab). */
+  prometheusQueryRange: (clusterId: ClusterId, query: string, range: PrometheusRange) =>
+    call<PromQueryResult>('prometheus_query_range', { clusterId, query, range }),
 
   // -- Port forwarding ------------------------------------------------------
   portForwardStart: (request: PortForwardRequest) =>

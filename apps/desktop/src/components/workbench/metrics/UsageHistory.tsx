@@ -21,9 +21,9 @@ export interface UsageRefs {
   memory: Partial<Record<RefKey, number>>;
 }
 
-const REF_ORDER: RefKey[] = ['requests', 'limits', 'allocatable', 'capacity'];
+export const REF_ORDER: RefKey[] = ['requests', 'limits', 'allocatable', 'capacity'];
 
-function refMeta(key: RefKey): Omit<ChartRef, 'value'> & { swatch: string } {
+export function refMeta(key: RefKey): Omit<ChartRef, 'value'> & { swatch: string } {
   switch (key) {
     case 'requests':
       return {
@@ -69,7 +69,7 @@ export function cpuWithUnit(millicores: number): string {
     : i18n.t('{cpu} cores', { cpu: formatCpu(millicores) });
 }
 
-function usePersistentRefs(storageKey: string, fallback: RefKey[]) {
+export function usePersistentRefs(storageKey: string, fallback: RefKey[]) {
   const [visible, setVisible] = useState<RefKey[]>(() => {
     try {
       const raw = localStorage.getItem(storageKey);

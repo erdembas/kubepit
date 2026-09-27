@@ -7,6 +7,7 @@ import { phaseTone } from '@/lib/kube/workloads';
 import { formatAge } from '@/lib/format';
 import { usageBarClass } from '@/lib/resourceTone';
 import { useWatch } from '../../data/watchCache';
+import { NamespaceMetricsHistory } from '../MetricsHistoryCard';
 import { Bar, MonoText, Row, Rows, Section, ToneText } from '../primitives';
 import type { SectionProps } from './types';
 
@@ -35,6 +36,7 @@ export function NamespaceSections({ obj, ctx, isActive }: SectionProps) {
           </Row>
         </Rows>
       </Section>
+      <NamespaceMetricsHistory obj={obj} ctx={ctx} isActive={isActive} />
       <Section title={i18n.t('Resource quotas')}>
         {!quotas.items.length ? (
           <p className="text-fg-dim text-[12px]">
