@@ -137,6 +137,75 @@ export interface ApiResourceInfo extends Gvk {
   categories: string[];
 }
 
+// -- OpenAPI v3 (schema-aware YAML editing, API explorer) --------------------
+
+/** One group-version document listed by `/openapi/v3`. */
+export interface OpenApiGroupVersion {
+  /** `''` for the core group. */
+  group: string;
+  version: string;
+  /** `v1`, `apps/v1`. */
+  api_version: string;
+  /** Index key: `api/v1`, `apis/apps/v1`. */
+  path: string;
+  /** Content hash of the document, when the server publishes one. */
+  hash: string | null;
+}
+
+export interface OpenApiIndex {
+  /** Changes whenever any group-version document changes (e.g. a CRD upgrade). */
+  hash: string;
+  /** Core group first, then by group and version. */
+  group_versions: OpenApiGroupVersion[];
+}
+
+export interface OpenApiGvk {
+  group: string;
+  version: string;
+  kind: string;
+}
+
+/** A schema node as Kubernetes publishes it (the OpenAPI v3 subset it uses). */
+export interface OpenApiSchema {
+  $ref?: string;
+  type?: string;
+  format?: string;
+  title?: string;
+  description?: string;
+  properties?: Record<string, OpenApiSchema>;
+  additionalProperties?: OpenApiSchema | boolean;
+  items?: OpenApiSchema;
+  required?: string[];
+  enum?: unknown[];
+  default?: unknown;
+  nullable?: boolean;
+  allOf?: OpenApiSchema[];
+  anyOf?: OpenApiSchema[];
+  oneOf?: OpenApiSchema[];
+  minimum?: number;
+  maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  minItems?: number;
+  maxItems?: number;
+  pattern?: string;
+  'x-kubernetes-group-version-kind'?: OpenApiGvk[];
+  'x-kubernetes-int-or-string'?: boolean;
+  'x-kubernetes-preserve-unknown-fields'?: boolean;
+  'x-kubernetes-embedded-resource'?: boolean;
+  'x-kubernetes-list-type'?: string;
+  'x-kubernetes-list-map-keys'?: string[];
+  'x-kubernetes-map-type'?: string;
+  'x-kubernetes-patch-merge-key'?: string;
+  'x-kubernetes-patch-strategy'?: string;
+  'x-kubernetes-validations'?: Array<{ rule: string; message?: string }>;
+}
+
+/** A group-version document reduced to its schemas (`paths` is stripped). */
+export interface OpenApiDocument {
+  components: { schemas: Record<string, OpenApiSchema> };
+}
+
 export interface ObjectMeta {
   name: string;
   namespace?: string;
