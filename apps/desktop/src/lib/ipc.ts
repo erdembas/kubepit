@@ -7,6 +7,9 @@ import type {
   ApiResourceInfo,
   AppInfo,
   ApplyMode,
+  ChangeDetail,
+  ChangeFilter,
+  ChangePage,
   ClusterDef,
   ClusterId,
   ClusterInput,
@@ -344,6 +347,13 @@ export const ipc = {
   fleetSearch: (query: FleetSearchQuery, onEvent: (event: FleetSearchEvent) => void) =>
     callWithChannel<string, FleetSearchEvent>('fleet_search', { query }, 'onEvent', onEvent),
   fleetSearchCancel: (searchId: string) => call<void>('fleet_search_cancel', { searchId }),
+  // -- Change timeline (recorded in memory while the cluster is connected) --
+  /** Journaled changes, newest first; `status` says whether the cluster records. */
+  changesList: (clusterId: ClusterId, filter: ChangeFilter) =>
+    call<ChangePage>('changes_list', { clusterId, filter }),
+  /** One change with its normalized before/after YAML (Secret values are never kept). */
+  changesGet: (clusterId: ClusterId, id: number) =>
+    call<ChangeDetail>('changes_get', { clusterId, id }),
   // -- Helm charts (repositories and catalog are local helm commands) -------
   helmRepoList: () => call<HelmRepo[]>('helm_repo_list'),
   helmRepoAdd: (name: string, url: string, options: HelmRepoAddOptions) =>

@@ -232,6 +232,7 @@ impl Kubepit {
                     connected_at: Some(now),
                 };
                 let sampler_client = est.client.clone();
+                let journal_client = est.client.clone();
                 if !self.pool.commit(est.client, status.clone(), epoch) {
                     // Disconnected (or removed) while we were connecting.
                     return Ok(self
@@ -242,6 +243,7 @@ impl Kubepit {
                 self.sink.cluster_status(&status);
                 self.touch_last_connected(id, now);
                 self.start_metrics_sampler(id, sampler_client);
+                self.start_change_journal(id, journal_client);
                 tracing::info!(cluster = %cluster.name, "connected");
                 Ok(status)
             }
@@ -363,6 +365,7 @@ impl Kubepit {
         self.watches.stop_cluster(id);
         self.log_streams.stop_cluster(id);
         self.metrics_history.stop_cluster(id);
+        self.change_journals.stop_cluster(id);
         self.forwards.stop_cluster(id, self.sink.as_ref());
     }
 

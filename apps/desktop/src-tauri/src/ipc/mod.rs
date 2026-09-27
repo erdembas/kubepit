@@ -23,9 +23,12 @@ mod resources;
 mod workloads;
 // Logs & debug: workload logs, log export, debug containers, container files.
 mod logs_debug;
+// Change timeline: in-memory change journal.
+mod changes;
 
 pub use access::*;
 pub use app::*;
+pub use changes::*;
 pub use clusters::*;
 pub use fleet::*;
 pub use helm::*;

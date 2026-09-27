@@ -875,6 +875,10 @@ pub struct Settings {
     pub node_shell_image: String,
     /// Default image for ephemeral debug containers.
     pub debug_image: String,
+    /// Record the change timeline of connected clusters (`change_journal.rs`).
+    pub change_journal: bool,
+    /// Cluster ids that opted out of the change timeline.
+    pub change_journal_disabled: Vec<String>,
 }
 
 impl Default for Settings {
@@ -889,6 +893,8 @@ impl Default for Settings {
             confirm_destructive: true,
             node_shell_image: DEFAULT_NODE_SHELL_IMAGE.to_string(),
             debug_image: DEFAULT_DEBUG_IMAGE.to_string(),
+            change_journal: true,
+            change_journal_disabled: Vec::new(),
         }
     }
 }

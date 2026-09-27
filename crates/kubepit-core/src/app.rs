@@ -12,6 +12,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Result};
 use serde_json::Value;
 
+use crate::change_journal::ChangeJournals;
 use crate::connection::ClientPool;
 use crate::error::ReadOnlyError;
 use crate::events::EventSink;
@@ -37,6 +38,8 @@ pub struct Kubepit {
     // Fleet: per-cluster metrics samplers and running fleet-wide searches.
     pub(crate) metrics_history: MetricsHistory,
     pub(crate) fleet_searches: TaskRegistry,
+    // Change timeline: per-cluster change journals.
+    pub(crate) change_journals: ChangeJournals,
 }
 
 impl Kubepit {
@@ -54,6 +57,7 @@ impl Kubepit {
             metrics_gate: MetricsGate::default(),
             metrics_history: MetricsHistory::default(),
             fleet_searches: TaskRegistry::default(),
+            change_journals: ChangeJournals::default(),
         })
     }
 
@@ -127,7 +131,11 @@ impl Kubepit {
         if settings.terminal_font_size == 0 {
             settings.terminal_font_size = Settings::default().terminal_font_size;
         }
-        self.store.set_settings(settings)
+        settings.change_journal_disabled.sort();
+        settings.change_journal_disabled.dedup();
+        let saved = self.store.set_settings(settings)?;
+        self.sync_change_journals();
+        Ok(saved)
     }
 
     pub fn workspace_load(&self) -> Result<Option<Value>> {
@@ -145,6 +153,7 @@ impl Kubepit {
         self.log_streams.stop_all();
         self.metrics_history.stop_all();
         self.fleet_searches.stop_all();
+        self.change_journals.stop_all();
         self.forwards.stop_all(self.sink.as_ref());
         let cleanup = self.cleanup_all_node_shells();
         if tokio::time::timeout(Duration::from_secs(4), cleanup)

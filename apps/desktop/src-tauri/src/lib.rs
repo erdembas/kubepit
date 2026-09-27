@@ -108,6 +108,9 @@ pub fn run() {
             ipc::metrics_history_fleet,
             ipc::fleet_search,
             ipc::fleet_search_cancel,
+            // Change timeline
+            ipc::changes_list,
+            ipc::changes_get,
             // Logs & debug
             ipc::workload_logs_stream,
             ipc::workload_logs_stop,

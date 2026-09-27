@@ -381,6 +381,111 @@ export interface PodFsTransfer {
 }
 
 // ---------------------------------------------------------------------------
+// Change timeline (in-memory change journal, `change_journal.rs`)
+// ---------------------------------------------------------------------------
+
+export type ChangeOp = 'added' | 'modified' | 'deleted';
+
+/** Who made a change: the most recent `managedFields` entry. */
+export interface ChangeActor {
+  /** Field manager: `kubectl-client-side-apply`, `helm`, `argocd-controller`, … */
+  manager: string;
+  /** `Apply` (server-side apply) or `Update`. */
+  operation: string | null;
+  /** Subresource the manager wrote through (`scale`), if any. */
+  subresource: string | null;
+}
+
+/** One changed field; `null` = absent on that side. */
+export interface ChangedPath {
+  /** `spec.replicas`, `spec.template.spec.containers[api].image`, `data["app.yaml"]`. */
+  path: string;
+  before: string | null;
+  after: string | null;
+  /** Secret data: only salted hash markers, never values. Show "changed" instead. */
+  redacted: boolean;
+}
+
+export interface ChangeSummary {
+  /** Monotonic per cluster journal. */
+  id: number;
+  /** Epoch ms when Kubepit observed the change. */
+  ts: number;
+  cluster_id: ClusterId;
+  gvk: Gvk;
+  namespace: string | null;
+  name: string;
+  uid: string;
+  op: ChangeOp;
+  actor: ChangeActor | null;
+  /** The first changed fields (modifications only). */
+  paths: ChangedPath[];
+  /** All changed fields, including those left out of `paths`. */
+  path_count: number;
+  /** Long values were shortened (or the bodies dropped) to fit the size cap. */
+  truncated: boolean;
+}
+
+export interface ChangeFilter {
+  /** Empty = all. Cluster-scoped objects only match as the Namespace named here. */
+  namespaces: string[];
+  /** Kind names (`Deployment`); empty = all. */
+  kinds: string[];
+  /** Exact object name. */
+  name: string | null;
+  /** Case-insensitive substring over kind, namespace, name, actor and paths. */
+  text: string | null;
+  /** Epoch ms, inclusive. */
+  since: number | null;
+  until: number | null;
+  /** 1–1000. */
+  limit: number;
+  /** `next_cursor` of the previous page. */
+  cursor: number | null;
+}
+
+export type ChangeKindState = 'syncing' | 'watching' | 'forbidden' | 'not-served' | 'error';
+
+export interface ChangeKindStatus {
+  kind: string;
+  state: ChangeKindState;
+  message: string | null;
+}
+
+export interface ChangeJournalStatus {
+  /** The settings allow recording this cluster. */
+  enabled: boolean;
+  /** The cluster is connected and recording. */
+  recording: boolean;
+  /** Epoch ms; changes before it are unknown. */
+  started_at: number | null;
+  /** Every watchable kind finished its baseline list. */
+  synced: boolean;
+  kinds: ChangeKindStatus[];
+  entries: number;
+  /** Entries dropped by the 24 h / 5 000 entries / memory bounds. */
+  evicted: number;
+  oldest_ts: number | null;
+}
+
+export interface ChangePage {
+  /** Newest first. */
+  entries: ChangeSummary[];
+  next_cursor: number | null;
+  status: ChangeJournalStatus;
+}
+
+export interface ChangeDetail {
+  summary: ChangeSummary;
+  /** Normalized YAML; `null` for additions (and when `omitted`). */
+  before_yaml: string | null;
+  /** `null` for deletions (and when `omitted`). */
+  after_yaml: string | null;
+  /** Too large to keep; only the changed paths are known. */
+  omitted: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Metrics & overview
 // ---------------------------------------------------------------------------
 
@@ -685,6 +790,10 @@ export interface Settings {
   node_shell_image: string;
   /** Default image for ephemeral debug containers. */
   debug_image: string;
+  /** Record the change timeline of connected clusters. */
+  change_journal: boolean;
+  /** Cluster ids that opted out of the change timeline. */
+  change_journal_disabled: ClusterId[];
 }
 
 // ---------------------------------------------------------------------------
