@@ -151,6 +151,7 @@ mod tests {
             notes: String::new(),
             created_at: 1,
             last_connected_at: None,
+            prometheus: Default::default(),
         }
     }
 

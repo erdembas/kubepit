@@ -20,6 +20,7 @@ use crate::metrics_history::MetricsHistory;
 use crate::node_shell::NodeShells;
 use crate::paths::Paths;
 use crate::portforward::PortForwards;
+use crate::prometheus::PrometheusCache;
 use crate::store::Store;
 use crate::tasks::TaskRegistry;
 use crate::tools;
@@ -37,6 +38,8 @@ pub struct Kubepit {
     // Fleet: per-cluster metrics samplers and running fleet-wide searches.
     pub(crate) metrics_history: MetricsHistory,
     pub(crate) fleet_searches: TaskRegistry,
+    // Prometheus: detection result per connection.
+    pub(crate) prometheus: PrometheusCache,
 }
 
 impl Kubepit {
@@ -54,6 +57,7 @@ impl Kubepit {
             metrics_gate: MetricsGate::default(),
             metrics_history: MetricsHistory::default(),
             fleet_searches: TaskRegistry::default(),
+            prometheus: PrometheusCache::default(),
         })
     }
 

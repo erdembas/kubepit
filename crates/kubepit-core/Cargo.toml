@@ -28,6 +28,8 @@ base64 = "0.22"
 flate2 = "1"
 # `/regex/` name patterns in fleet search (linear-time matching).
 regex = "1"
+# Raw GETs through the API server's service proxy (Prometheus queries).
+http = "1"
 
 [dev-dependencies]
 tempfile = "3"

@@ -23,6 +23,8 @@ mod resources;
 mod workloads;
 // Logs & debug: workload logs, log export, debug containers, container files.
 mod logs_debug;
+// Prometheus: detection status, preset series, ad-hoc PromQL.
+mod prometheus;
 
 pub use access::*;
 pub use app::*;
@@ -34,6 +36,7 @@ pub use logs::*;
 pub use logs_debug::*;
 pub use metrics::*;
 pub use portforward::*;
+pub use prometheus::*;
 pub use resources::*;
 pub use workloads::*;
 
