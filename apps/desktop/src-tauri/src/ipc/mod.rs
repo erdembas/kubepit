@@ -29,6 +29,8 @@ mod updater;
 pub(crate) mod alerts;
 // Insights: kubeconfig client certificate expiry.
 mod insights;
+// Prometheus: detection status, preset series, ad-hoc PromQL.
+mod prometheus;
 
 pub use access::*;
 pub use alerts::*;
@@ -42,6 +44,7 @@ pub use logs::*;
 pub use logs_debug::*;
 pub use metrics::*;
 pub use portforward::*;
+pub use prometheus::*;
 pub use resources::*;
 pub use updater::*;
 pub use workloads::*;

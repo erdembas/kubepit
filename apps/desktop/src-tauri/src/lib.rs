@@ -106,6 +106,10 @@ pub fn run() {
             // Metrics
             ipc::metrics_nodes,
             ipc::metrics_pods,
+            // Prometheus metrics (optional source)
+            ipc::prometheus_status,
+            ipc::prometheus_metrics,
+            ipc::prometheus_query_range,
             // Port forwarding
             ipc::port_forward_start,
             ipc::port_forward_stop,

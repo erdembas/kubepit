@@ -3,6 +3,7 @@ import type { ComponentType } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import {
+  ChartSpline,
   FileCode2,
   FolderTree,
   GitCompareArrows,
@@ -21,6 +22,7 @@ const TAB_ICON: Record<DockTab['kind'], ComponentType<{ className?: string }>> =
   compare: GitCompareArrows,
   'workload-logs': Logs,
   files: FolderTree,
+  promql: ChartSpline,
 };
 
 interface Props {

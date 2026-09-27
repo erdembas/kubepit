@@ -11,6 +11,7 @@ import './helmCharts';
 import './updates';
 import './alerts';
 import './insights';
+import './prometheus';
 
 export { mockListen } from './bus';
 

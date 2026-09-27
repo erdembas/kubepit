@@ -139,6 +139,7 @@ impl Kubepit {
                     notes: input.notes,
                     created_at: now,
                     last_connected_at: None,
+                    prometheus: Default::default(),
                 });
             }
             Ok(())
@@ -210,6 +211,7 @@ impl Kubepit {
             notes: cluster.notes,
             created_at: existing.created_at,
             last_connected_at: existing.last_connected_at,
+            prometheus: cluster.prometheus.normalized()?,
         };
         let stored = next.clone();
         let ((), list) = self.store.update_clusters(move |list| {

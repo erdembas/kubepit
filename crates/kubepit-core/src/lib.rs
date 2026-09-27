@@ -36,6 +36,7 @@
 //! | [`updates`]     | updater config, update IPC types, download progress    |
 //! | [`alerts`]      | transition alerts, dedupe, notification center history |
 //! | [`client_cert`] | kubeconfig client certificate subject and expiry       |
+//! | [`prometheus`]  | Prometheus detection, preset + PromQL range queries    |
 //!
 //! Push notifications to the UI go through [`EventSink`]; streams take plain
 //! `Fn(T) -> bool` callbacks (return `false` to stop) that the desktop shell
@@ -86,6 +87,8 @@ pub mod updates;
 pub mod alerts;
 // Insights: kubeconfig client certificate expiry (health checks live in the UI).
 pub mod client_cert;
+// Prometheus: provider detection and range queries over the service proxy.
+pub mod prometheus;
 
 pub use app::Kubepit;
 pub use events::{EventSink, NullSink};

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { PromRangeKey } from '@/lib/prometheus';
 import type { ClusterId, Gvk, TerminalSpec } from '@/types';
 import { useAppStore } from './useAppStore';
 
@@ -86,6 +87,15 @@ export type DockTab =
       /** Selected container; null = the pod's default container. */
       container: string | null;
       containers: string[];
+    }
+  // -- Prometheus -------------------------------------------------------------
+  /** Ad-hoc PromQL against the cluster's Prometheus (see `dock/promql/`). */
+  | {
+      id: string;
+      kind: 'promql';
+      title: string;
+      query: string;
+      range: PromRangeKey;
     };
 
 /** One side of a cross-cluster compare. */
@@ -102,7 +112,8 @@ type DockTabInput =
   | Omit<Extract<DockTab, { kind: 'editor'; mode: 'edit' }>, 'id'>
   | Omit<Extract<DockTab, { kind: 'compare' }>, 'id'>
   | Omit<Extract<DockTab, { kind: 'workload-logs' }>, 'id'>
-  | Omit<Extract<DockTab, { kind: 'files' }>, 'id'>;
+  | Omit<Extract<DockTab, { kind: 'files' }>, 'id'>
+  | Omit<Extract<DockTab, { kind: 'promql' }>, 'id'>;
 
 export interface ClusterDock {
   tabs: DockTab[];
@@ -165,6 +176,7 @@ function sameTarget(a: DockTab, b: DockTabInput): boolean {
     return a.namespace === b.namespace && a.selector === b.selector;
   if (a.kind === 'files' && b.kind === 'files')
     return a.namespace === b.namespace && a.pod === b.pod;
+  if (a.kind === 'promql' && b.kind === 'promql') return !!b.query && a.query === b.query;
   return false;
 }
 
@@ -460,4 +472,7 @@ export const dock = {
       containers,
       container: container ?? containers[0] ?? null,
     }),
+  /** PromQL console; `query` prefills (and runs) an expression, e.g. a chart's preset. */
+  promql: (clusterId: ClusterId, query = '', range: PromRangeKey = '1h') =>
+    useDockStore.getState().openTab(clusterId, { kind: 'promql', title: 'PromQL', query, range }),
 };

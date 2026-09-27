@@ -1,12 +1,18 @@
 import * as i18n from '@/i18n';
 import { Activity } from 'lucide-react';
 import type { ClusterOverview } from '@/types';
-import { RangeToggle, UsageHistory } from '../metrics/UsageHistory';
+import { MetricsRangeToggle } from '../metrics/PrometheusControls';
+import { UsageMetrics } from '../metrics/UsageMetrics';
 import { Card } from './charts';
 
 const CLUSTER_QUERY = { scope: 'cluster' } as const;
+const CLUSTER_TARGET = { kind: 'cluster' } as const;
 
-/** Cluster overview: CPU and memory over the last hour next to the rings. */
+/**
+ * Cluster overview: CPU and memory next to the rings; from Prometheus
+ * (with ranges up to 7 days, network, filesystem and restarts) when the
+ * cluster has one, otherwise the metrics-server history of the last hour.
+ */
 export function ClusterUsageHistory({
   clusterId,
   isActive,
@@ -18,11 +24,16 @@ export function ClusterUsageHistory({
 }) {
   i18n.useLocale();
   return (
-    <Card title={i18n.t('Usage history')} icon={<Activity />} actions={<RangeToggle />}>
+    <Card
+      title={i18n.t('Usage history')}
+      icon={<Activity />}
+      actions={<MetricsRangeToggle clusterId={clusterId} enabled={isActive} />}
+    >
       <div className="p-4">
-        <UsageHistory
+        <UsageMetrics
           clusterId={clusterId}
-          query={CLUSTER_QUERY}
+          historyQuery={CLUSTER_QUERY}
+          promTarget={CLUSTER_TARGET}
           enabled={isActive}
           prefsKey="cluster"
           layout="row"

@@ -34,6 +34,7 @@ function def(
     notes: '',
     created_at: now - 40 * DAY,
     last_connected_at: now - DAY,
+    prometheus: { mode: 'auto' },
     ...partial,
   };
 }

@@ -55,6 +55,9 @@ pub struct ClusterDef {
     pub created_at: i64,
     #[serde(default)]
     pub last_connected_at: Option<i64>,
+    /// Where charts read Prometheus metrics from (auto-detect by default).
+    #[serde(default)]
+    pub prometheus: PrometheusConfig,
 }
 
 /// What the "add cluster" flow sends. Exactly one of `kubeconfig_path` /
@@ -1002,6 +1005,209 @@ pub struct MetricsSeries {
     pub available: bool,
     /// Oldest first. Paused sampling shows up as missing points (gaps).
     pub points: Vec<MetricsPoint>,
+}
+
+// -- Prometheus metrics (optional, richer source; see `prometheus/`) ----------
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PromScheme {
+    #[default]
+    Http,
+    Https,
+}
+
+/// Which product serves the Prometheus-compatible API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PrometheusKind {
+    /// prometheus-operator / kube-prometheus-stack.
+    PrometheusOperator,
+    /// The prometheus-community `prometheus` chart or a plain Prometheus.
+    Prometheus,
+    Thanos,
+    VictoriaMetrics,
+    Mimir,
+    /// OpenShift monitoring (`thanos-querier`).
+    Openshift,
+    /// Configured by hand in the cluster settings.
+    Custom,
+}
+
+/// A Prometheus HTTP API reached through the API server's service proxy.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct PrometheusService {
+    pub kind: PrometheusKind,
+    pub namespace: String,
+    pub service: String,
+    pub port: u16,
+    #[serde(default)]
+    pub scheme: PromScheme,
+    /// `""` or `/prefix` (no trailing slash), e.g. `/select/0/prometheus`.
+    #[serde(default)]
+    pub path_prefix: String,
+}
+
+/// Per-cluster Prometheus setting (`ClusterDef.prometheus`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "lowercase")]
+pub enum PrometheusConfig {
+    /// Detect a well-known service.
+    #[default]
+    Auto,
+    /// Use this service.
+    Service {
+        namespace: String,
+        service: String,
+        port: u16,
+        #[serde(default)]
+        scheme: PromScheme,
+        #[serde(default)]
+        path_prefix: String,
+    },
+    /// Never use Prometheus (metrics-server only).
+    Off,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PrometheusState {
+    Available,
+    /// Detection found no Prometheus-compatible service.
+    NotFound,
+    /// A service was found or configured but did not answer queries.
+    Unreachable,
+    /// Disabled in the cluster settings.
+    Off,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PrometheusSource {
+    Detected,
+    Configured,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrometheusStatus {
+    pub state: PrometheusState,
+    /// The service queries go to (`available`), or the one that failed.
+    pub service: Option<PrometheusService>,
+    pub source: Option<PrometheusSource>,
+    pub error: Option<String>,
+    /// Services detection considered, best first.
+    pub candidates: Vec<PrometheusService>,
+    /// Epoch ms of the check.
+    pub checked_at: i64,
+}
+
+/// What a preset query is about. Internally tagged on `kind`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum PrometheusTarget {
+    Cluster,
+    Node {
+        name: String,
+    },
+    Namespace {
+        namespace: String,
+    },
+    /// Every pod the workload owns, matched by the pod names its kind
+    /// generates (so replaced pods stay in the history).
+    Workload {
+        namespace: String,
+        workload_kind: String,
+        name: String,
+    },
+    Pod {
+        namespace: String,
+        name: String,
+    },
+    Container {
+        namespace: String,
+        pod: String,
+        container: String,
+    },
+    Pvc {
+        namespace: String,
+        name: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrometheusMetric {
+    /// Millicores.
+    CpuUsage,
+    CpuRequests,
+    CpuLimits,
+    /// Bytes (working set).
+    MemoryUsage,
+    MemoryRequests,
+    MemoryLimits,
+    /// Bytes per second.
+    NetworkRx,
+    NetworkTx,
+    /// Bytes used on node filesystems / by container writable layers.
+    FsUsage,
+    FsCapacity,
+    /// Bytes used on persistent volumes (kubelet volume stats).
+    VolumeUsage,
+    VolumeCapacity,
+    /// Container restarts within the rate window.
+    Restarts,
+}
+
+/// Epoch-ms time range; `step` in seconds, `None` = automatic.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct PrometheusRange {
+    pub start: i64,
+    pub end: i64,
+    #[serde(default)]
+    pub step: Option<u64>,
+}
+
+/// `[epoch ms, value]`; non-finite samples are dropped (gaps).
+pub type PromPoint = (i64, f64);
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrometheusSeries {
+    pub metric: PrometheusMetric,
+    /// The PromQL that produced the points.
+    pub query: String,
+    pub points: Vec<PromPoint>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrometheusMetricsResult {
+    pub service: PrometheusService,
+    pub step_secs: u64,
+    pub rate_window_secs: u64,
+    pub start: i64,
+    pub end: i64,
+    /// One entry per requested metric that applies to the target.
+    pub series: Vec<PrometheusSeries>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PromQuerySeries {
+    pub labels: std::collections::BTreeMap<String, String>,
+    pub points: Vec<PromPoint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PromQueryResult {
+    pub service: PrometheusService,
+    pub step_secs: u64,
+    pub start: i64,
+    pub end: i64,
+    /// `matrix`, `vector`, `scalar` or `string`.
+    pub result_type: String,
+    pub series: Vec<PromQuerySeries>,
+    /// More series came back than are returned.
+    pub truncated: bool,
+    pub warnings: Vec<String>,
 }
 
 /// Default cap on matches per (cluster, kind).

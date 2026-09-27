@@ -3,6 +3,7 @@ import { asArray, asObject, asString, field, isObject, spec, status } from '@/li
 import { RefLink } from '@/lib/kube/columns/cells';
 import { phaseTone } from '@/lib/kube/workloads';
 import { ChipList, MonoText, Row, Rows, Section, ToneText } from '../primitives';
+import { PvcMetricsHistory } from '../MetricsHistoryCard';
 import { PodsMiniTable } from '../PodsMiniTable';
 import type { SectionProps } from './types';
 
@@ -54,6 +55,7 @@ export function PvcSections({ obj, ctx, isActive }: SectionProps) {
           </Row>
         </Rows>
       </Section>
+      <PvcMetricsHistory obj={obj} ctx={ctx} isActive={isActive} />
       <Section title={i18n.t('Mounted by')}>
         <PodsMiniTable
           ctx={ctx}
