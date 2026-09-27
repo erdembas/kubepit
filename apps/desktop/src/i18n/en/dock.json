@@ -118,6 +118,8 @@
   "error": "error",
   "Error": "Error",
   "Every source is hidden.": "Every source is hidden.",
+  "Explain": "Explain",
+  "Explain the field at the cursor in the API explorer ({shortcut})": "Explain the field at the cursor in the API explorer ({shortcut})",
   "Failed to start terminal: {message}": "Failed to start terminal: {message}",
   "Files": "Files",
   "Files · {pod}": "Files · {pod}",

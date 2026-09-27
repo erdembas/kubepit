@@ -24,6 +24,7 @@ export const VIEW_KEYS = {
   myPermissions: '@access',
   helmCharts: '@helm-charts',
   clusterHealth: '@health',
+  apiExplorer: '@explain',
 } as const;
 
 export interface NavItem {
@@ -94,6 +95,7 @@ export function viewLabel(key: string, apiResources?: readonly ApiResourceInfo[]
   if (key === VIEW_KEYS.myPermissions) return i18n.t('My Permissions');
   if (key === VIEW_KEYS.helmCharts) return i18n.t('Helm Charts');
   if (key === VIEW_KEYS.clusterHealth) return i18n.t('Cluster Health');
+  if (key === VIEW_KEYS.apiExplorer) return i18n.t('API Explorer');
   const builtin = Object.values(BUILTIN).find((k) => k.key === key);
   if (builtin)
     return builtin.key === BUILTIN.CustomResourceDefinition.key
@@ -130,6 +132,11 @@ export function buildNav(apiResources: readonly ApiResourceInfo[] | null): NavGr
           'health checks popeye lint score findings certificates tls expiry',
         ),
         ...items('cluster'),
+        viewItem(
+          VIEW_KEYS.apiExplorer,
+          i18n.t('API Explorer'),
+          'api explorer explain schema openapi fields crd',
+        ),
       ],
       subgroups: [],
     },

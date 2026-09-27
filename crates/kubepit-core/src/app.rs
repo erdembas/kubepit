@@ -19,6 +19,7 @@ use crate::events::EventSink;
 use crate::metrics::MetricsGate;
 use crate::metrics_history::MetricsHistory;
 use crate::node_shell::NodeShells;
+use crate::openapi::OpenApiCache;
 use crate::paths::Paths;
 use crate::portforward::PortForwards;
 use crate::prometheus::PrometheusCache;
@@ -43,6 +44,8 @@ pub struct Kubepit {
     pub(crate) alerts: AlertCenter,
     // Prometheus: detection result per connection.
     pub(crate) prometheus: PrometheusCache,
+    // OpenAPI v3 documents per connection (YAML editing, API explorer).
+    pub(crate) openapi: OpenApiCache,
 }
 
 impl Kubepit {
@@ -63,6 +66,7 @@ impl Kubepit {
             fleet_searches: TaskRegistry::default(),
             alerts,
             prometheus: PrometheusCache::default(),
+            openapi: OpenApiCache::default(),
         })
     }
 

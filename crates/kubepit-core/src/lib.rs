@@ -37,6 +37,7 @@
 //! | [`alerts`]      | transition alerts, dedupe, notification center history |
 //! | [`client_cert`] | kubeconfig client certificate subject and expiry       |
 //! | [`prometheus`]  | Prometheus detection, preset + PromQL range queries    |
+//! | [`openapi`]     | OpenAPI v3 schemas (YAML editing, API explorer)        |
 //!
 //! Push notifications to the UI go through [`EventSink`]; streams take plain
 //! `Fn(T) -> bool` callbacks (return `false` to stop) that the desktop shell
@@ -89,6 +90,8 @@ pub mod alerts;
 pub mod client_cert;
 // Prometheus: provider detection and range queries over the service proxy.
 pub mod prometheus;
+// Schema-aware YAML editing and the API explorer.
+pub mod openapi;
 
 pub use app::Kubepit;
 pub use events::{EventSink, NullSink};

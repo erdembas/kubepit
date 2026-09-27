@@ -43,6 +43,8 @@ import type {
   MetricsResult,
   MetricsSeries,
   NodeMetric,
+  OpenApiDocument,
+  OpenApiIndex,
   PatchType,
   PodDebugRequest,
   PodDirListing,
@@ -124,6 +126,14 @@ export const ipc = {
   // -- Discovery ------------------------------------------------------------
   apiResources: (clusterId: ClusterId) => call<ApiResourceInfo[]>('api_resources', { clusterId }),
   namespaceNames: (clusterId: ClusterId) => call<string[]>('namespace_names', { clusterId }),
+
+  // -- OpenAPI v3 (schema-aware YAML editing, API explorer; read-only) ------
+  /** `/openapi/v3`, cached per connection for a minute; `refresh` re-reads it. */
+  openapiV3Index: (clusterId: ClusterId, refresh = false) =>
+    call<OpenApiIndex>('openapi_v3_index', { clusterId, refresh }),
+  /** `components.schemas` of one group-version (`v1`, `apps/v1`), cached by content hash. */
+  openapiV3Document: (clusterId: ClusterId, apiVersion: string) =>
+    call<OpenApiDocument>('openapi_v3_document', { clusterId, apiVersion }),
 
   // -- Generic resources ----------------------------------------------------
   resourceList: (

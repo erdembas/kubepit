@@ -12,6 +12,7 @@ import './updates';
 import './alerts';
 import './insights';
 import './prometheus';
+import './openapi';
 
 export { mockListen } from './bus';
 

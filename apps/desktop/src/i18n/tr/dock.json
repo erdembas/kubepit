@@ -118,6 +118,8 @@
   "error": "hata",
   "Error": "Hata",
   "Every source is hidden.": "Tüm kaynaklar gizli.",
+  "Explain": "Açıkla",
+  "Explain the field at the cursor in the API explorer ({shortcut})": "İmleçteki alanı API gezgininde açıkla ({shortcut})",
   "Failed to start terminal: {message}": "Terminal başlatılamadı: {message}",
   "Files": "Dosyalar",
   "Files · {pod}": "Dosyalar · {pod}",

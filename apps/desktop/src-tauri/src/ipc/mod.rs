@@ -31,6 +31,8 @@ pub(crate) mod alerts;
 mod insights;
 // Prometheus: detection status, preset series, ad-hoc PromQL.
 mod prometheus;
+// OpenAPI v3 schemas: YAML editing, API explorer.
+mod openapi;
 
 pub use access::*;
 pub use alerts::*;
@@ -43,6 +45,7 @@ pub use insights::*;
 pub use logs::*;
 pub use logs_debug::*;
 pub use metrics::*;
+pub use openapi::*;
 pub use portforward::*;
 pub use prometheus::*;
 pub use resources::*;

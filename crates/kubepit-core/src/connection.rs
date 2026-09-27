@@ -368,6 +368,7 @@ impl Kubepit {
         self.stop_alert_monitor(id);
         self.prometheus.forget(id);
         self.forwards.stop_cluster(id, self.sink.as_ref());
+        self.openapi.forget(id);
     }
 
     /// `cluster_statuses`: one entry per registered cluster.

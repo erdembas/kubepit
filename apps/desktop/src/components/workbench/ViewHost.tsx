@@ -7,6 +7,7 @@ import { VIEW, useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { ApiResourceInfo } from '@/types';
 import { PermissionsPage } from './access/PermissionsPage';
 import { HealthPage } from './health/HealthPage';
+import { ApiExplorerPage } from './explain/ApiExplorerPage';
 import { HelmChartsPage } from './helm/HelmChartsPage';
 import { HelmPage } from './helm/HelmPage';
 import { ClusterOverviewPage } from './overview/ClusterOverviewPage';
@@ -85,6 +86,10 @@ export const ViewHost = memo(function ViewHost({
         isActive={isActive}
         apiResources={apiResources}
       />
+    );
+  if (activeKind === VIEW.apiExplorer)
+    return (
+      <ApiExplorerPage clusterId={clusterId} isActive={isActive} apiResources={apiResources} />
     );
   if (!gvk) {
     return apiResources ? (

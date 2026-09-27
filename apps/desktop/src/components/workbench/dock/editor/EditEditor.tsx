@@ -1,9 +1,18 @@
 import * as i18n from '@/i18n';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { FileCode2, GitCompareArrows, Loader2, RotateCcw, Save, ScanSearch } from 'lucide-react';
+import {
+  BookOpenText,
+  FileCode2,
+  GitCompareArrows,
+  Loader2,
+  RotateCcw,
+  Save,
+  ScanSearch,
+} from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { ipc } from '@/lib/ipc';
 import { cn } from '@/lib/cn';
+import { EXPLAIN_SHORTCUT } from '@/lib/kube/schema/monaco';
 import { modChord } from '@/lib/platform';
 import { useAppStore } from '@/store/useAppStore';
 import { useDockStore, type DockTab } from '@/store/useDockStore';
@@ -51,6 +60,7 @@ export const EditEditor = memo(function EditEditor({
   const [showDiff, setShowDiff] = useState(false);
   const [diffText, setDiffText] = useState('');
   const { review, start: startDryRun, rerun, close: closeReview } = useDryRunReview(clusterId);
+  const explainRef = useRef<(() => void) | null>(null);
   const dirty = load.state === 'ready' && yaml !== original;
   const gvkKey = JSON.stringify(tab.gvk);
   // Cmd+S can fire before React re-renders after the last keystroke, so
@@ -185,6 +195,18 @@ export const EditEditor = memo(function EditEditor({
             <Button
               size="xs"
               variant="ghost"
+              leftIcon={<BookOpenText className="h-3 w-3" />}
+              onClick={() => explainRef.current?.()}
+              disabled={!ready}
+              title={i18n.t('Explain the field at the cursor in the API explorer ({shortcut})', {
+                shortcut: EXPLAIN_SHORTCUT,
+              })}
+            >
+              {i18n.t('Explain')}
+            </Button>
+            <Button
+              size="xs"
+              variant="ghost"
               leftIcon={<GitCompareArrows className="h-3 w-3" />}
               onClick={() => setShowDiff((v) => !v)}
               disabled={!ready}
@@ -297,6 +319,8 @@ export const EditEditor = memo(function EditEditor({
                   onReview={startReview}
                   readOnly={readOnly}
                   fontSize={fontSize}
+                  clusterId={clusterId}
+                  explainRef={explainRef}
                 />
               </div>
               {showDiff && (
