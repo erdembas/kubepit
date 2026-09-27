@@ -39,6 +39,8 @@ mod connectivity;
 mod manifests;
 // Change timeline: in-memory change journal.
 mod changes;
+// Persistent history: audit log, persisted events and changes.
+mod history;
 
 pub use access::*;
 pub use alerts::*;
@@ -49,6 +51,7 @@ pub use connectivity::*;
 pub use fleet::*;
 pub use helm::*;
 pub use helm_charts::*;
+pub use history::*;
 pub use insights::*;
 pub use logs::*;
 pub use logs_debug::*;

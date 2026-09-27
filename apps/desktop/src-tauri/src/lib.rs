@@ -152,6 +152,15 @@ pub fn run() {
             // Change timeline
             ipc::changes_list,
             ipc::changes_get,
+            // Persistent history (audit log, persisted events and changes)
+            ipc::history_status,
+            ipc::history_audit_list,
+            ipc::history_audit_get,
+            ipc::history_audit_export,
+            ipc::history_events_list,
+            ipc::history_changes_list,
+            ipc::history_changes_get,
+            ipc::history_clear,
             // Logs & debug
             ipc::workload_logs_stream,
             ipc::workload_logs_stop,
