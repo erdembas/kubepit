@@ -192,6 +192,55 @@ export interface DeleteOptions {
   grace_period_seconds?: number | null;
 }
 
+// -- Workload operations (rollout history, set image, dry run) ---------------
+
+/** One container's image: listed by rollout history, sent by set image. */
+export interface ContainerImage {
+  container: string;
+  image: string;
+  init: boolean;
+}
+
+/**
+ * One rollout revision: a Deployment's ReplicaSet, or a StatefulSet's /
+ * DaemonSet's ControllerRevision. Lists are newest first.
+ */
+export interface RolloutRevision {
+  revision: number;
+  /** ReplicaSet or ControllerRevision name. */
+  name: string;
+  created: string | null;
+  /** `kubernetes.io/change-cause`. */
+  change_cause: string | null;
+  /** App containers first, then init containers. */
+  images: ContainerImage[];
+  /** Pod template (`pod-template-hash` / `controller-revision-hash` stripped). */
+  template: Record<string, unknown>;
+  /** ReplicaSets only: `status.replicas` / `status.readyReplicas`. */
+  replicas: number | null;
+  ready_replicas: number | null;
+  /** The revision the workload's spec currently runs. */
+  current: boolean;
+}
+
+export type DryRunOperation = 'create' | 'update' | 'unchanged';
+
+/**
+ * Server-side dry run (`dryRun=All`) of one manifest document. `operation`
+ * is what the request would do (`create` when nothing is live); `error` is
+ * set when the server or Kubepit rejected the document.
+ */
+export interface DryRunResult {
+  api_version: string;
+  kind: string;
+  name: string;
+  namespace: string | null;
+  operation: DryRunOperation;
+  live: KubeObject | null;
+  result: KubeObject | null;
+  error: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // Logs
 // ---------------------------------------------------------------------------

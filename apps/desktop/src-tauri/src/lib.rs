@@ -74,6 +74,11 @@ pub fn run() {
             ipc::cronjob_trigger,
             ipc::node_cordon,
             ipc::node_drain,
+            // Workload operations
+            ipc::rollout_history,
+            ipc::rollout_undo,
+            ipc::resource_set_image,
+            ipc::resource_dry_run_yaml,
             // Logs
             ipc::pod_logs_stream,
             ipc::pod_logs_stop,
