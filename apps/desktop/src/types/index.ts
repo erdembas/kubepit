@@ -28,6 +28,14 @@ export interface WorkspaceSnapshot {
   clusterSection: Record<ClusterId, SectionId>;
   collapsedSections: Record<SectionId, boolean>;
   sectionItemOrder: Record<SectionId, string[]>;
+  /** Health check rules silenced per cluster. Absent in files written before health checks. */
+  healthIgnores?: Record<ClusterId, HealthIgnore[]>;
+}
+
+/** A health rule silenced for one cluster; `namespace: null` silences it everywhere. */
+export interface HealthIgnore {
+  rule: string;
+  namespace: string | null;
 }
 
 /** `workspace://changed`: the window labelled `source` saved `snapshot`. */
@@ -98,6 +106,21 @@ export interface ClusterStatus {
   platform: string | null;
   server: string | null;
   connected_at: number | null;
+}
+
+/** Client certificate of a cluster's kubeconfig user (`cluster_client_certificate`). */
+export interface ClientCertificate {
+  /** Subject common name (the Kubernetes user name). */
+  subject: string;
+  /** Subject organizations (the Kubernetes groups), comma-separated. */
+  organization: string;
+  /** Issuer common name. */
+  issuer: string;
+  /** Epoch milliseconds. */
+  not_before: number;
+  not_after: number;
+  /** `inline` for `client-certificate-data`, otherwise the file path. */
+  source: string;
 }
 
 export interface KubeconfigContext {

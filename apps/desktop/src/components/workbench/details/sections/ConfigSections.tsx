@@ -1,18 +1,22 @@
 import * as i18n from '@/i18n';
 import { asString, field } from '@/lib/kube/accessors';
 import { Row, Rows, Section } from '../primitives';
+import { CertificateCards } from './CertificateSections';
 import { DataEditor } from './DataEditor';
 import type { SectionProps } from './types';
 
 export function ConfigMapSections({ obj, gvk, ctx, readOnly }: SectionProps) {
   return (
-    <DataEditor
-      key={obj.metadata.uid}
-      obj={obj}
-      gvk={gvk}
-      clusterId={ctx.clusterId}
-      readOnly={readOnly}
-    />
+    <>
+      <CertificateCards obj={obj} now={ctx.now} />
+      <DataEditor
+        key={obj.metadata.uid}
+        obj={obj}
+        gvk={gvk}
+        clusterId={ctx.clusterId}
+        readOnly={readOnly}
+      />
+    </>
   );
 }
 
@@ -32,6 +36,7 @@ export function SecretSections({ obj, gvk, ctx, readOnly }: SectionProps) {
           </Row>
         </Rows>
       </Section>
+      <CertificateCards obj={obj} now={ctx.now} />
       <DataEditor
         key={obj.metadata.uid}
         obj={obj}

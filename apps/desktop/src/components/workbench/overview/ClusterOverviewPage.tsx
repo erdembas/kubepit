@@ -20,6 +20,8 @@ import type { ApiResourceInfo, Quantity } from '@/types';
 import { useNow } from '../util';
 import { Card, GaugeRings, Legend, SegmentBar, StatTile, type Gauge, type Segment } from './charts';
 import { ClusterUsageHistory } from './ClusterUsageHistory';
+import { HealthSummaryCard } from '../health/HealthSummaryCard';
+import { ClientCertNotice } from '../health/ClientCertificate';
 import { WarningList } from './WarningList';
 
 function ResourceCard({
@@ -214,6 +216,7 @@ export function ClusterOverviewPage({
             onClick={() => void refreshOverview(clusterId)}
           />
         </div>
+        <ClientCertNotice clusterId={clusterId} isActive={isActive} />
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatTile
             icon={<Server />}
@@ -251,6 +254,12 @@ export function ClusterOverviewPage({
             onClick={() => go('deployments.apps')}
           />
         </div>
+        <HealthSummaryCard
+          clusterId={clusterId}
+          isActive={isActive}
+          apiResources={apiResources}
+          podCount={o.pods.total}
+        />
         <div className="grid gap-3 lg:grid-cols-3">
           <ResourceCard
             title={i18n.t('CPU')}

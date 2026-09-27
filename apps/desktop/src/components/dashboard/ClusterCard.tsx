@@ -11,6 +11,7 @@ import {
   SquareTerminal,
 } from 'lucide-react';
 import { StatusDot } from '@/components/ui/StatusDot';
+import { ClientCertBadge } from '@/components/workbench/health/ClientCertificate';
 import { useFleetMetricsHistory } from '@/components/workbench/metrics/useMetricsHistory';
 import { Sparkline } from '@/components/workbench/overview/TimeSeriesChart';
 import { connectCluster, disconnectCluster, openAndConnect } from '@/lib/clusterActions';
@@ -126,6 +127,8 @@ export const ClusterCard = memo(function ClusterCard({
           ))}
         </div>
       )}
+
+      <ClientCertBadge clusterId={cluster.id} visible={visible} />
 
       <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
         {state === 'connecting' ? (

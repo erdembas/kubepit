@@ -6,6 +6,7 @@ import { formatAge } from '@/lib/format';
 import type { Gvk, KubeObject } from '@/types';
 import { ChipList, MonoText, Row, Rows, Section } from './primitives';
 import { ConfigMapSections, SecretSections } from './sections/ConfigSections';
+import { CertificateKindSections } from './sections/CertificateSections';
 import { CrdSections, GenericSections } from './sections/GenericSections';
 import { CronJobSections, JobSections } from './sections/JobSections';
 import { EndpointsSections, IngressSections, ServiceSections } from './sections/NetworkSections';
@@ -19,6 +20,7 @@ import { WorkloadSections } from './sections/WorkloadSections';
 import type { SectionProps } from './sections/types';
 import { hasRollout } from '@/lib/kube/rollout';
 import { RolloutSection } from './sections/RolloutSection';
+import { HealthBanner } from '../health/HealthBanner';
 
 const BY_KIND: Record<string, ComponentType<SectionProps>> = {
   Pod: PodSections,
@@ -48,6 +50,8 @@ const BY_KIND: Record<string, ComponentType<SectionProps>> = {
   HorizontalPodAutoscaler: HpaSections,
   PodDisruptionBudget: PdbSections,
   CustomResourceDefinition: CrdSections,
+  // cert-manager.io Certificates; other groups' `Certificate` kinds fall back to the generic view.
+  Certificate: CertificateKindSections,
 };
 
 function MetaSection({ obj, ctx }: { obj: KubeObject; ctx: ColumnContext }) {
@@ -149,6 +153,7 @@ export function DetailsOverview({
   return (
     <>
       {hasRollout(obj) && <RolloutSection {...{ obj, gvk, ctx, isActive, readOnly }} />}
+      <HealthBanner clusterId={ctx.clusterId} obj={obj} now={ctx.now} />
       <MetaSection obj={obj} ctx={ctx} />
       <Kind obj={obj} gvk={gvk} ctx={ctx} isActive={isActive} readOnly={readOnly} />
     </>

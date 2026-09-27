@@ -7,6 +7,7 @@ import type {
   ApiResourceInfo,
   AppInfo,
   ApplyMode,
+  ClientCertificate,
   ClusterDef,
   ClusterId,
   ClusterInput,
@@ -95,6 +96,9 @@ export const ipc = {
   clusterStatuses: () => call<Record<ClusterId, ClusterStatus>>('cluster_statuses'),
   /** Writes a single-context kubeconfig for external tools; returns its path. */
   clusterExportKubeconfig: (id: ClusterId) => call<string>('cluster_export_kubeconfig', { id }),
+  /** Client certificate of the context's user (reads the kubeconfig only); `null` for other auth. */
+  clusterClientCertificate: (id: ClusterId) =>
+    call<ClientCertificate | null>('cluster_client_certificate', { id }),
   clusterOverview: (clusterId: ClusterId) =>
     call<ClusterOverview>('cluster_overview', { clusterId }),
 
