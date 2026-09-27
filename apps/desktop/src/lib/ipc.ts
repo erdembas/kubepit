@@ -4,6 +4,8 @@ import type {
   AccessCheck,
   AccessDecision,
   AccessRules,
+  Alert,
+  AlertNotice,
   ApiResourceInfo,
   AppInfo,
   ApplyMode,
@@ -373,6 +375,14 @@ export const ipc = {
   helmReleaseRevision: (clusterId: ClusterId, namespace: string, name: string, revision: number) =>
     call<HelmRevisionDetail>('helm_release_revision', { clusterId, namespace, name, revision }),
 
+  // -- Alerts (read-only observations; allowed on read-only clusters) -------
+  /** Every alert of this session, newest activity first. */
+  alertsList: () => call<Alert[]>('alerts_list'),
+  /** `ids: null` marks everything read; broadcasts `alerts://changed`. */
+  alertsMarkRead: (ids: string[] | null) => call<void>('alerts_mark_read', { ids }),
+  /** `ids: null` clears everything; broadcasts `alerts://changed`. */
+  alertsClear: (ids: string[] | null) => call<void>('alerts_clear', { ids }),
+
   // -- Terminal -------------------------------------------------------------
   ...terminalIpc,
 };
@@ -388,4 +398,9 @@ export const events = {
     listenEvent<{ id: string; code: number | null }>('terminal://exit', handler),
   onWorkspaceChanged: (handler: (payload: WorkspaceChanged) => void) =>
     listenEvent<WorkspaceChanged>('workspace://changed', handler),
+  /** An alert was raised or a repeat merged into one (every window hears it). */
+  onAlert: (handler: (notice: AlertNotice) => void) =>
+    listenEvent<AlertNotice>('alerts://new', handler),
+  /** Alerts were marked read or cleared: refetch `alertsList`. */
+  onAlertsChanged: (handler: () => void) => listenEvent<null>('alerts://changed', () => handler()),
 };

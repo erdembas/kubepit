@@ -15,6 +15,8 @@ pub(crate) fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::
     let paths = Paths::from_env()?;
     let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app.handle().clone()));
     let core = Arc::new(Kubepit::open(paths, sink)?);
+    // The desktop app watches connected clusters for alerts (see `alerts.rs`).
+    core.set_alert_monitoring(true);
     tracing::info!(data_dir = %core.paths().root().display(), "kubepit core ready");
 
     let handle = app.handle().clone();

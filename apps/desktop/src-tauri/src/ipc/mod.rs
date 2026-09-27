@@ -23,8 +23,11 @@ mod resources;
 mod workloads;
 // Logs & debug: workload logs, log export, debug containers, container files.
 mod logs_debug;
+// Alerts: notification center commands and the `alerts://new` event.
+pub(crate) mod alerts;
 
 pub use access::*;
+pub use alerts::*;
 pub use app::*;
 pub use clusters::*;
 pub use fleet::*;
