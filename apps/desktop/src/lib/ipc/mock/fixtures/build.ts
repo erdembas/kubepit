@@ -10,6 +10,7 @@ import { buildClasses, buildLeaderLeases, buildNamespaces, buildWebhooks } from 
 import { buildMonitoring } from './monitoring';
 import { buildIngress, buildNetworkPolicies } from './network';
 import { buildNodes } from './nodes';
+import { buildPrometheusServices } from './prometheus';
 import { buildPolicies } from './policies';
 import { buildRbac } from './rbac';
 import { buildStorage } from './storage';
@@ -27,6 +28,7 @@ function buildCluster(db: ClusterDb) {
   buildIngressNginx(db);
   buildCertManager(db);
   buildMonitoring(db);
+  buildPrometheusServices(db);
   buildArgo(db);
   buildCheckout(db);
   buildWeb(db);
