@@ -528,6 +528,73 @@ impl Default for Settings {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Access (RBAC self-reviews)
+// ---------------------------------------------------------------------------
+
+/// One `kubectl auth can-i` question. `namespace: None` asks cluster-wide
+/// (cluster-scoped kinds, or every namespace for namespaced ones).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct AccessCheck {
+    pub verb: String,
+    /// API group; `""` is the core group.
+    #[serde(default)]
+    pub group: String,
+    /// Plural resource name (`pods`, `deployments`).
+    pub resource: String,
+    #[serde(default)]
+    pub subresource: Option<String>,
+    #[serde(default)]
+    pub namespace: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+/// Answer to one [`AccessCheck`].
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AccessDecision {
+    pub allowed: bool,
+    /// An authorizer explicitly denied (not just "no authorizer allowed").
+    pub denied: bool,
+    pub reason: Option<String>,
+    /// The review itself failed: neither `allowed` nor `denied` is known.
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AccessResourceRule {
+    pub verbs: Vec<String>,
+    pub api_groups: Vec<String>,
+    pub resources: Vec<String>,
+    /// Empty = every name.
+    pub resource_names: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AccessNonResourceRule {
+    pub verbs: Vec<String>,
+    pub non_resource_urls: Vec<String>,
+}
+
+/// `SelfSubjectRulesReview` for one namespace.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AccessRules {
+    pub resource_rules: Vec<AccessResourceRule>,
+    pub non_resource_rules: Vec<AccessNonResourceRule>,
+    /// Some authorizer (typically a webhook) could not list its rules.
+    pub incomplete: bool,
+    pub evaluation_error: Option<String>,
+}
+
+/// The authenticated identity (`kubectl auth whoami`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct WhoAmI {
+    pub username: String,
+    pub uid: Option<String>,
+    pub groups: Vec<String>,
+    pub extra: std::collections::BTreeMap<String, Vec<String>>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -8,6 +8,7 @@ import type {
   KubeObject,
   WatchBatch,
 } from '@/types';
+import { mockListForbidden } from './access';
 import { sleep } from './bus';
 import './fixtures/build';
 import {
@@ -98,7 +99,8 @@ function forbidden(clusterId: string, gvk: Gvk, namespaces: string[]) {
     !namespaces.length
   )
     return 'secrets is forbidden: User "dev@acme.io" cannot list resource "secrets" in API group "" at the cluster scope';
-  return null;
+  // Demo RBAC identities (./access.ts).
+  return mockListForbidden(clusterId, gvk, namespaces);
 }
 
 register({

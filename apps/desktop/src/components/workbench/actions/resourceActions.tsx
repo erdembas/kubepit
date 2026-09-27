@@ -18,12 +18,14 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { ipc } from '@/lib/ipc';
+import type { AccessNeed } from '@/lib/kube/access';
 import { asString, spec } from '@/lib/kube/accessors';
 import { nodeUnschedulable } from '@/lib/kube/workloads';
 import { useAppStore } from '@/store/useAppStore';
 import { dock } from '@/store/useDockStore';
 import type { ClusterDef, Gvk, KubeObject } from '@/types';
 import { copyText, errorText } from '../util';
+import { requiredAccess } from './access';
 import { useActionDialogs } from './dialogStore';
 import { confirmDestructive, runMutation } from './guard';
 
@@ -49,6 +51,8 @@ export interface ResourceAction {
   mutating: boolean;
   /** Shown as a separate toolbar button (others collapse into the menu order). */
   primary?: boolean;
+  /** RBAC permissions the action needs; filled from `ACTION_ACCESS` by id. */
+  access?: AccessNeed;
   run: (anchor: Anchor) => void;
 }
 
@@ -318,5 +322,7 @@ export function resourceActions({
         },
       }),
   });
+  // Permission gating (see ./access.ts); ids without an entry stay ungated.
+  for (const a of actions) a.access ??= requiredAccess(a.id, obj, gvk);
   return actions;
 }

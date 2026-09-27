@@ -11,11 +11,13 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { ipc } from '@/lib/ipc';
+import type { AccessNeed } from '@/lib/kube/access';
 import { spec } from '@/lib/kube/accessors';
 import { nodeUnschedulable } from '@/lib/kube/workloads';
 import { useAppStore } from '@/store/useAppStore';
 import type { ClusterDef, Gvk, KubeObject } from '@/types';
 import { copyText, errorText } from '../util';
+import { bulkAccess } from './access';
 import { confirmDestructive } from './guard';
 import { RESTARTABLE } from './resourceActions';
 
@@ -26,6 +28,8 @@ export interface BulkAction {
   tone?: 'danger';
   /** Blocked on read-only clusters. */
   mutating: boolean;
+  /** RBAC permissions (allowed on at least one target); see ./access.ts. */
+  access?: AccessNeed;
   run: () => void;
 }
 
@@ -269,5 +273,7 @@ export function bulkActions({
       }),
   });
 
+  // Permission gating (see ./access.ts); ids without an entry stay ungated.
+  for (const a of actions) a.access ??= bulkAccess(a.id, targets, gvk);
   return actions;
 }

@@ -20,6 +20,7 @@ export const VIEW_KEYS = {
   workloadsOverview: '@workloads',
   portForwards: '@port-forwards',
   helmReleases: '@helm',
+  myPermissions: '@access',
 } as const;
 
 export interface NavItem {
@@ -86,6 +87,7 @@ export function viewLabel(key: string, apiResources?: readonly ApiResourceInfo[]
   if (key === VIEW_KEYS.workloadsOverview) return i18n.t('Workloads Overview');
   if (key === VIEW_KEYS.portForwards) return i18n.t('Port Forwarding');
   if (key === VIEW_KEYS.helmReleases) return i18n.t('Helm Releases');
+  if (key === VIEW_KEYS.myPermissions) return i18n.t('My Permissions');
   const builtin = Object.values(BUILTIN).find((k) => k.key === key);
   if (builtin)
     return builtin.key === BUILTIN.CustomResourceDefinition.key
@@ -158,7 +160,14 @@ export function buildNav(apiResources: readonly ApiResourceInfo[] | null): NavGr
       id: 'access',
       label: sectionLabel('access'),
       icon: SECTION_ICONS.access,
-      items: items('access'),
+      items: [
+        viewItem(
+          VIEW_KEYS.myPermissions,
+          i18n.t('My Permissions'),
+          'my permissions rbac can-i whoami access review',
+        ),
+        ...items('access'),
+      ],
       subgroups: [],
     },
     {

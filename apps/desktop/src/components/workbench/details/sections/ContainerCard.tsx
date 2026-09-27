@@ -1,13 +1,16 @@
 import * as i18n from '@/i18n';
-import { useState } from 'react';
-import { ArrowRightLeft, ChevronRight, ScrollText, SquareTerminal } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { ArrowRightLeft, ChevronRight, Lock, ScrollText, SquareTerminal } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { asArray, asObject, asString, isObject, type JsonObject } from '@/lib/kube/accessors';
+import { BUILTIN, toGvk } from '@/lib/kube/catalog';
 import { containerTone, type ContainerInfo } from '@/lib/kube/pods';
 import { cn } from '@/lib/cn';
 import { formatAge, formatBytes, formatCpu } from '@/lib/format';
 import { dock } from '@/store/useDockStore';
 import type { KubeObject, PodMetric } from '@/types';
+import { OPEN_GATE, useActionGates } from '../../access/gates';
+import { requiredAccess } from '../../actions/access';
 import { useActionDialogs } from '../../actions/dialogStore';
 import { openPodLogs, podPorts } from '../../actions/resourceActions';
 import { ChipList, CodeBlock, MonoText, Row, Rows } from '../primitives';
@@ -69,6 +72,18 @@ export function ContainerCard({
   const limits = asObject(resources.limits);
   const ports = podPorts({ ...pod, spec: { containers: [s] } });
   const ns = pod.metadata.namespace ?? 'default';
+  const gated = useMemo(
+    () =>
+      (['logs', 'shell'] as const).map((id) => ({
+        id,
+        mutating: false,
+        access: requiredAccess(id, pod, toGvk(BUILTIN.Pod)),
+      })),
+    [pod],
+  );
+  const gates = useActionGates(clusterId, gated, false);
+  const logsGate = gates.get('logs') ?? OPEN_GATE;
+  const shellGate = gates.get('shell') ?? OPEN_GATE;
   const stateLabel =
     c.state === 'running'
       ? c.ready
@@ -92,7 +107,11 @@ export function ContainerCard({
           <Button
             size="xs"
             variant="ghost"
-            leftIcon={<ScrollText className="h-3 w-3" />}
+            leftIcon={
+              logsGate.blocked ? <Lock className="h-3 w-3" /> : <ScrollText className="h-3 w-3" />
+            }
+            disabled={logsGate.blocked}
+            title={logsGate.message ?? undefined}
             onClick={() => openPodLogs(clusterId, pod, c.name)}
           >
             {i18n.t('Logs')}
@@ -101,7 +120,15 @@ export function ContainerCard({
             <Button
               size="xs"
               variant="ghost"
-              leftIcon={<SquareTerminal className="h-3 w-3" />}
+              leftIcon={
+                shellGate.blocked ? (
+                  <Lock className="h-3 w-3" />
+                ) : (
+                  <SquareTerminal className="h-3 w-3" />
+                )
+              }
+              disabled={shellGate.blocked}
+              title={shellGate.message ?? undefined}
               onClick={() => dock.podExec(clusterId, ns, pod.metadata.name, c.name)}
             >
               {i18n.t('Shell')}

@@ -23,11 +23,13 @@
 //! | [`portforward`] | local TCP → pod / service forwarding                    |
 //! | [`helm`]        | releases read from secrets, mutations via `helm`        |
 //! | [`terminal`]    | PTY launch plans (local, exec, attach, node shell)      |
+//! | [`access`]      | RBAC self-reviews (can-i, rules, whoami)                |
 //!
 //! Push notifications to the UI go through [`EventSink`]; streams take plain
 //! `Fn(T) -> bool` callbacks (return `false` to stop) that the desktop shell
 //! bridges to Tauri channels.
 
+pub mod access;
 pub mod app;
 pub mod cluster;
 pub mod connection;
