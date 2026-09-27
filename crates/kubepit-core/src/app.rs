@@ -16,6 +16,7 @@ use crate::connection::ClientPool;
 use crate::error::ReadOnlyError;
 use crate::events::EventSink;
 use crate::metrics::MetricsGate;
+use crate::metrics_history::MetricsHistory;
 use crate::node_shell::NodeShells;
 use crate::paths::Paths;
 use crate::portforward::PortForwards;
@@ -33,6 +34,9 @@ pub struct Kubepit {
     pub(crate) forwards: PortForwards,
     pub(crate) node_shells: NodeShells,
     pub(crate) metrics_gate: MetricsGate,
+    // Fleet: per-cluster metrics samplers and running fleet-wide searches.
+    pub(crate) metrics_history: MetricsHistory,
+    pub(crate) fleet_searches: TaskRegistry,
 }
 
 impl Kubepit {
@@ -48,6 +52,8 @@ impl Kubepit {
             forwards: PortForwards::default(),
             node_shells: NodeShells::default(),
             metrics_gate: MetricsGate::default(),
+            metrics_history: MetricsHistory::default(),
+            fleet_searches: TaskRegistry::default(),
         })
     }
 
@@ -134,6 +140,8 @@ impl Kubepit {
     pub async fn shutdown(&self) {
         self.watches.stop_all();
         self.log_streams.stop_all();
+        self.metrics_history.stop_all();
+        self.fleet_searches.stop_all();
         self.forwards.stop_all(self.sink.as_ref());
         let cleanup = self.cleanup_all_node_shells();
         if tokio::time::timeout(Duration::from_secs(4), cleanup)

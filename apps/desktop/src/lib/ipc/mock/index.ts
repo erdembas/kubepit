@@ -2,6 +2,7 @@ import { handlers } from './registry';
 import './app';
 import './resources';
 import './dock';
+import './fleet';
 
 export { mockListen } from './bus';
 

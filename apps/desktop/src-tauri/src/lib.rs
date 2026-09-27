@@ -90,6 +90,11 @@ pub fn run() {
             ipc::helm_rollback,
             ipc::helm_uninstall,
             ipc::helm_upgrade_values,
+            // Fleet: metrics history, fleet search
+            ipc::metrics_history,
+            ipc::metrics_history_fleet,
+            ipc::fleet_search,
+            ipc::fleet_search_cancel,
             // Terminal
             terminal::commands::terminal_create,
             terminal::commands::terminal_write,

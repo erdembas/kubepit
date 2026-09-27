@@ -528,6 +528,105 @@ impl Default for Settings {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Fleet: metrics history & fleet search
+// ---------------------------------------------------------------------------
+
+/// Which series `metrics_history` returns. Internally tagged on `scope`,
+/// exactly like the TS union (`{ scope: 'pods', namespace, names }`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "scope", rename_all = "lowercase")]
+pub enum MetricsHistoryQuery {
+    /// Cluster total (sum of nodes).
+    Cluster,
+    /// Sum of the named nodes.
+    Nodes { names: Vec<String> },
+    /// Sum of the named pods of one namespace (a workload = its pods).
+    Pods {
+        namespace: String,
+        names: Vec<String>,
+    },
+}
+
+/// One sample; `ts` is epoch milliseconds.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct MetricsPoint {
+    pub ts: i64,
+    pub cpu_millicores: f64,
+    pub memory_bytes: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MetricsSeries {
+    /// Seconds between points (15 at full resolution, 60 when downsampled).
+    pub interval_secs: u32,
+    /// False while metrics-server is known to be unavailable.
+    pub available: bool,
+    /// Oldest first. Paused sampling shows up as missing points (gaps).
+    pub points: Vec<MetricsPoint>,
+}
+
+/// Default cap on matches per (cluster, kind).
+pub const DEFAULT_FLEET_SEARCH_LIMIT: u32 = 200;
+
+fn default_fleet_search_limit() -> u32 {
+    DEFAULT_FLEET_SEARCH_LIMIT
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FleetSearchQuery {
+    /// Name pattern: substring (default), glob (`web-*`) or `/regex/`;
+    /// space-separated terms must all match. Empty matches every name.
+    #[serde(default)]
+    pub text: String,
+    pub kinds: Vec<Gvk>,
+    /// Empty = every registered cluster (disconnected ones are skipped).
+    #[serde(default)]
+    pub cluster_ids: Vec<String>,
+    #[serde(default)]
+    pub namespace: Option<String>,
+    #[serde(default)]
+    pub label_selector: Option<String>,
+    #[serde(default = "default_fleet_search_limit")]
+    pub limit_per_kind: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FleetSearchEventKind {
+    Results,
+    ClusterDone,
+    ClusterError,
+    ClusterSkipped,
+    Done,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FleetSearchItem {
+    /// The version the cluster serves, which may differ from the query's.
+    pub gvk: Gvk,
+    pub namespace: Option<String>,
+    pub name: String,
+    pub uid: String,
+    /// `metadata.creationTimestamp` (RFC 3339).
+    pub created: Option<String>,
+    pub labels: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FleetSearchEvent {
+    pub search_id: String,
+    /// `None` only on the final `done` event.
+    pub cluster_id: Option<String>,
+    pub kind: FleetSearchEventKind,
+    pub items: Vec<FleetSearchItem>,
+    /// `results`: the kind had more matches than `limit_per_kind`.
+    pub truncated: bool,
+    /// `cluster-done` / `cluster-error`: kinds RBAC did not allow listing.
+    pub forbidden_kinds: Vec<String>,
+    pub error: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

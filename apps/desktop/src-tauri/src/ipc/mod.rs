@@ -12,6 +12,7 @@
 
 mod app;
 mod clusters;
+mod fleet;
 mod helm;
 mod logs;
 mod metrics;
@@ -20,6 +21,7 @@ mod resources;
 
 pub use app::*;
 pub use clusters::*;
+pub use fleet::*;
 pub use helm::*;
 pub use logs::*;
 pub use metrics::*;

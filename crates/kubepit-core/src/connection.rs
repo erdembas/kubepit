@@ -164,6 +164,12 @@ impl ClientPool {
             }
         }
     }
+
+    /// The client of a connected cluster, without ever connecting (fleet
+    /// search must not wake clusters the user left disconnected).
+    pub(crate) fn connected_client(&self, id: &str) -> Option<Client> {
+        self.connected(id).map(|(client, _)| client)
+    }
 }
 
 /// What a successful connect learned about the cluster.
@@ -225,6 +231,7 @@ impl Kubepit {
                     server: Some(est.server).filter(|s| !s.is_empty()),
                     connected_at: Some(now),
                 };
+                let sampler_client = est.client.clone();
                 if !self.pool.commit(est.client, status.clone(), epoch) {
                     // Disconnected (or removed) while we were connecting.
                     return Ok(self
@@ -234,6 +241,7 @@ impl Kubepit {
                 }
                 self.sink.cluster_status(&status);
                 self.touch_last_connected(id, now);
+                self.start_metrics_sampler(id, sampler_client);
                 tracing::info!(cluster = %cluster.name, "connected");
                 Ok(status)
             }
@@ -354,6 +362,7 @@ impl Kubepit {
     pub(crate) fn stop_cluster_work(&self, id: &str) {
         self.watches.stop_cluster(id);
         self.log_streams.stop_cluster(id);
+        self.metrics_history.stop_cluster(id);
         self.forwards.stop_cluster(id, self.sink.as_ref());
     }
 
