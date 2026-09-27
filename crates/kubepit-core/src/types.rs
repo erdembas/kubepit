@@ -877,6 +877,8 @@ pub struct Settings {
     pub debug_image: String,
     /// Check for a new release on startup (only in builds with updates configured).
     pub auto_check_updates: bool,
+    /// Alerts and notifications (see `alerts.rs`).
+    pub alerts: crate::alerts::AlertSettings,
 }
 
 impl Default for Settings {
@@ -892,6 +894,7 @@ impl Default for Settings {
             node_shell_image: DEFAULT_NODE_SHELL_IMAGE.to_string(),
             debug_image: DEFAULT_DEBUG_IMAGE.to_string(),
             auto_check_updates: true,
+            alerts: crate::alerts::AlertSettings::default(),
         }
     }
 }

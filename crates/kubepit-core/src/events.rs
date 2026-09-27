@@ -5,6 +5,7 @@
 //! transitions) are pushed through this trait; the desktop shell implements
 //! it on top of `AppHandle::emit`, tests use [`NullSink`] or a recorder.
 
+use crate::alerts::AlertEvent;
 use crate::types::{ClusterDef, ClusterStatus, PortForward};
 
 pub trait EventSink: Send + Sync + 'static {
@@ -14,6 +15,11 @@ pub trait EventSink: Send + Sync + 'static {
     fn cluster_list(&self, clusters: &[ClusterDef]);
     /// `portforward://changed` — the full list of port forwards.
     fn port_forwards(&self, forwards: &[PortForward]);
+    /// `alerts://new` — an alert was raised (`fresh`) or a repeat merged
+    /// into an existing one. No-op by default.
+    fn alert(&self, _event: &AlertEvent) {}
+    /// `alerts://changed` — alerts were marked read or cleared.
+    fn alerts_changed(&self) {}
 }
 
 /// Sink that drops every event (tests, headless tools).

@@ -25,8 +25,11 @@ mod workloads;
 mod logs_debug;
 // In-app updates (inert until release signing is configured).
 mod updater;
+// Alerts: notification center commands and the `alerts://new` event.
+pub(crate) mod alerts;
 
 pub use access::*;
+pub use alerts::*;
 pub use app::*;
 pub use clusters::*;
 pub use fleet::*;

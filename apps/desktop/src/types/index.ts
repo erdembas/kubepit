@@ -687,6 +687,92 @@ export interface Settings {
   debug_image: string;
   /** Check for a new release on startup (only in builds with updates configured). */
   auto_check_updates: boolean;
+  /** Alerts and notifications. */
+  alerts: AlertSettings;
+}
+
+// ---------------------------------------------------------------------------
+// Alerts (transition monitor + notification center)
+// ---------------------------------------------------------------------------
+
+/** Kubernetes vocabulary, shown verbatim (never translated). */
+export type AlertReason =
+  | 'CrashLoopBackOff'
+  | 'OOMKilled'
+  | 'ImagePullBackOff'
+  | 'Evicted'
+  | 'JobFailed'
+  | 'NodeNotReady'
+  | 'NodePressure'
+  | 'ProgressDeadlineExceeded';
+
+export type AlertSeverity = 'critical' | 'warning';
+
+export interface AlertObjectRef {
+  /** '' = core group. */
+  group: string;
+  version: string;
+  kind: string;
+  namespace: string | null;
+  /** '' for a collapsed burst (see `Alert.group`). */
+  name: string;
+}
+
+/** A burst of one reason in one namespace, collapsed into one alert. */
+export interface AlertGroup {
+  /** Distinct objects affected so far. */
+  total: number;
+  /** Their names (capped). */
+  names: string[];
+}
+
+export interface Alert {
+  id: string;
+  cluster_id: ClusterId;
+  severity: AlertSeverity;
+  reason: AlertReason;
+  object: AlertObjectRef;
+  /** Pod reasons: the container. */
+  container: string | null;
+  /** `NodePressure`: the condition type (`DiskPressure`, …). */
+  condition: string | null;
+  /** Kubernetes' own message (never translated). */
+  message: string;
+  /** Epoch ms. */
+  first_seen: number;
+  last_seen: number;
+  /** Occurrences merged into this entry (cooldown dedupe, bursts). */
+  count: number;
+  read: boolean;
+  group: AlertGroup | null;
+}
+
+/** `alerts://new`: an alert was raised (`fresh`) or a repeat merged into one. */
+export interface AlertNotice {
+  alert: Alert;
+  fresh: boolean;
+  /** The one window that posts the OS notification. */
+  notifier: string | null;
+  /** Whether any Kubepit window has focus. */
+  app_focused: boolean;
+}
+
+export interface AlertSettings {
+  /** Master switch: watch connected clusters for alerts. */
+  enabled: boolean;
+  disabled_reasons: AlertReason[];
+  /** Namespace globs (`*`, `?`); empty = every namespace. Nodes ignore these. */
+  include_namespaces: string[];
+  exclude_namespaces: string[];
+  /** Clusters that are not watched at all. */
+  disabled_clusters: ClusterId[];
+  /** Recorded but never notify: id → until (epoch ms), null = until unmuted. */
+  muted_clusters: Record<ClusterId, number | null>;
+  /** OS notifications paused until (epoch ms). */
+  snoozed_until: number | null;
+  os_notifications: boolean;
+  /** Only while no Kubepit window is focused. */
+  background_only: boolean;
 }
 
 // ---------------------------------------------------------------------------

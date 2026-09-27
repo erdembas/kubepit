@@ -9,6 +9,7 @@ import './fleet';
 import './logsDebug';
 import './helmCharts';
 import './updates';
+import './alerts';
 
 export { mockListen } from './bus';
 

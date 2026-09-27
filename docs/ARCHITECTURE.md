@@ -34,7 +34,9 @@ single source of truth for the frontend ⇄ backend boundary.
 - Global events: `cluster://status` (ClusterStatus), `cluster://list`
   (ClusterDef[]), `portforward://changed` (PortForward[]), `terminal://exit`
   (`{ id, code }`), `workspace://changed` (`{ source, snapshot }`, the
-  window label that saved `workspace.json`).
+  window label that saved `workspace.json`), `alerts://new` (AlertNotice:
+  `{ alert, fresh, notifier, app_focused }`), `alerts://changed` (`null`;
+  alerts were marked read or cleared, refetch `alerts_list`).
 
 ## Windows
 
@@ -135,6 +137,55 @@ through `--password-stdin`.
   selectors) and streams results per cluster.
 - Cross-cluster compare and drift are UI-side: `resource_get` on each
   cluster, `lib/kube/normalize.ts` (mode `compare`) and `lib/diff.ts`.
+
+## Alerts
+
+`alerts.rs` (+ `alerts/`) watches connected clusters and feeds desktop
+notifications and the notification center (status bar bell → right panel
+`components/alerts/AlertsPanel.tsx`, settings under Notifications).
+
+- **Monitor.** Started after a successful connect when alerts are enabled
+  for the cluster, stopped with the connection (disconnect keeps the
+  alerts, removing the cluster drops them). One `kube::runtime` watcher per
+  kind — pods, Jobs, nodes, Deployments — cluster-wide, or per namespace
+  when the cluster declares `accessible_namespaces`. Objects deserialise
+  into slim types (identity + the status fields detection needs) and keep
+  a compact snapshot; no per-object API calls. Kinds whose reasons are all
+  disabled are not watched; a 403/404 on the first list drops that kind
+  instead of retrying forever. Alerts only read, so read-only clusters are
+  watched too. Monitoring is opt-in per process
+  (`Kubepit::set_alert_monitoring`): the desktop shell enables it, tests
+  and headless tools do not.
+- **Transitions only** (`alerts/detect.rs`, pure functions of the old
+  snapshot and the new object): container entering `CrashLoopBackOff`, a new
+  `OOMKilled` termination, `ImagePullBackOff`/`ErrImagePull`, pod
+  `Evicted`, Job `Failed`, node Ready → False/Unknown and new
+  Memory/Disk/PID pressure, Deployment `ProgressDeadlineExceeded`. The
+  first list is the baseline and never alerts; a re-list after a desync
+  compares against what was known.
+- **Book** (`alerts/book.rs`): settings filters (reasons, namespace globs)
+  first, then dedupe per (cluster, object, reason[, condition]) with a
+  10-minute sliding cooldown (`count` grows, no new notification), burst
+  collapse (after 3 alerts of one reason/kind/namespace within a minute the
+  rest merge into one group alert, `object.name` empty, `group.names`),
+  and a 500-entry in-memory history. `alerts_list`, `alerts_mark_read`,
+  `alerts_clear` (`ids: null` = all).
+- **Notifications.** The UI decides (`lib/alerts/policy.ts`): only
+  `fresh` alerts, not while snoozed or the cluster is muted, OS
+  notifications only from the `notifier` window (`main` while open,
+  otherwise the first window by label) so several windows never post
+  twice, and — with "only in the background" — a toast in the focused
+  window instead while Kubepit is in front. Titles and bodies are built in
+  the UI's current language (`lib/alerts/text.ts`); reasons, names and
+  Kubernetes messages stay verbatim. Desktop notifications go through
+  `tauri-plugin-notification` (clicking one focuses Kubepit; the plugin
+  reports no clicks on desktop), browser previews use the web
+  Notification API and open the alert on click.
+- **Settings** (`Settings.alerts`): master switch, disabled reasons,
+  include/exclude namespace globs, disabled clusters (not watched), muted
+  clusters (recorded, never notify; until a time or indefinitely), global
+  snooze (1 h / until tomorrow 08:00), OS notifications and "only in the
+  background".
 
 ## Access (RBAC)
 

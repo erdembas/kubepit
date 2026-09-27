@@ -32,8 +32,9 @@ export function mainTabKey(tab: MainTab): string {
 
 export type SidebarGroupBy = 'none' | 'environment' | 'status' | 'tag';
 export type SidebarStatusFilter = 'all' | 'connected' | 'disconnected';
-export type RightPanel = 'events' | 'forwards';
-export type SettingsCategory = 'general' | 'kubeconfig' | 'terminal' | 'tools' | 'about';
+export type RightPanel = 'events' | 'forwards' | 'alerts';
+export type SettingsCategory =
+  'general' | 'kubeconfig' | 'terminal' | 'notifications' | 'tools' | 'about';
 
 export type ClusterEditorState = { mode: 'add' } | { mode: 'edit'; cluster: ClusterDef } | null;
 

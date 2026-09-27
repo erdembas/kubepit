@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use kubepit_core::alerts::AlertEvent;
 use kubepit_core::types::{ClusterDef, ClusterStatus, PortForward};
 use kubepit_core::{EventSink, Kubepit};
 use serde::Serialize;
@@ -48,6 +49,14 @@ impl EventSink for TauriEventSink {
 
     fn port_forwards(&self, forwards: &[PortForward]) {
         let _ = self.app.emit(EVENT_PORT_FORWARDS, forwards);
+    }
+
+    fn alert(&self, event: &AlertEvent) {
+        crate::ipc::alerts::emit_alert(&self.app, event);
+    }
+
+    fn alerts_changed(&self) {
+        crate::ipc::alerts::emit_alerts_changed(&self.app);
     }
 }
 

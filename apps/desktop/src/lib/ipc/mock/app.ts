@@ -10,6 +10,7 @@ import type {
   TerminalOutput,
   WorkspaceSnapshot,
 } from '@/types';
+import { DEFAULT_ALERT_SETTINGS } from '@/lib/alerts/policy';
 import { windowLabel } from '@/lib/windowSeed';
 import { mockEmit, mockEmitAllWindows, sleep } from './bus';
 import { register, type MockArgs } from './registry';
@@ -165,6 +166,7 @@ let settings: Settings = {
   node_shell_image: 'docker.io/library/alpine:3.20',
   debug_image: 'docker.io/library/busybox:1.36',
   auto_check_updates: true,
+  alerts: DEFAULT_ALERT_SETTINGS,
 };
 
 const WORKSPACE_KEY = 'kubepit.demo.workspace';

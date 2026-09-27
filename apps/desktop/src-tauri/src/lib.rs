@@ -45,6 +45,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(updater)
         .setup(setup_app)
         .invoke_handler(tauri::generate_handler![
@@ -144,6 +145,10 @@ pub fn run() {
             ipc::helm_install,
             ipc::helm_upgrade,
             ipc::helm_release_revision,
+            // Alerts
+            ipc::alerts_list,
+            ipc::alerts_mark_read,
+            ipc::alerts_clear,
             // Terminal
             terminal::commands::terminal_create,
             terminal::commands::terminal_write,
