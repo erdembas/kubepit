@@ -1,5 +1,5 @@
 import * as i18n from '@/i18n';
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { DiffEditor, type MonacoDiffEditor } from '@monaco-editor/react';
 import {
   ArrowRight,
@@ -126,6 +126,7 @@ export function DiffView({
         </div>
       ) : monaco ? (
         <div className="relative min-h-0 flex-1">
+          <DetachOnUnmount editorRef={editorRef} />
           <DiffEditor
             original={original}
             modified={modified}
@@ -172,6 +173,28 @@ export function DiffView({
       )}
     </div>
   );
+}
+
+/**
+ * Detaches and disposes the diff models before `@monaco-editor/react`
+ * tears the editor down. Its own cleanup disposes the models while they are
+ * still attached, which makes Monaco throw "TextModel got disposed before
+ * DiffEditorWidget model got reset" whenever a diff unmounts. Rendered as a
+ * sibling *before* the editor so its cleanup runs first.
+ */
+function DetachOnUnmount({ editorRef }: { editorRef: { current: MonacoDiffEditor | null } }) {
+  useEffect(
+    () => () => {
+      const editor = editorRef.current;
+      const model = editor?.getModel();
+      if (!editor || !model) return;
+      editor.setModel(null);
+      model.original.dispose();
+      model.modified.dispose();
+    },
+    [editorRef],
+  );
+  return null;
 }
 
 function SideLabel({ tone, children }: { tone: 'added' | 'removed'; children: ReactNode }) {
