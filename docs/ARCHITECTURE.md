@@ -147,3 +147,41 @@ Every diff (apply review, rollout revisions, Helm revisions, compare and
 drift) renders through `components/workbench/common/DiffView.tsx` on top of
 Monaco's diff editor, with `lib/diff.ts` (Myers line diff) for stats and the
 fallback view.
+
+## Schema-aware YAML & API explorer
+
+Editors and the explorer are driven by the connected cluster's own OpenAPI
+v3, so CRDs work like builtins.
+
+- `openapi.rs`: `openapi_v3_index` reads `/openapi/v3` (group-version
+  documents with their `?hash=` URLs, cached for a minute or until
+  `refresh`); `openapi_v3_document` returns one group-version's
+  `components.schemas` (`paths` stripped), fetched through the hashed URL
+  and cached by that hash. The cache belongs to the connection (dropped on
+  disconnect, reset on reconnect). Both only read, so read-only clusters
+  allow them.
+- `lib/kube/schema/` (pure TS): `openapi.ts` resolves `$ref`/`allOf` per
+  level (children stay lazy, recursive definitions are free) and finds a
+  kind by `x-kubernetes-group-version-kind`; `fields.ts` walks YAML paths
+  and describes fields (type label, required, enum, default, format,
+  `x-kubernetes-*` markers); `yamlContext.ts` derives the path under the
+  cursor from indentation (works on half-typed documents), `yamlAst.ts`
+  from the `yaml` parser's source ranges; `validate.ts`, `complete.ts`,
+  `tree.ts` compute markers, suggestions and explorer rows; `loader.ts`
+  caches index, documents (by hash) and discovery per cluster.
+- `lib/kube/schema/monaco.ts` registers one completion and one hover
+  provider for `yaml`; they only answer for models bound with
+  `attachKubeYaml(monaco, editor, { clusterId })` (the model → cluster
+  mapping; `useKubeYaml` in the dock editors and the details YAML tab).
+  Diagnostics run debounced on documents that parse (unknown field, wrong
+  type, missing required field, unsupported enum value, unserved
+  apiVersion/kind). No schema means no suggestions and no markers; nothing
+  blocks editing or applying. Helm values and other YAML stay unbound.
+- API explorer: view `@explain` (`VIEW_KEYS.apiExplorer`,
+  `components/workbench/explain/`), opened through `openExplain()` in
+  `store/useExplainStore.ts` from the navigator, the command palette
+  (`explain <kind>`), a kind page's toolbar and the editors ("Explain field
+  at cursor", ⌘/Ctrl+Shift+E), which reveals that field in the tree.
+- The demo backend serves a handcrafted subset (`mock/fixtures/openapi.ts`:
+  Pod, Service, ConfigMap, Secret, Namespace, Deployment, Job, CronJob and
+  cert-manager's Certificate) plus a minimal schema for every other kind.
