@@ -31,6 +31,7 @@ import { YamlTab } from './YamlTab';
 import { hasRollout } from '@/lib/kube/rollout';
 import { requestFor, useDetailsTabRequest } from './detailsTabs';
 import { HistoryTab } from './HistoryTab';
+import { GitOpsBadge } from '../gitops/ManagedNotice';
 
 type Tab = 'details' | 'yaml' | 'events' | 'history';
 
@@ -56,6 +57,7 @@ export function DetailsPanel({
   liveObject,
   isActive,
   apiResources,
+  viewKey,
 }: {
   clusterId: string;
   gvk: Gvk;
@@ -64,6 +66,8 @@ export function DetailsPanel({
   liveObject: KubeObject | null;
   isActive: boolean;
   apiResources: ApiResourceInfo[] | null;
+  /** View tab whose selection this panel shows (defaults to `kindKey`; the GitOps overview). */
+  viewKey?: string;
 }) {
   i18n.useLocale();
   const [tab, setTab] = useState<Tab>('details');
@@ -87,7 +91,7 @@ export function DetailsPanel({
     isActive,
   );
   const obj = liveObject ?? fetched.data ?? null;
-  const close = () => useWorkbenchStore.getState().select(clusterId, kindKey, null);
+  const close = () => useWorkbenchStore.getState().select(clusterId, viewKey ?? kindKey, null);
   const tabRequest = useDetailsTabRequest((s) =>
     requestFor(s.request, clusterId, obj?.metadata.uid),
   );
@@ -178,6 +182,7 @@ export function DetailsPanel({
               <> · {formatAge(obj.metadata.creationTimestamp, now)}</>
             )}
           </p>
+          {obj && <GitOpsBadge clusterId={clusterId} obj={obj} isActive={isActive} />}
         </div>
         {obj && <DetailsToolbar clusterId={clusterId} actions={actions} readOnly={readOnly} />}
         <span className="bg-border/80 mx-0.5 h-5 w-px shrink-0" aria-hidden />

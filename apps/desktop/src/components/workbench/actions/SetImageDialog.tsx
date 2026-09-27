@@ -18,6 +18,7 @@ import {
 import { cn } from '@/lib/cn';
 import { useAppStore } from '@/store/useAppStore';
 import type { ContainerImage } from '@/types';
+import { GitOpsNotice } from '../gitops/ManagedNotice';
 import type { ActionDialog } from './dialogStore';
 import { runMutation } from './guard';
 
@@ -161,6 +162,7 @@ export function SetImageDialog({
       }
     >
       <div className="space-y-4">
+        <GitOpsNotice clusterId={clusterId} obj={obj} />
         <p className="text-fg-muted text-[12px]">{hint(obj.kind)}</p>
         <div className="border-border/60 divide-border/50 divide-y overflow-hidden rounded-lg border">
           <div className="text-fg-dim bg-fg/[0.02] grid grid-cols-[minmax(110px,160px)_minmax(0,1fr)_10px_minmax(96px,170px)_24px] items-center gap-2 px-3 py-1.5 text-[10px] font-semibold tracking-[0.08em] uppercase">

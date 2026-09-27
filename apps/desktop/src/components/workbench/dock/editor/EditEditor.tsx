@@ -9,6 +9,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { useDockStore, type DockTab } from '@/store/useDockStore';
 import type { ClusterId } from '@/types';
 import { DiffView } from '../../common/DiffView';
+import { GitOpsYamlNotice } from '../../gitops/ManagedNotice';
 import { isConflictError } from './documents';
 import { EditorBanner, EditorBar, ReadOnlyNotice } from './EditorChrome';
 import { REVIEW_SHORTCUT, useDryRunReview } from './review';
@@ -251,6 +252,7 @@ export const EditEditor = memo(function EditEditor({
           </div>
         </EditorBar>
         {readOnly && <ReadOnlyNotice />}
+        {!readOnly && <GitOpsYamlNotice clusterId={clusterId} yaml={original} />}
         {saveError && (
           <EditorBanner
             tone={saveError.conflict ? 'warning' : 'error'}

@@ -19,6 +19,7 @@ import { WorkloadSections } from './sections/WorkloadSections';
 import type { SectionProps } from './sections/types';
 import { hasRollout } from '@/lib/kube/rollout';
 import { RolloutSection } from './sections/RolloutSection';
+import { gitopsSectionsFor } from './sections/gitopsSections';
 
 const BY_KIND: Record<string, ComponentType<SectionProps>> = {
   Pod: PodSections,
@@ -145,7 +146,7 @@ export function DetailsOverview({
   readOnly: boolean;
 }) {
   i18n.useLocale();
-  const Kind = BY_KIND[obj.kind] ?? GenericSections;
+  const Kind = gitopsSectionsFor(obj) ?? BY_KIND[obj.kind] ?? GenericSections;
   return (
     <>
       {hasRollout(obj) && <RolloutSection {...{ obj, gvk, ctx, isActive, readOnly }} />}

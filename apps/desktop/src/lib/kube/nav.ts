@@ -11,6 +11,7 @@ import {
   type KindDef,
   type NavSectionId,
 } from './catalog';
+import { gitopsResources, isGitOpsResource } from './gitops/kinds';
 import { kindIcon, SECTION_ICONS } from './icons';
 
 /** Navigator tree (Freelens layout) built from the catalog plus discovery. */
@@ -22,6 +23,7 @@ export const VIEW_KEYS = {
   helmReleases: '@helm',
   myPermissions: '@access',
   helmCharts: '@helm-charts',
+  gitops: '@gitops',
 } as const;
 
 export interface NavItem {
@@ -63,6 +65,8 @@ function sectionLabel(id: NavSectionId): string {
       return i18n.t('Access Control');
     case 'helm':
       return i18n.t('Helm');
+    case 'gitops':
+      return i18n.t('GitOps');
     default:
       return i18n.t('Custom Resources');
   }
@@ -90,6 +94,7 @@ export function viewLabel(key: string, apiResources?: readonly ApiResourceInfo[]
   if (key === VIEW_KEYS.helmReleases) return i18n.t('Helm Releases');
   if (key === VIEW_KEYS.myPermissions) return i18n.t('My Permissions');
   if (key === VIEW_KEYS.helmCharts) return i18n.t('Helm Charts');
+  if (key === VIEW_KEYS.gitops) return i18n.t('GitOps Overview');
   const builtin = Object.values(BUILTIN).find((k) => k.key === key);
   if (builtin)
     return builtin.key === BUILTIN.CustomResourceDefinition.key
@@ -104,6 +109,42 @@ export function pluralKind(kind: string): string {
   if (/(s|x|z|ch|sh)$/.test(kind)) return `${kind}es`;
   if (/[^aeiou]y$/.test(kind)) return `${kind.slice(0, -1)}ies`;
   return `${kind}s`;
+}
+
+function resourceItem(r: ApiResourceInfo): NavItem {
+  const key = kindKey(r);
+  return {
+    key,
+    label: pluralKind(r.kind),
+    icon: kindIcon(key),
+    gvk: gvkFromApiResource(r),
+    terms: `${r.kind} ${r.plural} ${r.short_names.join(' ')} ${r.group}`.toLowerCase(),
+  };
+}
+
+/** GitOps (Argo CD, Flux): only when discovery serves one of their kinds. */
+function gitopsGroup(apiResources: readonly ApiResourceInfo[] | null): NavGroup | null {
+  const served = gitopsResources(apiResources);
+  if (!served.length) return null;
+  const minor = (r: ApiResourceInfo) =>
+    r.group === 'notification.toolkit.fluxcd.io' || r.group === 'image.toolkit.fluxcd.io';
+  const subgroups = new Map<string, NavItem[]>();
+  for (const r of served.filter(minor))
+    subgroups.set(r.group, [...(subgroups.get(r.group) ?? []), resourceItem(r)]);
+  return {
+    id: 'gitops',
+    label: sectionLabel('gitops'),
+    icon: SECTION_ICONS.gitops,
+    items: [
+      viewItem(VIEW_KEYS.gitops, i18n.t('Overview'), 'gitops argo argocd flux sync overview'),
+      ...served.filter((r) => !minor(r)).map(resourceItem),
+    ],
+    subgroups: [...subgroups.entries()].map(([group, list]) => ({
+      id: `gitops:${group}`,
+      label: group,
+      items: list,
+    })),
+  };
 }
 
 export function buildNav(apiResources: readonly ApiResourceInfo[] | null): NavGroup[] {
@@ -183,11 +224,13 @@ export function buildNav(apiResources: readonly ApiResourceInfo[] | null): NavGr
       subgroups: [],
     },
   ];
+  const gitops = gitopsGroup(apiResources);
+  if (gitops) groups.push(gitops);
 
   const byGroup = new Map<string, NavItem[]>();
   const seen = new Set<string>();
   for (const r of apiResources ?? []) {
-    if (!isCustomResource(r) || r.group === 'metrics.k8s.io') continue;
+    if (!isCustomResource(r) || r.group === 'metrics.k8s.io' || isGitOpsResource(r)) continue;
     const key = kindKey(r);
     if (seen.has(key)) continue;
     seen.add(key);
