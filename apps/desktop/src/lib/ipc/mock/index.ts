@@ -10,6 +10,7 @@ import './logsDebug';
 import './helmCharts';
 import './updates';
 import './alerts';
+import './insights';
 
 export { mockListen } from './bus';
 

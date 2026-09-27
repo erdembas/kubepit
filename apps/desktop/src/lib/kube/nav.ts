@@ -23,6 +23,7 @@ export const VIEW_KEYS = {
   helmReleases: '@helm',
   myPermissions: '@access',
   helmCharts: '@helm-charts',
+  clusterHealth: '@health',
 } as const;
 
 export interface NavItem {
@@ -92,6 +93,7 @@ export function viewLabel(key: string, apiResources?: readonly ApiResourceInfo[]
   if (key === VIEW_KEYS.helmReleases) return i18n.t('Helm Releases');
   if (key === VIEW_KEYS.myPermissions) return i18n.t('My Permissions');
   if (key === VIEW_KEYS.helmCharts) return i18n.t('Helm Charts');
+  if (key === VIEW_KEYS.clusterHealth) return i18n.t('Cluster Health');
   const builtin = Object.values(BUILTIN).find((k) => k.key === key);
   if (builtin)
     return builtin.key === BUILTIN.CustomResourceDefinition.key
@@ -122,6 +124,11 @@ export function buildNav(apiResources: readonly ApiResourceInfo[] | null): NavGr
       icon: SECTION_ICONS.cluster,
       items: [
         viewItem(VIEW_KEYS.clusterOverview, i18n.t('Overview'), 'overview cluster dashboard'),
+        viewItem(
+          VIEW_KEYS.clusterHealth,
+          i18n.t('Health'),
+          'health checks popeye lint score findings certificates tls expiry',
+        ),
         ...items('cluster'),
       ],
       subgroups: [],

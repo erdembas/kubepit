@@ -4,6 +4,7 @@ import { refreshOverview } from '@/lib/clusterActions';
 import { syncThemeAcrossWindows } from '@/lib/theme';
 import { windowLabel, windowSeed } from '@/lib/windowSeed';
 import { UNASSIGNED_BUCKET, useAppStore } from '@/store/useAppStore';
+import { useHealthStore } from '@/store/useHealthStore';
 import type { WorkspaceSnapshot } from '@/types';
 
 const OVERVIEW_INTERVAL_MS = 30_000;
@@ -19,6 +20,7 @@ function hydrate(workspace: WorkspaceSnapshot) {
     collapsedSections: workspace.collapsedSections ?? {},
     sectionItemOrder: workspace.sectionItemOrder ?? {},
   });
+  useHealthStore.getState().hydrateIgnores(workspace.healthIgnores ?? {});
 }
 
 /**
@@ -85,18 +87,10 @@ export function useAppBootstrap() {
     };
   }, []);
 
-  // Persist the workspace layout (sections, membership, order, collapse).
+  // Persist the workspace layout (sections, membership, order, collapse) and health ignores.
   useEffect(() => {
     let timer: number | undefined;
-    const unsubscribe = useAppStore.subscribe((state, prev) => {
-      if (!state.bootstrapped || applyingRemoteWorkspace) return;
-      if (
-        state.sections === prev.sections &&
-        state.clusterSection === prev.clusterSection &&
-        state.collapsedSections === prev.collapsedSections &&
-        state.sectionItemOrder === prev.sectionItemOrder
-      )
-        return;
+    const schedule = () => {
       window.clearTimeout(timer);
       timer = window.setTimeout(() => {
         const s = useAppStore.getState();
@@ -115,13 +109,30 @@ export function useAppBootstrap() {
                 : [],
             ]),
           ),
+          healthIgnores: useHealthStore.getState().ignores,
         };
         void ipc.workspaceSave(snapshot).catch(console.error);
       }, SAVE_DEBOUNCE_MS);
+    };
+    const unsubscribe = useAppStore.subscribe((state, prev) => {
+      if (!state.bootstrapped || applyingRemoteWorkspace) return;
+      if (
+        state.sections === prev.sections &&
+        state.clusterSection === prev.clusterSection &&
+        state.collapsedSections === prev.collapsedSections &&
+        state.sectionItemOrder === prev.sectionItemOrder
+      )
+        return;
+      schedule();
+    });
+    const unsubscribeHealth = useHealthStore.subscribe((state, prev) => {
+      if (!useAppStore.getState().bootstrapped || applyingRemoteWorkspace) return;
+      if (state.ignores !== prev.ignores) schedule();
     });
     return () => {
       window.clearTimeout(timer);
       unsubscribe();
+      unsubscribeHealth();
     };
   }, []);
 

@@ -35,6 +35,7 @@
 //! | [`pod_fs`]      | container file browser and copy over exec              |
 //! | [`updates`]     | updater config, update IPC types, download progress    |
 //! | [`alerts`]      | transition alerts, dedupe, notification center history |
+//! | [`client_cert`] | kubeconfig client certificate subject and expiry       |
 //!
 //! Push notifications to the UI go through [`EventSink`]; streams take plain
 //! `Fn(T) -> bool` callbacks (return `false` to stop) that the desktop shell
@@ -83,6 +84,8 @@ pub mod workload_logs;
 pub mod updates;
 // Alerts: desktop notifications and the notification center.
 pub mod alerts;
+// Insights: kubeconfig client certificate expiry (health checks live in the UI).
+pub mod client_cert;
 
 pub use app::Kubepit;
 pub use events::{EventSink, NullSink};

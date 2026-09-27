@@ -6,6 +6,7 @@ import { gvkForKey } from '@/lib/kube/catalog';
 import { VIEW, useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { ApiResourceInfo } from '@/types';
 import { PermissionsPage } from './access/PermissionsPage';
+import { HealthPage } from './health/HealthPage';
 import { HelmChartsPage } from './helm/HelmChartsPage';
 import { HelmPage } from './helm/HelmPage';
 import { ClusterOverviewPage } from './overview/ClusterOverviewPage';
@@ -76,6 +77,15 @@ export const ViewHost = memo(function ViewHost({
     );
   if (activeKind === VIEW.helmCharts)
     return <HelmChartsPage clusterId={clusterId} namespaces={namespaces} isActive={isActive} />;
+  if (activeKind === VIEW.clusterHealth)
+    return (
+      <HealthPage
+        clusterId={clusterId}
+        namespaces={namespaces}
+        isActive={isActive}
+        apiResources={apiResources}
+      />
+    );
   if (!gvk) {
     return apiResources ? (
       <div className="flex flex-1 items-center justify-center p-8">

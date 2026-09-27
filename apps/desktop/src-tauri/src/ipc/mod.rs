@@ -27,6 +27,8 @@ mod logs_debug;
 mod updater;
 // Alerts: notification center commands and the `alerts://new` event.
 pub(crate) mod alerts;
+// Insights: kubeconfig client certificate expiry.
+mod insights;
 
 pub use access::*;
 pub use alerts::*;
@@ -35,6 +37,7 @@ pub use clusters::*;
 pub use fleet::*;
 pub use helm::*;
 pub use helm_charts::*;
+pub use insights::*;
 pub use logs::*;
 pub use logs_debug::*;
 pub use metrics::*;

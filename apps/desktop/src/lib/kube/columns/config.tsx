@@ -3,6 +3,7 @@ import { formatAge } from '@/lib/format';
 import type { KubeObject } from '@/types';
 import { asArray, asNumber, asObject, asString, field, isObject, spec, status } from '../accessors';
 import { Chips, Dash, Mono, Muted, standard, Tone } from './cells';
+import { certificateExpiryColumn } from './certificates';
 import type { KindColumns } from './types';
 
 const dataKeys = (o: KubeObject) => [
@@ -39,6 +40,7 @@ export const secretColumns: KindColumns = {
       cell: (o) => <Mono>{asString(field(o, 'type')) || 'Opaque'}</Mono>,
       sort: (o) => asString(field(o, 'type')),
     },
+    certificateExpiryColumn,
   ]),
 };
 

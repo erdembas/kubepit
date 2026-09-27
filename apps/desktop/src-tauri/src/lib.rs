@@ -75,6 +75,7 @@ pub fn run() {
             ipc::cluster_disconnect,
             ipc::cluster_statuses,
             ipc::cluster_export_kubeconfig,
+            ipc::cluster_client_certificate,
             ipc::cluster_overview,
             // Discovery
             ipc::api_resources,

@@ -6,6 +6,7 @@ import { buildData, buildLegacy, buildTeams } from './data';
 import { setBuilder, type ClusterDb } from './db';
 import { buildEvents } from './events';
 import { buildGatewayApi } from './gateway';
+import { buildHealthDemo } from './health';
 import { buildHelm } from './helm';
 import { buildClasses, buildLeaderLeases, buildNamespaces, buildWebhooks } from './infra';
 import { buildMonitoring } from './monitoring';
@@ -58,6 +59,7 @@ function buildCluster(db: ClusterDb) {
       tls: 'argocd-server-tls',
       paths: [['/', 'argocd-server', 443]],
     });
+  buildHealthDemo(db);
   buildHelm(db);
   buildEvents(db);
   buildRolloutHistory(db);
