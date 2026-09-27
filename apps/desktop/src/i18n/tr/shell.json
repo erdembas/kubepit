@@ -132,6 +132,7 @@
   "Delete, scale to zero, drain and Helm uninstall always ask first. Production clusters additionally require typing the resource name.": "Silme, sıfıra ölçekleme, drain ve Helm kaldırma her zaman önce onay ister. Production cluster'larda ayrıca kaynak adının yazılması gerekir.",
   "Deployments of one namespace": "Tek bir namespace'teki Deployment'lar",
   "Development": "Geliştirme",
+  "Diff local manifests": "Yerel manifestlerin farkını al",
   "Dim UI": "Loş arayüz",
   "Discard": "Vazgeç",
   "Disconnect": "Bağlantıyı kes",

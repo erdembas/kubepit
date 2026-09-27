@@ -2,6 +2,7 @@ import { useLocaleMemo as useMemo } from '@/i18n';
 import * as i18n from '@/i18n';
 import { useEffect, useRef, useState } from 'react';
 import {
+  ArrowRightLeft,
   Ban,
   CircleCheck,
   CircleDashed,
@@ -20,6 +21,7 @@ import { useAppStore } from '@/store/useAppStore';
 import type { CompareSide, DockTab } from '@/store/useDockStore';
 import type { ClusterId } from '@/types';
 import { compareToBaseline, fetchSide, type DriftRow, type FetchedSide } from './compareData';
+import type { SyncRequest } from './SyncPanel';
 
 type CompareTab = Extract<DockTab, { kind: 'compare' }>;
 
@@ -116,6 +118,7 @@ export function DriftPane({
   refresh,
   onBaseline,
   onOpenDiff,
+  onSync,
 }: {
   clusterId: ClusterId;
   tab: CompareTab;
@@ -123,6 +126,7 @@ export function DriftPane({
   refresh: number;
   onBaseline: (clusterId: ClusterId) => void;
   onOpenDiff: (left: CompareSide, right: CompareSide) => void;
+  onSync: (request: SyncRequest) => void;
 }) {
   i18n.useLocale();
   const clusters = useAppStore((s) => s.clusters);
@@ -181,6 +185,16 @@ export function DriftPane({
   };
   const baselineSide = sides[baselineId];
   const baselineName = clusters.find((c) => c.id === baselineId)?.name ?? baselineId;
+  // "Sync to…": clusters that differ from the baseline or miss the object.
+  const drifted = done
+    .filter(
+      (r) =>
+        r.cluster.id !== baselineId &&
+        (r.row!.identical === false || r.row!.side.state === 'missing'),
+    )
+    .map((r) => r.cluster.id);
+  const syncFromBaseline = (targets: ClusterId[]) =>
+    onSync({ source: side(baselineId), targets, namespace: tab.namespace });
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -208,6 +222,16 @@ export function DriftPane({
             cluster: <span className="text-fg font-medium">{baselineName}</span>,
           })}
         </span>
+        <button
+          type="button"
+          disabled={baselineSide?.state !== 'ok'}
+          onClick={() => syncFromBaseline(drifted)}
+          title={i18n.t('Apply the baseline object to clusters that differ: review, then apply')}
+          className="text-fg-muted hover:text-fg hover:bg-fg/5 flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 transition-colors disabled:opacity-40"
+        >
+          <ArrowRightLeft className="h-3 w-3" />
+          {i18n.t('Sync to…')}
+        </button>
       </div>
       <div className="overlay-scroll min-h-0 flex-1 overflow-y-auto px-2 py-1.5">
         {baselineSide && baselineSide.state !== 'ok' && (
@@ -217,7 +241,7 @@ export function DriftPane({
             )}
           </p>
         )}
-        <div className="text-fg-dim grid grid-cols-[minmax(180px,1.1fr)_150px_minmax(0,2fr)_64px] gap-3 px-2 py-1 text-[10.5px] font-semibold tracking-[0.08em] uppercase">
+        <div className="text-fg-dim grid grid-cols-[minmax(180px,1.1fr)_150px_minmax(0,2fr)_88px] gap-3 px-2 py-1 text-[10.5px] font-semibold tracking-[0.08em] uppercase">
           <span>{i18n.t('Cluster')}</span>
           <span>{i18n.t('State')}</span>
           <span>{i18n.t('Differences')}</span>
@@ -240,7 +264,7 @@ export function DriftPane({
                 }
               }}
               className={cn(
-                'group grid min-h-9 grid-cols-[minmax(180px,1.1fr)_150px_minmax(0,2fr)_64px] items-center gap-3 rounded-md px-2 text-[12px] transition-colors',
+                'group grid min-h-9 grid-cols-[minmax(180px,1.1fr)_150px_minmax(0,2fr)_88px] items-center gap-3 rounded-md px-2 text-[12px] transition-colors',
                 canDiff && 'hover:bg-fg/4 cursor-pointer',
                 isBaseline && 'bg-accent/5 shadow-[inset_2px_0_0_rgb(var(--accent))]',
               )}
@@ -278,6 +302,19 @@ export function DriftPane({
                     <Crosshair className="h-3.5 w-3.5" />
                   </button>
                 )}
+                {!isBaseline &&
+                  baselineSide?.state === 'ok' &&
+                  (row?.identical === false || row?.side.state === 'missing') && (
+                    <button
+                      type="button"
+                      title={i18n.t('Sync from the baseline: review, then apply')}
+                      aria-label={i18n.t('Sync from the baseline: review, then apply')}
+                      onClick={() => syncFromBaseline([cluster.id])}
+                      className="text-fg-dim hover:text-fg hover:bg-fg/10 flex h-6 w-6 items-center justify-center rounded-md"
+                    >
+                      <ArrowRightLeft className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 {canDiff && (
                   <button
                     type="button"

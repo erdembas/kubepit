@@ -1,5 +1,5 @@
 import * as i18n from '@/i18n';
-import { ChevronUp, FilePlus2, TerminalSquare } from 'lucide-react';
+import { ChevronUp, FilePlus2, FolderGit2, TerminalSquare } from 'lucide-react';
 import { Kbd } from '@/components/ui/Kbd';
 import { DockStripAction } from './DockStripAction';
 
@@ -9,6 +9,7 @@ interface Props {
   onOpen: () => void;
   onClusterShell: () => void;
   onCreate: () => void;
+  onManifests: () => void;
 }
 
 /** Slim h-8 bar shown while the dock is minimized (or has no tabs yet). */
@@ -18,6 +19,7 @@ export function DockCollapsedBar({
   onOpen,
   onClusterShell,
   onCreate,
+  onManifests,
 }: Props) {
   i18n.useLocale();
   return (
@@ -49,6 +51,12 @@ export function DockCollapsedBar({
             label={i18n.t('Create')}
             title={i18n.t('Create a resource from YAML')}
             onClick={onCreate}
+          />
+          <DockStripAction
+            icon={<FolderGit2 />}
+            label={i18n.t('Manifests')}
+            title={i18n.t('Diff and apply local manifests to clusters')}
+            onClick={onManifests}
           />
         </>
       )}

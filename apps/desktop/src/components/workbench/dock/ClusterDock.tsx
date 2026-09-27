@@ -73,6 +73,7 @@ export function ClusterDock({ clusterId, visible }: { clusterId: ClusterId; visi
     () => dockOpeners.create(clusterId, scopeNamespace(clusterId)),
     [clusterId],
   );
+  const openManifests = useCallback(() => dockOpeners.manifests(clusterId), [clusterId]);
 
   // Ctrl+` toggles the dock of the visible cluster (capture phase, so a
   // focused terminal cannot swallow it). With no tabs it opens a shell.
@@ -133,6 +134,7 @@ export function ClusterDock({ clusterId, visible }: { clusterId: ClusterId; visi
             onClusterShell={openClusterShell}
             onLocalShell={openLocalShell}
             onCreate={openCreate}
+            onManifests={openManifests}
             onToggleMaximize={() => setMaximized(clusterId, !dock.maximized)}
             onMinimize={() => setOpen(clusterId, false)}
           />
@@ -144,6 +146,7 @@ export function ClusterDock({ clusterId, visible }: { clusterId: ClusterId; visi
           onOpen={() => setOpen(clusterId, true)}
           onClusterShell={openClusterShell}
           onCreate={openCreate}
+          onManifests={openManifests}
         />
       )}
       <div className={open ? 'relative min-h-0 flex-1' : 'hidden'}>

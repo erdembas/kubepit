@@ -36,7 +36,22 @@ export function tabTitle(tab: DockTab, clusterName: string | null): string {
           });
     case 'files':
       return i18n.t('Files · {pod}', { pod: tab.pod });
+    case 'manifests': {
+      const name = tab.source ? sourceName(tab.source.paths) : null;
+      return name ? i18n.t('Manifests · {name}', { name }) : i18n.t('Manifests');
+    }
   }
+}
+
+/** Last path segment of a picked folder, or "a.yaml +2" for several files. */
+function sourceName(paths: string[]): string | null {
+  const base = (p: string) =>
+    p
+      .replace(/[\\/]+$/, '')
+      .split(/[\\/]/)
+      .pop() ?? p;
+  if (paths.length === 0) return null;
+  return paths.length === 1 ? base(paths[0]!) : `${base(paths[0]!)} +${paths.length - 1}`;
 }
 
 /** Longer hover text: namespace, container, previous-instance flag… */
@@ -80,6 +95,10 @@ export function tabTooltip(tab: DockTab, clusterName: string | null): string {
       return i18n.t('Files in {target}', {
         target: `${tab.namespace}/${tab.pod}${tab.container ? ` (${tab.container})` : ''}`,
       });
+    case 'manifests':
+      return tab.source
+        ? tab.source.paths.join('\n')
+        : i18n.t('Diff and apply local manifests to clusters');
   }
 }
 

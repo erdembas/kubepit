@@ -4,6 +4,7 @@ import {
   Boxes,
   Copy,
   FileSearch,
+  FolderGit2,
   FolderPlus,
   Languages,
   LayoutDashboard,
@@ -110,6 +111,19 @@ export function clusterActions(cluster: ClusterDef): PaletteItem[] {
       run: () => {
         openAndConnect(cluster.id);
         dock.shell(cluster.id, cluster.name);
+      },
+    },
+    {
+      type: 'action',
+      id: `manifests:${cluster.id}`,
+      label: i18n.t('Diff local manifests'),
+      hint: 'kubectl diff',
+      icon: FolderGit2,
+      keywords: 'manifests kustomize helm apply yaml folder',
+      group: 'cluster',
+      run: () => {
+        openAndConnect(cluster.id);
+        dock.manifests(cluster.id);
       },
     },
     {

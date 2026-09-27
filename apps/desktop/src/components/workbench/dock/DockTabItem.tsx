@@ -4,6 +4,7 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import {
   FileCode2,
+  FolderGit2,
   FolderTree,
   GitCompareArrows,
   Logs,
@@ -21,6 +22,7 @@ const TAB_ICON: Record<DockTab['kind'], ComponentType<{ className?: string }>> =
   compare: GitCompareArrows,
   'workload-logs': Logs,
   files: FolderTree,
+  manifests: FolderGit2,
 };
 
 interface Props {

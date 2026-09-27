@@ -132,6 +132,7 @@
   "Delete, scale to zero, drain and Helm uninstall always ask first. Production clusters additionally require typing the resource name.": "Delete, scale to zero, drain and Helm uninstall always ask first. Production clusters additionally require typing the resource name.",
   "Deployments of one namespace": "Deployments of one namespace",
   "Development": "Development",
+  "Diff local manifests": "Diff local manifests",
   "Dim UI": "Dim UI",
   "Discard": "Discard",
   "Disconnect": "Disconnect",
