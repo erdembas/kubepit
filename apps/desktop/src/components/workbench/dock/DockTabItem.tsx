@@ -2,7 +2,7 @@ import * as i18n from '@/i18n';
 import type { ComponentType } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { FileCode2, ScrollText, TerminalSquare, X } from 'lucide-react';
+import { FileCode2, GitCompareArrows, ScrollText, TerminalSquare, X } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import type { DockTab } from '@/store/useDockStore';
 
@@ -10,6 +10,7 @@ const TAB_ICON: Record<DockTab['kind'], ComponentType<{ className?: string }>> =
   terminal: TerminalSquare,
   logs: ScrollText,
   editor: FileCode2,
+  compare: GitCompareArrows,
 };
 
 interface Props {

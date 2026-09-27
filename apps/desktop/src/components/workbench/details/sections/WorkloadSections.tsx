@@ -3,6 +3,7 @@ import { asArray, asObject, asString, isObject, spec } from '@/lib/kube/accessor
 import { parseSelector, matchesSelector, selectorText } from '@/lib/kube/selectors';
 import { replicaCounts } from '@/lib/kube/workloads';
 import { ChipList, MiniTable, MonoText, Row, Rows, Section } from '../primitives';
+import { WorkloadMetricsHistory } from '../MetricsHistoryCard';
 import { PodsMiniTable } from '../PodsMiniTable';
 import { ConditionsTable } from './PodSections';
 import type { SectionProps } from './types';
@@ -122,6 +123,7 @@ export function WorkloadSections({ obj, ctx, isActive }: SectionProps) {
       <Section title={i18n.t('Pod template')}>
         <TemplateContainers template={s.template} />
       </Section>
+      <WorkloadMetricsHistory obj={obj} ctx={ctx} isActive={isActive} />
       <Section title={i18n.t('Pods')}>
         <PodsMiniTable
           ctx={ctx}

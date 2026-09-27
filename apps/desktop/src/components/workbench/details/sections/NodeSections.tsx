@@ -13,6 +13,7 @@ import { cn } from '@/lib/cn';
 import { formatBytes, formatCpu, formatPercent } from '@/lib/format';
 import { usageBarClass } from '@/lib/resourceTone';
 import { Bar, ChipList, MiniTable, MonoText, Row, Rows, Section } from '../primitives';
+import { NodeMetricsHistory } from '../MetricsHistoryCard';
 import { PodsMiniTable } from '../PodsMiniTable';
 import { ConditionsTable } from './PodSections';
 import type { SectionProps } from './types';
@@ -114,6 +115,7 @@ export function NodeSections({ obj, ctx, isActive }: SectionProps) {
           </div>
         </Section>
       )}
+      <NodeMetricsHistory obj={obj} ctx={ctx} isActive={isActive} />
       <Section title={i18n.t('Capacity')}>
         <MiniTable
           rows={Object.keys(cap)}

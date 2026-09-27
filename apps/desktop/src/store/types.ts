@@ -15,12 +15,15 @@ export type MainTab =
   | { kind: 'dashboard' }
   | { kind: 'cluster'; refId: ClusterId }
   | { kind: 'settings' }
-  | { kind: 'port-forwards' };
+  | { kind: 'port-forwards' }
+  /** Fleet search across every connected cluster. */
+  | { kind: 'search' };
 
 export const DASHBOARD_TAB: MainTab = { kind: 'dashboard' };
 export const DASHBOARD_TAB_KEY = 'dashboard:dashboard';
 export const SETTINGS_TAB_KEY = 'settings:settings';
 export const PORT_FORWARDS_TAB_KEY = 'port-forwards:port-forwards';
+export const SEARCH_TAB_KEY = 'search:search';
 
 export function mainTabKey(tab: MainTab): string {
   return tab.kind === 'cluster' ? `cluster:${tab.refId}` : `${tab.kind}:${tab.kind}`;

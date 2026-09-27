@@ -1,5 +1,5 @@
 import * as i18n from '@/i18n/core';
-import { LayoutDashboard, Network, Settings as SettingsIcon } from 'lucide-react';
+import { LayoutDashboard, Network, ScanSearch, Settings as SettingsIcon } from 'lucide-react';
 import type { MainTab } from '@/store/useAppStore';
 import type { ClusterDef, ClusterStatus, ConnState } from '@/types';
 
@@ -32,6 +32,12 @@ export function resolveTabMeta(
       return {
         label: i18n.t('Port forwards'),
         icon: <Network className="h-3 w-3" />,
+        closable: true,
+      };
+    case 'search':
+      return {
+        label: i18n.t('Fleet search'),
+        icon: <ScanSearch className="h-3 w-3" />,
         closable: true,
       };
     case 'cluster': {

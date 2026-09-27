@@ -44,13 +44,37 @@ export type DockTab =
       gvk: Gvk;
       namespace: string | null;
       name: string;
+    }
+  /** Cross-cluster compare / drift of one object (see `dock/compare/`). */
+  | {
+      id: string;
+      kind: 'compare';
+      title: string;
+      gvk: Gvk;
+      namespace: string | null;
+      name: string;
+      mode: 'compare' | 'drift';
+      /** Compare mode sides; null until the view picks defaults. */
+      left: CompareSide | null;
+      right: CompareSide | null;
+      /** Drift mode: the cluster every other cluster is compared with. */
+      baseline: ClusterId | null;
+      includeStatus: boolean;
     };
+
+/** One side of a cross-cluster compare. */
+export interface CompareSide {
+  clusterId: ClusterId;
+  namespace: string | null;
+  name: string;
+}
 
 type DockTabInput =
   | Omit<Extract<DockTab, { kind: 'terminal' }>, 'id'>
   | Omit<Extract<DockTab, { kind: 'logs' }>, 'id'>
   | Omit<Extract<DockTab, { kind: 'editor'; mode: 'create' }>, 'id'>
-  | Omit<Extract<DockTab, { kind: 'editor'; mode: 'edit' }>, 'id'>;
+  | Omit<Extract<DockTab, { kind: 'editor'; mode: 'edit' }>, 'id'>
+  | Omit<Extract<DockTab, { kind: 'compare' }>, 'id'>;
 
 export interface ClusterDock {
   tabs: DockTab[];
@@ -331,4 +355,39 @@ export const dock = {
       namespace,
       name,
     }),
+  /** Compare an object across clusters; one tab per object, switched to `mode`. */
+  compare: (
+    clusterId: ClusterId,
+    gvk: Gvk,
+    namespace: string | null,
+    name: string,
+    mode: 'compare' | 'drift' = 'compare',
+  ) => {
+    const store = useDockStore.getState();
+    const existing = store.docks[clusterId]?.tabs.find(
+      (t) =>
+        t.kind === 'compare' &&
+        t.gvk.group === gvk.group &&
+        t.gvk.kind === gvk.kind &&
+        t.namespace === namespace &&
+        t.name === name,
+    );
+    if (existing) {
+      store.updateTab(clusterId, existing.id, { mode });
+      store.setActive(clusterId, existing.id);
+      return existing.id;
+    }
+    return store.openTab(clusterId, {
+      kind: 'compare',
+      title: `${gvk.kind.toLowerCase()}/${name}`,
+      gvk,
+      namespace,
+      name,
+      mode,
+      left: null,
+      right: null,
+      baseline: null,
+      includeStatus: false,
+    });
+  },
 };

@@ -11,6 +11,7 @@ import {
 import { RefLink } from '@/lib/kube/columns/cells';
 import { podContainers, podStatus, podStatusTone } from '@/lib/kube/pods';
 import { formatAge, formatBytes, formatCpu } from '@/lib/format';
+import { PodMetricsHistory } from '../MetricsHistoryCard';
 import { ChipList, MiniTable, MonoText, Row, Rows, Section, ToneText } from '../primitives';
 import { ContainerCard } from './ContainerCard';
 import type { SectionProps } from './types';
@@ -44,7 +45,7 @@ export function ConditionsTable({ obj, now }: { obj: SectionProps['obj']; now: n
   );
 }
 
-export function PodSections({ obj, ctx }: SectionProps) {
+export function PodSections({ obj, ctx, isActive }: SectionProps) {
   i18n.useLocale();
   const s = spec(obj);
   const st = status(obj);
@@ -121,6 +122,7 @@ export function PodSections({ obj, ctx }: SectionProps) {
           </Row>
         </Rows>
       </Section>
+      <PodMetricsHistory obj={obj} ctx={ctx} isActive={isActive} />
       <Section title={i18n.t('Conditions')}>
         <ConditionsTable obj={obj} now={ctx.now} />
       </Section>

@@ -39,16 +39,19 @@ function clusters(): ClusterDef[] {
 
 const unit = (seed: string, n: number) => hashString(`${seed}:${n}`) / 4294967296;
 
-/** Multiplier around 1 for one series at tick `t`. */
-function wave(seed: string, t: number, what: 'cpu' | 'mem'): number {
+/**
+ * Multiplier around 1 for one series at tick `t`. `jitter` scales noise and
+ * bursts: sums over many pods (cluster, node) are calmer than one pod.
+ */
+function wave(seed: string, t: number, what: 'cpu' | 'mem', jitter = 1): number {
   const h = hashString(seed);
   const phase = (h % 628) / 100;
   if (what === 'cpu') {
     const slow = Math.sin(t / 38 + phase) * 0.11;
-    const mid = Math.sin(t / 6.7 + phase * 2) * 0.05;
-    const noise = (unit(seed, t) - 0.5) * 0.12;
+    const mid = Math.sin(t / 6.7 + phase * 2) * 0.05 * jitter;
+    const noise = (unit(seed, t) - 0.5) * 0.12 * jitter;
     const window = Math.floor(t / 9);
-    const burst = unit(`${seed}!`, window) > 0.9 ? 0.55 * Math.exp(-(t % 9) / 2.2) : 0;
+    const burst = unit(`${seed}!`, window) > 0.93 ? 0.4 * jitter * Math.exp(-(t % 9) / 2.2) : 0;
     return Math.max(0.08, 1 + slow + mid + noise + burst);
   }
   const period = 36 + (h % 44);
@@ -70,12 +73,13 @@ function curve(
   base: Quantity,
   from: number,
   to: number,
+  jitter = 1,
 ): Map<number, [number, number]> {
   const out = new Map<number, [number, number]>();
   for (let t = from; t <= to; t++)
     out.set(t, [
-      base.cpu_millicores * wave(seed, t, 'cpu'),
-      base.memory_bytes * wave(seed, t, 'mem'),
+      base.cpu_millicores * wave(seed, t, 'cpu', jitter),
+      base.memory_bytes * wave(seed, t, 'mem', jitter),
     ]);
   return out;
 }
@@ -106,14 +110,14 @@ function history(db: ClusterDb, query: MetricsHistoryQuery, from: number, to: nu
       }),
       { cpu_millicores: 0, memory_bytes: 0 },
     );
-    return sumCurves([curve(db.id, total, from, to)]);
+    return sumCurves([curve(db.id, total, from, to, 0.35)]);
   }
   if (query.scope === 'nodes') {
     const wanted = new Set(query.names);
     return sumCurves(
       nodeMetrics(db)
         .items.filter((m) => wanted.has(m.name))
-        .map((m) => curve(`${db.id}/${m.name}`, m, from, to)),
+        .map((m) => curve(`${db.id}/${m.name}`, m, from, to, 0.6)),
     );
   }
   const wanted = new Set(query.names);

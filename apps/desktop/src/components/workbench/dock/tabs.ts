@@ -24,6 +24,10 @@ export function tabTitle(tab: DockTab, clusterName: string | null): string {
       return tab.container && tab.containers.length > 1 ? `${tab.pod} · ${tab.container}` : tab.pod;
     case 'editor':
       return tab.mode === 'create' ? i18n.t('Create resource') : tab.title;
+    case 'compare':
+      return tab.mode === 'drift'
+        ? i18n.t('Drift · {name}', { name: tab.name })
+        : i18n.t('Compare · {name}', { name: tab.name });
   }
 }
 
@@ -54,6 +58,11 @@ export function tabTooltip(tab: DockTab, clusterName: string | null): string {
       return tab.mode === 'create'
         ? i18n.t('Create resource in {namespace}', { namespace: tab.namespace ?? 'default' })
         : `${tab.namespace ? `${tab.namespace}/` : ''}${tab.gvk.kind}/${tab.name}`;
+    case 'compare':
+      return i18n.t('{kind} {name} across clusters', {
+        kind: tab.gvk.kind,
+        name: `${tab.namespace ? `${tab.namespace}/` : ''}${tab.name}`,
+      });
   }
 }
 

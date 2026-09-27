@@ -15,6 +15,8 @@ import {
   CircleCheck,
   CirclePause,
   CirclePlay,
+  GitCompareArrows,
+  Radar,
   type LucideIcon,
 } from 'lucide-react';
 import { ipc } from '@/lib/ipc';
@@ -286,6 +288,21 @@ export function resourceActions({
     icon: Copy,
     mutating: false,
     run: () => void copyText(name, name),
+  });
+  // Fleet: cross-cluster compare / drift (read-only, opens a dock tab).
+  add({
+    id: 'compare',
+    label: i18n.t('Compare across clusters…'),
+    icon: GitCompareArrows,
+    mutating: false,
+    run: () => dock.compare(clusterId, gvk, ns, name, 'compare'),
+  });
+  add({
+    id: 'drift',
+    label: i18n.t('Check drift across clusters'),
+    icon: Radar,
+    mutating: false,
+    run: () => dock.compare(clusterId, gvk, ns, name, 'drift'),
   });
   add({
     id: 'delete',
