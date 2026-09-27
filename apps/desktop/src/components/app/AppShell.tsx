@@ -7,6 +7,7 @@ import { SidebarRail } from '@/components/SidebarRail';
 import { StatusBar } from '@/components/StatusBar';
 import { TitleBar } from '@/components/TitleBar';
 import { ClusterEditor } from '@/components/cluster-editor/ClusterEditor';
+import { ConnectivityHost } from '@/components/connectivity/ConnectivityHost';
 import { DiscoverDialog } from '@/components/discover/DiscoverDialog';
 import { CommandPalette } from '@/components/palette/CommandPalette';
 import { ConfirmHost } from '@/components/app/ConfirmHost';
@@ -55,6 +56,7 @@ function AppOverlays() {
       {importDialogOpen && <DiscoverDialog />}
       {paletteOpen && <CommandPalette />}
       <ConfirmHost />
+      <ConnectivityHost />
       <Toasts />
     </>
   );

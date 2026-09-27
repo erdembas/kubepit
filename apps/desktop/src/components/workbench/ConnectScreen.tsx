@@ -1,6 +1,7 @@
 import * as i18n from '@/i18n';
 import { AlertTriangle, Loader2, Pencil, Plug, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { ClusterProxyLine } from '@/components/connectivity/ClusterProxyLine';
 import { connectCluster } from '@/lib/clusterActions';
 import { serverLabel } from '@/lib/clusterMeta';
 import { useAppStore } from '@/store/useAppStore';
@@ -35,6 +36,7 @@ export function ConnectScreen({
         >
           {server}
         </p>
+        <ClusterProxyLine cluster={cluster} className="mt-1" />
 
         {state === 'connecting' ? (
           <div

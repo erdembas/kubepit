@@ -1,6 +1,6 @@
 import * as i18n from '@/i18n';
 import { useEffect, useState } from 'react';
-import { CheckCircle2, FolderOpen, Plus, Trash2, XCircle } from 'lucide-react';
+import { CheckCircle2, FolderOpen, KeyRound, Loader2, Plus, Trash2, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Switch } from '@/components/ui/Switch';
@@ -188,7 +188,76 @@ export function KubeconfigCategory({ description }: { description: string }) {
           </div>
         </div>
       </SettingsSection>
+      <CredentialStorageSection />
     </SettingsPageShell>
+  );
+}
+
+/**
+ * Connectivity: keep pasted kubeconfigs in the OS credential store. Applies
+ * immediately (it migrates every managed kubeconfig), outside the draft.
+ */
+function CredentialStorageSection() {
+  i18n.useLocale();
+  const enabled = useAppStore((s) => s.settings?.keychain_kubeconfigs ?? false);
+  const platform = useAppStore((s) => s.appInfo?.platform);
+  const managed = useAppStore((s) => s.clusters.filter((c) => c.managed).length);
+  const [busy, setBusy] = useState(false);
+  const storeName =
+    platform === 'macos'
+      ? i18n.t('macOS Keychain')
+      : platform === 'windows'
+        ? i18n.t('Windows Credential Manager')
+        : i18n.t('Secret Service (GNOME Keyring, KWallet)');
+  const toggle = async (next: boolean) => {
+    setBusy(true);
+    try {
+      const saved = await ipc.kubeconfigStorageSet(next);
+      useAppStore.getState().setSettings(saved);
+      useAppStore
+        .getState()
+        .pushToast(
+          'success',
+          next
+            ? i18n.t('Pasted kubeconfigs are now kept in the {store}.', { store: storeName })
+            : i18n.t('Pasted kubeconfigs are now kept as files.'),
+        );
+    } catch (e) {
+      useAppStore.getState().pushToast('error', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <SettingsSection
+      title={i18n.t('Credential storage')}
+      description={i18n.t(
+        'Where kubeconfigs you pasted into Kubepit are kept. Kubeconfig files on your disk are never moved.',
+      )}
+    >
+      <Switch
+        checked={enabled}
+        disabled={busy}
+        onChange={(next) => void toggle(next)}
+        label={
+          <span className="inline-flex items-center gap-1.5">
+            <KeyRound className="text-fg-dim h-3.5 w-3.5" />
+            {i18n.t('Keep pasted kubeconfigs in the {store}', { store: storeName })}
+            {busy && <Loader2 className="text-fg-dim h-3 w-3 animate-spin" />}
+          </span>
+        }
+        description={i18n.t(
+          'Instead of files under ~/.kubepit/kubeconfigs. Existing ones move now, one at a time; if the store is locked or unavailable nothing changes. The single-context file for kubectl, helm and terminals then only exists while the cluster is connected.',
+        )}
+      />
+      <p className="text-fg-dim mt-2 text-[11px]">
+        {i18n.plural(
+          '{count} pasted kubeconfig is affected.',
+          '{count} pasted kubeconfigs are affected.',
+          managed,
+        )}
+      </p>
+    </SettingsSection>
   );
 }
 

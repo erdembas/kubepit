@@ -13,6 +13,8 @@ import { useAppStore, type ClusterEditorState } from '@/store/useAppStore';
 import type { ClusterDef, ClusterInput, KubeconfigSource } from '@/types';
 import { ClusterFields, type ClusterFieldValues } from './ClusterFields';
 import { Field } from './Field';
+import { ProxyField } from './ProxyField';
+import { proxyUrlProblem } from '@/lib/proxy';
 
 type SourceMode = 'file' | 'paste';
 
@@ -67,6 +69,8 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
   const [pasted, setPasted] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Connectivity: per-cluster proxy override.
+  const [proxy, setProxy] = useState(editing?.proxy_url ?? '');
 
   // Offer discovered kubeconfig files as quick picks in add mode.
   useEffect(() => {
@@ -126,6 +130,8 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
     setError(null);
     const name = fields.name.trim();
     if (!name) return setError(i18n.t('Give the cluster a name.'));
+    const proxyProblem = proxyUrlProblem(proxy);
+    if (proxyProblem) return setError(proxyProblem);
     setBusy(true);
     try {
       const store = useAppStore.getState();
@@ -140,6 +146,7 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
           accessible_namespaces: splitList(fields.accessible_namespaces),
           read_only: fields.read_only,
           notes: fields.notes,
+          proxy_url: proxy.trim() || null,
         });
         store.assignClusterToSection(saved.id, fields.sectionId);
         store.pushToast('success', i18n.t('Saved {name}', { name: saved.name }));
@@ -157,6 +164,7 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
           accessible_namespaces: splitList(fields.accessible_namespaces),
           read_only: fields.read_only,
           notes: fields.notes,
+          proxy_url: proxy.trim() || null,
         };
         const [added] = await ipc.clusterAdd([input]);
         if (added) {
@@ -326,6 +334,7 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
         <ClusterFields value={fields} onChange={setFields} />
 
         <div className="border-border/60 space-y-3 border-t pt-4">
+          <ProxyField value={proxy} onChange={setProxy} clusterId={editing?.id ?? null} />
           <Switch
             checked={fields.read_only}
             onChange={(read_only) => setFields((f) => ({ ...f, read_only }))}

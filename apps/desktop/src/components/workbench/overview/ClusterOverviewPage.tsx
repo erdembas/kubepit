@@ -11,6 +11,7 @@ import {
   Server,
   TriangleAlert,
 } from 'lucide-react';
+import { ClusterProxyLine } from '@/components/connectivity/ClusterProxyLine';
 import { IconButton } from '@/components/ui/IconButton';
 import { refreshOverview } from '@/lib/clusterActions';
 import { formatBytes, formatCpu, formatPercent } from '@/lib/format';
@@ -127,6 +128,7 @@ export function ClusterOverviewPage({
 }) {
   i18n.useLocale();
   const overview = useAppStore((s) => s.overviews[clusterId]);
+  const cluster = useAppStore((s) => s.clusters.find((c) => c.id === clusterId));
   const error = useAppStore((s) => s.overviewErrors[clusterId]);
   const now = useNow(30_000, isActive);
   const go = (key: string) => useWorkbenchStore.getState().setActiveKind(clusterId, key);
@@ -206,6 +208,7 @@ export function ClusterOverviewPage({
               {' · '}
               {i18n.t('refreshes every 20s')}
             </p>
+            {cluster && <ClusterProxyLine cluster={cluster} className="mt-0.5" />}
           </div>
           <IconButton
             className="ml-auto"

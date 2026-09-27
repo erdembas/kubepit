@@ -8,6 +8,8 @@ import './workloadOps';
 import './fleet';
 import './logsDebug';
 import './helmCharts';
+// Registered after './app': it wraps `port_forward_start` and `cluster_connect`.
+import './connectivity';
 
 export { mockListen } from './bus';
 

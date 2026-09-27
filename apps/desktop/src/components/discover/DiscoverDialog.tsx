@@ -17,6 +17,7 @@ import { cn } from '@/lib/cn';
 import { ipc, isTauri } from '@/lib/ipc';
 import { sectionColor } from '@/lib/sectionColors';
 import { useAppStore } from '@/store/useAppStore';
+import { useConnectivityStore } from '@/store/useConnectivityStore';
 import type { ClusterEnvironment, ClusterInput, KubeconfigSource } from '@/types';
 
 const key = (path: string, context: string) => `${path}\u0000${context}`;
@@ -55,6 +56,26 @@ export function DiscoverDialog() {
       });
   };
   useEffect(scan, []);
+
+  // Connectivity: contexts announced by the kubeconfig watcher start selected.
+  useEffect(() => {
+    if (!sources) return;
+    const preselect = useConnectivityStore.getState().discoverPreselect;
+    if (!preselect?.length) return;
+    useConnectivityStore.getState().setDiscoverPreselect(null);
+    const found = preselect.filter(
+      (c) =>
+        !existing.has(key(c.path, c.context)) &&
+        sources.some((s) => s.path === c.path && s.contexts.some((x) => x.name === c.context)),
+    );
+    setSelected((prev) => new Set([...prev, ...found.map((c) => key(c.path, c.context))]));
+    setEnvs((prev) => {
+      const next = { ...prev };
+      for (const c of found) next[key(c.path, c.context)] ??= guessEnvironment(c.context);
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sources]);
 
   const addFile = async () => {
     if (!isTauri) return;

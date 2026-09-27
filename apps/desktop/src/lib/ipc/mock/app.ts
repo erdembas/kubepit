@@ -164,6 +164,7 @@ let settings: Settings = {
   confirm_destructive: true,
   node_shell_image: 'docker.io/library/alpine:3.20',
   debug_image: 'docker.io/library/busybox:1.36',
+  keychain_kubeconfigs: false,
 };
 
 const WORKSPACE_KEY = 'kubepit.demo.workspace';
@@ -185,6 +186,15 @@ const defaultWorkspace: WorkspaceSnapshot = {
 };
 
 let forwards: PortForward[] = [];
+
+/** Live demo forwards, for the connectivity mock (saved forwards, restarts, failures). */
+export const demoForwards = {
+  list: () => forwards,
+  replace: (next: PortForward[]) => {
+    forwards = next;
+    mockEmit('portforward://changed', forwards);
+  },
+};
 
 const discovered: KubeconfigSource[] = [
   {
@@ -337,6 +347,7 @@ register({
         accessible_namespaces: input.accessible_namespaces,
         read_only: input.read_only,
         notes: input.notes,
+        proxy_url: input.proxy_url ?? null,
         created_at: Date.now(),
         last_connected_at: null,
       }),
