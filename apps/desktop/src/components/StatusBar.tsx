@@ -2,6 +2,7 @@ import { useLocaleMemo as useMemo } from '@/i18n';
 import * as i18n from '@/i18n';
 import { Activity, Cpu, MemoryStick, Network, Settings as SettingsIcon } from 'lucide-react';
 import { LanguageMenu } from '@/components/LanguageMenu';
+import { AlertBell } from '@/components/alerts/AlertBell';
 import { ThemeMenu } from '@/components/ThemeMenu';
 import { KubepitMark } from '@/components/ui/KubepitMark';
 import { useAppStore } from '@/store/useAppStore';
@@ -114,6 +115,7 @@ export function StatusBar() {
           <Activity className="text-accent h-3 w-3" />
           <span className="text-fg-dim">{i18n.t('Events')}</span>
         </button>
+        <AlertBell />
         <LanguageMenu />
         <button
           type="button"

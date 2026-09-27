@@ -11,7 +11,7 @@ import type { Settings } from '@/types';
 import { SettingsPageShell, SettingsSection } from './SettingsView';
 
 /** Local draft of backend settings with an explicit Save, like RunHQ's settings pages. */
-function useSettingsDraft() {
+export function useSettingsDraft() {
   const settings = useAppStore((s) => s.settings);
   const [draft, setDraft] = useState<Settings | null>(settings);
   const [saving, setSaving] = useState(false);

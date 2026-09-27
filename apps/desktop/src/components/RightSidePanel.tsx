@@ -1,6 +1,7 @@
 import * as i18n from '@/i18n';
 import { useCallback, useRef } from 'react';
 import { useAppStore } from '@/store/useAppStore';
+import { AlertsPanel } from '@/components/alerts/AlertsPanel';
 import { FleetEventsPanel } from '@/components/panels/FleetEventsPanel';
 import { PortForwardsPanel } from '@/components/panels/PortForwardsPanel';
 import { cn } from '@/lib/cn';
@@ -55,6 +56,8 @@ export function RightSidePanel() {
   const hasOpenedForwards = useRef(false);
   if (active === 'events') hasOpenedEvents.current = true;
   if (active === 'forwards') hasOpenedForwards.current = true;
+  const hasOpenedAlerts = useRef(false);
+  if (active === 'alerts') hasOpenedAlerts.current = true;
 
   const isOpen = active != null;
   const renderedWidth = isOpen ? width : 0;
@@ -93,6 +96,11 @@ export function RightSidePanel() {
           {hasOpenedForwards.current && (
             <div className={active === 'forwards' ? 'flex h-full min-h-0 flex-1' : 'hidden'}>
               <PortForwardsPanel />
+            </div>
+          )}
+          {hasOpenedAlerts.current && (
+            <div className={active === 'alerts' ? 'flex h-full min-h-0 flex-1' : 'hidden'}>
+              <AlertsPanel visible={active === 'alerts'} />
             </div>
           )}
         </div>

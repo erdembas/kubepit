@@ -8,6 +8,7 @@ import './workloadOps';
 import './fleet';
 import './logsDebug';
 import './helmCharts';
+import './alerts';
 
 export { mockListen } from './bus';
 

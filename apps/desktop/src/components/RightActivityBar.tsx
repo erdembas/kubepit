@@ -1,6 +1,7 @@
 import * as i18n from '@/i18n';
-import { Activity, Network } from 'lucide-react';
+import { Activity, Bell, Network } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { selectUnreadCount, useAlertStore } from '@/store/useAlertStore';
 import { useAppStore, type RightPanel } from '@/store/useAppStore';
 
 /**
@@ -38,12 +39,20 @@ const ITEMS: RailItem[] = [
     },
     icon: Network,
   },
+  {
+    id: 'alerts',
+    get label() {
+      return i18n.t('Notification center');
+    },
+    icon: Bell,
+  },
 ];
 
 export function RightActivityBar() {
   i18n.useLocale();
   const active = useAppStore((s) => s.rightPanel);
   const toggle = useAppStore((s) => s.toggleRightPanel);
+  const unreadAlerts = useAlertStore(selectUnreadCount);
 
   return (
     <nav
@@ -79,6 +88,12 @@ export function RightActivityBar() {
               />
             )}
             <Icon className="h-4 w-4" />
+            {item.id === 'alerts' && unreadAlerts > 0 && (
+              <span
+                aria-hidden
+                className="bg-status-error ring-surface absolute top-2 right-2 h-1.5 w-1.5 rounded-full ring-2"
+              />
+            )}
           </button>
         );
       })}

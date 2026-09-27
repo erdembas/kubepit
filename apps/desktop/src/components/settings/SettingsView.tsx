@@ -1,6 +1,7 @@
 import * as i18n from '@/i18n';
 import { type ReactNode } from 'react';
 import {
+  Bell,
   FileCode2,
   Info,
   Settings as SettingsIcon,
@@ -17,6 +18,7 @@ import {
   TerminalCategory,
   ToolsCategory,
 } from './categories';
+import { NotificationsCategory } from './NotificationsCategory';
 
 interface CategoryDef {
   id: SettingsCategory;
@@ -58,6 +60,17 @@ const CATEGORIES: ReadonlyArray<CategoryDef> = [
       return i18n.t('Shell, font size and node shell image.');
     },
     icon: SquareTerminal,
+    group: 'workspace',
+  },
+  {
+    id: 'notifications',
+    get label() {
+      return i18n.t('Notifications');
+    },
+    get description() {
+      return i18n.t('Alerts from connected clusters, desktop notifications and filters.');
+    },
+    icon: Bell,
     group: 'workspace',
   },
   {
@@ -155,6 +168,9 @@ export function SettingsView() {
           {active === 'general' && <GeneralCategory description={current.description} />}
           {active === 'kubeconfig' && <KubeconfigCategory description={current.description} />}
           {active === 'terminal' && <TerminalCategory description={current.description} />}
+          {active === 'notifications' && (
+            <NotificationsCategory description={current.description} />
+          )}
           {active === 'tools' && <ToolsCategory description={current.description} />}
           {active === 'about' && <AboutCategory description={current.description} />}
         </section>
