@@ -68,6 +68,16 @@ export function ResourcePage({
   }, [kindKey, namespaces]);
   // Saved views: a kind's default view applies the first time its table opens.
   useEffect(() => applyDefaultViewOnce(clusterId, kindKey), [clusterId, kindKey]);
+  // Dialogs requested for this table must not pop up later when it closes first.
+  useEffect(
+    () => () => {
+      const mine = (t: { clusterId: string; kindKey: string } | null) =>
+        t?.clusterId === clusterId && t.kindKey === kindKey;
+      if (mine(useTableExport.getState().request)) useTableExport.getState().close();
+      if (mine(useSaveViewDialog.getState().target)) useSaveViewDialog.getState().close();
+    },
+    [clusterId, kindKey],
+  );
   const saveViewOpen = useSaveViewDialog(
     (s) => s.target?.clusterId === clusterId && s.target.kindKey === kindKey,
   );

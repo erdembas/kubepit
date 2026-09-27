@@ -159,14 +159,14 @@ export function updateActions(): PaletteItem[] {
       icon: RefreshCw,
       keywords: 'update upgrade version release',
       group: 'actions',
-      run: () => {
-        const updater = useUpdaterStore.getState();
-        if (updater.status && !updater.status.configured) {
-          useAppStore.getState().openSettings('about');
-          return;
-        }
-        void updater.check();
-      },
+      run: () =>
+        void (async () => {
+          const updater = useUpdaterStore.getState();
+          const status = updater.status ?? (await updater.loadStatus());
+          // Builds without a signing key explain that on the About & Updates page.
+          if (!status?.configured) useAppStore.getState().openSettings('about');
+          else await updater.check();
+        })(),
     },
   ];
 }

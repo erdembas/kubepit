@@ -122,3 +122,29 @@ pub async fn update_install(
     state.pending.lock().take();
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn committed_section() -> serde_json::Value {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
+        config
+            .pointer("/plugins/updater")
+            .cloned()
+            .expect("tauri.conf.json has a plugins.updater section")
+    }
+
+    #[test]
+    fn committed_config_is_ready_for_a_signing_key() {
+        let mut section = committed_section();
+        let current = UpdaterConfig::from_plugin_config(Some(&section));
+        assert_eq!(current.problem, None);
+        assert_eq!(current.endpoint(), DEFAULT_UPDATE_ENDPOINT);
+
+        // Adding only a public key must be enough to turn updates on.
+        section["pubkey"] = serde_json::json!("dW50cnVzdGVkIGNvbW1lbnQ=");
+        assert!(UpdaterConfig::from_plugin_config(Some(&section)).enabled());
+    }
+}
