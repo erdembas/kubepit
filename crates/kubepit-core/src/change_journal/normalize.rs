@@ -14,12 +14,18 @@
 //!   salted hash marker, so "the value of key X changed" stays visible,
 //! - string values longer than [`MAX_STRING_BYTES`] become a hash marker.
 //!
+//! [`same_intent`] then treats two normalized versions that differ only in
+//! timestamps outside `spec` (heartbeats written into ConfigMap data, "last
+//! synced" annotations, …) as the same.
+//!
 //! [`actor`] reads who made a change from `managedFields`, which
 //! normalization then throws away.
 
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
+use std::sync::LazyLock;
 
+use regex::Regex;
 use serde_json::{Map, Value};
 
 use super::types::ChangeActor;
@@ -210,6 +216,48 @@ pub fn normalize(gvk: &Gvk, raw: &Value, redactor: &Redactor) -> Value {
     value
 }
 
+/// ISO 8601 / RFC 3339 date-times, also inside larger strings (JSON or
+/// YAML payloads in ConfigMap data).
+static TIMESTAMP: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?")
+        .unwrap()
+});
+
+/// Whether two normalized versions carry the same intent: equal, or
+/// different only in timestamps outside `spec`. `spec` is compared exactly:
+/// `kubectl rollout restart` only moves the pod template's `restartedAt`
+/// timestamp and is a real change.
+pub fn same_intent(before: &Value, after: &Value) -> bool {
+    if before == after {
+        return true;
+    }
+    let (Some(a), Some(b)) = (before.as_object(), after.as_object()) else {
+        return false;
+    };
+    a.len() == b.len()
+        && a.iter().all(|(key, x)| {
+            b.get(key)
+                .is_some_and(|y| x == y || (key != "spec" && same_but_timestamps(x, y)))
+        })
+}
+
+fn same_but_timestamps(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::String(a), Value::String(b)) => {
+            a == b || TIMESTAMP.replace_all(a, "") == TIMESTAMP.replace_all(b, "")
+        }
+        (Value::Array(a), Value::Array(b)) => {
+            a.len() == b.len() && a.iter().zip(b).all(|(x, y)| same_but_timestamps(x, y))
+        }
+        (Value::Object(a), Value::Object(b)) => {
+            a.len() == b.len()
+                && a.iter()
+                    .all(|(k, x)| b.get(k).is_some_and(|y| same_but_timestamps(x, y)))
+        }
+        _ => a == b,
+    }
+}
+
 /// Nodes: name, labels and spec; status and annotations churn constantly.
 fn node_view(source: &Map<String, Value>) -> Map<String, Value> {
     let mut out = Map::new();
@@ -343,6 +391,35 @@ mod tests {
         ] {
             assert!(!is_noise_annotation(key), "{key}");
         }
+    }
+
+    #[test]
+    fn timestamp_only_updates_outside_spec_are_noise() {
+        let heartbeat = |status: &str, time: &str| {
+            json!({"kind": "ConfigMap", "metadata": {"name": "keepalived-heartbeat",
+                "annotations": {"example.io/synced-at": time}},
+                "data": {"keepalived-ttl-172.17.1.45": format!(
+                    r#"{{"Status":"{status}","IP":"172.17.1.45","HeartbeatTime":"{time}"}}"#)}})
+        };
+        let a = heartbeat("MASTER", "2026-09-27T19:58:39.0715374Z");
+        let b = heartbeat("MASTER", "2026-09-27T19:58:41.0762211Z");
+        assert!(same_intent(&a, &b));
+        assert!(!same_intent(
+            &a,
+            &heartbeat("BACKUP", "2026-09-27T19:58:41Z")
+        ));
+        let mut added = b.clone();
+        added["data"]["other"] = json!("2026-09-27 19:58:41");
+        assert!(!same_intent(&a, &added));
+
+        let restart = |at: &str| {
+            json!({"kind": "Deployment", "metadata": {"name": "web"}, "spec": {"template": {
+                "metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": at}}}}})
+        };
+        assert!(!same_intent(
+            &restart("2026-09-27T19:00:00+03:00"),
+            &restart("2026-09-27T20:00:00+03:00")
+        ));
     }
 
     #[test]

@@ -21,6 +21,7 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use super::diff::{changed_paths, MAX_PATHS};
+use super::normalize::same_intent;
 use super::types::{
     ChangeActor, ChangeDetail, ChangeFilter, ChangeJournalStatus, ChangeKindState,
     ChangeKindStatus, ChangeOp, ChangeSummary,
@@ -279,8 +280,8 @@ impl ClusterJournal {
         let json = serialize(&item.object);
         let previous = self.baseline.get(&item.key).map(Base::object);
         match previous {
-            Some(before) if before == item.object => {
-                // Noise only (status, resourceVersion, heartbeats, …).
+            Some(before) if same_intent(&before, &item.object) => {
+                // Noise only (status, resourceVersion, heartbeats, timestamps, …).
                 self.set_base(source, item, json);
             }
             Some(before) => {
@@ -761,6 +762,28 @@ mod tests {
         assert!(deleted.before_yaml.unwrap().contains("replicas: 1"));
         assert!(deleted.after_yaml.is_none());
         assert!(j.detail(9999).is_none());
+    }
+
+    #[test]
+    fn timestamp_only_updates_are_not_recorded() {
+        const CM: &str = "configmaps@*";
+        let heartbeat = |time: &str| {
+            item(
+                "ConfigMap",
+                "kube-system",
+                "keepalived-heartbeat",
+                json!({"metadata": {"name": "keepalived-heartbeat"},
+                       "data": {"node-a": format!(r#"{{"Status":"MASTER","HeartbeatTime":"{time}"}}"#)}}),
+            )
+        };
+        let mut j = ClusterJournal::new("c1", T0, JournalLimits::default());
+        j.register_source(CM, "ConfigMap");
+        j.begin_list(CM);
+        j.list_item(CM, heartbeat("2026-09-27T19:58:39.44Z"), T0);
+        j.end_list(CM, T0);
+        j.apply(CM, heartbeat("2026-09-27T19:58:41.45Z"), T0 + 1);
+        j.apply(CM, heartbeat("2026-09-27T19:58:43.46Z"), T0 + 2);
+        assert!(j.is_empty());
     }
 
     #[test]
