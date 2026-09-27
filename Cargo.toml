@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/kubepit-core",
+    "apps/desktop/src-tauri",
+]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.89"
+license = "MIT"
+repository = "https://github.com/erdembas/kubepit"
+authors = ["Erdem Baş <erdembas@users.noreply.github.com>"]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

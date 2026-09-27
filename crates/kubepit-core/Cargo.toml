@@ -1,0 +1,31 @@
+[package]
+name = "kubepit-core"
+version = "0.1.0"
+description = "Kubepit core: cluster registry, kubeconfig handling and Kubernetes access."
+edition = "2021"
+rust-version = "1.89"
+license = "MIT"
+
+[dependencies]
+kube = { version = "4.2", default-features = false, features = ["client", "config", "runtime", "ws", "rustls-tls", "ring", "gzip", "oidc", "http-proxy", "socks5", "jsonpatch"] }
+k8s-openapi = { version = "0.28", features = ["latest"] }
+# Deserialises RFC 6902 patches coming from the UI (`resource_patch` with `patch_type: json`).
+json-patch = "4"
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+parking_lot = "0.12"
+dirs = "6"
+base64 = "0.22"
+flate2 = "1"
+
+[dev-dependencies]
+tempfile = "3"

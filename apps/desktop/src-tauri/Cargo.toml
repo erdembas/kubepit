@@ -1,0 +1,45 @@
+[package]
+name = "kubepit-desktop"
+version = "0.1.0"
+description = "Kubepit desktop application."
+edition = "2021"
+rust-version = "1.89"
+license = "MIT"
+repository = "https://github.com/erdembas/kubepit"
+
+[lib]
+name = "kubepit_desktop"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "kubepit"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+kubepit-core = { path = "../../../crates/kubepit-core" }
+
+tauri = { version = "2", features = ["macos-private-api"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-process = "2"
+tauri-plugin-clipboard-manager = "2"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+anyhow = "1"
+parking_lot = "0.12"
+portable-pty = "0.8"
+# PTY bytes are base64-encoded once and shipped through a typed Channel.
+base64 = "0.22"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

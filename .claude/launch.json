@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "kubepit-ui",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@kubepit/desktop", "dev"],
+      "port": 1430
+    }
+  ]
+}

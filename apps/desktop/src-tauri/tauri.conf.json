@@ -1,0 +1,53 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Kubepit",
+  "version": "0.1.0",
+  "identifier": "io.github.erdembas.kubepit",
+  "build": {
+    "beforeDevCommand": "pnpm --filter @kubepit/desktop dev",
+    "devUrl": "http://localhost:1430",
+    "beforeBuildCommand": "pnpm --filter @kubepit/desktop build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Kubepit",
+        "width": 1600,
+        "height": 1000,
+        "minWidth": 1024,
+        "minHeight": 680,
+        "center": true,
+        "maximized": true,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 14, "y": 18 },
+        "transparent": false,
+        "resizable": true,
+        "fullscreen": false,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: asset: https://asset.localhost; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; worker-src 'self' blob:; connect-src ipc: http://ipc.localhost http://localhost:1430 ws://localhost:1431"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "DeveloperTool",
+    "shortDescription": "A local-first Kubernetes IDE for many clusters.",
+    "longDescription": "Kubepit manages many Kubernetes clusters from one window: sections, tags, live resource tables, logs, shells, port forwarding, Helm releases and YAML editing.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": { "signingIdentity": "-" }
+  }
+}

@@ -1,0 +1,45 @@
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+.pnpm-store/
+
+# Rust / Tauri
+target/
+apps/desktop/src-tauri/resources/agent-runtime/*.cjs
+apps/desktop/src-tauri/resources/agent-runtime/*.mjs
+**/*.rs.bk
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build outputs
+**/src-tauri/gen/
+**/src-tauri/target/
+
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# Other lockfiles (we use pnpm)
+yarn.lock
+package-lock.json
