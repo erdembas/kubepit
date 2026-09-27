@@ -9,6 +9,7 @@ import { PermissionsPage } from './access/PermissionsPage';
 import { HealthPage } from './health/HealthPage';
 import { ApiExplorerPage } from './explain/ApiExplorerPage';
 import { GitOpsPage } from './gitops/GitOpsPage';
+import { ChangesPage } from './changes/ChangesPage';
 import { HelmChartsPage } from './helm/HelmChartsPage';
 import { HelmPage } from './helm/HelmPage';
 import { ClusterOverviewPage } from './overview/ClusterOverviewPage';
@@ -82,6 +83,15 @@ export const ViewHost = memo(function ViewHost({
   if (activeKind === VIEW.clusterHealth)
     return (
       <HealthPage
+        clusterId={clusterId}
+        namespaces={namespaces}
+        isActive={isActive}
+        apiResources={apiResources}
+      />
+    );
+  if (activeKind === VIEW.changes)
+    return (
+      <ChangesPage
         clusterId={clusterId}
         namespaces={namespaces}
         isActive={isActive}

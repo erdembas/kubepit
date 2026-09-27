@@ -1043,6 +1043,10 @@ pub struct Settings {
     /// store instead of `kubeconfigs/<id>.yaml`. Changed only through
     /// `kubeconfig_storage_set`, which migrates the existing entries.
     pub keychain_kubeconfigs: bool,
+    /// Record the change timeline of connected clusters (`change_journal.rs`).
+    pub change_journal: bool,
+    /// Cluster ids that opted out of the change timeline.
+    pub change_journal_disabled: Vec<String>,
 }
 
 impl Default for Settings {
@@ -1060,6 +1064,8 @@ impl Default for Settings {
             auto_check_updates: true,
             alerts: crate::alerts::AlertSettings::default(),
             keychain_kubeconfigs: false,
+            change_journal: true,
+            change_journal_disabled: Vec::new(),
         }
     }
 }

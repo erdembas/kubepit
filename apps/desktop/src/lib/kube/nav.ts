@@ -27,6 +27,7 @@ export const VIEW_KEYS = {
   clusterHealth: '@health',
   apiExplorer: '@explain',
   gitops: '@gitops',
+  changes: '@changes',
 } as const;
 
 export interface NavItem {
@@ -101,6 +102,7 @@ export function viewLabel(key: string, apiResources?: readonly ApiResourceInfo[]
   if (key === VIEW_KEYS.clusterHealth) return i18n.t('Cluster Health');
   if (key === VIEW_KEYS.apiExplorer) return i18n.t('API Explorer');
   if (key === VIEW_KEYS.gitops) return i18n.t('GitOps Overview');
+  if (key === VIEW_KEYS.changes) return i18n.t('Changes');
   const builtin = Object.values(BUILTIN).find((k) => k.key === key);
   if (builtin)
     return builtin.key === BUILTIN.CustomResourceDefinition.key
@@ -171,6 +173,11 @@ export function buildNav(apiResources: readonly ApiResourceInfo[] | null): NavGr
           VIEW_KEYS.clusterHealth,
           i18n.t('Health'),
           'health checks popeye lint score findings certificates tls expiry',
+        ),
+        viewItem(
+          VIEW_KEYS.changes,
+          i18n.t('Changes'),
+          'changes timeline history audit diff what changed incident',
         ),
         ...items('cluster'),
         viewItem(

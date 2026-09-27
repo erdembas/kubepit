@@ -13,6 +13,7 @@ use anyhow::{anyhow, Result};
 use serde_json::Value;
 
 use crate::alerts::AlertCenter;
+use crate::change_journal::ChangeJournals;
 use crate::connection::ClientPool;
 use crate::error::ReadOnlyError;
 use crate::events::EventSink;
@@ -52,6 +53,8 @@ pub struct Kubepit {
     pub(crate) secrets: Arc<dyn SecretStore>,
     pub(crate) saved_forwards: SavedForwards,
     pub(crate) kubeconfig_watch: parking_lot::Mutex<Option<crate::kubeconfig_watch::WatchHandle>>,
+    // Change timeline: per-cluster change journals.
+    pub(crate) change_journals: ChangeJournals,
 }
 
 impl Kubepit {
@@ -89,6 +92,7 @@ impl Kubepit {
             secrets,
             saved_forwards,
             kubeconfig_watch: parking_lot::Mutex::new(None),
+            change_journals: ChangeJournals::default(),
         };
         // Left behind by a crash while in keychain mode.
         app.remove_transient_run_kubeconfigs();
@@ -168,8 +172,11 @@ impl Kubepit {
         settings.alerts = settings.alerts.normalized();
         // Only `kubeconfig_storage_set` flips this, because it migrates.
         settings.keychain_kubeconfigs = self.settings().keychain_kubeconfigs;
+        settings.change_journal_disabled.sort();
+        settings.change_journal_disabled.dedup();
         let saved = self.store.set_settings(settings)?;
         self.apply_alert_settings(&saved.alerts);
+        self.sync_change_journals();
         Ok(saved)
     }
 
@@ -191,6 +198,7 @@ impl Kubepit {
         self.metrics_history.stop_all();
         self.fleet_searches.stop_all();
         self.alerts.stop_all();
+        self.change_journals.stop_all();
         self.forwards.stop_all(self.sink.as_ref());
         let cleanup = self.cleanup_all_node_shells();
         if tokio::time::timeout(Duration::from_secs(4), cleanup)

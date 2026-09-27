@@ -37,10 +37,13 @@ mod openapi;
 mod connectivity;
 // Local manifests: render folders, diff / apply to clusters.
 mod manifests;
+// Change timeline: in-memory change journal.
+mod changes;
 
 pub use access::*;
 pub use alerts::*;
 pub use app::*;
+pub use changes::*;
 pub use clusters::*;
 pub use connectivity::*;
 pub use fleet::*;

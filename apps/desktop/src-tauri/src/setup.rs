@@ -23,6 +23,8 @@ pub(crate) fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::
     )?);
     // The desktop app watches connected clusters for alerts (see `alerts.rs`).
     core.set_alert_monitoring(true);
+    // ... and records their change timeline (see `change_journal.rs`).
+    core.set_change_journal_recording(true);
     tracing::info!(data_dir = %core.paths().root().display(), "kubepit core ready");
     core.start_kubeconfig_watch();
 

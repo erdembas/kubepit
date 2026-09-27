@@ -10,7 +10,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use kubepit_core::types::{ClusterInput, ClusterStatus, PortForward};
+use kubepit_core::types::{ClusterInput, ClusterStatus, PortForward, Settings};
 use kubepit_core::{EventSink, Kubepit, Paths};
 use parking_lot::Mutex;
 use serde_json::{json, Value};
@@ -187,6 +187,13 @@ pub fn setup(
     let recorder = Arc::new(Recorder::default());
     let app =
         Arc::new(Kubepit::open(Paths::new(dir.path().join("home")), recorder.clone()).unwrap());
+    // The change journal watches cluster-wide in the background; it stays
+    // off unless a test turns it on, so request logs remain deterministic.
+    app.set_settings(Settings {
+        change_journal: false,
+        ..app.settings()
+    })
+    .unwrap();
     let cluster = app
         .cluster_add(vec![ClusterInput {
             name: "Fake".into(),

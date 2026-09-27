@@ -169,6 +169,8 @@ let settings: Settings = {
   auto_check_updates: true,
   alerts: DEFAULT_ALERT_SETTINGS,
   keychain_kubeconfigs: false,
+  change_journal: true,
+  change_journal_disabled: [],
 };
 
 const WORKSPACE_KEY = 'kubepit.demo.workspace';

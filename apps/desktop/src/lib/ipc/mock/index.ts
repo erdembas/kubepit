@@ -19,6 +19,7 @@ import './prometheus';
 import './openapi';
 // Registered after './app': it wraps `port_forward_start` and `cluster_connect`.
 import './connectivity';
+import './changes';
 
 export { mockListen } from './bus';
 

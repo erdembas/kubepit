@@ -44,6 +44,7 @@
 //! | [`secrets`]     | OS credential store behind `SecretStore`               |
 //! | [`credentials`] | managed kubeconfig storage, keychain migration         |
 //! | [`manifests`]   | local manifests: render folders, diff / apply to clusters |
+//! | [`change_journal`] | in-memory change timeline (per-cluster watchers)    |
 //!
 //! Push notifications to the UI go through [`EventSink`]; streams take plain
 //! `Fn(T) -> bool` callbacks (return `false` to stop) that the desktop shell
@@ -106,6 +107,8 @@ pub mod saved_forwards;
 pub mod secrets;
 // Local manifests: render folders / Kustomize / Helm, diff and apply.
 pub mod manifests;
+// Change timeline: in-memory journal of cluster changes.
+pub mod change_journal;
 
 pub use app::Kubepit;
 pub use events::{EventSink, NullSink};

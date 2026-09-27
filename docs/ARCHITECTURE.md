@@ -318,6 +318,44 @@ or more clusters like `kubectl diff`, then applies the selected changes.
   cluster-state kinds refused) and is dry-run on the chosen clusters and
   namespace before anything is applied.
 
+## Change timeline
+
+`change_journal.rs` records "what changed" while a cluster is connected
+(`Settings.change_journal`, on by default; per-cluster opt-out in
+`change_journal_disabled`, toggled from the Changes view). Like the metrics
+sampler it starts after a successful connect and stops, dropping the
+journal, on disconnect, removal, shutdown or opt-out. Like alerts, recording
+is opt-in per process (`Kubepit::set_change_journal_recording`): the desktop
+shell enables it, tests and headless tools do not.
+
+- One `kube::runtime` watcher per journaled kind (workloads, CronJobs,
+  Services, Ingresses, ConfigMaps, Secrets, HPAs, PDBs, NetworkPolicies,
+  Namespaces, Nodes, RBAC), cluster-wide; a kind forbidden cluster-wide
+  falls back to the cluster's `accessible_namespaces`. A first list that is
+  forbidden or not served ends that watcher (reported in the status, never
+  retried); later errors retry with backoff.
+- The first list is only the baseline. Every later version is normalized
+  (`normalize.rs`: no status, resourceVersion, generation, managedFields,
+  bookkeeping/heartbeat annotations; nodes keep labels and spec) and
+  compared with the last one; differences become entries with the actor
+  (latest non-status `managedFields` entry) and changed paths (`diff.rs`,
+  list items keyed by `name` / `mountPath`). A re-list after a desync
+  records what changed meanwhile, including deletions.
+- **Secret values are never stored**: `data` / `stringData` values become
+  keyed-hash markers (`<redacted #…>`, random key per journal) as soon as
+  an event arrives, so "value of key X changed" is visible without the
+  value. Helm release secrets are not journaled.
+- Memory only, per cluster: 24 h, 5 000 entries, 32 MiB of entries and
+  64 KiB of before/after per entry (long values shortened, else only the
+  paths kept). The baseline keeps one compact JSON string per object.
+- `changes_list` (filter, newest first, cursor paging) and `changes_get`
+  (normalized before/after YAML) are polled by the UI. The Changes view
+  (`components/workbench/changes/`, logic in `lib/kube/changes/`) merges
+  journal entries with Warning events, Helm revisions and ReplicaSet
+  rollouts; journaled kinds get a Changes tab in the details panel.
+- Tests keep the journal off (`tests/support` setup) unless they enable
+  it; `tests/change_journal.rs` drives it through the fake API server.
+
 ## Access (RBAC)
 
 `access.rs` wraps SelfSubjectAccessReview, SelfSubjectRulesReview and

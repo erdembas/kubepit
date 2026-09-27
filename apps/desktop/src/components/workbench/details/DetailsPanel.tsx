@@ -1,6 +1,6 @@
 import * as i18n from '@/i18n';
 import { useEffect, useMemo, useState } from 'react';
-import { Bell, FileCode2, History, Info, Loader2, X } from 'lucide-react';
+import { Bell, FileCode2, FileDiff, History, Info, Loader2, X } from 'lucide-react';
 import { ResizeHandle } from '@/components/ui/ResizeHandle';
 import { ipc } from '@/lib/ipc';
 import { resolveRef } from '@/lib/kube/catalog';
@@ -36,8 +36,11 @@ import { HistoryTab } from './HistoryTab';
 import { Workflow } from 'lucide-react';
 import { MapTab } from '../topology/MapTab';
 import { GitOpsBadge } from '../gitops/ManagedNotice';
+// Change timeline: journaled changes of this object.
+import { isJournaled } from '@/lib/kube/changes/kinds';
+import { ChangesTab } from './ChangesTab';
 
-type Tab = 'details' | 'yaml' | 'events' | 'history' | 'map';
+type Tab = 'details' | 'yaml' | 'events' | 'history' | 'map' | 'changes';
 
 const POD_METRIC_KINDS = new Set([
   'Pod',
@@ -161,6 +164,9 @@ export function DetailsPanel({
       ? [{ id: 'history' as const, label: i18n.t('History'), icon: History }]
       : []),
     { id: 'map', label: i18n.t('Map'), icon: Workflow },
+    ...(obj && isJournaled(obj)
+      ? [{ id: 'changes' as const, label: i18n.t('Changes'), icon: FileDiff }]
+      : []),
   ];
 
   return (
@@ -245,7 +251,9 @@ export function DetailsPanel({
             </>
           )}
         </div>
-      ) : tab === 'details' || (tab === 'history' && !hasRollout(obj)) ? (
+      ) : tab === 'details' ||
+        (tab === 'history' && !hasRollout(obj)) ||
+        (tab === 'changes' && !isJournaled(obj)) ? (
         <div className="overlay-scroll min-h-0 flex-1 overflow-auto">
           <DetailsOverview obj={obj} gvk={gvk} ctx={ctx} isActive={isActive} readOnly={readOnly} />
         </div>
@@ -260,6 +268,8 @@ export function DetailsPanel({
           apiResources={apiResources}
           onShowDetails={() => setTab('details')}
         />
+      ) : tab === 'changes' ? (
+        <ChangesTab clusterId={clusterId} obj={obj} isActive={isActive} />
       ) : tab === 'yaml' ? (
         <YamlTab
           clusterId={clusterId}
