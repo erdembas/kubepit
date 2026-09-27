@@ -63,6 +63,9 @@ pub fn run() {
             // Discovery
             ipc::api_resources,
             ipc::namespace_names,
+            // OpenAPI v3 schemas (YAML editing, API explorer)
+            ipc::openapi_v3_index,
+            ipc::openapi_v3_document,
             // Generic resources
             ipc::resource_list,
             ipc::resource_watch,

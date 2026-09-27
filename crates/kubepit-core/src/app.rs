@@ -18,6 +18,7 @@ use crate::events::EventSink;
 use crate::metrics::MetricsGate;
 use crate::metrics_history::MetricsHistory;
 use crate::node_shell::NodeShells;
+use crate::openapi::OpenApiCache;
 use crate::paths::Paths;
 use crate::portforward::PortForwards;
 use crate::store::Store;
@@ -37,6 +38,8 @@ pub struct Kubepit {
     // Fleet: per-cluster metrics samplers and running fleet-wide searches.
     pub(crate) metrics_history: MetricsHistory,
     pub(crate) fleet_searches: TaskRegistry,
+    // OpenAPI v3 documents per connection (YAML editing, API explorer).
+    pub(crate) openapi: OpenApiCache,
 }
 
 impl Kubepit {
@@ -54,6 +57,7 @@ impl Kubepit {
             metrics_gate: MetricsGate::default(),
             metrics_history: MetricsHistory::default(),
             fleet_searches: TaskRegistry::default(),
+            openapi: OpenApiCache::default(),
         })
     }
 

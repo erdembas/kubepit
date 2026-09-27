@@ -364,6 +364,7 @@ impl Kubepit {
         self.log_streams.stop_cluster(id);
         self.metrics_history.stop_cluster(id);
         self.forwards.stop_cluster(id, self.sink.as_ref());
+        self.openapi.forget(id);
     }
 
     /// `cluster_statuses`: one entry per registered cluster.

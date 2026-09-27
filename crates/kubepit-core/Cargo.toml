@@ -28,6 +28,8 @@ base64 = "0.22"
 flate2 = "1"
 # `/regex/` name patterns in fleet search (linear-time matching).
 regex = "1"
+# Raw GET requests for `/openapi/v3` documents (already in kube's tree).
+http = "1"
 
 [dev-dependencies]
 tempfile = "3"

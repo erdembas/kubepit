@@ -23,6 +23,8 @@ mod resources;
 mod workloads;
 // Logs & debug: workload logs, log export, debug containers, container files.
 mod logs_debug;
+// OpenAPI v3 schemas: YAML editing, API explorer.
+mod openapi;
 
 pub use access::*;
 pub use app::*;
@@ -33,6 +35,7 @@ pub use helm_charts::*;
 pub use logs::*;
 pub use logs_debug::*;
 pub use metrics::*;
+pub use openapi::*;
 pub use portforward::*;
 pub use resources::*;
 pub use workloads::*;
