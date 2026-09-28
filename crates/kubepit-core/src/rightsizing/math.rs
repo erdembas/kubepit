@@ -8,6 +8,7 @@
 //!   value, so recommendations do not churn — unless the current value is
 //!   below the observed peak.
 
+use super::strategy::WARN_OOM_KILLED;
 use super::types::{Change, ContainerRecommendation, RightsizingSettings, UsageStats, Verdict};
 use crate::cost::CostPricing;
 
@@ -19,7 +20,9 @@ pub const MIN_CPU_CHANGE: f64 = 10.0;
 pub const MIN_MEMORY_CHANGE: f64 = 16.0 * MIB;
 
 impl RightsizingSettings {
-    /// Clamped to sane ranges (headroom 0–300 %, 1–30 days).
+    /// Clamped to sane ranges: headroom 0–300 %, 1–30 days, minimum history
+    /// 1–720 hours (at most the window), minimum coverage 0.1–1, throttling
+    /// threshold 1–50 %.
     pub fn normalized(self) -> Self {
         let pct = |v: f64, default: f64| {
             if v.is_finite() {
@@ -36,6 +39,15 @@ impl RightsizingSettings {
                 default
             }
         };
+        let clamp = |v: f64, lo: f64, hi: f64, default: f64| {
+            if v.is_finite() {
+                v.clamp(lo, hi)
+            } else {
+                default.clamp(lo, hi)
+            }
+        };
+        let days = self.days.clamp(1, 30);
+        let max_hours = (f64::from(days) * 24.0).min(720.0);
         Self {
             cpu_headroom_percent: pct(self.cpu_headroom_percent, defaults.cpu_headroom_percent),
             memory_headroom_percent: pct(
@@ -48,7 +60,15 @@ impl RightsizingSettings {
             ),
             min_cpu_millicores: min(self.min_cpu_millicores, defaults.min_cpu_millicores),
             min_memory_bytes: min(self.min_memory_bytes, defaults.min_memory_bytes),
-            days: self.days.clamp(1, 30),
+            days,
+            min_hours: clamp(self.min_hours, 1.0, max_hours, defaults.min_hours),
+            min_coverage: clamp(self.min_coverage, 0.1, 1.0, defaults.min_coverage),
+            throttle_threshold_percent: clamp(
+                self.throttle_threshold_percent,
+                1.0,
+                50.0,
+                defaults.throttle_threshold_percent,
+            ),
         }
     }
 }
@@ -175,7 +195,14 @@ pub fn monthly_requests(
 }
 
 /// Over- or under-provisioned, from the containers' usage and requests.
+/// An OOM kill (the `oom-killed` warning) always means under-provisioned.
 pub fn verdict(containers: &[ContainerRecommendation], current: f64, recommended: f64) -> Verdict {
+    let oom_killed = containers
+        .iter()
+        .any(|c| c.warnings.iter().any(|w| w.code == WARN_OOM_KILLED));
+    if oom_killed {
+        return Verdict::Under;
+    }
     if containers.iter().all(|c| c.usage.is_none()) {
         return Verdict::NoData;
     }
@@ -220,19 +247,28 @@ pub fn stats_from_samples(cpu: &[f64], memory: &[f64], interval_secs: f64) -> Op
         cpu_max,
         memory_max,
         hours: cpu.len() as f64 * interval_secs / 3600.0,
+        cpu_avg: None,
+        memory_avg: None,
     })
 }
 
 /// Worst replica wins: the largest p95, maximum and memory of `stats`;
-/// hours add up (the caller divides by the replica count).
+/// hours add up (the caller divides by the replica count). Averages are
+/// not combined (the metrics-server path has none): they are `None`.
 pub fn combine(stats: &[UsageStats]) -> Option<UsageStats> {
     let mut iter = stats.iter();
-    let first = *iter.next()?;
+    let first = UsageStats {
+        cpu_avg: None,
+        memory_avg: None,
+        ..*iter.next()?
+    };
     Some(iter.fold(first, |acc, s| UsageStats {
         cpu_p95: acc.cpu_p95.max(s.cpu_p95),
         cpu_max: acc.cpu_max.max(s.cpu_max),
         memory_max: acc.memory_max.max(s.memory_max),
         hours: acc.hours + s.hours,
+        cpu_avg: None,
+        memory_avg: None,
     }))
 }
 
@@ -241,7 +277,7 @@ mod tests {
     use super::*;
     use crate::rightsizing::strategy::{recommend, DEFAULT_STRATEGY_ID};
     use crate::rightsizing::strategy::{strategy, ContainerInput};
-    use crate::rightsizing::types::{ResourceValues, RightsizingSource};
+    use crate::rightsizing::types::{RecommendationWarning, ResourceValues, RightsizingSource};
 
     fn settings() -> RightsizingSettings {
         RightsizingSettings::default()
@@ -253,6 +289,8 @@ mod tests {
             cpu_max: cpu_p95 * 1.5,
             memory_max,
             hours: 168.0,
+            cpu_avg: None,
+            memory_avg: None,
         }
     }
 
@@ -266,6 +304,8 @@ mod tests {
                 usage,
                 source: RightsizingSource::Prometheus,
                 settings: &s,
+                evidence: None,
+                hpa: None,
             },
         )
     }
@@ -318,7 +358,7 @@ mod tests {
             memory_limit_headroom_percent: 0.0,
             min_cpu_millicores: 0.0,
             min_memory_bytes: 0.0,
-            days: 7,
+            ..settings()
         };
         for peak in [0.3, 7.0, 99.9, 333.3, 1234.5, 9999.0] {
             assert!(cpu_request(peak, &bare) >= peak, "{peak}");
@@ -385,6 +425,27 @@ mod tests {
     }
 
     #[test]
+    fn oom_makes_the_verdict_under() {
+        let mut oom_container = rec(
+            ResourceValues {
+                cpu_request: Some(1000.0),
+                memory_request: Some(GIB),
+                ..Default::default()
+            },
+            Some(usage(100.0, 200.0 * MIB)),
+        );
+        // Without the OOM kill the halved requests make it over-provisioned.
+        assert_eq!(
+            verdict(std::slice::from_ref(&oom_container), 10.0, 5.0),
+            Verdict::Over
+        );
+        oom_container
+            .warnings
+            .push(RecommendationWarning::new(WARN_OOM_KILLED));
+        assert_eq!(verdict(&[oom_container], 10.0, 5.0), Verdict::Under);
+    }
+
+    #[test]
     fn sample_statistics_and_replica_merging() {
         let cpu: Vec<f64> = (0..240)
             .map(|i| if i % 20 == 0 { 500.0 } else { 100.0 })
@@ -403,6 +464,8 @@ mod tests {
                 cpu_max: 900.0,
                 memory_max: 1.0,
                 hours: 0.5,
+                cpu_avg: None,
+                memory_avg: None,
             },
         ])
         .unwrap();

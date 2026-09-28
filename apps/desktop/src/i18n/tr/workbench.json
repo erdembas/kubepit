@@ -2640,6 +2640,7 @@
   "Without a selector the Service sends traffic nowhere until you add Endpoints.": "Seçici olmadan Service, Endpoints ekleyene kadar trafiği hiçbir yere göndermez.",
   "Workload": "İş yükü",
   "Workload configuration": "İş yükü yapılandırması",
+  "Workload history": "İş yükü geçmişi",
   "workloads": "iş yükü",
   "Workloads": "İş Yükleri",
   "Workloads by level": "Seviyeye göre iş yükleri",
