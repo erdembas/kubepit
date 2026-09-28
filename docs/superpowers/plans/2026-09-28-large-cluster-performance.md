@@ -492,7 +492,7 @@ git commit -m "perf(mock): scaled demo clusters (?scale=, &churn=) and backend-l
 **Files:**
 - Create: `apps/desktop/src/lib/perf/fixtures.ts`
 - Create: `apps/desktop/src/lib/kube/topology/topology.bench.ts`, `lib/kube/health/health.bench.ts`, `lib/kube/netpol/netpol.bench.ts`, `lib/logs/logs.bench.ts`, `components/workbench/table/tableModel.bench.ts`
-- Modify: `package.json` (root script `"perf:bench": "pnpm --filter @kubepit/desktop bench -- --outputJson ../../perf-results/frontend-bench.json"`), `.gitignore` (`perf-results/`)
+- Modify: `package.json` (root script `"perf:bench": "pnpm --filter @kubepit/desktop bench --outputJson ../../perf-results/frontend-bench.json"`; no `--`, which pnpm forwards to Vitest, so the flag was ignored), `.gitignore` (`perf-results/`)
 
 **Interfaces:**
 - Consumes: `generateScaleObjects` (Task 6).
@@ -514,14 +514,14 @@ git commit -m "perf(mock): scaled demo clusters (?scale=, &churn=) and backend-l
     - `logs/record_index_50k`: `new RecordIndex().ingest(50 000 mixed RawLine)`;
     - `table/filter_sort_20k`: `filterItems` + `sortItems` on `l` pods sorted by the default column.
 
-- [ ] **Step 1: Write the bench files** with `bench('<id>', fn, { time: 2000 })`. Build inputs once at module scope.
+- [x] **Step 1: Write the bench files** with `bench('<id>', fn, { time: 2000 })`. Build inputs once at module scope.
 
-- [ ] **Step 2: Run them**
+- [x] **Step 2: Run them**
 
 Run: `pnpm perf:bench && node -e "console.log(Object.keys(require('./perf-results/frontend-bench.json')).length > 0)"`
 Expected: every id appears in the bench output table; the JSON exists.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/desktop/src package.json .gitignore
