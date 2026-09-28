@@ -23,15 +23,18 @@
 //!   on read-only clusters).
 
 pub mod evidence;
+pub mod export;
 pub mod math;
 pub mod ownership;
 pub mod patch;
 pub mod percentile;
+pub mod reevaluate;
 pub mod strategy;
 pub mod summary;
 pub mod types;
 pub mod workload_history;
 
+pub use reevaluate::reevaluate;
 pub use types::*;
 
 use std::collections::HashMap;
@@ -266,41 +269,15 @@ pub fn recommend_workload(
             strategy::recommend(strategy, &input)
         })
         .collect();
-    let coverage_hours = containers
-        .iter()
-        .filter_map(|c| c.usage.map(|u| u.hours))
-        .fold(0.0, f64::max);
-    let cost_replicas = math::cost_replicas(&w.kind, w.replicas, &containers);
-    let monthly_current = math::monthly_requests(&containers, cost_replicas, pricing, false);
-    let monthly_recommended = math::monthly_requests(&containers, cost_replicas, pricing, true);
-    // The weakest container with data decides.
-    let confidence = containers
-        .iter()
-        .filter(|c| c.usage.is_some())
-        .map(|c| c.confidence)
-        .min()
-        .unwrap_or(Confidence::Low);
-    let mut rec = WorkloadRecommendation {
+    let facts = math::WorkloadFacts {
         kind: w.kind.clone(),
         namespace: w.namespace.clone(),
         name: w.name.clone(),
         uid: w.uid.clone(),
         replicas: w.replicas,
-        confidence,
-        verdict: math::verdict(&containers, monthly_current, monthly_recommended),
-        coverage_hours,
-        changed: containers.iter().any(ContainerRecommendation::changed),
-        monthly_delta: monthly_recommended - monthly_current,
-        monthly_current,
-        containers,
-        pods: Vec::new(),
-        pods_truncated: false,
-        hpa: None,
-        lenses: Vec::new(),
-        cost_replicas,
+        ..Default::default()
     };
-    rec.lenses = summary::lenses_of(&rec);
-    rec
+    math::workload_recommendation(facts, containers, pricing)
 }
 
 /// Changed first, then the largest saving, then the largest increase.
