@@ -7,13 +7,14 @@ import type {
   PortForward,
   PortForwardRequest,
   Settings,
+  SettingsChanged,
   TerminalOutput,
   WorkspaceSnapshot,
 } from '@/types';
 import { DEFAULT_ALERT_SETTINGS } from '@/lib/alerts/policy';
 import { DEFAULT_HISTORY_SETTINGS } from '@/lib/history/audit';
 import { windowLabel } from '@/lib/windowSeed';
-import { mockEmit, mockEmitAllWindows, sleep } from './bus';
+import { mockEmit, mockEmitAllWindows, mockListen, sleep } from './bus';
 import { register, type MockArgs } from './registry';
 import { demoOverview } from './resources';
 
@@ -177,6 +178,12 @@ let settings: Settings = {
   keyboard_mode: false,
 };
 
+// Every demo window runs its own backend: keep this one's settings in step
+// with the ones another window saves, like the one shared desktop backend.
+void mockListen<SettingsChanged>('settings://changed', (changed) => {
+  if (changed.source !== windowLabel) settings = changed.settings;
+});
+
 const WORKSPACE_KEY = 'kubepit.demo.workspace';
 const defaultWorkspace: WorkspaceSnapshot = {
   version: 1,
@@ -277,7 +284,12 @@ register({
     helm: { path: '/opt/homebrew/bin/helm', version: 'v3.17.1' },
   }),
   settings_get: () => settings,
-  settings_set: ({ settings: next }: MockArgs) => (settings = next as Settings),
+  settings_set: ({ settings: next }: MockArgs) => {
+    settings = next as Settings;
+    const changed: SettingsChanged = { source: windowLabel, settings };
+    mockEmitAllWindows('settings://changed', changed);
+    return settings;
+  },
   workspace_load: () => {
     try {
       const raw = localStorage.getItem(WORKSPACE_KEY);

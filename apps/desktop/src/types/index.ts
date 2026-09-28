@@ -49,6 +49,15 @@ export interface WorkspaceChanged {
   snapshot: WorkspaceSnapshot;
 }
 
+/**
+ * `settings://changed`: the window labelled `source` saved `settings`
+ * (`settings_set` or `kubeconfig_storage_set`). Every window hears it.
+ */
+export interface SettingsChanged {
+  source: string;
+  settings: Settings;
+}
+
 // ---------------------------------------------------------------------------
 // Clusters
 // ---------------------------------------------------------------------------

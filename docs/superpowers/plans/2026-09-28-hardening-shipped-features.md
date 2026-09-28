@@ -1156,7 +1156,7 @@ git commit -m "feat(observability): explain missing services/proxy permission fo
   - `events.onSettingsChanged(handler)`.
   - `remoteSettings(event: SettingsChanged, ownLabel: string): Settings | null`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // apps/desktop/src/lib/settingsSync.test.ts
@@ -1186,21 +1186,21 @@ fn settings_changed_payload_shape() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm --filter @kubepit/desktop test -- src/lib/settingsSync.test.ts && cargo test -p kubepit-desktop settings_changed_payload_shape`
 Expected: FAIL (missing module and struct).
 
-- [ ] **Step 3: Implement.** Both commands take `app: tauri::AppHandle, window: tauri::Window` and `emit` after saving. `useAppBootstrap` listens with `events.onSettingsChanged((e) => { const s = remoteSettings(e, windowLabel); if (s) useAppStore.getState().setSettings(s); })`. Keep the `settingsGet` re-read in `useAlertNotifications`.
+- [x] **Step 3: Implement.** Both commands take `app: tauri::AppHandle, window: tauri::Window` and `emit` after saving. `useAppBootstrap` listens with `events.onSettingsChanged((e) => { const s = remoteSettings(e, windowLabel); if (s) useAppStore.getState().setSettings(s); })`. Keep the `settingsGet` re-read in `useAlertNotifications`.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm --filter @kubepit/desktop test && cargo test -p kubepit-desktop && pnpm typecheck`
 Expected: PASS.
 
-- [ ] **Step 5: Verify in the demo.** Open two demo windows (`window_open`), mute a cluster in one, and check that the other window's bell menu shows it muted without a reload.
+- [x] **Step 5: Verify in the demo.** Open two demo windows (`window_open`), mute a cluster in one, and check that the other window's bell menu shows it muted without a reload.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/desktop docs/ARCHITECTURE.md

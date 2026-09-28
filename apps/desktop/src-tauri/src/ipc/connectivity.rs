@@ -1,7 +1,8 @@
 //! Connectivity: saved port forwards, restarts and local port checks,
 //! per-cluster proxy info, and where managed kubeconfigs are kept (OS
 //! credential store). Saved forwards are also emitted on
-//! `portforward://saved`; kubeconfig file changes on `kubeconfig://changed`.
+//! `portforward://saved`; kubeconfig file changes on `kubeconfig://changed`;
+//! a storage switch on `settings://changed`.
 
 use kubepit_core::portforward::local_port_status;
 use kubepit_core::types::{
@@ -11,6 +12,7 @@ use kubepit_core::types::{
 use tauri::State;
 
 use super::{blocking, ipc_err, IpcResult};
+use crate::app_state::emit_settings_changed;
 use crate::AppState;
 
 #[tauri::command]
@@ -78,11 +80,16 @@ pub async fn cluster_proxy_info(
 }
 
 /// Migrates every managed kubeconfig; the OS may ask to unlock the store.
+/// The saved settings go to every window (`settings://changed`).
 #[tauri::command]
 pub async fn kubeconfig_storage_set(
     keychain: bool,
+    app: tauri::AppHandle,
+    window: tauri::Window,
     state: State<'_, AppState>,
 ) -> IpcResult<Settings> {
     let core = state.core.clone();
-    blocking(move || core.kubeconfig_storage_set(keychain)).await
+    let saved = blocking(move || core.kubeconfig_storage_set(keychain)).await?;
+    emit_settings_changed(&app, window.label(), &saved);
+    Ok(saved)
 }

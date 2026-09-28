@@ -38,7 +38,10 @@ single source of truth for the frontend ⇄ backend boundary.
   `{ alert, fresh, notifier, app_focused }`), `alerts://changed` (`null`;
   alerts were marked read or cleared, refetch `alerts_list`),
   `portforward://saved` (SavedPortForward[]), `kubeconfig://changed`
-  (KubeconfigChanged), `customactions://changed` (CustomAction[]).
+  (KubeconfigChanged), `customactions://changed` (CustomAction[]),
+  `settings://changed` (`{ source, settings }`, after `settings_set` or
+  `kubeconfig_storage_set`; every window applies it except `source`, the
+  saving window, so its open settings draft is not reset).
 
 ## Windows
 
