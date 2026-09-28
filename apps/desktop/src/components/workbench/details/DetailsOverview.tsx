@@ -22,6 +22,7 @@ import { hasRollout } from '@/lib/kube/rollout';
 import { RolloutSection } from './sections/RolloutSection';
 import { HealthBanner } from '../health/HealthBanner';
 import { gitopsSectionsFor } from './sections/gitopsSections';
+import { NetworkPolicySections } from '../netpol/PolicySections';
 
 const BY_KIND: Record<string, ComponentType<SectionProps>> = {
   Pod: PodSections,
@@ -50,6 +51,7 @@ const BY_KIND: Record<string, ComponentType<SectionProps>> = {
   ServiceAccount: ServiceAccountSections,
   HorizontalPodAutoscaler: HpaSections,
   PodDisruptionBudget: PdbSections,
+  NetworkPolicy: NetworkPolicySections,
   CustomResourceDefinition: CrdSections,
   // cert-manager.io Certificates; other groups' `Certificate` kinds fall back to the generic view.
   Certificate: CertificateKindSections,

@@ -33,6 +33,7 @@ import { dock } from '@/store/useDockStore';
 import type { ClusterDef } from '@/types';
 import { explainAction } from './explainItems';
 import { fleetSearchAction } from './fleetSearchItem';
+import { netpolAction } from './netpolItems';
 import { VIEW_KEYS } from '@/lib/kube/nav';
 import { useWorkbenchStore } from '@/store/useWorkbenchStore';
 
@@ -149,6 +150,7 @@ export function clusterActions(cluster: ClusterDef): PaletteItem[] {
       },
     },
     explainAction(cluster, 'cluster'),
+    netpolAction(cluster, 'cluster'),
     {
       type: 'action',
       id: `manifests:${cluster.id}`,
@@ -210,6 +212,7 @@ export function resourceJumps(cluster: ClusterDef): PaletteItem[] {
     ...jumps,
     resourceMapItem(cluster, `jump-map:${cluster.id}`, 'resources'),
     explainAction(cluster, 'resources'),
+    netpolAction(cluster, 'resources'),
   ];
 }
 

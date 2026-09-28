@@ -39,8 +39,12 @@ import { GitOpsBadge } from '../gitops/ManagedNotice';
 // Change timeline: journaled changes of this object.
 import { isJournaled } from '@/lib/kube/changes/kinds';
 import { ChangesTab } from './ChangesTab';
+// NetworkPolicy simulator: who can reach this pod / workload.
+import { Radar } from 'lucide-react';
+import { hasReachability } from '@/lib/kube/netpol/subject';
+import { ReachabilityTab } from '../netpol/ReachabilityTab';
 
-type Tab = 'details' | 'yaml' | 'events' | 'history' | 'map' | 'changes';
+type Tab = 'details' | 'yaml' | 'events' | 'history' | 'map' | 'changes' | 'reachability';
 
 const POD_METRIC_KINDS = new Set([
   'Pod',
@@ -167,6 +171,9 @@ export function DetailsPanel({
     ...(obj && isJournaled(obj)
       ? [{ id: 'changes' as const, label: i18n.t('Changes'), icon: FileDiff }]
       : []),
+    ...(obj && hasReachability(obj)
+      ? [{ id: 'reachability' as const, label: i18n.t('Reachability'), icon: Radar }]
+      : []),
   ];
 
   return (
@@ -219,7 +226,7 @@ export function DetailsPanel({
       <nav
         role="tablist"
         aria-label={i18n.t('Details tabs')}
-        className="border-border/60 flex h-10 shrink-0 items-center gap-1 border-b px-3"
+        className="border-border/60 overlay-scroll flex h-10 shrink-0 items-center gap-1 overflow-x-auto border-b px-3"
       >
         {tabs.map(({ id, label, icon: TabIcon }) => (
           <button
@@ -229,7 +236,7 @@ export function DetailsPanel({
             aria-selected={tab === id}
             onClick={() => setTab(id)}
             className={cn(
-              'flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[12px] transition',
+              'flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[12px] transition',
               tab === id
                 ? 'bg-fg/7 text-fg font-medium'
                 : 'text-fg-dim hover:bg-fg/4 hover:text-fg',
@@ -253,7 +260,8 @@ export function DetailsPanel({
         </div>
       ) : tab === 'details' ||
         (tab === 'history' && !hasRollout(obj)) ||
-        (tab === 'changes' && !isJournaled(obj)) ? (
+        (tab === 'changes' && !isJournaled(obj)) ||
+        (tab === 'reachability' && !hasReachability(obj)) ? (
         <div className="overlay-scroll min-h-0 flex-1 overflow-auto">
           <DetailsOverview obj={obj} gvk={gvk} ctx={ctx} isActive={isActive} readOnly={readOnly} />
         </div>
@@ -270,6 +278,14 @@ export function DetailsPanel({
         />
       ) : tab === 'changes' ? (
         <ChangesTab clusterId={clusterId} obj={obj} isActive={isActive} />
+      ) : tab === 'reachability' ? (
+        <ReachabilityTab
+          clusterId={clusterId}
+          gvk={gvk}
+          obj={obj}
+          isActive={isActive}
+          apiResources={apiResources}
+        />
       ) : tab === 'yaml' ? (
         <YamlTab
           clusterId={clusterId}

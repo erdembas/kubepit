@@ -11,6 +11,8 @@ import { DetailsPanel } from '../details/DetailsPanel';
 import { useMapFocus } from './mapNavigation';
 import { TopologyMap } from './TopologyMap';
 import { useTopologyData } from './useTopologyData';
+// NetworkPolicy simulator: reachability overlay from the selected pod.
+import { MapReachabilityToggle, useMapReachability } from '../netpol/MapReachability';
 
 /**
  * Namespace "Resource Map": every object in the selected namespaces and how
@@ -40,6 +42,14 @@ export function ResourceMapPage({
     [selection, apiResources, selectedNode],
   );
   const Icon = kindIcon(VIEW.resourceMap);
+  const reach = useMapReachability({
+    clusterId,
+    namespaces,
+    isActive,
+    apiResources,
+    graph: data.graph,
+    selection,
+  });
 
   const onOpen = (node: TopoNode) =>
     useWorkbenchStore.getState().select(clusterId, VIEW.resourceMap, {
@@ -68,6 +78,8 @@ export function ResourceMapPage({
           {data.loading && data.synced && (
             <Loader2 className="text-fg-dim h-3 w-3 animate-spin" aria-label={i18n.t('Syncing')} />
           )}
+          <span className="ml-auto" />
+          <MapReachabilityToggle reach={reach} />
         </div>
         <TopologyMap
           label={i18n.t('Resource Map')}
@@ -83,6 +95,8 @@ export function ResourceMapPage({
           focusRequest={focusRequest}
           onOpen={onOpen}
           emptyText={i18n.t('Nothing to map in the selected namespaces.')}
+          overlay={reach.overlay}
+          overlayNotice={reach.notice}
           footer={({ objects, relationships }) => (
             <div className="border-border/60 text-fg-dim flex h-7 shrink-0 items-center gap-2 border-t px-4 text-[11px] tabular-nums">
               <span

@@ -402,6 +402,7 @@
   "Open in browser": "Tarayıcıda aç",
   "Open in cluster": "Cluster'da aç",
   "Open in workbench": "Çalışma alanında aç",
+  "Open network policy simulator": "Ağ politikası simülatörünü aç",
   "Open PromQL console": "PromQL konsolunu aç",
   "Open resource map": "Kaynak haritasını aç",
   "Open Settings": "Ayarları aç",

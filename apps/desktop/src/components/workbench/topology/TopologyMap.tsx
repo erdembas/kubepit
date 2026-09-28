@@ -17,6 +17,7 @@ import { TopologyCanvas, type FocusRequest } from './TopologyCanvas';
 import { TopologyLegend } from './TopologyLegend';
 import { isStringArray, usePersistentJson } from './persist';
 import type { TopologyWatchError } from './useTopologyData';
+import type { ReachState } from '@/lib/kube/netpol/overlay';
 
 /**
  * A relationship map with its controls: search, kind filter chips, pod
@@ -39,6 +40,8 @@ export function TopologyMap({
   toolbar,
   footer,
   emptyText,
+  overlay,
+  overlayNotice,
 }: {
   label: string;
   graph: TopoGraph;
@@ -59,6 +62,9 @@ export function TopologyMap({
   /** Status bar under the map, with the counts of the scoped graph. */
   footer?: (stats: { objects: number; relationships: number }) => ReactNode;
   emptyText: string;
+  /** Reachability overlay (NetworkPolicy simulator) and its legend. */
+  overlay?: ReadonlyMap<string, ReachState> | null;
+  overlayNotice?: ReactNode;
 }) {
   i18n.useLocale();
   const [search, setSearch] = useState('');
@@ -271,11 +277,13 @@ export function TopologyMap({
             fitRequest={fitRequest}
             focusRequest={focus}
             onActivate={activate}
+            overlay={overlay}
           />
         )}
         {view.nodes.length > 0 && <TopologyLegend families={families} />}
-        {(view.aggregated > 0 || forbidden.length > 0 || failed.length > 0) && (
+        {(view.aggregated > 0 || forbidden.length > 0 || failed.length > 0 || !!overlayNotice) && (
           <div className="pointer-events-none absolute top-2 left-3 flex max-w-[calc(100%-1.5rem)] flex-col gap-1">
+            {overlayNotice}
             {view.aggregated > 0 && (
               <p className="border-border bg-surface-raised/95 text-fg-muted pointer-events-auto flex items-start gap-1.5 rounded-md border px-2 py-1 text-[11px] shadow-sm">
                 <Info className="text-cat-frontend mt-px h-3.5 w-3.5 shrink-0" />

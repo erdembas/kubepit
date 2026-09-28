@@ -13,6 +13,7 @@ import { buildClasses, buildLeaderLeases, buildNamespaces, buildWebhooks } from 
 import { buildMonitoring } from './monitoring';
 import { buildIngress, buildNetworkPolicies } from './network';
 import { buildNodes } from './nodes';
+import { buildNetpolDemo } from './netpol';
 import { buildPrometheusServices } from './prometheus';
 import { buildPolicies } from './policies';
 import { buildRbac } from './rbac';
@@ -67,6 +68,8 @@ function buildCluster(db: ClusterDb) {
   buildGitOps(db);
   buildEvents(db);
   buildRolloutHistory(db);
+  // Last, so the other fixtures keep their generated names.
+  buildNetpolDemo(db);
 }
 
 setBuilder(buildCluster);

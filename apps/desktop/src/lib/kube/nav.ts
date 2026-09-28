@@ -28,6 +28,7 @@ export const VIEW_KEYS = {
   apiExplorer: '@explain',
   gitops: '@gitops',
   changes: '@changes',
+  netpolSimulator: '@netpol',
 } as const;
 
 export interface NavItem {
@@ -103,6 +104,7 @@ export function viewLabel(key: string, apiResources?: readonly ApiResourceInfo[]
   if (key === VIEW_KEYS.apiExplorer) return i18n.t('API Explorer');
   if (key === VIEW_KEYS.gitops) return i18n.t('GitOps Overview');
   if (key === VIEW_KEYS.changes) return i18n.t('Changes');
+  if (key === VIEW_KEYS.netpolSimulator) return i18n.t('Network Policy Simulator');
   const builtin = Object.values(BUILTIN).find((k) => k.key === key);
   if (builtin)
     return builtin.key === BUILTIN.CustomResourceDefinition.key
@@ -216,6 +218,11 @@ export function buildNav(apiResources: readonly ApiResourceInfo[] | null): NavGr
       icon: SECTION_ICONS.network,
       items: [
         ...items('network'),
+        viewItem(
+          VIEW_KEYS.netpolSimulator,
+          i18n.t('Policy Simulator'),
+          'network policy policies netpol simulator reachability can talk connectivity isolation',
+        ),
         viewItem(VIEW_KEYS.portForwards, i18n.t('Port Forwarding'), 'port forward pf'),
       ],
       subgroups: [],
