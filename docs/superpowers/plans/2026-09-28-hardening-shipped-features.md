@@ -686,7 +686,7 @@ git commit -m "fix(ui): Changes header and details tab strip fit narrow panes"
 **Interfaces:**
 - Produces: `formatMoney(value: number, currency: string, opts?: { compact?: boolean; signed?: boolean }): string`. The `cents` option is removed; nothing uses it.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // apps/desktop/src/lib/cost.test.ts
@@ -728,12 +728,12 @@ describe('formatMoney', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `pnpm --filter @kubepit/desktop test -- src/lib/cost.test.ts`
 Expected: FAIL (`$5,669.3` and `$2,299.7` are returned).
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
   - `const amount = Number.isFinite(value) ? Math.round(value * 100) / 100 : 0`.
   - `const decimals = Math.abs(amount) < 1000 ? 2 : 0`.
   - `notation: compact && Math.abs(amount) >= 1_000_000 ? 'compact' : 'standard'`, with `maximumFractionDigits: 1` in compact mode.
@@ -741,12 +741,12 @@ Expected: FAIL (`$5,669.3` and `$2,299.7` are returned).
   - The fallback uses the same fraction digits.
   - `RightsizingPanel` passes `formatMoney(delta, currency, { signed: true })` instead of the hand-built prefix.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/src

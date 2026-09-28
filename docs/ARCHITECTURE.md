@@ -772,7 +772,11 @@ applying a recommendation only reads, so read-only clusters get it all.
   (`workload-overprovisioned`, `workload-underprovisioned`, category
   efficiency) that only fire on large, confident deltas
   (`lib/kube/rightsizing/model.ts#healthVerdict`). Per-viewer preferences
-  live in localStorage (`kubepit.cost.v1`).
+  live in localStorage (`kubepit.cost.v1`). Every amount goes through one
+  formatter, `lib/cost.ts#formatMoney`, in the UI locale: rounded to cents,
+  two decimals below 1,000 and none from there, compact notation only from
+  one million (`$1.2M`), `signed` deltas (`+$12.50`), unknown currency
+  codes as `12.40 XYZ`; unit prices keep four decimals (`formatUnitPrice`).
 - **Demo**: OpenCost on prod-eu-west-1 (`mock/fixtures/cost.ts` derives
   allocations with usage, network and idle plus a daily trend), estimates
   elsewhere (Prometheus usage and a requests trend where the demo runs
