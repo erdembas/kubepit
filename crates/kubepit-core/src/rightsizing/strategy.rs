@@ -25,6 +25,7 @@ use super::types::{
     RecommendationWarning, ResourceValues, RightsizingSettings, RightsizingSource,
     RightsizingStrategyInfo, UsageEvidence, UsageStats,
 };
+use super::workload_history::{WorkloadHistory, WORKLOAD_HISTORY_ID};
 
 /// Id of the strategy used when a request names none.
 pub const DEFAULT_STRATEGY_ID: &str = "percentile-headroom";
@@ -89,7 +90,7 @@ pub trait RecommendationStrategy: Send + Sync {
 }
 
 /// Every strategy the backend offers; the first is the default.
-pub static STRATEGIES: &[&dyn RecommendationStrategy] = &[&PercentileHeadroom];
+pub static STRATEGIES: &[&dyn RecommendationStrategy] = &[&PercentileHeadroom, &WorkloadHistory];
 
 pub fn strategies() -> Vec<RightsizingStrategyInfo> {
     STRATEGIES.iter().map(|s| s.info()).collect()
@@ -104,6 +105,22 @@ pub fn strategy(id: Option<&str>) -> Result<&'static dyn RecommendationStrategy>
     match STRATEGIES.iter().find(|s| s.info().id == id) {
         Some(s) => Ok(*s),
         None => bail!("unknown right-sizing strategy \"{id}\""),
+    }
+}
+
+/// The strategy for a request (spec §6.10). A named strategy is used as it
+/// is; with none (`None` or blank) it is chosen automatically:
+/// `workload-history` when the collection resolved pods through
+/// kube-state-metrics owner metrics, else `percentile-headroom`. The bool
+/// is true when the choice was automatic.
+pub fn resolve(
+    requested: Option<&str>,
+    owner_metrics: bool,
+) -> Result<(&'static dyn RecommendationStrategy, bool)> {
+    match requested.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(id) => Ok((strategy(Some(id))?, false)),
+        None if owner_metrics => Ok((strategy(Some(WORKLOAD_HISTORY_ID))?, true)),
+        None => Ok((strategy(None)?, true)),
     }
 }
 
@@ -358,6 +375,32 @@ mod tests {
         assert_eq!(strategy(None).unwrap().info().id, DEFAULT_STRATEGY_ID);
         assert_eq!(strategy(Some(" ")).unwrap().info().id, DEFAULT_STRATEGY_ID);
         assert!(strategy(Some("nope")).is_err());
+    }
+
+    #[test]
+    fn resolution_prefers_workload_history_with_owner_metrics() {
+        use crate::rightsizing::workload_history::WORKLOAD_HISTORY_ID;
+        assert_eq!(
+            resolve(None, true).map(|(s, a)| (s.info().id, a)).unwrap(),
+            (WORKLOAD_HISTORY_ID.into(), true)
+        );
+        assert_eq!(
+            resolve(None, false).map(|(s, a)| (s.info().id, a)).unwrap(),
+            (DEFAULT_STRATEGY_ID.into(), true)
+        );
+        assert_eq!(
+            resolve(Some(" "), true).unwrap().0.info().id,
+            WORKLOAD_HISTORY_ID
+        );
+        assert!(!resolve(Some("percentile-headroom"), true).unwrap().1);
+        assert_eq!(
+            resolve(Some("workload-history"), false)
+                .map(|(s, a)| (s.info().id, a))
+                .unwrap(),
+            (WORKLOAD_HISTORY_ID.into(), false)
+        );
+        assert!(resolve(Some("nope"), true).is_err());
+        assert!(strategies().iter().any(|s| s.id == WORKLOAD_HISTORY_ID));
     }
 
     #[test]

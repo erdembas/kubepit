@@ -702,7 +702,7 @@ git commit -m "feat(rightsizing): flags and confidence caps from usage evidence"
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Test helpers: `current(cpu, mem)` sets both requests and a memory limit of `mem`;
 `requests_only(cpu, mem)` sets the two requests and no limits.
@@ -746,21 +746,21 @@ Test helpers: `current(cpu, mem)` sets both requests and a memory limit of `mem`
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core -- rightsizing::workload_history rightsizing::strategy`
 
 Expected: FAIL to compile.
 
-- [ ] **Step 3: Implement the strategy and `resolve`**
+- [x] **Step 3: Implement the strategy and `resolve`**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core rightsizing`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/src/rightsizing

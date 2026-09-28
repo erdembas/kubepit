@@ -2640,6 +2640,7 @@
   "Without a selector the Service sends traffic nowhere until you add Endpoints.": "Without a selector the Service sends traffic nowhere until you add Endpoints.",
   "Workload": "Workload",
   "Workload configuration": "Workload configuration",
+  "Workload history": "Workload history",
   "workloads": "workloads",
   "Workloads": "Workloads",
   "Workloads by level": "Workloads by level",

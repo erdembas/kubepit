@@ -24,6 +24,7 @@ pub mod patch;
 pub mod percentile;
 pub mod strategy;
 pub mod types;
+pub mod workload_history;
 
 pub use types::*;
 

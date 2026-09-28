@@ -173,7 +173,9 @@ export function warningText(w: RecommendationWarning): string {
 
 /** Display name of a strategy (product names stay as they are). */
 export function strategyLabel(info: Pick<RightsizingStrategyInfo, 'id' | 'name'>): string {
-  return info.id === 'percentile-headroom' ? i18n.t('Percentile + headroom') : info.name;
+  if (info.id === 'percentile-headroom') return i18n.t('Percentile + headroom');
+  if (info.id === 'workload-history') return i18n.t('Workload history');
+  return info.name;
 }
 
 export type RightsizingFilter = 'changed' | 'over' | 'under' | 'all';

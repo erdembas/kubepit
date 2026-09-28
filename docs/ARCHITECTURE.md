@@ -887,6 +887,18 @@ applying a recommendation only reads, so read-only clusters get it all.
   never lowered (CPU limits are never invented) —, minimums, rounding up
   to sane steps, never below the observed peak, no churn under 10 % /
   10 m / 16 MiB; confidence high from 3 days, medium from 12 hours.
+  `workload-history` (`rightsizing/workload_history.rs`, KubeFit's logic)
+  sits next to it: CPU request = p95 + 20 %, memory request = max + 20 %,
+  both at least the minimums and rounded up to whole millicores / MiB;
+  after an OOM kill the memory base is never below the current limit; the
+  same no-churn band; a container without a memory limit gets one at the
+  peak + `memory_limit_headroom_percent` (never below the request,
+  `memory-limit-added`), existing limits are left to `finalize`, CPU
+  limits are never invented; confidence high from 72 hours, else medium
+  (`short-history`), metrics-server low. `strategy::resolve` picks the
+  requested strategy, or automatically `workload-history` when the
+  collection resolved pods through kube-state-metrics owner metrics and
+  `percentile-headroom` otherwise (`strategy_auto`).
   Between the strategy and `finalize`, the shared `strategy::apply_evidence`
   turns the usage evidence and the HPA into flags that only cap the
   confidence and never change a value (a recommendation is always
