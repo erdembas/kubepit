@@ -415,6 +415,99 @@ An optional, richer metrics source next to the metrics-server history
   prod-eu-west-1, the prometheus chart on the other cloud clusters and no
   Prometheus on the local ones.
 
+## Structured logs
+
+Pod logs, merged workload logs and the Loki tab share one pure log model
+(`apps/desktop/src/lib/logs/`, no React, no I/O):
+
+- **Parsing** (`parse.ts`, `time.ts`, `levels.ts`): per line, after the
+  Kubernetes `timestamps=true` prefix and ANSI colours are removed — JSON
+  objects (zap, logrus, slog, pino/bunyan numbers, ECS `log.level`,
+  Serilog `@l`/`@m`), logfmt, klog (incl. structured `"msg" k=v`) and text
+  layouts (Spring Boot/logback, log4j, Python logging, zap console, Go
+  `log`, nginx error logs, bracketed or leading levels, logrus TTY, access
+  logs with the level from the status code, Go panics, Python tracebacks,
+  Java exception headers) → `{ time, level, message, fields }`. Levels
+  normalize to trace/debug/info/warn/error/fatal. `detectLevelToken` is the
+  cheap check run on every incoming line (it also locates the level token
+  for colouring); `parseLogLine` is the full parse, run lazily.
+- **Records** (`records.ts`): `RecordIndex` folds lines into records per
+  source — Java/Node stack frames, `Caused by:`, `... N more`, Python
+  tracebacks and Go panics join the previous record — and stamps every
+  line with its record's level. It is fed incrementally and trimmed with
+  the bounded line buffer (50 000 lines), and keeps level counts.
+- **Filters and export** (`filter.ts`, `structured.ts`, `rowFilter.ts`):
+  level sets, field filters (`key=value`, `key!=value`, `key~regex`,
+  `key!~regex`, free text) over parsed fields, flattened JSON paths and
+  source fields (pod, container, Loki stream labels); `RowFilter` keeps
+  the visible rows incrementally while the predicate is unchanged; export
+  of the filtered records as JSON lines or RFC 4180 CSV through the save
+  dialog (`saveTextAs` with a file filter).
+- **xterm mode**: lines are written with ANSI styling by their record
+  level (errors and their stack frames red, other levels on the level
+  token); the text itself never changes, so selection and copy stay raw.
+  A level filter in the toolbar (both modes) repaints from the buffer.
+- **Structured mode** (`dock/logs/structured/`, per-viewer toggle):
+  level chips with counts, the filter bar, a column picker over the
+  fields discovered in the newest records, and a virtualized table (fixed
+  22 px rows; expanded rows add a known detail height) with time, source
+  (merged views and Loki; folded into the message below ~620 px), level,
+  message and extra field columns. A row expands to its pretty JSON
+  (`jsonLines.ts`); clicking a value there or in a field column adds a
+  filter (Alt excludes). Pausing freezes the rows at the pause point.
+
+## Loki
+
+Historical logs from an in-cluster Loki (`crates/kubepit-core/src/loki/`),
+read-only, over the same transport as Prometheus.
+
+- **Shared service proxy** (`service_proxy.rs`): path building, the GET
+  transport with a timeout, proxy error bodies, the retry-free client per
+  connection (`Kubepit::proxy_clients`), service listing with a namespace
+  fallback, prefix/name validation and the generic per-connection
+  detection cache (`DetectCache`) used by both Prometheus and Loki.
+- **Detection** (`loki/detect.rs`) ranks the grafana/loki gateway
+  (`loki-gateway`), the microservices query frontend, the simple scalable
+  read path (`loki-read`), a single binary (`loki`, loki-stack) and a bare
+  querier; write path, backends, caches, canaries, headless and memberlist
+  services never qualify. Conventional namespaces (`loki`, `logging`,
+  `monitoring`, `observability`) win ties; forbidden cluster-wide lists
+  fall back to those namespaces plus the accessible ones. The best four
+  are probed with a labels request over the last five minutes.
+  `ClusterDef.loki` overrides it: `auto`, a `service` (namespace, name,
+  port, scheme, path prefix, optional `X-Scope-OrgID` tenant) or `off`
+  (cluster editor, next to Prometheus). External/Grafana Cloud Loki is out
+  of scope.
+- **Commands**: `loki_status` (cached per connection and setting like
+  Prometheus), `loki_query_range` (LogQL, nanosecond `start`/`end` as
+  strings, limit ≤ 5 000, direction, `step` for metric queries; streams are
+  merged by timestamp, metric matrices parsed like PromQL), `loki_labels`
+  and `loki_label_values` (optionally narrowed by a selector) for the
+  query builder. A vanished service (proxy 404/502/503) marks the
+  detection stale. Loki's own errors (bad LogQL, missing tenant, limits)
+  come back verbatim.
+- **UI** (`dock/loki/`, dock tab kind `loki`): a query builder
+  (namespace, workload, pod and container pickers fed by Loki's label
+  values — label names follow what the Loki uses, e.g.
+  `k8s_namespace_name` — plus a line filter and `| json` / `| logfmt`) or
+  raw LogQL (`lib/logs/logql.ts`, workload pods matched by the names their
+  kind generates, like the Prometheus presets), range presets
+  (15m … 7d), a line limit, and a log-volume histogram
+  (`sum(count_over_time(…))`, SVG; click or drag to zoom into an absolute
+  window; falls back to the loaded lines). Results render through the same
+  xterm and structured views; "Load older" pages backwards from the oldest
+  line (end = its timestamp + 1 ns, boundary duplicates dropped). Entry
+  points: "Historical logs (Loki)" on pods and workloads (details and
+  menus), the pod/workload log toolbars and the command palette. Without
+  Loki the tab explains why (not found / off / unreachable) with "Detect
+  again" and the settings.
+- **Demo**: `lib/ipc/mock/loki.ts` + `fixtures/loki.ts` fake the gateway on
+  prod-eu-west-1, the single binary on the other cloud clusters (dev's is
+  unreachable) and nothing on the local ones; streams are the fixture pods
+  with deterministic JSON, logfmt, klog, nginx and Spring/Java lines per
+  minute and a LogQL subset. Demo pod logs mix JSON, logfmt, klog, Python
+  tracebacks and Java stack traces so structured mode has work to do.
+
 ## Local manifests
 
 The "Manifests" dock tab (`dock/manifests/`) diffs local files against one

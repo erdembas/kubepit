@@ -3,6 +3,7 @@ import {
   ArrowRightLeft,
   Ban,
   Bug,
+  CalendarSearch,
   FolderTree,
   Copy,
   Link2,
@@ -39,6 +40,7 @@ import { workloadActions } from './workloadActions';
 import { wizardActions } from './wizardActions';
 // Power user: user-defined custom actions (k9s-plugin style).
 import { customResourceActions } from './custom/customActions';
+import { hasLokiLogs, openLokiForObject } from './lokiActions';
 
 import {
   openPodLogs,
@@ -163,6 +165,15 @@ export function resourceActions({
       run: () => openWorkloadLogs(clusterId, obj),
     });
   }
+  // Loki: historical logs of the pod or the workload's pods (read-only).
+  if (hasLokiLogs(kind))
+    add({
+      id: 'loki-logs',
+      label: i18n.t('Historical logs (Loki)'),
+      icon: CalendarSearch,
+      mutating: false,
+      run: () => openLokiForObject(clusterId, obj),
+    });
   if (SCALABLE.has(kind))
     add({
       id: 'scale',

@@ -1,8 +1,16 @@
+import { splitK8sTimestamp, stripAnsi } from '@/lib/logs/ansi';
+import { LEVEL_SGR, type LogLevel } from '@/lib/logs/levels';
+import { detectLevelToken } from '@/lib/logs/parse';
+
+export { stripAnsi };
+
 /**
- * Pod log line formatting for the xterm log view. Mirrors RunHQ's
+ * Pod log line formatting for the xterm log views. Mirrors RunHQ's
  * `log-xterm/format.ts`: keep explicit ANSI colour untouched, and only
- * colour plain text lines that carry a recognisable level — errors in red,
- * warnings with a yellow level token — so busy logs stay readable.
+ * colour plain text lines by their level — errors (and their stack traces)
+ * in red, other levels on the level token (warnings yellow, info cyan,
+ * debug/trace dim) — so busy logs stay readable. The text itself never
+ * changes, so selections and copies are the raw line.
  */
 
 // ESC sequences other than SGR (cursor moves, erase, OSC titles, …) would
@@ -11,39 +19,7 @@ const ANSI_NON_SGR_RE =
   // eslint-disable-next-line no-control-regex
   /\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)|\[[0-9;?]*[@A-HJKSTfhlnpsuDEMLR]|[()][A-Z0-9]|[=>DEMHcp78])/g;
 // eslint-disable-next-line no-control-regex
-const ANSI_ALL_RE =
-  /\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[()][A-Z0-9]|[=>DEMHcp78])/g;
-// eslint-disable-next-line no-control-regex
 const SGR_RE = /\x1b\[[0-9;]*m/y;
-
-/** RFC 3339 prefix added by the API server when `timestamps=true`. */
-const TIMESTAMP_RE = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2}))\s/;
-
-const ERROR_RES = [
-  /\b(?:ERROR|FATAL|PANIC|CRITICAL|SEVERE|EMERG(?:ENCY)?)\b/,
-  /\[(?:error|crit|alert|emerg)\]/, // nginx / apache
-  /\blevel[=:]\s*"?(?:error|err|fatal|panic|critical|crit|dpanic)\b/i,
-  /"(?:level|severity|lvl|log\.level)"\s*:\s*"(?:error|err|fatal|panic|critical|crit|severe|emergency|alert|dpanic)"/i,
-  /^(?:panic:|fatal error:|Traceback \(most recent call last\)|Exception in thread)/,
-  /^[EF]\d{4} \d{2}:\d{2}:\d{2}/, // klog
-  /^\s*(?:[\w$]+\.)+[\w$]*(?:Exception|Error)(?::|$)/, // java.lang.IllegalStateException: …
-];
-
-const WARN_RES = [
-  /\b(?:WARN|WARNING)\b/,
-  /\[warn(?:ing)?\]/,
-  /(?<=\blevel[=:]\s*"?)(?:warn|warning)\b/i,
-  /(?<="(?:level|severity|lvl|log\.level)"\s*:\s*")(?:warn|warning)(?=")/i,
-  /^W\d{4}(?= \d{2}:\d{2}:\d{2})/, // klog
-];
-
-export type LogLevel = 'error' | 'warn' | null;
-
-export function detectLevel(text: string): LogLevel {
-  if (ERROR_RES.some((re) => re.test(text))) return 'error';
-  if (WARN_RES.some((re) => re.test(text))) return 'warn';
-  return null;
-}
 
 export function sanitizeAnsi(input: string): string {
   const cr = input.lastIndexOf('\r');
@@ -51,23 +27,19 @@ export function sanitizeAnsi(input: string): string {
   return collapsed.replace(ANSI_NON_SGR_RE, '');
 }
 
-export function stripAnsi(input: string): string {
-  return input.replace(ANSI_ALL_RE, '');
-}
-
-function highlight(body: string): string {
-  const level = detectLevel(body);
-  if (level === 'error') return `\x1b[31m${body}\x1b[39m`;
-  if (level === 'warn') {
-    for (const re of WARN_RES) {
-      const match = re.exec(body);
-      if (match) {
-        const end = match.index + match[0].length;
-        return `${body.slice(0, match.index)}\x1b[93m${match[0]}\x1b[39m${body.slice(end)}`;
-      }
-    }
-  }
-  return body;
+/**
+ * Colour `body` by `level` (the line's record level; `undefined` = detect
+ * from the line itself). Errors colour the whole line, so continuation
+ * lines of an error (stack frames) are red too.
+ */
+function highlight(body: string, level: LogLevel | null | undefined): string {
+  const token = detectLevelToken(body);
+  const effective = level === undefined ? (token?.level ?? null) : level;
+  if (!effective) return body;
+  const sgr = LEVEL_SGR[effective];
+  if (effective === 'error' || effective === 'fatal') return `${sgr.open}${body}${sgr.close}`;
+  if (!token || token.level !== effective || token.end <= token.start) return body;
+  return `${body.slice(0, token.start)}${sgr.open}${body.slice(token.start, token.end)}${sgr.close}${body.slice(token.end)}`;
 }
 
 /** Cut to `width` visible cells (ANSI-aware), marking the cut with a dim ellipsis. */
@@ -99,17 +71,20 @@ export interface LogFormatOptions {
   cols: number;
 }
 
-/** Bytes written to xterm for one raw log line (no trailing newline in `text`). */
-export function formatLogLine(text: string, opts: LogFormatOptions): string {
-  let body = sanitizeAnsi(text);
-  let ts = '';
-  const match = TIMESTAMP_RE.exec(body);
-  if (match) {
-    ts = match[1]!;
-    body = body.slice(match[0].length);
-  }
-  if (!body.includes('\x1b[')) body = highlight(body);
-  let line = ts ? `\x1b[2m${ts}\x1b[22m ${body}` : body;
+/**
+ * Bytes written to xterm for one raw log line (no trailing newline in
+ * `text`). `level` is the line's record level when known (continuation
+ * lines inherit it); `undefined` detects it from the line.
+ */
+export function formatLogLine(
+  text: string,
+  opts: LogFormatOptions,
+  level?: LogLevel | null,
+): string {
+  const split = splitK8sTimestamp(sanitizeAnsi(text));
+  let body = split.body;
+  if (!body.includes('\x1b[')) body = highlight(body, level);
+  let line = split.ts ? `\x1b[2m${split.ts}\x1b[22m ${body}` : body;
   if (!opts.wrap && opts.cols > 8) line = truncateAnsi(line, opts.cols);
   // Reset so an unterminated colour in one line never bleeds into the next.
   return `${line}\x1b[0m\r\n`;

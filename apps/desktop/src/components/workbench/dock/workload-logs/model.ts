@@ -370,7 +370,7 @@ export function formatMergedEntry(
   const prefix = `\x1b[38;2;${rgb}m${sourceLabel(source.pod, source.container, fmt.layout)}\x1b[39m `;
   // The body is truncated to what is left after the prefix column.
   const cols = opts.cols > 0 ? Math.max(8, opts.cols - fmt.layout.width - 1) : opts.cols;
-  return prefix + formatLogLine(entry.text, { wrap: opts.wrap, cols });
+  return prefix + formatLogLine(entry.text, { wrap: opts.wrap, cols }, entry.level);
 }
 
 /** Plain text export: `pod/container  line`, ANSI stripped. */

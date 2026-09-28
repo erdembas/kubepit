@@ -9,23 +9,17 @@
 //! 3. Probe the best [`MAX_PROBES`] candidates with `query=1` through the
 //!    service proxy; the first that answers wins.
 
-use std::collections::BTreeMap;
-
 use anyhow::Result;
-use k8s_openapi::api::core::v1::Service;
-use kube::api::{Api, ListParams};
 use kube::Client;
 
 use super::proxy::{self, PROBE_TIMEOUT};
-use crate::error::{api_code, kube_error};
+use crate::service_proxy;
 use crate::types::{PromScheme, PrometheusKind, PrometheusService};
+
+pub use crate::service_proxy::ServiceInfo;
 
 /// Candidates probed before giving up.
 pub const MAX_PROBES: usize = 4;
-/// Services per list page.
-const PAGE_SIZE: u32 = 500;
-/// Pages read from a cluster-wide list (enough for 5 000 services).
-const MAX_PAGES: usize = 10;
 /// Where monitoring stacks usually live, for clusters that forbid listing
 /// services cluster-wide.
 pub const FALLBACK_NAMESPACES: &[&str] = &[
@@ -39,40 +33,6 @@ pub const FALLBACK_NAMESPACES: &[&str] = &[
     "mimir",
     "openshift-monitoring",
 ];
-
-/// What detection needs to know about a service.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ServiceInfo {
-    pub namespace: String,
-    pub name: String,
-    pub labels: BTreeMap<String, String>,
-    /// `(name, port)` of every TCP port.
-    pub ports: Vec<(Option<String>, u16)>,
-}
-
-impl ServiceInfo {
-    pub fn from_service(svc: &Service) -> Option<Self> {
-        let ports = svc
-            .spec
-            .as_ref()?
-            .ports
-            .as_ref()?
-            .iter()
-            .filter(|p| p.protocol.as_deref().unwrap_or("TCP") == "TCP")
-            .filter_map(|p| Some((p.name.clone(), u16::try_from(p.port).ok()?)))
-            .collect();
-        Some(Self {
-            namespace: svc.metadata.namespace.clone()?,
-            name: svc.metadata.name.clone()?,
-            labels: svc.metadata.labels.clone().unwrap_or_default(),
-            ports,
-        })
-    }
-
-    fn label(&self, key: &str) -> &str {
-        self.labels.get(key).map(String::as_str).unwrap_or_default()
-    }
-}
 
 /// A ranked service. Higher scores are probed first.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -202,21 +162,7 @@ fn namespace_bonus(namespace: &str) -> i32 {
 /// The candidate `svc` is, if it looks like a Prometheus-compatible API.
 pub fn classify(svc: &ServiceInfo) -> Option<Candidate> {
     let rule = rule_for(svc)?;
-    let by_name = rule.port_names.iter().find_map(|wanted| {
-        svc.ports
-            .iter()
-            .find(|(name, _)| name.as_deref() == Some(*wanted))
-            .map(|(_, port)| *port)
-    });
-    let by_number = || {
-        rule.port_numbers
-            .iter()
-            .find(|wanted| svc.ports.iter().any(|(_, p)| p == *wanted))
-            .copied()
-    };
-    let port = by_name
-        .or_else(by_number)
-        .or_else(|| svc.ports.first().map(|(_, p)| *p))?;
+    let port = svc.pick_port(rule.port_names, rule.port_numbers)?;
     Some(Candidate {
         score: rule.score + namespace_bonus(&svc.namespace),
         service: PrometheusService {
@@ -246,41 +192,7 @@ pub fn rank(services: &[ServiceInfo]) -> Vec<Candidate> {
 /// Every service the user may list: cluster-wide, or per namespace when
 /// the cluster-wide list is forbidden.
 pub async fn list_services(client: &Client, namespaces: &[String]) -> Result<Vec<ServiceInfo>> {
-    match list_pages(Api::<Service>::all(client.clone())).await {
-        Ok(services) => Ok(services),
-        Err(err) if api_code(&err) == Some(403) => {
-            let mut wanted: Vec<String> =
-                FALLBACK_NAMESPACES.iter().map(|s| s.to_string()).collect();
-            for ns in namespaces {
-                if !wanted.contains(ns) {
-                    wanted.push(ns.clone());
-                }
-            }
-            let lists = futures::future::join_all(
-                wanted
-                    .iter()
-                    .map(|ns| list_pages(Api::<Service>::namespaced(client.clone(), ns))),
-            )
-            .await;
-            // Missing or forbidden namespaces simply contribute nothing.
-            Ok(lists.into_iter().filter_map(Result::ok).flatten().collect())
-        }
-        Err(err) => Err(err),
-    }
-}
-
-async fn list_pages(api: Api<Service>) -> Result<Vec<ServiceInfo>> {
-    let mut out = Vec::new();
-    let mut params = ListParams::default().limit(PAGE_SIZE);
-    for _ in 0..MAX_PAGES {
-        let page = api.list(&params).await.map_err(kube_error)?;
-        out.extend(page.items.iter().filter_map(ServiceInfo::from_service));
-        match page.metadata.continue_.filter(|c| !c.is_empty()) {
-            Some(token) => params = params.continue_token(&token),
-            None => break,
-        }
-    }
-    Ok(out)
+    service_proxy::list_services(client, FALLBACK_NAMESPACES, namespaces).await
 }
 
 /// Does `service` answer Prometheus queries? `Err` explains why not.
@@ -292,6 +204,7 @@ pub async fn probe(client: &Client, service: &PrometheusService) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use k8s_openapi::api::core::v1::Service;
 
     fn svc(
         namespace: &str,

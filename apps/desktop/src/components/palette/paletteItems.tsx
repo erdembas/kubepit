@@ -2,6 +2,7 @@ import * as i18n from '@/i18n/core';
 import {
   AppWindow,
   Boxes,
+  CalendarSearch,
   ChartSpline,
   Copy,
   FileSearch,
@@ -148,6 +149,19 @@ export function clusterActions(cluster: ClusterDef): PaletteItem[] {
       run: () => {
         openAndConnect(cluster.id);
         dock.promql(cluster.id);
+      },
+    },
+    {
+      type: 'action',
+      id: `loki:${cluster.id}`,
+      label: i18n.t('Open Loki logs'),
+      hint: 'LogQL',
+      icon: CalendarSearch,
+      keywords: 'loki logql historical logs grafana',
+      group: 'cluster',
+      run: () => {
+        openAndConnect(cluster.id);
+        dock.loki(cluster.id);
       },
     },
     explainAction(cluster, 'cluster'),

@@ -31,15 +31,19 @@ export async function pickOpenPath(): Promise<string | null> {
  * plain download in browser previews. Resolves to the written path, or null
  * when the user cancelled or the browser took over.
  */
-export async function saveTextAs(defaultName: string, text: string): Promise<string | null> {
+export async function saveTextAs(
+  defaultName: string,
+  text: string,
+  filter?: { name: string; extensions: string[] },
+): Promise<string | null> {
   if (!isTauri) {
     downloadText(defaultName, text);
     return null;
   }
-  const path = await pickSavePath(defaultName, {
-    name: i18n.t('Log files'),
-    extensions: ['log', 'txt'],
-  });
+  const path = await pickSavePath(
+    defaultName,
+    filter ?? { name: i18n.t('Log files'), extensions: ['log', 'txt'] },
+  );
   if (!path) return null;
   await ipc.saveTextFile(path, text);
   return path;

@@ -78,6 +78,8 @@ export interface ClusterDef {
   last_connected_at: number | null;
   /** Where charts read Prometheus metrics from (auto-detected by default). */
   prometheus: PrometheusConfig;
+  /** Where historical logs are read from (Loki; missing = auto-detect). */
+  loki?: LokiConfig;
   /**
    * Connectivity: proxy for this cluster (`http://`, `https://`, `socks5://`,
    * `socks5h://`). Overrides the kubeconfig's `proxy-url`; null = none.
@@ -1584,6 +1586,90 @@ export interface PromQueryResult {
   series: PromQuerySeries[];
   /** More series came back than are returned. */
   truncated: boolean;
+  warnings: string[];
+}
+
+// -- Loki (historical logs) ---------------------------------------------------
+
+/** Which part of a Loki installation serves the query API. */
+export type LokiKind = 'gateway' | 'loki' | 'read' | 'query-frontend' | 'querier' | 'custom';
+
+/** A Loki HTTP API reached through the API server's service proxy. */
+export interface LokiService {
+  kind: LokiKind;
+  namespace: string;
+  service: string;
+  port: number;
+  scheme: PromScheme;
+  /** '' or '/prefix' (no trailing slash). */
+  path_prefix: string;
+}
+
+/** Per-cluster setting (`ClusterDef.loki`). */
+export type LokiConfig =
+  | { mode: 'auto' }
+  | {
+      mode: 'service';
+      namespace: string;
+      service: string;
+      port: number;
+      scheme: PromScheme;
+      path_prefix: string;
+      /** `X-Scope-OrgID` of a multi-tenant Loki; '' = none. */
+      tenant: string;
+    }
+  | { mode: 'off' };
+
+export type LokiState = 'available' | 'not-found' | 'unreachable' | 'off';
+
+export interface LokiStatus {
+  state: LokiState;
+  /** The service queries go to (`available`), or the one that failed. */
+  service: LokiService | null;
+  source: 'detected' | 'configured' | null;
+  error: string | null;
+  /** Services detection considered, best first. */
+  candidates: LokiService[];
+  /** Epoch ms. */
+  checked_at: number;
+}
+
+export type LokiDirection = 'backward' | 'forward';
+
+/** A LogQL range query; times are nanosecond Unix epochs as decimal strings. */
+export interface LokiQuery {
+  query: string;
+  start: string;
+  end: string;
+  /** Lines at most (log queries); null = 1 000, capped at 5 000. */
+  limit: number | null;
+  direction: LokiDirection;
+  /** Seconds between points of metric queries; null = Loki's default. */
+  step: number | null;
+}
+
+export interface LokiLine {
+  /** Index into `LokiQueryResult.streams`. */
+  stream: number;
+  /** Nanosecond Unix epoch (decimal string). */
+  ts: string;
+  line: string;
+}
+
+export interface LokiQueryResult {
+  service: LokiService;
+  /** 'streams' for log queries; 'matrix' | 'vector' | 'scalar' for metric queries. */
+  result_type: string;
+  /** Label sets of the returned streams. */
+  streams: Record<string, string>[];
+  /** Lines of every stream, merged in `direction` order. */
+  lines: LokiLine[];
+  /** Metric query results. */
+  series: PromQuerySeries[];
+  /** The effective line limit. */
+  limit: number;
+  /** `limit` lines came back: more may exist beyond the last one. */
+  limit_reached: boolean;
   warnings: string[];
 }
 

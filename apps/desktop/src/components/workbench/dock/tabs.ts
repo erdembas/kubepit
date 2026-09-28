@@ -45,6 +45,13 @@ export function tabTitle(tab: DockTab, clusterName: string | null): string {
       const name = tab.source ? sourceName(tab.source.paths) : null;
       return name ? i18n.t('Manifests · {name}', { name }) : i18n.t('Manifests');
     }
+    case 'loki': {
+      const target = tab.builder?.pod ?? tab.builder?.workload?.name ?? null;
+      if (target) return `Loki · ${target}`;
+      return tab.query
+        ? `Loki · ${tab.query.length > 28 ? `${tab.query.slice(0, 27)}…` : tab.query}`
+        : 'Loki';
+    }
   }
 }
 
@@ -110,6 +117,8 @@ export function tabTooltip(tab: DockTab, clusterName: string | null): string {
       return tab.source
         ? tab.source.paths.join('\n')
         : i18n.t('Diff and apply local manifests to clusters');
+    case 'loki':
+      return tab.query || i18n.t('Historical logs from the cluster’s Loki');
   }
 }
 

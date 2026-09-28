@@ -1038,6 +1038,7 @@
   "Hide values": "Hide values",
   "High": "High",
   "Highlights matching names; Enter jumps to the next match": "Highlights matching names; Enter jumps to the next match",
+  "Historical logs (Loki)": "Historical logs (Loki)",
   "History": "History",
   "History builds up every 15 seconds while the cluster stays connected.": "History builds up every 15 seconds while the cluster stays connected.",
   "History limit {limit}": "History limit {limit}",

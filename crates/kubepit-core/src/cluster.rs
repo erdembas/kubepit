@@ -142,6 +142,7 @@ impl Kubepit {
                     created_at: now,
                     last_connected_at: None,
                     prometheus: Default::default(),
+                    loki: Default::default(),
                     proxy_url: proxy::normalize(input.proxy_url.as_deref())?,
                 });
             }
@@ -216,6 +217,7 @@ impl Kubepit {
             created_at: existing.created_at,
             last_connected_at: existing.last_connected_at,
             prometheus: cluster.prometheus.normalized()?,
+            loki: cluster.loki.normalized()?,
             proxy_url,
         };
         if target_changed {

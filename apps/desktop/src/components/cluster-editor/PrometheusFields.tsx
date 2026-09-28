@@ -60,7 +60,7 @@ export function prometheusConfig(
   };
 }
 
-function Chip({
+export function Chip({
   active,
   onClick,
   children,

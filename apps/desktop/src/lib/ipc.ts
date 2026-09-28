@@ -61,6 +61,9 @@ import type {
   LocalPortStatus,
   LogChunk,
   LogOptions,
+  LokiQuery,
+  LokiQueryResult,
+  LokiStatus,
   ManifestApplyResult,
   ManifestRecent,
   ManifestRender,
@@ -403,6 +406,25 @@ export const ipc = {
   /** Ad-hoc PromQL range query (PromQL dock tab). */
   prometheusQueryRange: (clusterId: ClusterId, query: string, range: PrometheusRange) =>
     call<PromQueryResult>('prometheus_query_range', { clusterId, query, range }),
+
+  // -- Loki historical logs (optional; read-only) ---------------------------
+  /** Detection result cached per connection; `refresh` detects again. */
+  lokiStatus: (clusterId: ClusterId, refresh = false) =>
+    call<LokiStatus>('loki_status', { clusterId, refresh }),
+  /** LogQL range query: log lines (streams) or a metric query's series. */
+  lokiQueryRange: (clusterId: ClusterId, query: LokiQuery) =>
+    call<LokiQueryResult>('loki_query_range', { clusterId, query }),
+  /** Label names in [start, end] (ns strings), optionally of streams matching `query`. */
+  lokiLabels: (clusterId: ClusterId, start: string, end: string, query: string | null = null) =>
+    call<string[]>('loki_labels', { clusterId, start, end, query }),
+  /** Values of `label` in [start, end] (ns strings), optionally of streams matching `query`. */
+  lokiLabelValues: (
+    clusterId: ClusterId,
+    label: string,
+    start: string,
+    end: string,
+    query: string | null = null,
+  ) => call<string[]>('loki_label_values', { clusterId, label, start, end, query }),
 
   // -- Port forwarding ------------------------------------------------------
   portForwardStart: (request: PortForwardRequest) =>

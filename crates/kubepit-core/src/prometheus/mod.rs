@@ -22,20 +22,14 @@ pub mod promql;
 pub mod proxy;
 pub mod range;
 
-use std::collections::HashMap;
-use std::path::Path;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use anyhow::{anyhow, bail, Context, Result};
-use kube::config::KubeConfigOptions;
+use anyhow::{bail, Result};
 use kube::Client;
-use parking_lot::Mutex;
 
 use crate::app::Kubepit;
-use crate::error::{kube_error, ApiError};
-use crate::kubeconfig;
 use crate::objects::now_millis;
+use crate::service_proxy::{is_proxy_failure, valid_name, DetectCache, DetectedStatus};
 use crate::types::{
     ClusterDef, PromQueryResult, PrometheusConfig, PrometheusKind, PrometheusMetric,
     PrometheusMetricsResult, PrometheusRange, PrometheusSeries, PrometheusService,
@@ -45,9 +39,7 @@ use detect::MAX_PROBES;
 use parse::PromData;
 use range::Window;
 
-/// How long a negative answer (not found, unreachable) is trusted, so a
-/// Prometheus installed while Kubepit runs is picked up.
-pub const RECHECK_AFTER: Duration = Duration::from_secs(5 * 60);
+pub use crate::service_proxy::RECHECK_AFTER;
 /// Series one ad-hoc query returns at most.
 pub const MAX_QUERY_SERIES: usize = 200;
 /// Points one ad-hoc query returns at most (over all series).
@@ -59,32 +51,7 @@ pub const MAX_QUERY_LEN: usize = 16 * 1024;
 // Configuration
 // ---------------------------------------------------------------------------
 
-fn valid_name(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 253
-        && value
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.')
-}
-
-/// `""` or `/a/b` (no trailing slash); only path characters, no `..`.
-pub fn normalize_prefix(raw: &str) -> Result<String> {
-    let trimmed = raw.trim().trim_matches('/');
-    if trimmed.is_empty() {
-        return Ok(String::new());
-    }
-    let allowed = |c: char| c.is_ascii_alphanumeric() || "/-_.~".contains(c);
-    if !trimmed.chars().all(allowed) {
-        bail!("the path prefix may only contain letters, digits, '/', '-', '_', '.' and '~'");
-    }
-    if trimmed
-        .split('/')
-        .any(|s| s.is_empty() || s == "." || s == "..")
-    {
-        bail!("the path prefix must not contain empty, '.' or '..' segments");
-    }
-    Ok(format!("/{trimmed}"))
-}
+pub use crate::service_proxy::normalize_prefix;
 
 impl PrometheusConfig {
     /// Trimmed and validated, as stored in `clusters.json`.
@@ -146,117 +113,13 @@ impl PrometheusConfig {
 // Detection cache
 // ---------------------------------------------------------------------------
 
-#[derive(Clone)]
-struct Entry {
-    /// `ClusterStatus.connected_at` of the connection it belongs to.
-    connected_at: Option<i64>,
-    config: PrometheusConfig,
-    status: PrometheusStatus,
-    at: Instant,
-    stale: bool,
-}
+/// Detection results per cluster (see [`DetectCache`]).
+pub type PrometheusCache = DetectCache<PrometheusConfig, PrometheusStatus>;
 
-/// Detection results per cluster. An entry is valid for the connection it
-/// was made on and the configuration it was made with; negative answers
-/// expire after [`RECHECK_AFTER`], and a service that disappears (proxy
-/// 404/503) marks its entry stale.
-#[derive(Default)]
-pub struct PrometheusCache {
-    entries: Mutex<HashMap<String, Entry>>,
-    locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
-    /// Retry-free client per connection (`connected_at`), see [`proxy_client`].
-    clients: Mutex<HashMap<String, (Option<i64>, Client)>>,
-}
-
-impl PrometheusCache {
-    fn detect_lock(&self, cluster_id: &str) -> Arc<tokio::sync::Mutex<()>> {
-        self.locks
-            .lock()
-            .entry(cluster_id.to_string())
-            .or_default()
-            .clone()
+impl DetectedStatus for PrometheusStatus {
+    fn is_available(&self) -> bool {
+        self.state == PrometheusState::Available
     }
-
-    fn get_at(
-        &self,
-        cluster_id: &str,
-        connected_at: Option<i64>,
-        config: &PrometheusConfig,
-        now: Instant,
-    ) -> Option<PrometheusStatus> {
-        let entries = self.entries.lock();
-        let entry = entries.get(cluster_id)?;
-        let fresh = entry.status.state == PrometheusState::Available
-            || now.duration_since(entry.at) < RECHECK_AFTER;
-        (entry.connected_at == connected_at && &entry.config == config && !entry.stale && fresh)
-            .then(|| entry.status.clone())
-    }
-
-    fn put(
-        &self,
-        cluster_id: &str,
-        connected_at: Option<i64>,
-        config: PrometheusConfig,
-        status: PrometheusStatus,
-    ) {
-        self.entries.lock().insert(
-            cluster_id.to_string(),
-            Entry {
-                connected_at,
-                config,
-                status,
-                at: Instant::now(),
-                stale: false,
-            },
-        );
-    }
-
-    /// Drop everything of a cluster (disconnect, removal).
-    pub fn forget(&self, cluster_id: &str) {
-        self.entries.lock().remove(cluster_id);
-        self.clients.lock().remove(cluster_id);
-    }
-
-    /// Detect again on the next status request.
-    pub fn invalidate(&self, cluster_id: &str) {
-        if let Some(entry) = self.entries.lock().get_mut(cluster_id) {
-            entry.stale = true;
-        }
-    }
-}
-
-/// A client for `cluster` like the pool's, but without kube's default retry
-/// policy: through the service proxy a 503 ("no endpoints available") or a
-/// busy Prometheus is an answer, not a reason to back off for minutes.
-async fn proxy_client(cluster: &ClusterDef) -> Result<Client> {
-    let path = Path::new(&cluster.kubeconfig_path);
-    let kc = kubeconfig::load(path)
-        .with_context(|| format!("failed to read kubeconfig {}", path.display()))?;
-    let single = kubeconfig::single_context(&kc, &cluster.context)?;
-    let options = KubeConfigOptions {
-        context: Some(cluster.context.clone()),
-        ..Default::default()
-    };
-    let mut config = kube::Config::from_custom_kubeconfig(single, &options)
-        .await
-        .map_err(|e| {
-            anyhow!(
-                "invalid kubeconfig for context \"{}\": {e}",
-                cluster.context
-            )
-        })?;
-    config.default_retry = false;
-    Client::try_from(config).map_err(kube_error)
-}
-
-/// The proxy could not reach the service (gone, no endpoints, forbidden),
-/// as opposed to Prometheus rejecting a query.
-fn is_proxy_failure(err: &anyhow::Error) -> bool {
-    err.chain().any(|cause| {
-        cause.downcast_ref::<ApiError>().is_some_and(|api| {
-            api.reason == proxy::PROXY_REASON && matches!(api.code, 404 | 502 | 503)
-        })
-    })
 }
 
 fn status(state: PrometheusState) -> PrometheusStatus {
@@ -363,27 +226,7 @@ impl Kubepit {
     /// The Prometheus client of the cluster's current connection (connecting
     /// on demand, like every command).
     async fn prometheus_client(&self, cluster: &ClusterDef) -> Result<(Client, Option<i64>)> {
-        self.client(&cluster.id).await?;
-        let connected_at = self.cluster_status(&cluster.id).connected_at;
-        let cached = self
-            .prometheus
-            .clients
-            .lock()
-            .get(&cluster.id)
-            .filter(|(at, _)| *at == connected_at)
-            .map(|(_, client)| client.clone());
-        let client = match cached {
-            Some(client) => client,
-            None => {
-                let client = proxy_client(cluster).await?;
-                self.prometheus
-                    .clients
-                    .lock()
-                    .insert(cluster.id.clone(), (connected_at, client.clone()));
-                client
-            }
-        };
-        Ok((client, connected_at))
+        self.service_proxy_client(cluster).await
     }
 
     /// `prometheus_status`: the cached detection result of this connection,
@@ -570,6 +413,7 @@ impl Kubepit {
 mod tests {
     use super::*;
     use crate::types::PromScheme;
+    use std::time::Duration;
 
     fn service_config(prefix: &str) -> PrometheusConfig {
         PrometheusConfig::Service {

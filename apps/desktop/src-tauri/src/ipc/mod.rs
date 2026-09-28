@@ -31,6 +31,8 @@ pub(crate) mod alerts;
 mod insights;
 // Prometheus: detection status, preset series, ad-hoc PromQL.
 mod prometheus;
+// Loki: historical logs (status, LogQL range queries, labels).
+mod loki;
 // OpenAPI v3 schemas: YAML editing, API explorer.
 mod openapi;
 // Connectivity: saved port forwards, proxy info, keychain storage.
@@ -67,6 +69,7 @@ pub use history::*;
 pub use insights::*;
 pub use logs::*;
 pub use logs_debug::*;
+pub use loki::*;
 pub use manifests::*;
 pub use metrics::*;
 pub use openapi::*;
