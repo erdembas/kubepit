@@ -1,6 +1,7 @@
 import YAML from 'yaml';
 import {
   DEPRECATED_APIS,
+  DEPRECATIONS_CHECKED_THROUGH,
   DEPRECATIONS_UPDATED,
   compareMinor,
   deprecatedApi,
@@ -305,6 +306,7 @@ register({
       target_version: target,
       next_version: nextMinor(git)!,
       table_updated: DEPRECATIONS_UPDATED,
+      table_checked_through: DEPRECATIONS_CHECKED_THROUGH,
       scanned_at: Date.now(),
       objects_scanned: objects,
       kinds_scanned: kinds.size,

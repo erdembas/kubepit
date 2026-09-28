@@ -166,6 +166,9 @@ pub struct UpgradeReport {
     pub next_version: String,
     /// When the deprecated-API table was last reviewed.
     pub table_updated: String,
+    /// The newest minor the table was checked through; a newer target may
+    /// remove APIs the table does not list yet.
+    pub table_checked_through: String,
     /// Epoch milliseconds.
     pub scanned_at: i64,
     pub objects_scanned: u64,
@@ -506,6 +509,7 @@ impl Kubepit {
             target_version: target.to_string(),
             next_version: current.next().to_string(),
             table_updated: deprecations::table_updated().to_string(),
+            table_checked_through: deprecations::table_checked_through().to_string(),
             scanned_at: crate::objects::now_millis(),
             objects_scanned: objects.scanned,
             kinds_scanned: objects.units,

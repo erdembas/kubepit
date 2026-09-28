@@ -147,13 +147,21 @@ monaco.ts`, `values.ts`): completion, hovers and markers from the same
   for namespaced kinds without one) and name into added / changed / removed
   / unchanged with before and after documents. With `live`, every rendered
   object also goes through `dry_run.rs` (server-side apply, `dryRun=All`, at
-  most 300) for a live → after diff; fields a chart stops setting are not
-  removed by that dry run (helm's three-way merge removes them). The dialog
-  makes this a review step: "Upgrade" first renders the review
-  (`helm/UpgradeChanges.tsx`: filterable object list, per-object
-  `DiffView` in `edit` normalisation, release / live toggle, deprecated
-  apiVersions flagged), and only a reviewed, unchanged input runs the
-  upgrade (still behind the typed-name confirmation).
+  most 300) for a live → after diff. That dry run never removes fields a
+  chart stops setting; helm's three-way merge does, so each changed object
+  with a live object also gets `dropped_fields`: the paths the old render
+  has, the new render lacks and the live object still carries, except
+  empty maps and lists, which the API server keeps
+  (`change_journal::diff::dropped_paths`, the change journal's keyed-list
+  walker and path syntax). The dialog makes this a review step: "Upgrade"
+  first renders the review (`helm/UpgradeChanges.tsx`: filterable object
+  list, per-object `DiffView` in `edit` normalisation, release / live
+  toggle, deprecated apiVersions flagged, the dropped fields listed under
+  "Helm will remove these fields from the live object" and counted per row
+  and in the header), and only a reviewed, unchanged input runs the upgrade
+  (still behind the typed-name confirmation). The demo mirrors the walker
+  (`mock/droppedPaths.ts`), and its first changed Deployment drops an
+  annotation.
 
 ## Upgrade readiness (deprecated APIs)
 
@@ -164,10 +172,15 @@ newer Kubernetes minor" (`upgrade_readiness_scan`, read-only).
   apiVersion + kind, plural resource, deprecated-in, removed-in (null while
   none is scheduled), replacement (and replacement kind) and note codes,
   dated (`updated`) and covering the 1.16 → 1.32 removals plus `v1
-Endpoints` (deprecated in 1.33). The Rust side embeds it
+Endpoints` (deprecated in 1.33). Coverage is explicit: `checked_through`
+  is the newest minor whose deprecation guide and release notes were
+  checked, and `no_removals` lists the checked minors that remove nothing.
+  A unit test (`table_accounts_for_every_minor`) requires every minor from
+  1.16 through `checked_through` to be some entry's `removed_in` or in
+  `no_removals`, never both. The Rust side embeds it
   (`include_str!`); the UI imports the same file
   (`lib/kube/deprecations.ts`, which also translates the note codes). The
-  file's `_comment` says how to update it; a unit test checks it.
+  file's `_comment` says how to update it; unit tests check it.
 - **Scan** against a target (default: the minor after the server's
   `gitVersion`), concurrently: metadata-only lists (paged, 20 000 per kind)
   of every table kind the cluster serves — one resource per kind, the
@@ -186,7 +199,8 @@ Endpoints` (deprecated in 1.33). The Rust side embeds it
   `components/workbench/upgrade/`): target picker (next four minors),
   blockers / warnings / Helm tiles, sources, filters and findings grouped by
   apiVersion + kind with the replacement and notes; rows open the object or
-  the Helm release. Reports live in `store/useUpgradeStore.ts` (per cluster
+  the Helm release. The target card notes when the target is newer than the
+  report's `table_checked_through` (later releases may remove more APIs). Reports live in `store/useUpgradeStore.ts` (per cluster
   and target, this session only) and feed the dashboard's fleet card
   (`components/dashboard/UpgradeFleetCard.tsx`: every connected cluster
   against its next minor, "Check all" scans three at a time). Schema-aware

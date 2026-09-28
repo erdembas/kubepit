@@ -11,6 +11,7 @@ import type {
   KubeObject,
 } from '@/types';
 import { sleep } from './bus';
+import { droppedPaths } from './droppedPaths';
 import { CHARTS, chartDef, type ChartDef } from './fixtures/charts';
 import { getDb, helmKey } from './fixtures/db';
 import { handlers, register, type MockArgs } from './registry';
@@ -135,6 +136,7 @@ export function diffManifests(before: string, after: string, ns: string): HelmPr
       before: previous?.value ?? null,
       after: doc.value,
       live: null,
+      dropped_fields: [],
     });
   }
   for (const [key, doc] of old)
@@ -149,6 +151,7 @@ export function diffManifests(before: string, after: string, ns: string): HelmPr
       before: doc.value,
       after: null,
       live: null,
+      dropped_fields: [],
     });
   return out.sort(
     (a, b) =>
@@ -157,6 +160,31 @@ export function diffManifests(before: string, after: string, ns: string): HelmPr
       (a.namespace ?? '').localeCompare(b.namespace ?? '') ||
       a.name.localeCompare(b.name),
   );
+}
+
+/**
+ * Demo: the chart versions the demo upgrades to stop setting this
+ * annotation, which the running revision rendered on the release's first
+ * changed Deployment (so it is live too). The review then lists it under
+ * the fields helm removes. Only the preview's copies carry it.
+ */
+const RETIRED_ANNOTATION = 'example.com/legacy-rollout';
+
+function retiredBefore(objects: HelmPreviewObject[]): HelmPreviewObject | null {
+  const target = objects.find((o) => o.kind === 'Deployment' && o.change === 'changed');
+  if (!target?.before) return null;
+  target.before = structuredClone(target.before);
+  target.before.metadata.annotations = {
+    ...target.before.metadata.annotations,
+    [RETIRED_ANNOTATION]: 'enabled',
+  };
+  return target;
+}
+
+function retiredLive(result: DryRunResult): DryRunResult {
+  for (const o of [result.live, result.result])
+    if (o) o.metadata.annotations = { ...o.metadata.annotations, [RETIRED_ANNOTATION]: 'enabled' };
+  return result;
 }
 
 async function liveDryRun(
@@ -225,10 +253,16 @@ register({
       request: { ...(request as HelmUpgradeRequest), dry_run: true },
     })) as HelmInstallResult;
     const objects = diffManifests(detail.manifest, result.manifest, namespace);
+    const retired = retiredBefore(objects);
     if (live) {
       await sleep(400);
-      for (const o of objects)
-        if (o.after) o.live = await liveDryRun(clusterId, o.after, namespace);
+      for (const o of objects) {
+        if (!o.after) continue;
+        const dryRun = await liveDryRun(clusterId, o.after, namespace);
+        o.live = o === retired ? retiredLive(dryRun) : dryRun;
+        if (o.change === 'changed' && o.before && o.live.live)
+          o.dropped_fields = droppedPaths(o.before, o.after, o.live.live);
+      }
     }
     return {
       result,

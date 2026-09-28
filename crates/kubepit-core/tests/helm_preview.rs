@@ -21,11 +21,13 @@ const SCHEMA: &str = r#"{"$schema":"http://json-schema.org/draft-07/schema#","ty
  "properties":{"replicaCount":{"type":"integer","minimum":1}},"required":["replicaCount"]}"#;
 
 /// What `helm upgrade --dry-run --output json` prints: the next revision.
+/// Its Deployment keeps an annotations map but no longer sets
+/// `example.com/legacy`, which the running revision does.
 const DRY_RUN_RELEASE: &str = r#"{"name":"web","namespace":"shop","version":4,
  "info":{"status":"pending-upgrade","description":"Dry run complete","notes":"Upgraded"},
  "chart":{"metadata":{"name":"nginx","version":"18.10.0"},"values":{"replicaCount":1}},
  "config":{"replicaCount":3},
- "manifest":"---\n# Source: nginx/templates/deployment.yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n  replicas: 3\n---\n# Source: nginx/templates/svc.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: web\nspec:\n  ports:\n  - port: 80\n"}"#;
+ "manifest":"---\n# Source: nginx/templates/deployment.yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\n  annotations:\n    example.com/team: shop\nspec:\n  replicas: 3\n---\n# Source: nginx/templates/svc.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: web\nspec:\n  ports:\n  - port: 80\n"}"#;
 
 /// `pull` unpacks a chart into `--destination`, with a schema only when
 /// the `with-schema` marker exists; `upgrade` prints the dry-run release.
@@ -109,7 +111,8 @@ fn release_payload() -> String {
                   // helm stores `[]byte` fields base64-encoded.
                   "schema": engine.encode(SCHEMA)},
         "config": {"replicaCount": 2},
-        "manifest": "---\n# Source: nginx/templates/deployment.yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n  replicas: 2\n---\n# Source: nginx/templates/cm.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: web-config\n"
+        // The running revision's Deployment carries an annotation the new render drops.
+        "manifest": "---\n# Source: nginx/templates/deployment.yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\n  annotations:\n    example.com/legacy: \"on\"\nspec:\n  replicas: 2\n---\n# Source: nginx/templates/cm.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: web-config\n"
     });
     let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     gz.write_all(release.to_string().as_bytes()).unwrap();
@@ -118,7 +121,9 @@ fn release_payload() -> String {
 
 fn deployment(replicas: i64) -> Value {
     json!({"apiVersion": "apps/v1", "kind": "Deployment",
-           "metadata": {"name": "web", "namespace": "shop", "uid": "uid-web", "resourceVersion": "5"},
+           "metadata": {"name": "web", "namespace": "shop", "uid": "uid-web", "resourceVersion": "5",
+                        "annotations": {"example.com/legacy": "on",
+                                        "deployment.kubernetes.io/revision": "3"}},
            "spec": {"replicas": replicas}})
 }
 
@@ -299,6 +304,15 @@ async fn upgrade_preview_diffs_objects_and_live_state_on_read_only_clusters() {
     assert_eq!(live.operation, DryRunOperation::Update);
     assert_eq!(live.live.as_ref().unwrap()["spec"]["replicas"], 2);
     assert_eq!(live.result.as_ref().unwrap()["spec"]["replicas"], 3);
+    // Old render minus new render, still live: what helm's three-way merge removes.
+    assert_eq!(
+        deployment.dropped_fields,
+        vec![r#"metadata.annotations["example.com/legacy"]"#.to_string()]
+    );
+    assert!(
+        service.dropped_fields.is_empty(),
+        "only changed objects drop fields"
+    );
     assert!(
         preview.objects[2].live.is_none(),
         "removed objects are not applied"
@@ -326,6 +340,10 @@ async fn upgrade_preview_diffs_objects_and_live_state_on_read_only_clusters() {
         .unwrap();
     assert!(!quick.live_checked);
     assert!(quick.objects.iter().all(|o| o.live.is_none()));
+    assert!(
+        quick.objects.iter().all(|o| o.dropped_fields.is_empty()),
+        "dropped fields need the live objects"
+    );
     assert!(server.log.lock()[before..]
         .iter()
         .all(|r| r.method == "GET" && !r.path.contains("/deployments/")));

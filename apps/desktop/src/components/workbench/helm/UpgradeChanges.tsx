@@ -1,7 +1,7 @@
 import * as i18n from '@/i18n';
 import { useLocaleMemo as useMemo } from '@/i18n';
 import { useState } from 'react';
-import { Loader2, Radar, TriangleAlert } from 'lucide-react';
+import { Eraser, Loader2, Radar, TriangleAlert } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { deprecatedApi, deprecationMessage } from '@/lib/kube/deprecations';
 import { normalizedYaml } from '@/lib/kube/normalize';
@@ -35,7 +35,9 @@ function liveLabel(live: DryRunResult): { text: string; tone: string } {
  * the rendered revision as added / changed / removed / unchanged, with a
  * per-object diff (normalized like every other diff). With "Compare with
  * live objects" the rendered objects are also dry-run on the server and
- * diffed against what is running now.
+ * diffed against what is running now, and each changed object lists the
+ * fields helm's three-way merge removes (`dropped_fields`), which that dry
+ * run never shows.
  */
 export function UpgradeChanges({
   preview,
@@ -65,6 +67,10 @@ export function UpgradeChanges({
     for (const o of objects) out[o.change]++;
     return out;
   }, [objects]);
+  const dropped = useMemo(
+    () => objects.reduce((n, o) => n + o.dropped_fields.length, 0),
+    [objects],
+  );
   const visible = filter === 'all' ? objects : objects.filter((o) => o.change === filter);
   const selected =
     visible.find((o) => o.key === selectedKey) ??
@@ -87,6 +93,16 @@ export function UpgradeChanges({
             <ChangeBadge change={c} count={counts[c]} />
           </button>
         ))}
+        {preview.live_checked && dropped > 0 && (
+          <span className="text-status-starting flex items-center gap-1 text-[11px]">
+            <Eraser className="h-3 w-3" />
+            {i18n.plural(
+              '{count} field removed from live objects',
+              '{count} fields removed from live objects',
+              dropped,
+            )}
+          </span>
+        )}
         <label className="text-fg-dim ml-auto flex cursor-pointer items-center gap-1.5 text-[11px]">
           {loadingLive ? (
             <Loader2 className="h-3 w-3 animate-spin" />
@@ -166,6 +182,7 @@ export function UpgradeChanges({
                   )}
                 </div>
                 <DeprecationNote object={selected} />
+                <DroppedFields object={selected} />
                 {liveSide ? (
                   <LiveDiff result={selected.live!} />
                 ) : (
@@ -227,6 +244,19 @@ function ObjectRow({
             {live && <span className={cn('ml-1', live.tone)}>· {live.text}</span>}
           </span>
         </span>
+        {o.dropped_fields.length > 0 && (
+          <span
+            className="text-status-starting flex shrink-0 items-center gap-0.5 text-[10.5px] tabular-nums"
+            title={i18n.plural(
+              'Helm removes {count} field from the live object',
+              'Helm removes {count} fields from the live object',
+              o.dropped_fields.length,
+            )}
+          >
+            <Eraser className="h-3 w-3" />
+            {o.dropped_fields.length}
+          </span>
+        )}
         {deprecated && (
           <TriangleAlert
             className="text-status-starting h-3 w-3 shrink-0"
@@ -253,6 +283,27 @@ function DeprecationNote({ object }: { object: HelmPreviewObject }) {
   );
 }
 
+/** Old render minus new render, still live: what helm's three-way merge removes. */
+function DroppedFields({ object }: { object: HelmPreviewObject }) {
+  i18n.useLocale();
+  if (!object.dropped_fields.length) return null;
+  return (
+    <div className="border-border/50 bg-status-starting/[0.06] flex max-h-28 shrink-0 flex-col border-b px-3 py-1.5 text-[11px]">
+      <p className="text-fg-muted flex items-center gap-1.5">
+        <Eraser className="text-status-starting h-3 w-3 shrink-0" />
+        {i18n.t('Helm will remove these fields from the live object')}
+      </p>
+      <ul className="overlay-scroll mt-1 min-h-0 overflow-auto pl-[18px]">
+        {object.dropped_fields.map((path) => (
+          <li key={path} className="text-fg truncate font-mono text-[10.5px]" title={path}>
+            {path}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function LiveDiff({ result }: { result: DryRunResult }) {
   i18n.useLocale();
   if (result.error)
@@ -268,19 +319,12 @@ function LiveDiff({ result }: { result: DryRunResult }) {
       </div>
     );
   return (
-    <>
-      <p className="border-border/50 text-fg-dim shrink-0 border-b px-3 py-1.5 text-[11px]">
-        {i18n.t(
-          'Server-side apply dry run of the rendered object: fields the new chart stops setting are not removed here, helm removes them.',
-        )}
-      </p>
-      <DiffView
-        original={normalizedYaml(result.live)}
-        modified={normalizedYaml(result.result)}
-        originalLabel={result.live ? i18n.t('Live') : i18n.t('Not in the cluster')}
-        modifiedLabel={i18n.t('After upgrade (server dry run)')}
-        identicalHint={i18n.t('The server would leave this object unchanged.')}
-      />
-    </>
+    <DiffView
+      original={normalizedYaml(result.live)}
+      modified={normalizedYaml(result.result)}
+      originalLabel={result.live ? i18n.t('Live') : i18n.t('Not in the cluster')}
+      modifiedLabel={i18n.t('After upgrade (server dry run)')}
+      identicalHint={i18n.t('The server would leave this object unchanged.')}
+    />
   );
 }
