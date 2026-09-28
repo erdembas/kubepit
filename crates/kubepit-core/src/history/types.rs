@@ -417,6 +417,8 @@ pub enum HistoryKind {
     Audit,
     Events,
     Changes,
+    /// Stored recommendation scans.
+    Recommendations,
     All,
 }
 
@@ -442,6 +444,8 @@ pub struct HistoryStatus {
     pub audit: HistoryTableStatus,
     pub events: HistoryTableStatus,
     pub changes: HistoryTableStatus,
+    /// Rows of stored recommendation scans; `oldest_ts` is the oldest run.
+    pub recommendations: HistoryTableStatus,
     /// Writes dropped because the writer queue was full.
     pub dropped: u64,
     /// Connected clusters whose events and changes are being persisted now.

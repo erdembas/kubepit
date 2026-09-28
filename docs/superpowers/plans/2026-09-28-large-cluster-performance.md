@@ -233,7 +233,7 @@ git commit -m "test(perf): scale presets and a paged, selector-aware fake API se
 
   Task 12 (H1) and Task 15 (H4) update the expectations pinned here.
 
-- [ ] **Step 1: Write the test** (a snapshot of today's behaviour; it passes on the current code)
+- [x] **Step 1: Write the test** (a snapshot of today's behaviour; it passes on the current code)
 
 ```rust
 // crates/kubepit-core/tests/perf_probe.rs
@@ -271,14 +271,14 @@ Where the counts come from:
 - secrets and configmaps = journal;
 - events = history persistence.
 
-The helpers `scale_setup`, `persist_history`, `wait_synced` and `gvk` live in this file.
+The helpers `scale_setup`, `persist_history`, `wait_synced` and `gvk` live in this file. _(Done: they, `watch_streams_per_path` and `unpaged_lists` live in `tests/support/perf.rs` instead, so `benches/e2e.rs` shares them. `unpaged_lists(log)` counts every list-shaped path, including ones the fixture answers 404, so it takes no cluster. The whole fan-out map, all 20 paths, is pinned. An ignored test repeats the snapshot at `m` and `l`: `cargo test -p kubepit-core --test perf_probe -- --ignored`. The counts matched at all three presets.)_
 
-- [ ] **Step 2: Run the test**
+- [x] **Step 2: Run the test**
 
 Run: `cargo test -p kubepit-core --test perf_probe -- --nocapture`
 Expected: PASS. If a count differs, the code changed after this plan was written. Pin the observed value, state it in the commit body, and record it in the spec's Results table (`structural/fanout`).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add crates/kubepit-core/tests/perf_probe.rs docs/superpowers/specs
@@ -308,19 +308,20 @@ git commit -m "test(perf): pin watch fan-out and unpaged lists at scale"
 | `metrics_history/series_cluster` | full ring | `series(&MetricsHistoryQuery::Cluster, 0)` |
 | `metrics_history/series_100_pods` | full ring | `series(&Pods { namespace, names: 100 }, 0)` |
 
-- [ ] **Step 1: Write the benches.** Use `criterion_group!{ name = benches; config = Criterion::default().sample_size(20); targets = … }` and build inputs outside `b.iter`. For benches that consume their input, use `iter_batched` with `BatchSize::LargeInput`.
+- [x] **Step 1: Write the benches.** Use `criterion_group!{ name = benches; config = Criterion::default().sample_size(20); targets = … }` and build inputs outside `b.iter`. For benches that consume their input, use `iter_batched` with `BatchSize::LargeInput`.
+  _(Done. `watch/aggregator_initial_20k` flushes every `FLUSH_MAX_OBJECTS` like `run_watch`; `watch/reset_batch_20k` times only `take_batch` (`iter_custom`, the re-list is untimed); `metrics_history` uses synthetic metrics with 100 pods per namespace, so one namespace holds the 100 queried pods. `[lib] bench = false` keeps `cargo bench -p kubepit-core -- <criterion flags>` from handing the flags to libtest.)_
 
-- [ ] **Step 2: Run them**
+- [x] **Step 2: Run them**
 
 Run: `cargo bench -p kubepit-core --bench watch --bench metrics_history -- --quick --noplot`
 Expected: each id above prints a time, and `target/criterion/watch/aggregator_initial_20k/new/estimates.json` exists.
 
-- [ ] **Step 3: Lint**
+- [x] **Step 3: Lint**
 
 Run: `cargo clippy --workspace --all-targets -- -D warnings`
 Expected: no warnings.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add Cargo.toml Cargo.lock crates/kubepit-core
@@ -347,14 +348,15 @@ git commit -m "perf(bench): Criterion benches for watch batching and metrics his
 | `journal/details_after_500` | journal with 5 000 entries | `details_after(0, 500)` |
 | `history/writer_events_10k` | temp-dir `Writer::start(path, QUEUE_CAPACITY)` | `submit(WriteOp::Events(rows))` in batches of 100 until 10 000, then `flush(10 s)`. After the run, assert `stats().dropped == 0` |
 
-- [ ] **Step 1: Write the benches** as specified. `writer_events_10k` uses `iter_custom` with a fresh temp dir per iteration.
+- [x] **Step 1: Write the benches** as specified. `writer_events_10k` uses `iter_custom` with a fresh temp dir per iteration.
+  _(Done. `book_record` records a new alert on a new object a minute after the last one, so every call takes the slowest path: index, push, evict the oldest. `apply_update` and `details_after_500` apply real `data` changes, so each apply records a Modified entry. The writer bench also asserts `failed == 0`.)_
 
-- [ ] **Step 2: Run them**
+- [x] **Step 2: Run them**
 
 Run: `cargo bench -p kubepit-core --bench watchers -- --quick --noplot`
 Expected: every id prints a time, and the writer bench reports no drops (the bench panics otherwise).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add crates/kubepit-core/benches/watchers.rs
@@ -387,14 +389,18 @@ git commit -m "perf(bench): alerts, change journal and history writer benches"
   - `{ "e2e/max_rss_l_all_watchers": <bytes> }`: `getrusage(RUSAGE_SELF).ru_maxrss` (KiB on Linux, bytes on macOS; normalize to bytes). It is measured after connecting to `l` with every opt-in switch on, one pods watch, and a 5 s settle.
   - `"structural/list_requests_without_limit"`: the Task 2 `unpaged_lists` count at `l`.
 
-- [ ] **Step 1: Write the benches.** e2e benches build a `tokio::runtime::Runtime` and use the fixture router from Task 1. They never touch `~/.kube`: `Paths` points at a temp dir.
+- [x] **Step 1: Write the benches.** e2e benches build a `tokio::runtime::Runtime` and use the fixture router from Task 1. They never touch `~/.kube`: `Paths` points at a temp dir.
+  _(Done, with three choices worth knowing:_
+  - _`e2e/max_rss_l_all_watchers` is measured in a child process (the bench binary re-run with `KUBEPIT_PERF_RSS_CHILD_URL`), so the in-process fixture's own memory is not counted. The report is written only under `cargo bench`: it needs `--bench` and skips `--list`._
+  - _`e2e/fleet_search_l` sets `limit_per_kind` to 20 000, so every page is read: 40 pod pages, 80 lists in all. The UI's 200 would stop after about two pages per kind at `l`. The coordinator decided to keep 20 000, because the spec's risk is the many-page path. Discovery is cached first with `api_resources`, as the UI does, so each search makes exactly its 80 list requests. The bench asserts that count._
+  - _`e2e/prometheus_query` detects `prometheus-operated` once, untimed. The service is added to the last page of the fixture's Services list.)_
 
-- [ ] **Step 2: Run them**
+- [x] **Step 2: Run them**
 
 Run: `cargo bench -p kubepit-core --bench search_proxies --bench e2e -- --quick --noplot && cat target/perf/backend-e2e.json`
 Expected: every id prints a time, and the JSON file holds both keys.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add crates/kubepit-core
@@ -473,7 +479,7 @@ Expected: FAIL (module missing).
   - With `churn > 0`, the liveness timer ticks every 100 ms and applies `churn / 10` pod changes per tick round-robin: 90% status/label updates, 10% delete + recreate.
   - `db.ts` keeps `byName: Map<kindKey, Map<"ns/name", uid>>` and `byOwner: Map<ownerUid, Set<uid>>` in sync in `put`/`drop`.
 
-- [x] **Step 4: Run the tests and check the build time** _(Browser check on 2026-09-28, `pnpm dev:ui` at `?scale=l` in the desktop app's browser pane (pane hidden, `setTimeout` polling): `c-scale-l` connected 1.5 s after the click, and the pods table showed all 20 000 pods 0.77 s after opening Pods, 2.3 s in total. Earlier, the tests and typecheck passed. Headless (Vitest, fake timers): `c-scale-l` builds in ~0.25 s; the list arrives 150–350 ms after the watch, its 40 full batches go out at once (one macrotask each), and `synced` follows at the first 150 ms tick after them: at 450 ms under fake timers.)_
+- [x] **Step 4: Run the tests and check the build time** _(Browser check on 2026-09-28, `pnpm dev:ui` at `?scale=l` in the desktop app's browser pane (pane hidden, `setTimeout` polling): `c-scale-l` connected 1.5 s after the click, and the pods table showed all 20 000 pods 0.77 s after opening Pods, 2.3 s in total. Earlier, the tests and typecheck passed. Headless (Vitest, fake timers): `c-scale-l` builds in ~0.25 s; the list arrives 20–140 ms after the watch, its 40 full batches go out at once (one macrotask each), and `synced` follows at the first 150 ms tick after them: the list at 80 ms, its batches by 119 ms and `synced` at 150 ms under fake timers.)_
 
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck`
 Expected: PASS. Then open `pnpm dev:ui` at `http://localhost:1430/?scale=l`: the `c-scale-l` cluster connects and the pods table fills within 3 s.
@@ -492,7 +498,7 @@ git commit -m "perf(mock): scaled demo clusters (?scale=, &churn=) and backend-l
 **Files:**
 - Create: `apps/desktop/src/lib/perf/fixtures.ts`
 - Create: `apps/desktop/src/lib/kube/topology/topology.bench.ts`, `lib/kube/health/health.bench.ts`, `lib/kube/netpol/netpol.bench.ts`, `lib/logs/logs.bench.ts`, `components/workbench/table/tableModel.bench.ts`
-- Modify: `package.json` (root script `"perf:bench": "pnpm --filter @kubepit/desktop bench -- --outputJson ../../perf-results/frontend-bench.json"`), `.gitignore` (`perf-results/`)
+- Modify: `package.json` (root script `"perf:bench": "pnpm --filter @kubepit/desktop bench --outputJson ../../perf-results/frontend-bench.json"`; no `--`, which pnpm forwards to Vitest, so the flag was ignored), `.gitignore` (`perf-results/`)
 
 **Interfaces:**
 - Consumes: `generateScaleObjects` (Task 6).
@@ -514,14 +520,14 @@ git commit -m "perf(mock): scaled demo clusters (?scale=, &churn=) and backend-l
     - `logs/record_index_50k`: `new RecordIndex().ingest(50 000 mixed RawLine)`;
     - `table/filter_sort_20k`: `filterItems` + `sortItems` on `l` pods sorted by the default column.
 
-- [ ] **Step 1: Write the bench files** with `bench('<id>', fn, { time: 2000 })`. Build inputs once at module scope.
+- [x] **Step 1: Write the bench files** with `bench('<id>', fn, { time: 2000 })`. Build inputs once at module scope.
 
-- [ ] **Step 2: Run them**
+- [x] **Step 2: Run them**
 
 Run: `pnpm perf:bench && node -e "console.log(Object.keys(require('./perf-results/frontend-bench.json')).length > 0)"`
 Expected: every id appears in the bench output table; the JSON exists.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/desktop/src package.json .gitignore
@@ -535,7 +541,8 @@ git commit -m "perf(bench): Vitest benches for topology, health, netpol, logs an
 **Files:**
 - Create: `apps/desktop/src/lib/perf/stats.ts`, `apps/desktop/src/lib/perf/probe.ts`
 - Modify: `apps/desktop/src/main.tsx:15-17` (install the probe global)
-- Modify: `apps/desktop/src/components/workbench/table/ResourcePage.tsx` (marks), `components/workbench/data/watchCache.ts:108-145` (apply → flush duration), `components/workbench/topology/TopologyMap.tsx:98-120` (build/view/layout), `components/workbench/health/useHealthScan.ts:~226` (scan duration), `components/workbench/ViewPanes.tsx` (view switch)
+- Modify: `apps/desktop/src/components/workbench/table/ResourcePage.tsx` (marks), `components/workbench/data/watchCache.ts:108-145` (apply → commit: the batches' apply cost plus flush start → React commit), `components/workbench/topology/TopologyMap.tsx:98-120` (build/view/layout), `components/workbench/health/useHealthScan.ts:~226` (scan duration), `components/workbench/ViewPanes.tsx` (view switch)
+  - As built: the driver is `apps/desktop/src/lib/perf/driver.ts`, a lazy chunk that `main.tsx` loads only while the probe is on, and `installPerfGlobal` lives in `lib/perf/global.ts`, which only that chunk imports (the entry bundle never names the global); `map:build` is timed in `topology/useTopologyData.ts` (where the graph is built); the view switch is in `components/workbench/tabs/ViewPanes.tsx`.
 - Test: `apps/desktop/src/lib/perf/stats.test.ts`, `apps/desktop/src/lib/perf/probe.test.ts`
 
 **Interfaces:**
@@ -553,9 +560,9 @@ git commit -m "perf(bench): Vitest benches for topology, health, netpol, logs an
     - `heap(): number | null` (`performance.memory` when present), `domNodes()`;
     - `watchStats()` (watchCache entries: key, listeners, items), `mockWatchStats()`;
     - `report()`, `reset()`.
-  - Recorded ids: `table:ttfr` (navigate → first non-empty rows committed), `table:synced`, `watch:apply` (with `items`), `map:build`, `map:view`, `map:layout`, `health:scan`, `view:switch`.
+  - Recorded ids: `table:ttfr` (navigate → first non-empty rows committed), `table:synced`, `watch:apply` (applying the batches plus flush start → React commit, without the frame wait; meta `items`, `applyMs`, `flushMs`, `commitMs` and `latencyMs`, first batch → commit), `map:build`, `map:view`, `map:layout`, `health:scan`, `view:switch`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // apps/desktop/src/lib/perf/stats.test.ts
@@ -604,21 +611,21 @@ describe('probe', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm --filter @kubepit/desktop test -- src/lib/perf`
 Expected: FAIL (modules missing).
 
-- [ ] **Step 3: Implement the probe and the instrumentation.**
+- [x] **Step 3: Implement the probe and the instrumentation.**
   - Every instrumentation call is `if (perfEnabled()) …` or a no-op function, so disabled builds do no work beyond one boolean check.
   - `scrollTable` finds the active table's scroll container (`[role="rowgroup"]`'s scroll parent). It scrolls with `requestAnimationFrame` at 2 000 px/s and collects frame deltas and long tasks (`PerformanceObserver('longtask')`).
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck && pnpm --filter @kubepit/desktop build`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/src
@@ -632,6 +639,7 @@ git commit -m "perf(ui): dev-only in-app probe (?perf=1) for rows, scrolling, ma
 **Files:**
 - Modify: `package.json` (root devDependency `playwright` `^1.55.0`; script `"perf:ui": "node scripts/perf/ui-perf.mjs"`)
 - Create: `scripts/perf/lib.mjs`, `scripts/perf/ui-perf.mjs`
+- Create: `scripts/perf/index.js` (as built: Node 22 runs a directory argument of `node --test` as a module instead of searching it; this index loads every `*.test.mjs` beside it, so `node --test scripts/perf/` keeps working)
 - Test: `scripts/perf/lib.test.mjs`
 
 **Interfaces:**
@@ -644,8 +652,15 @@ git commit -m "perf(ui): dev-only in-app probe (?perf=1) for rows, scrolling, ma
     - `soakSummary(samples: Array<{ minute: number; heap: number; dom: number }>): { heapRatio: number; domDrift: number }`. The ratio is the last sample's heap ÷ the first sample at or after minute 5; drift is `(lastDom − firstDom) / firstDom`.
     - `resultIds(preset, measurements): Record<string, number>`. It maps to the `ui/*` ids in the spec budgets table (`ui/ttfr_pods_<preset>` and so on).
   - Safety: the driver aborts if `page.evaluate(() => '__TAURI_INTERNALS__' in window)` is true, and only navigates to `http://localhost:<port>`.
+  - As built:
+    - Every request outside the preview server is aborted (`isAllowedUrl`).
+    - The result file is `{ meta, results: { "<id>": { value, unit } }, raw }`.
+    - Besides the budget ids, it writes `ui/scroll_p95_frame_<p>`, `ui/scroll_long_task_max_<p>` and `ui/health_long_task_max_<p>`, the other parts of those budgets.
+    - Each scenario runs in a fresh page, so no scenario reuses another's cached watches.
+    - `connect` lands on a view without watches. The overview's health card would otherwise warm the pods cache.
+    - `ui/map_*` runs from opening the map to two frames after its synced view. `ui/map_leave` switches from the synced all-namespaces map to the overview.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```js
 // scripts/perf/lib.test.mjs
@@ -668,15 +683,15 @@ test('resultIds names results like the budgets', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `node --test scripts/perf/`
 Expected: FAIL (module missing).
 
-- [ ] **Step 3: Implement.** Each scenario calls the probe driver:
+- [x] **Step 3: Implement.** Each scenario calls the probe driver:
   - `ttfr`: `connect('c-scale-<p>')`, `openKind(…, 'pods')`, then poll `report()` for `table:ttfr` and `table:synced`.
   - `scroll`: `scrollTable(5000)`.
-  - `apply`: needs churn; run for 20 s and take the p95 of `watch:apply`.
+  - `apply`: needs churn; run for 20 s and take the p95 of `watch:apply` (the work per flush; the frame wait is only in its `latencyMs`).
   - `map`: `openView(…, 'resource-map')` scoped to `ns-0001`, then all namespaces on `m`.
   - `health`: `health:scan` plus the long tasks.
   - `leave`: `switchView` from the map to the overview.
@@ -684,12 +699,12 @@ Expected: FAIL (module missing).
 
   Write the JSON result file.
 
-- [ ] **Step 4: Run the tests and one real pass**
+- [x] **Step 4: Run the tests and one real pass**
 
 Run: `node --test scripts/perf/ && pnpm --filter @kubepit/desktop build && pnpm exec playwright install chromium && pnpm perf:ui -- --preset s --scenarios ttfr,scroll`
 Expected: the tests pass, and `perf-results/ui.json` holds `ui/ttfr_pods_s` and `ui/scroll_fps_s`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add package.json pnpm-lock.yaml scripts/perf

@@ -144,7 +144,9 @@ register({
         // `synced` at the next tick, then the changes made meanwhile.
         deliverList(id, listFor(clusterId, gvk, nss));
       },
-      150 + Math.random() * 200,
+      // The list arrives before the first 150 ms tick, so a small list lands
+      // on that tick as it does from the backend.
+      20 + Math.random() * 120,
     );
     return id;
   },

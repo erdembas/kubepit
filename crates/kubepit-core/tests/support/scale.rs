@@ -622,6 +622,13 @@ fn not_found(path: &str) -> Reply {
     )
 }
 
+/// Whether `path` (without its query) has the shape of a list or watch
+/// request (`/api/{v}/{plural}`, `/apis/{g}/{v}/{plural}` or their
+/// `namespaces/{ns}/…` variants), whether or not the fixture serves it.
+pub fn is_list_path(path: &str) -> bool {
+    resolve(path).is_some()
+}
+
 /// A list/watch path → (cluster-wide collection path, namespace).
 fn resolve(path: &str) -> Option<(String, Option<String>)> {
     let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();

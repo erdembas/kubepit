@@ -15,6 +15,7 @@ import { PaneFocusContext, useNestedPaneFocus } from '@/components/split/paneFoc
 import { PANE_DROP, tabCollision, useTabDrag, type DropZone } from '@/components/split/tabDrag';
 import { kindIcon } from '@/lib/kube/icons';
 import { viewLabel } from '@/lib/kube/nav';
+import { perfViewShown } from '@/lib/perf/probe';
 import { useViewLayout, useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { ViewGroup, ViewLayout } from '@/store/viewLayout';
 import type { ApiResourceInfo } from '@/types';
@@ -132,6 +133,7 @@ const ViewPane = memo(function ViewPane({
   tabSlot: HTMLElement | null;
 }) {
   i18n.useLocale();
+  perfViewShown(group.id, group.active);
   const { setNodeRef } = useDroppable({ id: `${PANE_DROP}${group.id}` });
   // Unfocused while the main pane holding this cluster is not focused either.
   const keyboardFocus = useNestedPaneFocus(focused);

@@ -20,9 +20,12 @@
     "typecheck": "pnpm -r typecheck",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,css,html}\"",
     "i18n:check": "node scripts/check-i18n.mjs",
-    "test:ui": "pnpm --filter @kubepit/desktop test"
+    "test:ui": "pnpm --filter @kubepit/desktop test",
+    "perf:bench": "pnpm --filter @kubepit/desktop bench --outputJson ../../perf-results/frontend-bench.json",
+    "perf:ui": "node scripts/perf/ui-perf.mjs"
   },
   "devDependencies": {
+    "playwright": "^1.55.0",
     "prettier": "^3.9.8",
     "prettier-plugin-tailwindcss": "^0.8.1",
     "typescript": "^5.7.2"

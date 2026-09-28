@@ -99,7 +99,7 @@ Deterministic structural probes (request counts per path) are ordinary tests, no
 1. **Vitest bench** (`*.bench.ts`, Node) for the pure engines: topology build/view/layout, `scanHealth`, `buildCluster` + `namespaceMatrix`, `parseLogLine`, `detectLevelToken`, `RecordIndex`, and table filter/sort. None of them imports React or zustand (verified); they use `@/i18n/core`.
 2. **An in-app probe** (`lib/perf/`), active only with `?perf=1` or `localStorage['kubepit.perf'] = '1'`, with no cost when inactive. It records:
    - time-to-first-rows and time-to-synced;
-   - watch batch apply → flush duration;
+   - the cost of applying watch batches: their apply, the snapshot flush and React's commit (the wait for the next frame is recorded apart, as latency);
    - FPS during a programmatic scroll;
    - long tasks;
    - map build/view/layout and health scan durations;
@@ -140,7 +140,7 @@ The macOS WKWebView number comes from the same probe in `pnpm tauri:dev`, opened
 | H7 | Per-frame snapshot copies and full re-sorts cost too much | Batch apply → commit p95 > 16 ms at `l` with churn 50/s | Incremental snapshots (items array reused when only updates arrive) and a sort merge of changed rows |
 | H8 | Idle snapshots and journal baselines grow memory | Soak heap at 30 min > 1.15 × heap at 5 min | Evict `watchCache` entries idle (unsubscribed) for 5 minutes; cap journal baseline bytes |
 | H9 | The journal hot path is slow | `journal/apply_update` or `journal/details_after_500` misses its budget | Keep the parsed baseline object (not only its string); convert to YAML outside the lock |
-| H10 | Fleet search times out at scale | `fleet_search/e2e_l` > 6 s per cluster | Stop paging at the per-kind match limit sooner; raise concurrency per cluster; stream partial results before the timeout |
+| H10 | Fleet search times out at scale | `e2e/fleet_search_l` > 6 s per cluster | Stop paging at the per-kind match limit sooner; raise concurrency per cluster; stream partial results before the timeout |
 | MAP | The 400-node Resource Map cap (from hardening) | Map bench at 800 and 1 200 nodes within budget (build + view + layout ≤ 250 ms, frame ≤ 16 ms while panning) | Raise `DEFAULT_MAX_NODES` to the largest size within budget, else keep 400 and record why |
 
 Pagination note: watch lists already page. H4 is about the non-watch lists above.

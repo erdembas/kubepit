@@ -872,7 +872,7 @@ export interface HistoryChangePage {
   next_cursor: number | null;
 }
 
-export type HistoryKind = 'audit' | 'events' | 'changes' | 'all';
+export type HistoryKind = 'audit' | 'events' | 'changes' | 'recommendations' | 'all';
 
 export interface HistoryTableStatus {
   rows: number;
@@ -891,6 +891,8 @@ export interface HistoryStatus {
   audit: HistoryTableStatus;
   events: HistoryTableStatus;
   changes: HistoryTableStatus;
+  /** Rows of stored recommendation scans; `oldest_ts` is the oldest run. */
+  recommendations: HistoryTableStatus;
   /** Writes dropped because the writer queue was full. */
   dropped: number;
   /** Connected clusters whose events and changes are persisted right now. */

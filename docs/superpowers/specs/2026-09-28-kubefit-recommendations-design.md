@@ -853,7 +853,9 @@ state changes and at most every 250 ms while progressing.
 It carries no kubeconfig, server URL, Prometheus service, Secret reference, tenant or
 label selector.
 
-**YAML:** one fragment per **changed** container, separated by a blank line. Values use
+**YAML:** one fragment per **changed** container. Every fragment is its own YAML
+document, separated by a blank line and `---`, so an export of several containers stays
+valid YAML (one document cannot repeat `resources:`). Values use
 `patch::format_cpu` / `patch::format_memory`. The comments are fixed English:
 
 ```yaml

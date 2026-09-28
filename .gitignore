@@ -37,6 +37,9 @@ yarn-error.log*
 **/src-tauri/gen/
 **/src-tauri/target/
 
+# Performance results (scripts/perf, pnpm perf:*)
+perf-results/
+
 # TypeScript incremental build info
 *.tsbuildinfo
 

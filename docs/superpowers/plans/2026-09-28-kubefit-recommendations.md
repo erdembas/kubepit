@@ -1221,7 +1221,7 @@ git commit -m "feat(recommendations): backend settings with per-strategy overrid
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn migration_two_applies_on_fresh_and_version_one_databases() {
@@ -1246,21 +1246,21 @@ Steps:
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core history::recommendations`
 
 Expected: FAIL to compile.
 
-- [ ] **Step 3: Implement `history/recommendations.rs` and append the migration**
+- [x] **Step 3: Implement `history/recommendations.rs` and append the migration**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core history`
 
 Expected: PASS, including the existing history tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/src/history crates/kubepit-core/src/history.rs crates/kubepit-core/src/recommendations
@@ -1295,7 +1295,7 @@ git commit -m "feat(history): store recommendation scans (migration 2)"
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn retention_deletes_old_runs_but_keeps_the_latest() { /* latest older than 30 d stays; others go */ }
@@ -1310,21 +1310,21 @@ Steps:
 #[test] fn clearing_recommendations_per_cluster() { clear(&conn, Some("c1")).unwrap(); assert!(latest(&conn, "c1", CONFIG).unwrap().scan.is_none()); assert!(latest(&conn, "c2", CONFIG).unwrap().scan.is_some()); }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core history`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement prune, clear and status, plus the `HistoryKind` and `HistoryStatus` changes on both sides**
+- [x] **Step 3: Implement prune, clear and status, plus the `HistoryKind` and `HistoryStatus` changes on both sides**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core history && pnpm typecheck`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/src/history crates/kubepit-core/src/history.rs apps/desktop/src/types/index.ts apps/desktop/src/lib/ipc/mock/history.ts
@@ -1366,7 +1366,7 @@ git commit -m "feat(history): retention and thinning of recommendation scans"
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn scan_ops_are_barriers_and_never_dropped() {
@@ -1384,21 +1384,21 @@ Steps:
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core -- history::writer rightsizing::tests`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement the operations, the API and `reevaluate`**
+- [x] **Step 3: Implement the operations, the API and `reevaluate`**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/src
@@ -1427,12 +1427,12 @@ git commit -m "feat(history): blocking scan writes and re-evaluation of stored s
       - the complete resulting `resources` block.
     - Raised limits carry `# raised with the request (limit ÷ request ×{ratio})`, where
       the ratio has at most 2 decimals and no trailing zeros.
-    - Fragments are separated by a blank line.
+    - Fragments are separate YAML documents, separated by a blank line and `---`.
     - With nothing changed, the output is `# No changes to export.\n`.
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn yaml_fragments_use_kubernetes_quantities() {
@@ -1458,21 +1458,21 @@ Steps:
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core rightsizing::export`
 
 Expected: FAIL to compile.
 
-- [ ] **Step 3: Implement both builders**
+- [x] **Step 3: Implement both builders**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core rightsizing::export`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/src/rightsizing

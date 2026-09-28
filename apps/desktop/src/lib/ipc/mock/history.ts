@@ -27,6 +27,7 @@ import type {
   HistoryEventPage,
   HistoryKind,
   HistoryStatus,
+  HistoryTableStatus,
   KubeObject,
   ManifestApplyResult,
   Settings,
@@ -60,6 +61,26 @@ const identities = new Map<string, string>();
 let seeded = false;
 /** Kinds of persisted data the user cleared (seeds do not come back). */
 const cleared = new Set<string>();
+
+/**
+ * Stored recommendation scans of the demo backend as the history sees them:
+ * rows and the oldest run for the status, and how to clear them.
+ */
+export interface RecommendationHistory {
+  table(): HistoryTableStatus;
+  clear(clusterId: string | null): void;
+}
+
+let recommendationHistory: RecommendationHistory | null = null;
+
+/** Show the demo's stored recommendation scans in the history status and clears. */
+export function provideRecommendationHistory(source: RecommendationHistory) {
+  recommendationHistory = source;
+}
+
+function recommendationTable(): HistoryTableStatus {
+  return recommendationHistory?.table() ?? { rows: 0, oldest_ts: null };
+}
 
 function settings(): Settings | undefined {
   return handlers.settings_get?.({}) as Settings | undefined;
@@ -936,7 +957,11 @@ function sortedAudit(f: AuditFilter): AuditEntry[] {
 function sizeBytes() {
   const events = allPersistedEvents();
   return (
-    96 * 1024 + audit.length * 3_000 + events * 1_400 + (persistedChanges?.length ?? 0) * 4_000
+    96 * 1024 +
+    audit.length * 3_000 +
+    events * 1_400 +
+    (persistedChanges?.length ?? 0) * 4_000 +
+    recommendationTable().rows * 800
   );
 }
 
@@ -962,6 +987,7 @@ function status(): HistoryStatus {
     audit: table(audit.map((a) => ({ ts: a.entry.ts }))),
     events: table(events),
     changes: table(changes),
+    recommendations: recommendationTable(),
     dropped: 0,
     persisting: clusters()
       .filter((c) => s.persist_clusters.includes(c.id) && statuses()[c.id]?.state === 'connected')
@@ -1090,7 +1116,8 @@ register({
   history_clear: ({ kind, clusterId }: MockArgs): HistoryStatus => {
     const k = kind as HistoryKind;
     const scope = (clusterId as string | null) ?? '*';
-    const kinds: HistoryKind[] = k === 'all' ? ['audit', 'events', 'changes'] : [k];
+    const kinds: HistoryKind[] =
+      k === 'all' ? ['audit', 'events', 'changes', 'recommendations'] : [k];
     seedAudit();
     for (const each of kinds) {
       cleared.add(`${each}|${scope}`);
@@ -1098,6 +1125,7 @@ register({
         for (let i = audit.length - 1; i >= 0; i--)
           if (scope === '*' || audit[i]!.entry.cluster_id === scope) audit.splice(i, 1);
       }
+      if (each === 'recommendations') recommendationHistory?.clear(scope === '*' ? null : scope);
     }
     return status();
   },
