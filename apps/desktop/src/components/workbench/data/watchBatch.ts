@@ -48,9 +48,9 @@ export function batchPatch(
 /**
  * The patch to paint at once after a batch, or `null` to coalesce the batch
  * into the next frame. Painted at once: an error, the first sync or the
- * recovery from a failed list, and a clean `reset` (a full snapshot after a
- * reconnect or re-list) while an earlier error is still shown. A source that
- * still fails reports its error again on its next retry.
+ * recovery from a failed list, and the backend's `recovered` signal (every
+ * failing source delivered events again) while an error is still shown.
+ * A `reset` alone keeps the error: another namespace may still be failing.
  */
 export function batchFlush(
   prev: Pick<WatchSnapshot, 'synced' | 'status' | 'error'>,
@@ -58,7 +58,7 @@ export function batchFlush(
   size: number,
 ): Partial<WatchSnapshot> | null {
   const synced = prev.synced || batch.synced;
-  if (batch.error || (synced && prev.status !== 'ready') || (batch.reset && prev.error))
+  if (batch.error || (synced && prev.status !== 'ready') || (batch.recovered && prev.error))
     return batchPatch(prev, batch, size);
   return null;
 }

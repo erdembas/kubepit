@@ -306,7 +306,16 @@ export interface WatchBatch {
   deletes: string[];
   /** True once the initial list has been fully delivered. */
   synced: boolean;
+  /**
+   * A watch error (one namespace forbidden, a dropped connection). The
+   * objects of the batch are still valid and must be applied.
+   */
   error: string | null;
+  /**
+   * Every source that reported an error delivered events again: clear the
+   * error shown for this watch. Never set together with `error`.
+   */
+  recovered: boolean;
 }
 
 export type ApplyMode = 'apply' | 'replace' | 'create';

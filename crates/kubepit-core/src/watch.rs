@@ -17,7 +17,13 @@
 //! `synced` becomes true once every source finished its initial list (or
 //! failed it — a 403 on one namespace must not leave the table spinning).
 //! Watch errors are reported in the batch's `error` and the watcher keeps
-//! retrying with kube's default backoff. The task stops as soon as the
+//! retrying with kube's default backoff. kube rarely re-lists after an
+//! error (only on 410 Gone): a failed watch keeps watching or resumes from
+//! its resourceVersion, and a namespace whose first list failed streams its
+//! later list without a reset. So a source that reported an error counts as
+//! failing until it delivers an event again (`InitDone`, `Apply` or
+//! `Delete`); once no source is failing, the next batch has `recovered` set
+//! and the UI clears the error it shows. The task stops as soon as the
 //! channel to the webview is gone.
 
 use std::collections::{HashMap, HashSet};
@@ -46,6 +52,8 @@ struct SourceState {
     buffer: Option<HashMap<String, Value>>,
     synced_once: bool,
     failed_initial: bool,
+    /// Reported an error and has not delivered an event since.
+    failing: bool,
 }
 
 impl SourceState {
@@ -65,6 +73,8 @@ pub struct WatchAggregator {
     deletes: HashSet<String>,
     reset: bool,
     error: Option<String>,
+    /// Every failing source delivered an event again since the last batch.
+    recovered: bool,
     pending: usize,
     last_synced: bool,
 }
@@ -83,6 +93,7 @@ impl WatchAggregator {
             // The first batch always tells the UI to start from a clean slate.
             reset: true,
             error: None,
+            recovered: false,
             pending: 0,
             last_synced: false,
         }
@@ -141,8 +152,25 @@ impl WatchAggregator {
         self.stage_upsert(key, value);
     }
 
+    /// `source` delivered an event: if it was failing and no other source
+    /// still is, the next batch reports the recovery (and drops an error
+    /// that is older than it).
+    fn on_healthy(&mut self, source: usize) {
+        let state = self.source(source);
+        if !state.failing {
+            return;
+        }
+        state.failing = false;
+        if self.sources.iter().all(|s| !s.failing) {
+            self.error = None;
+            self.recovered = true;
+            self.pending += 1;
+        }
+    }
+
     /// Listing finished for `source`.
     pub fn on_init_done(&mut self, source: usize) {
+        self.on_healthy(source);
         let buffer = {
             let state = self.source(source);
             state.synced_once = true;
@@ -161,12 +189,14 @@ impl WatchAggregator {
 
     /// Object added or modified.
     pub fn on_apply(&mut self, source: usize, key: String, value: Value) {
+        self.on_healthy(source);
         self.store.insert(key.clone(), (source, value.clone()));
         self.stage_upsert(key, value);
     }
 
     /// Object deleted.
-    pub fn on_delete(&mut self, _source: usize, key: String) {
+    pub fn on_delete(&mut self, source: usize, key: String) {
+        self.on_healthy(source);
         self.store.remove(&key);
         self.stage_delete(key);
     }
@@ -177,7 +207,10 @@ impl WatchAggregator {
         if !state.synced_once {
             state.failed_initial = true;
         }
+        state.failing = true;
         self.error = Some(message);
+        // The error is newer than any recovery still pending.
+        self.recovered = false;
         self.pending += 1;
     }
 
@@ -205,12 +238,18 @@ impl WatchAggregator {
     pub fn take_batch(&mut self) -> Option<WatchBatch> {
         let synced = self.synced();
         let has_changes = !self.upserts.is_empty() || !self.deletes.is_empty();
-        if !self.reset && !has_changes && self.error.is_none() && synced == self.last_synced {
+        if !self.reset
+            && !has_changes
+            && self.error.is_none()
+            && !self.recovered
+            && synced == self.last_synced
+        {
             return None;
         }
         self.last_synced = synced;
         self.pending = 0;
         let error = self.error.take();
+        let recovered = std::mem::take(&mut self.recovered);
         if self.reset {
             self.reset = false;
             self.upserts.clear();
@@ -226,6 +265,7 @@ impl WatchAggregator {
                 deletes: Vec::new(),
                 synced,
                 error,
+                recovered,
             });
         }
         let order = std::mem::take(&mut self.upsert_order);
@@ -243,6 +283,7 @@ impl WatchAggregator {
             deletes,
             synced,
             error,
+            recovered,
         })
     }
 }
@@ -477,7 +518,110 @@ mod tests {
         agg.on_init_done(1);
         let next = agg.take_batch().unwrap();
         assert!(next.error.is_none());
+        assert!(next.recovered);
         assert_eq!(uids(&next), vec!["x"]);
+    }
+
+    #[test]
+    fn failed_initial_list_that_later_succeeds_reports_recovery() {
+        let mut agg = WatchAggregator::new("w", 2);
+        agg.on_init(0);
+        agg.on_init_apply(0, "a".into(), obj("a", 1));
+        agg.on_init_done(0);
+        agg.on_error(1, "pods is forbidden".into());
+        let failed = agg.take_batch().unwrap();
+        assert_eq!(failed.error.as_deref(), Some("pods is forbidden"));
+        assert!(!failed.recovered);
+
+        // kube retries the list; it streams without a reset.
+        agg.on_init(1);
+        agg.on_init_apply(1, "b".into(), obj("b", 1));
+        assert!(
+            !agg.take_batch().unwrap().recovered,
+            "not recovered mid-list"
+        );
+        agg.on_init_done(1);
+        let recovered = agg.take_batch().unwrap();
+        assert!(recovered.recovered);
+        assert!(!recovered.reset);
+        assert!(recovered.error.is_none());
+        assert!(agg.take_batch().is_none(), "recovery is reported once");
+    }
+
+    #[test]
+    fn error_then_clean_apply_reports_recovery() {
+        let mut agg = WatchAggregator::new("w", 1);
+        agg.on_init(0);
+        agg.on_init_done(0);
+        agg.take_batch();
+        // A dropped watch keeps its state and resumes from its resourceVersion.
+        agg.on_error(0, "connection reset".into());
+        assert!(agg.take_batch().unwrap().error.is_some());
+        agg.on_apply(0, "a".into(), obj("a", 2));
+        let batch = agg.take_batch().unwrap();
+        assert!(batch.recovered && !batch.reset && batch.error.is_none());
+        assert_eq!(uids(&batch), vec!["a"]);
+        // Later events of a healthy source report nothing more.
+        agg.on_apply(0, "a".into(), obj("a", 3));
+        assert!(!agg.take_batch().unwrap().recovered);
+    }
+
+    #[test]
+    fn error_then_clean_delete_reports_recovery() {
+        let mut agg = WatchAggregator::new("w", 1);
+        agg.on_init(0);
+        agg.on_init_apply(0, "a".into(), obj("a", 1));
+        agg.on_init_done(0);
+        agg.take_batch();
+        agg.on_error(0, "watch stream closed".into());
+        agg.take_batch();
+        agg.on_delete(0, "a".into());
+        let batch = agg.take_batch().unwrap();
+        assert!(batch.recovered && batch.error.is_none());
+        assert_eq!(batch.deletes, vec!["a"]);
+    }
+
+    #[test]
+    fn recovery_waits_for_every_failing_source() {
+        let mut agg = WatchAggregator::new("w", 3);
+        for source in 0..3 {
+            agg.on_init(source);
+            agg.on_init_done(source);
+        }
+        agg.take_batch();
+        agg.on_error(0, "a failed".into());
+        agg.on_error(1, "b failed".into());
+        agg.take_batch();
+        // Events of a source that never failed prove nothing.
+        agg.on_apply(2, "c".into(), obj("c", 1));
+        assert!(!agg.take_batch().unwrap().recovered);
+        agg.on_apply(0, "a".into(), obj("a", 1));
+        assert!(
+            !agg.take_batch().unwrap().recovered,
+            "source 1 still failing"
+        );
+        agg.on_apply(1, "b".into(), obj("b", 1));
+        assert!(agg.take_batch().unwrap().recovered);
+    }
+
+    #[test]
+    fn a_batch_never_carries_both_an_error_and_a_recovery() {
+        let mut agg = WatchAggregator::new("w", 1);
+        agg.on_init(0);
+        agg.on_init_done(0);
+        agg.take_batch();
+        // Error and recovery within one flush interval: the recovery wins.
+        agg.on_error(0, "blip".into());
+        agg.on_apply(0, "a".into(), obj("a", 1));
+        let batch = agg.take_batch().unwrap();
+        assert!(batch.recovered && batch.error.is_none());
+        // Recovery then a new error: the error wins.
+        agg.on_error(0, "blip".into());
+        agg.on_apply(0, "a".into(), obj("a", 2));
+        agg.on_error(0, "again".into());
+        let batch = agg.take_batch().unwrap();
+        assert!(!batch.recovered);
+        assert_eq!(batch.error.as_deref(), Some("again"));
     }
 
     #[test]

@@ -89,10 +89,17 @@ localStorage (`kubepit.workbench.v1`, `kubepit.views.v1`,
   pure logic in `watchBatch.ts`) always applies the objects first. The list
   turns `error` only when nothing is left; otherwise the rows stay and the
   resource table shows a "Some namespaces could not be watched" notice (for
-  example one forbidden namespace of several). A later clean `reset` (the
-  full snapshot after a reconnect or re-list) clears the error; a source
-  that still fails reports it again on its next retry. Error-only batches
-  change no rows and do not bump the snapshot `version`.
+  example one forbidden namespace of several). kube rarely re-lists after
+  an error (only on 410 Gone): a failed watch keeps watching or resumes
+  from its resourceVersion, and a namespace whose first list failed
+  streams its later list without a reset. So the backend (`watch.rs`)
+  counts a source that reported an error as failing until it delivers an
+  event again (`InitDone`, `Apply` or `Delete`); once none is failing, the
+  next batch has `recovered: true` and the UI clears the error. A `reset`
+  alone keeps it (another namespace may still fail), and a quiet namespace
+  keeps the error until its next event or Retry. Error-only batches change
+  no rows and do not bump the snapshot `version`. Views that read several
+  lists use `data/listState.ts`: a list with an error is incomplete.
 - `read_only` clusters reject every mutating command in the backend (dry runs
   and RBAC self-reviews only read, so they stay available).
 
@@ -883,7 +890,10 @@ deterministic (no cluster access, no dependencies):
   OVN, Amazon VPC CNI with its policy agent flag, kindnet by release;
   Flannel alone does not). Verdicts are marked "not certain" when the
   plugin likely does not enforce, unevaluated policies apply to the
-  namespaces involved, or a host-network pod / pod-IP ipBlock is involved.
+  namespaces involved, the NetworkPolicy list failed or only partly loaded
+  (a forbidden namespace would otherwise look unprotected), or a
+  host-network pod / pod-IP ipBlock is involved
+  (`components/workbench/netpol/uncertain.ts`).
 
 UI (`components/workbench/netpol/`): `useNetpolData` watches pods,
 NetworkPolicies and Services cluster-wide (falling back to the selected
@@ -1118,10 +1128,11 @@ the generic watches.
   `access/useRbacData.ts` watches the RBAC lists cluster-wide (RoleBindings
   fall back to the asked namespace) and reports lists it cannot read instead
   of guessing. A list counts as loaded only when it is complete
-  (`data/listState.ts`, shared with the health scan): one that kept the rows
-  of the readable namespaces but reports an error is listed with the
-  unreadable ones ("answers may be incomplete"). Only RBAC is evaluated: webhook and cloud IAM authorizers are
-  not visible to it, which the UI says.
+  (`data/listState.ts`, shared with the health scan): one that kept the
+  rows of the readable namespaces but reports an error is listed with the
+  unreadable ones ("answers may be incomplete"). Only RBAC is evaluated:
+  webhook and cloud IAM authorizers are not visible to it, which the UI
+  says.
 - **Demo**: `mock/fixtures/trivy.ts` writes reports for prod-eu, staging and
   dev (not prod-us or the local clusters) from the demo workloads and a
   catalog of real CVEs chosen per image; `mock/fixtures/security.ts` labels

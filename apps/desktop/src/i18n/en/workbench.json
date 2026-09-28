@@ -2225,6 +2225,7 @@
   "Some lists could not be read, so the evaluation is incomplete: {kinds}": "Some lists could not be read, so the evaluation is incomplete: {kinds}",
   "Some long values were shortened to fit the journal.": "Some long values were shortened to fit the journal.",
   "Some namespaces could not be watched: {error}": "Some namespaces could not be watched: {error}",
+  "Some NetworkPolicies could not be read, so policies that apply here may be missing.": "Some NetworkPolicies could not be read, so policies that apply here may be missing.",
   "Some sources could not be read and were skipped: {what}": "Some sources could not be read and were skipped: {what}",
   "Source": "Source",
   "Source and price model": "Source and price model",

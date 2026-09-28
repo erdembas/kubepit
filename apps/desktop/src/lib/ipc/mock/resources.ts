@@ -127,7 +127,15 @@ register({
       () => {
         const error = forbidden(clusterId, gvk, nss);
         if (error) {
-          emit({ watch_id: id, reset: true, upserts: [], deletes: [], synced: false, error });
+          emit({
+            watch_id: id,
+            reset: true,
+            upserts: [],
+            deletes: [],
+            synced: false,
+            error,
+            recovered: false,
+          });
           removeWatcher(id);
           return;
         }
@@ -138,6 +146,7 @@ register({
           deletes: [],
           synced: true,
           error: null,
+          recovered: false,
         });
       },
       150 + Math.random() * 200,

@@ -2225,6 +2225,7 @@
   "Some lists could not be read, so the evaluation is incomplete: {kinds}": "Bazı listeler okunamadı, bu yüzden değerlendirme eksik: {kinds}",
   "Some long values were shortened to fit the journal.": "Bazı uzun değerler kayda sığması için kısaltıldı.",
   "Some namespaces could not be watched: {error}": "Bazı namespace'ler izlenemedi: {error}",
+  "Some NetworkPolicies could not be read, so policies that apply here may be missing.": "Bazı NetworkPolicy'ler okunamadı; bu yüzden burada uygulanan politikalar eksik olabilir.",
   "Some sources could not be read and were skipped: {what}": "Bazı kaynaklar okunamadı ve atlandı: {what}",
   "Source": "Kaynak",
   "Source and price model": "Kaynak ve fiyat modeli",

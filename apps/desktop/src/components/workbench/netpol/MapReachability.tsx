@@ -54,6 +54,7 @@ export function useMapReachability({
   const uncertain =
     !!source &&
     (data.cni.enforcement === 'not-enforced' ||
+      data.policiesIncomplete ||
       relevantUnevaluated(data.unevaluated, [source.namespace]).length > 0);
 
   const notice: ReactNode = !enabled ? null : (

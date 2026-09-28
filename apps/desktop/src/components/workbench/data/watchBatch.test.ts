@@ -12,6 +12,7 @@ const batch = (b: Partial<WatchBatch>): WatchBatch => ({
   deletes: [],
   synced: false,
   error: null,
+  recovered: false,
   ...b,
 });
 
@@ -69,12 +70,15 @@ describe('watch batch sequences', () => {
   const forbiddenB =
     'pods is forbidden: User "dev" cannot list resource "pods" in the namespace "b"';
 
-  it('a partial error keeps its rows until a clean reset clears it', () => {
-    const [partial, update, retry, recovered] = run([
+  it('a partial error keeps its rows until the backend reports recovery', () => {
+    const [partial, update, retry, relist, recovered] = run([
       batch({ reset: true, upserts: [pod('a1')], synced: true, error: forbiddenB }),
       batch({ upserts: [pod('a2')], synced: true }),
       batch({ synced: true, error: forbiddenB }),
-      batch({ reset: true, upserts: [pod('a1'), pod('a2'), pod('b1', 'b')], synced: true }),
+      // Namespace a re-lists (410 Gone) while b is still failing.
+      batch({ reset: true, upserts: [pod('a1'), pod('a2')], synced: true }),
+      // b's retried list succeeds: streamed without a reset.
+      batch({ upserts: [pod('b1', 'b')], synced: true, recovered: true }),
     ]);
     expect(partial).toMatchObject({ status: 'ready', error: forbiddenB, forbidden: true });
     expect(partial!.rows).toEqual(['a1']);
@@ -84,7 +88,9 @@ describe('watch batch sequences', () => {
     // A failing retry reports again, without touching the rows.
     expect(retry).toMatchObject({ status: 'ready', error: forbiddenB, painted: true });
     expect(retry!.rows).toEqual(['a1', 'a2']);
-    // The full snapshot after the reconnect clears it.
+    // A reset alone proves nothing about b.
+    expect(relist).toMatchObject({ status: 'ready', error: forbiddenB, painted: false });
+    // The recovery clears it, although no reset was sent.
     expect(recovered).toMatchObject({
       status: 'ready',
       error: null,
@@ -92,6 +98,17 @@ describe('watch batch sequences', () => {
       painted: true,
     });
     expect(recovered!.rows).toEqual(['a1', 'a2', 'b1']);
+  });
+
+  it('a recovery with no rows (a quiet namespace) still clears the error', () => {
+    const [, blip, recovered] = run([
+      batch({ reset: true, upserts: [pod('a1')], synced: true }),
+      batch({ synced: true, error: 'watch stream closed' }),
+      batch({ synced: true, recovered: true }),
+    ]);
+    expect(blip).toMatchObject({ status: 'ready', error: 'watch stream closed' });
+    expect(recovered).toMatchObject({ status: 'ready', error: null, painted: true });
+    expect(recovered!.rows).toEqual(['a1']);
   });
 
   it('a failed list recovers when rows arrive', () => {
