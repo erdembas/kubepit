@@ -573,7 +573,7 @@ Expected: FAIL. `./dataKey` is missing; `hideKinds` is not exported.
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck`
 Expected: PASS.
 
-- [ ] **Step 6: Verify the timing.**
+- [x] **Step 6: Verify the timing.** _(2026-09-28, browser demo on staging-gke: leaving the Resource Map for Deployments now costs the same as leaving Pods, 806–816 ms vs 807–813 ms over 4 runs each, i.e. the map adds nothing; that time is the Deployments view itself. Before this task leaving the map added over a second.)_
   1. In `pnpm dev:ui` on prod-eu-west-1, open the Resource Map with all namespaces.
   2. Start a Chrome Performance recording and switch to the Overview view.
   3. Expected: the task after the click takes < 200 ms (it took > 1 s before). Put both numbers in the commit body.
@@ -665,7 +665,7 @@ Expected: FAIL (modules missing).
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck && pnpm i18n:check`
 Expected: PASS.
 
-- [ ] **Step 5: Verify visually.** In `pnpm dev:ui`, check the Changes view in a split pane about 560 px wide: the header wraps to two rows and nothing is clipped. Drag the details panel to its 380 px minimum and open the Map tab through a node link: the Map tab scrolls into view, and the wheel scrolls the strip.
+- [x] **Step 5: Verify visually.** _(2026-09-28: Changes header wraps to two rows at ~560 px and still fits at ~330 px; with the details panel at 380 px a Deployment's 7-tab strip overflows 622/379 px and the wheel scrolls it to the end.)_ In `pnpm dev:ui`, check the Changes view in a split pane about 560 px wide: the header wraps to two rows and nothing is clipped. Drag the details panel to its 380 px minimum and open the Map tab through a node link: the Map tab scrolls into view, and the wheel scrolls the strip.
 
 - [x] **Step 6: Commit**
 
@@ -1737,9 +1737,9 @@ git commit -m "feat(history): audit mutating custom actions; guard that every mu
 
 **Files:** none new.
 
-- [ ] **Step 1: Run every check**
+- [x] **Step 1: Run every check** _(2026-09-28: all exit 0 — 582 Rust tests, 91 Vitest tests.)_
 
 Run: `pnpm typecheck && pnpm i18n:check && cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && pnpm --filter @kubepit/desktop build && pnpm --filter @kubepit/desktop test`
 Expected: every command exits 0.
 
-- [ ] **Step 2: Smoke-test the demo.** In `pnpm dev:ui`, open Health (the "Off by default" card), a Node's Map tab, Changes in a narrow pane, the Cost view (money formats), the Loki tab on staging (forbidden notice), the Manifests tab with Watch on, the Upgrade view with a target past `checked_through`, and the Activity view. Expected: no console errors.
+- [x] **Step 2: Smoke-test the demo.** _(2026-09-28: all screens render with no console errors. The Upgrade target past `checked_through` (1.37) is not selectable on the demo clusters, which run 1.31 and offer at most 1.35, so that note could not be seen in the demo.)_ In `pnpm dev:ui`, open Health (the "Off by default" card), a Node's Map tab, Changes in a narrow pane, the Cost view (money formats), the Loki tab on staging (forbidden notice), the Manifests tab with Watch on, the Upgrade view with a target past `checked_through`, and the Activity view. Expected: no console errors.
