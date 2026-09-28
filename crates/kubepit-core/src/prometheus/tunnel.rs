@@ -918,6 +918,24 @@ j6EzTBQKCIK44Ht1hGckQEbsh5M4xlh8CvAbHO7lGMeusAjsKyS4dyiR
         assert!(err.to_string().contains("CA bundle"), "{err}");
     }
 
+    #[tokio::test]
+    async fn a_trusted_certificate_for_another_name_is_refused() {
+        // The leaf is for prometheus.monitoring.svc, signed by the trusted CA.
+        let err = https_get_as(
+            "thanos-query.monitoring.svc",
+            false,
+            Some(TEST_CA.as_bytes()),
+        )
+        .await
+        .unwrap_err();
+        let err = format!("{err:#}");
+        assert!(
+            err.contains("TLS handshake with thanos-query.monitoring.svc failed"),
+            "{err}"
+        );
+        assert!(err.to_lowercase().contains("name"), "{err}");
+    }
+
     fn secured(tenant: &str) -> PrometheusAccess {
         PrometheusAccess {
             tenant: tenant.into(),
