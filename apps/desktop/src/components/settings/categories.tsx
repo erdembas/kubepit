@@ -1,11 +1,12 @@
 import * as i18n from '@/i18n';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, FolderOpen, KeyRound, Loader2, Plus, Trash2, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Switch } from '@/components/ui/Switch';
 import { KubepitMark } from '@/components/ui/KubepitMark';
 import { ipc, isTauri } from '@/lib/ipc';
+import { rebaseDraft } from '@/lib/settingsSync';
 import { useAppStore } from '@/store/useAppStore';
 import type { Settings } from '@/types';
 import { SettingsPageShell, SettingsSection } from './SettingsView';
@@ -16,13 +17,22 @@ export function useSettingsDraft() {
   const settings = useAppStore((s) => s.settings);
   const [draft, setDraft] = useState<Settings | null>(settings);
   const [saving, setSaving] = useState(false);
-  useEffect(() => setDraft(settings), [settings]);
+  // The settings the draft started from. When they change (another window
+  // saved), an unchanged draft follows them and a dirty one keeps its edits.
+  const base = useRef(settings);
+  useEffect(() => {
+    const previous = base.current;
+    base.current = settings;
+    setDraft((d) => rebaseDraft(d, previous, settings));
+  }, [settings]);
   const dirty = JSON.stringify(draft) !== JSON.stringify(settings);
   const save = async () => {
     if (!draft) return;
     setSaving(true);
     try {
       const saved = await ipc.settingsSet(draft);
+      // The backend normalizes (trims paths, sorts lists): start over from it.
+      setDraft(saved);
       useAppStore.getState().setSettings(saved);
       useAppStore.getState().pushToast('success', i18n.t('Settings saved'));
     } catch (e) {

@@ -38,7 +38,11 @@ single source of truth for the frontend ⇄ backend boundary.
   `{ alert, fresh, notifier, app_focused }`), `alerts://changed` (`null`;
   alerts were marked read or cleared, refetch `alerts_list`),
   `portforward://saved` (SavedPortForward[]), `kubeconfig://changed`
-  (KubeconfigChanged), `customactions://changed` (CustomAction[]).
+  (KubeconfigChanged), `customactions://changed` (CustomAction[]),
+  `settings://changed` (`{ source, settings }`, after `settings_set` or
+  `kubeconfig_storage_set`; every window applies it except `source`, the
+  saving window, so its open settings draft is not reset; a dirty draft
+  elsewhere keeps its edited fields, `lib/settingsSync.ts`).
 
 ## Windows
 
@@ -361,9 +365,18 @@ notifications and the notification center (status bar bell → right panel
   window instead while Kubepit is in front. Titles and bodies are built in
   the UI's current language (`lib/alerts/text.ts`); reasons, names and
   Kubernetes messages stay verbatim. Desktop notifications go through
-  `tauri-plugin-notification` (clicking one focuses Kubepit; the plugin
-  reports no clicks on desktop), browser previews use the web
-  Notification API and open the alert on click.
+  `tauri-plugin-notification`, which reports no clicks on desktop (actions
+  are mobile-only); clicking one focuses Kubepit. So the notifier window
+  remembers the target of the last notification it posted while no Kubepit
+  window was focused (its own `document.hasFocus()` and every notice's
+  `app_focused`; `lib/alerts/clickThrough.ts`: the alert, or the
+  notification center for a group) and opens it when it gains focus itself
+  within 10 s; the target is one-shot and a newer notification replaces
+  it. Limitations: bringing the notifier window to the front by other
+  means within 10 s does the same, and a click that brings another Kubepit
+  window to the front opens nothing (Settings → Notifications says so).
+  Browser previews use the web Notification API and open the alert on
+  click.
 - **Settings** (`Settings.alerts`): master switch, disabled reasons,
   include/exclude namespace globs, disabled clusters (not watched), muted
   clusters (recorded, never notify; until a time or indefinitely), global

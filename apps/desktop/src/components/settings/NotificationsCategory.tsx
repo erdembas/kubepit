@@ -129,6 +129,9 @@ export function NotificationsCategory({ description }: { description: string }) 
             disabled={!alerts.enabled}
             onChange={(v) => set({ os_notifications: v })}
             label={i18n.t('Show a system notification for new alerts')}
+            description={i18n.t(
+              'Clicking a desktop notification brings Kubepit to the front and opens the alert (within 10 seconds). With several windows open, the alert opens only when the main window comes to the front (or the first window, while the main window is closed).',
+            )}
           />
           <Switch
             checked={alerts.background_only}

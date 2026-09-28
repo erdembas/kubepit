@@ -7,13 +7,14 @@ import type {
   PortForward,
   PortForwardRequest,
   Settings,
+  SettingsChanged,
   TerminalOutput,
   WorkspaceSnapshot,
 } from '@/types';
 import { DEFAULT_ALERT_SETTINGS } from '@/lib/alerts/policy';
 import { DEFAULT_HISTORY_SETTINGS } from '@/lib/history/audit';
 import { windowLabel } from '@/lib/windowSeed';
-import { mockEmit, mockEmitAllWindows, sleep } from './bus';
+import { mockEmit, mockEmitAllWindows, mockListen, sleep } from './bus';
 import { register, type MockArgs } from './registry';
 import { demoOverview } from './resources';
 
@@ -157,7 +158,7 @@ async function connect(id: string): Promise<ClusterStatus> {
   return status;
 }
 
-let settings: Settings = {
+const defaultSettings: Settings = {
   kubectl_path: null,
   helm_path: null,
   shell_path: null,
@@ -176,6 +177,26 @@ let settings: Settings = {
   history: { ...DEFAULT_HISTORY_SETTINGS, persist_clusters: ['c-staging'] },
   keyboard_mode: false,
 };
+
+// Saved like the demo workspace, so a demo window opened later starts from
+// the settings the others saved (and never broadcasts stale defaults).
+const SETTINGS_KEY = 'kubepit.demo.settings';
+let settings: Settings = (() => {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    return raw
+      ? { ...defaultSettings, ...(JSON.parse(raw) as Partial<Settings>) }
+      : defaultSettings;
+  } catch {
+    return defaultSettings;
+  }
+})();
+
+// Every demo window runs its own backend: keep this one's settings in step
+// with the ones another window saves, like the one shared desktop backend.
+void mockListen<SettingsChanged>('settings://changed', (changed) => {
+  if (changed.source !== windowLabel) settings = changed.settings;
+});
 
 const WORKSPACE_KEY = 'kubepit.demo.workspace';
 const defaultWorkspace: WorkspaceSnapshot = {
@@ -277,7 +298,17 @@ register({
     helm: { path: '/opt/homebrew/bin/helm', version: 'v3.17.1' },
   }),
   settings_get: () => settings,
-  settings_set: ({ settings: next }: MockArgs) => (settings = next as Settings),
+  settings_set: ({ settings: next }: MockArgs) => {
+    settings = next as Settings;
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    } catch {
+      /* ignore */
+    }
+    const changed: SettingsChanged = { source: windowLabel, settings };
+    mockEmitAllWindows('settings://changed', changed);
+    return settings;
+  },
   workspace_load: () => {
     try {
       const raw = localStorage.getItem(WORKSPACE_KEY);

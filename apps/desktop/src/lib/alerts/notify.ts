@@ -7,8 +7,10 @@ import { isTauri } from '@/lib/ipc';
  * Notification API in browser previews (`pnpm dev:ui`).
  *
  * Desktop notifications cannot report clicks (the plugin only supports
- * actions on mobile); clicking one brings Kubepit to the front, which is
- * all the platform offers. Browser notifications also open the alert.
+ * actions on mobile); clicking one brings Kubepit to the front, and
+ * `clickThrough.ts` then opens the alert when that focus follows the
+ * notification within 10 seconds. Browser notifications open the alert on
+ * click themselves.
  */
 
 export type NotificationPermissionState = 'granted' | 'denied' | 'default' | 'unsupported';
@@ -34,7 +36,10 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
 export interface OsNotification {
   title: string;
   body: string;
-  /** Browser previews only: runs after focusing the window. */
+  /**
+   * Browser previews: runs after focusing the window. Desktop notifications
+   * never call it; the caller hands it to `clickThrough.ts` instead.
+   */
   onClick?: () => void;
 }
 

@@ -103,6 +103,7 @@ import type {
   SavedPortForward,
   SavedPortForwardInput,
   Settings,
+  SettingsChanged,
   UpdateInfo,
   UpdateProgress,
   UpdaterStatus,
@@ -128,6 +129,7 @@ export const ipc = {
   // -- App ------------------------------------------------------------------
   appInfo: () => call<AppInfo>('app_info'),
   settingsGet: () => call<Settings>('settings_get'),
+  /** Saves and broadcasts `settings://changed` to every window. */
   settingsSet: (settings: Settings) => call<Settings>('settings_set', { settings }),
   workspaceLoad: () => call<WorkspaceSnapshot | null>('workspace_load'),
   /** Saves and broadcasts `workspace://changed` to every window. */
@@ -457,7 +459,10 @@ export const ipc = {
   portForwardLocalPort: (port: number) =>
     call<LocalPortStatus>('port_forward_local_port', { port }),
   clusterProxyInfo: (id: ClusterId) => call<ClusterProxyInfo>('cluster_proxy_info', { id }),
-  /** Moves every pasted kubeconfig into (true) or out of the OS credential store. */
+  /**
+   * Moves every pasted kubeconfig into (true) or out of the OS credential
+   * store; broadcasts the saved settings (`settings://changed`).
+   */
   kubeconfigStorageSet: (keychain: boolean) =>
     call<Settings>('kubeconfig_storage_set', { keychain }),
 
@@ -649,6 +654,9 @@ export const events = {
     listenEvent<{ id: string; code: number | null }>('terminal://exit', handler),
   onWorkspaceChanged: (handler: (payload: WorkspaceChanged) => void) =>
     listenEvent<WorkspaceChanged>('workspace://changed', handler),
+  /** A window saved the settings (every window hears it, the saving one too). */
+  onSettingsChanged: (handler: (payload: SettingsChanged) => void) =>
+    listenEvent<SettingsChanged>('settings://changed', handler),
   /** An alert was raised or a repeat merged into one (every window hears it). */
   onAlert: (handler: (notice: AlertNotice) => void) =>
     listenEvent<AlertNotice>('alerts://new', handler),

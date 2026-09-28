@@ -5,7 +5,7 @@ use serde_json::Value;
 use tauri::{Emitter, State};
 
 use super::{blocking, IpcResult};
-use crate::app_state::{WorkspaceChanged, EVENT_WORKSPACE_CHANGED};
+use crate::app_state::{emit_settings_changed, WorkspaceChanged, EVENT_WORKSPACE_CHANGED};
 use crate::AppState;
 
 #[tauri::command]
@@ -19,10 +19,18 @@ pub async fn settings_get(state: State<'_, AppState>) -> IpcResult<Settings> {
     Ok(state.core.settings())
 }
 
+/// Saves the settings, then tells every window (`settings://changed`).
 #[tauri::command]
-pub async fn settings_set(settings: Settings, state: State<'_, AppState>) -> IpcResult<Settings> {
+pub async fn settings_set(
+    settings: Settings,
+    app: tauri::AppHandle,
+    window: tauri::Window,
+    state: State<'_, AppState>,
+) -> IpcResult<Settings> {
     let core = state.core.clone();
-    blocking(move || core.set_settings(settings)).await
+    let saved = blocking(move || core.set_settings(settings)).await?;
+    emit_settings_changed(&app, window.label(), &saved);
+    Ok(saved)
 }
 
 /// `null` when the frontend never saved a snapshot.

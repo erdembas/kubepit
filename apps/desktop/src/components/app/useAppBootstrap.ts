@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { events, ipc } from '@/lib/ipc';
 import { refreshOverview } from '@/lib/clusterActions';
+import { remoteSettings } from '@/lib/settingsSync';
 import { syncThemeAcrossWindows } from '@/lib/theme';
 import { windowLabel, windowSeed } from '@/lib/windowSeed';
 import { UNASSIGNED_BUCKET, useAppStore } from '@/store/useAppStore';
@@ -28,7 +29,8 @@ function hydrate(workspace: WorkspaceSnapshot) {
  * Loads app info, settings, the cluster registry and the workspace layout,
  * subscribes to backend events, persists section edits back to
  * `~/.kubepit/workspace.json` (and applies the ones other windows save),
- * and keeps dashboard overviews fresh for connected clusters. A window
+ * applies the settings other windows save (`settings://changed`), and
+ * keeps dashboard overviews fresh for connected clusters. A window
  * opened from another one starts with that window's tabs.
  */
 export function useAppBootstrap() {
@@ -69,6 +71,11 @@ export function useAppBootstrap() {
         }),
         await events.onClustersChanged((list) => useAppStore.getState().setClusters(list)),
         await events.onPortForwards((list) => useAppStore.getState().setPortForwards(list)),
+        // Settings saved in another window (mute, snooze, preferences).
+        await events.onSettingsChanged((event) => {
+          const next = remoteSettings(event, windowLabel);
+          if (next) useAppStore.getState().setSettings(next);
+        }),
         await events.onWorkspaceChanged(({ source, snapshot }) => {
           if (source === windowLabel || snapshot.version !== 1) return;
           applyingRemoteWorkspace = true;

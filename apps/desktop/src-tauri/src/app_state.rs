@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use kubepit_core::alerts::AlertEvent;
 use kubepit_core::types::{
-    ClusterDef, ClusterStatus, KubeconfigChanged, PortForward, SavedPortForward,
+    ClusterDef, ClusterStatus, KubeconfigChanged, PortForward, SavedPortForward, Settings,
 };
 use kubepit_core::{EventSink, Kubepit};
 use serde::Serialize;
@@ -25,6 +25,8 @@ pub const EVENT_KUBECONFIG_CHANGED: &str = "kubeconfig://changed";
 pub const EVENT_TERMINAL_EXIT: &str = "terminal://exit";
 /// `workspace://changed`
 pub const EVENT_WORKSPACE_CHANGED: &str = "workspace://changed";
+/// `settings://changed`
+pub const EVENT_SETTINGS_CHANGED: &str = "settings://changed";
 
 /// Payload of `terminal://exit`.
 #[derive(Debug, Clone, Serialize)]
@@ -82,9 +84,44 @@ pub struct WorkspaceChanged {
     pub snapshot: serde_json::Value,
 }
 
+/// Payload of `settings://changed`: a window saved the settings. Every window
+/// receives it; the one named by `source` already holds `settings` and
+/// ignores it (so its own settings draft is not reset).
+#[derive(Debug, Clone, Serialize)]
+pub struct SettingsChanged {
+    pub source: String,
+    pub settings: Settings,
+}
+
+/// Tell every window that the window labelled `source` saved `settings`.
+pub fn emit_settings_changed(app: &tauri::AppHandle, source: &str, settings: &Settings) {
+    let changed = SettingsChanged {
+        source: source.to_string(),
+        settings: settings.clone(),
+    };
+    let _ = app.emit(EVENT_SETTINGS_CHANGED, changed);
+}
+
 /// Shared Tauri-managed state.
 pub struct AppState {
     pub core: Arc<Kubepit>,
     pub terminals: TerminalManager,
     pub window_terminals: WindowTerminals,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_changed_payload_shape() {
+        let value = serde_json::to_value(SettingsChanged {
+            source: "win-1".into(),
+            settings: Settings::default(),
+        })
+        .unwrap();
+        assert_eq!(value["source"], "win-1");
+        assert!(value["settings"].is_object());
+        assert_eq!(EVENT_SETTINGS_CHANGED, "settings://changed");
+    }
 }
