@@ -1919,6 +1919,8 @@ git commit -m "feat(demo): recommendation scans in the in-memory backend"
     new codes; `strategyLabel` for `workload-history`)
   - `apps/desktop/src/components/workbench/cost/CostNotes.tsx` (texts for the new note
     kinds)
+  - Already done with Task 7, because the Cost view shows the pipeline's notes and flags
+    from then on: `warningText` for the nine codes and the note texts, in EN and TR.
   - `apps/desktop/src/App.tsx`, or the root that already subscribes to `onAlert`
     (`startRecommendationEvents()`)
   - `apps/desktop/src/i18n/{en,tr}/{workbench,shell}.json`
