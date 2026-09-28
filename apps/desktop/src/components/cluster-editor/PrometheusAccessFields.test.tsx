@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { accessDraft } from '@/lib/prometheusAccess';
 import type { PrometheusConfig } from '@/types';
-import { PrometheusAccessFields } from './PrometheusAccessFields';
+import { AccessSummary, PrometheusAccessFields } from './PrometheusAccessFields';
 
 const https: PrometheusConfig = {
   mode: 'service',
@@ -20,6 +20,24 @@ function render(draft: ReturnType<typeof accessDraft>, config: PrometheusConfig 
 }
 
 describe('PrometheusAccessFields', () => {
+  it('summarises a collapsed section, insecure TLS included', () => {
+    const summary = (draft: ReturnType<typeof accessDraft>, config: PrometheusConfig = https) =>
+      renderToStaticMarkup(<AccessSummary value={draft} config={config} />);
+    expect(summary(accessDraft(undefined))).toBe('');
+    const insecure = accessDraft({
+      tenant: '',
+      cluster_labels: {},
+      auth: { type: 'bearer', namespace: 'monitoring', secret: 'prom-auth', token_key: 'token' },
+      tls: { ca: null, insecure_skip_verify: true },
+    });
+    const html = summary(insecure);
+    expect(html).toContain('Configured');
+    expect(html).toContain('Insecure');
+    // Skip-verify only counts where TLS applies (an https service).
+    expect(summary(insecure, { ...https, scheme: 'http' })).not.toContain('Insecure');
+    expect(summary({ ...insecure, skipVerify: false })).not.toContain('Insecure');
+  });
+
   it('stays collapsed until something is configured', () => {
     const html = render(accessDraft(undefined));
     expect(html).toContain('Shared or secured Prometheus');

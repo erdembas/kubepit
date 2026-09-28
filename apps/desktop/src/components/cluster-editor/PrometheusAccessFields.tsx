@@ -18,11 +18,29 @@ import type { PrometheusConfig } from '@/types';
 import { Field } from './Field';
 import { Chip } from './Chip';
 
-function hasContent(draft: AccessDraft): boolean {
+function hasContent(draft: AccessDraft, config: PrometheusConfig): boolean {
   return (
     draft.tenant.trim() !== '' ||
     draft.labels.some((l) => l.name.trim() || l.value.trim()) ||
-    draft.auth !== 'none'
+    (draft.auth !== 'none' && credentialsAllowed(config))
+  );
+}
+
+/** Badges of the collapsed section: set at all, and TLS verification skipped. */
+export function AccessSummary({ value, config }: { value: AccessDraft; config: PrometheusConfig }) {
+  i18n.useLocale();
+  if (!hasContent(value, config)) return null;
+  return (
+    <>
+      <Badge tone="neutral" size="xs">
+        {i18n.t('Configured')}
+      </Badge>
+      {tlsApplies(value, config) && value.skipVerify && (
+        <Badge tone="warning" size="xs" icon={<ShieldAlert className="h-3 w-3" />}>
+          {i18n.t('Insecure')}
+        </Badge>
+      )}
+    </>
   );
 }
 
@@ -46,7 +64,7 @@ export function PrometheusAccessFields({
   onChange: (next: AccessDraft) => void;
 }) {
   i18n.useLocale();
-  const [open, setOpen] = useState(() => hasContent(value));
+  const [open, setOpen] = useState(() => hasContent(value, config));
   const set = <K extends keyof AccessDraft>(key: K, v: AccessDraft[K]) =>
     onChange({ ...value, [key]: v });
   const setLabel = (index: number, patch: Partial<AccessDraft['labels'][number]>) =>
@@ -68,11 +86,7 @@ export function PrometheusAccessFields({
       >
         <ChevronDown className={cn('h-3 w-3 transition-transform', !open && '-rotate-90')} />
         {i18n.t('Shared or secured Prometheus')}
-        {!open && hasContent(value) && (
-          <Badge tone="neutral" size="xs">
-            {i18n.t('Configured')}
-          </Badge>
-        )}
+        {!open && <AccessSummary value={value} config={config} />}
       </button>
       {open && (
         <div className="border-border/60 space-y-3 border-l pl-3">
