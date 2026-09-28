@@ -106,7 +106,7 @@
   - `WorkspaceSnapshot.healthOptIns?: Record<ClusterId, string[]>`.
   - Store: `optIns: Record<ClusterId, string[]>`, `hydrateOptIns(raw: unknown): void`, `setOptIn(clusterId: ClusterId, rule: string, on: boolean): void`, `useHealthOptIns(clusterId): string[]`.
 
-- [ ] **Step 1: Add Vitest.** Skip this step if `apps/desktop/vitest.config.ts` already exists (the CI plan may have added it). Add the devDependency and scripts. Create `vitest.config.ts` with:
+- [x] **Step 1: Add Vitest.** Skip this step if `apps/desktop/vitest.config.ts` already exists (the CI plan may have added it). Add the devDependency and scripts. Create `vitest.config.ts` with:
   - `resolve.alias['@'] = path.resolve(__dirname, 'src')`;
   - `test.environment = 'node'`;
   - `test.include = ['src/**/*.test.{ts,tsx}']`;
@@ -114,7 +114,7 @@
 
   Run `pnpm install`.
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 ```ts
 // apps/desktop/src/lib/kube/health/optIn.test.ts
@@ -183,12 +183,12 @@ describe('health opt-ins', () => {
 
 `HealthSummary.groups` is the per-rule list that `summarize` already returns. If the field has a different name, use it; the assertion stays the same.
 
-- [ ] **Step 3: Run the tests to verify they fail**
+- [x] **Step 3: Run the tests to verify they fail**
 
 Run: `pnpm --filter @kubepit/desktop test -- src/lib/kube/health/optIn.test.ts src/store/useHealthStore.test.ts`
 Expected: FAIL. `isSilenced`, `hydrateOptIns` and the `container-privilege-escalation-unset` rule do not exist.
 
-- [ ] **Step 4: Implement.**
+- [x] **Step 4: Implement.**
   - `rule()` gains a trailing `opts: { optIn?: boolean } = {}`.
   - `container-privilege-escalation`: severity `warning`, title "Privilege escalation allowed".
   - New `container-privilege-escalation-unset`: category security, severity info, `needs: []`, `local: true`, `optIn: true`. Title: "Containers that do not disable privilege escalation". Hint: the existing one.
@@ -199,12 +199,12 @@ Expected: FAIL. `isSilenced`, `hydrateOptIns` and the `container-privilege-escal
   - `HealthPage` adds an "Off by default" card listing `RULES.filter(r => r.optIn)`, each with a "Turn on" or "Turn off" button.
   - Add the EN and TR strings.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck && pnpm i18n:check`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/desktop package.json pnpm-lock.yaml docs/ARCHITECTURE.md

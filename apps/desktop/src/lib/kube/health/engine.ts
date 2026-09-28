@@ -173,6 +173,23 @@ export function isIgnored(f: Pick<Finding, 'ruleId' | 'ref'>, ignores: readonly 
   );
 }
 
+/** An opt-in rule the cluster has not turned on. */
+function isOffByDefault(f: Pick<Finding, 'ruleId'>, optIns: readonly string[]) {
+  return ruleDef(f.ruleId)?.optIn === true && !optIns.includes(f.ruleId);
+}
+
+/**
+ * Hidden from the view, counts and score: ignored, or produced by an opt-in
+ * rule the cluster has not turned on (`optIns`: the rule ids turned on).
+ */
+export function isSilenced(
+  f: Pick<Finding, 'ruleId' | 'ref'>,
+  ignores: readonly HealthIgnore[],
+  optIns: readonly string[],
+) {
+  return isIgnored(f, ignores) || isOffByDefault(f, optIns);
+}
+
 const PENALTY: Record<Severity, number> = { critical: 100, warning: 50, info: 10 };
 const RANK: Record<Severity, number> = { critical: 0, warning: 1, info: 2 };
 
@@ -189,8 +206,16 @@ export function gradeOf(score: number): string {
   return 'F';
 }
 
-/** Applies ignores and computes the score (mean over kinds of the per-object scores). */
-export function summarize(scan: HealthScan, ignores: readonly HealthIgnore[]): HealthSummary {
+/**
+ * Drops silenced findings (`isSilenced`) and computes the score (mean over
+ * kinds of the per-object scores). `ignored` counts explicit ignores only, not
+ * the findings of opt-in rules that are off.
+ */
+export function summarize(
+  scan: HealthScan,
+  ignores: readonly HealthIgnore[],
+  optIns: readonly string[] = [],
+): HealthSummary {
   const counts = Object.fromEntries(SEVERITIES.map((s) => [s, 0])) as Record<Severity, number>;
   const categories = Object.fromEntries(CATEGORIES.map((c) => [c, 0])) as Record<Category, number>;
   const byUid = new Map<string, Finding[]>();
@@ -198,8 +223,8 @@ export function summarize(scan: HealthScan, ignores: readonly HealthIgnore[]): H
   const worst = new Map<string, { kind: string; penalty: number }>();
   let ignored = 0;
   for (const f of scan.findings) {
-    if (isIgnored(f, ignores)) {
-      ignored++;
+    if (isSilenced(f, ignores, optIns)) {
+      if (!isOffByDefault(f, optIns)) ignored++;
       continue;
     }
     counts[f.severity]++;

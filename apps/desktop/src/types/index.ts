@@ -30,6 +30,11 @@ export interface WorkspaceSnapshot {
   sectionItemOrder: Record<SectionId, string[]>;
   /** Health check rules silenced per cluster. Absent in files written before health checks. */
   healthIgnores?: Record<ClusterId, HealthIgnore[]>;
+  /**
+   * Opt-in health rules (off by default) turned on per cluster, by rule id.
+   * Absent in files written before opt-in rules.
+   */
+  healthOptIns?: Record<ClusterId, string[]>;
 }
 
 /** A health rule silenced for one cluster; `namespace: null` silences it everywhere. */

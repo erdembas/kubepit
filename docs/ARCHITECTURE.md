@@ -946,14 +946,18 @@ feed are described in `docs/RELEASING.md`.
   rule family (containers, pods, workloads, network, config, storage,
   policy, nodes, certificates). `rules.ts` is the catalog: stable rule ids
   (persisted in ignores), category, default severity, the lists a rule
-  needs and a fix hint. Every finding points at one object. Pod-spec rules
+  needs, a fix hint and `optIn` (off by default). Every finding points at
+  one object. Pod-spec rules
   run once per workload template (bare pods only when no loaded controller
   covers them), so one bad template is one finding, not one per replica.
 - `engine.ts` runs the rule families as passes (the async runner yields
   between them), caps findings per rule (400) and objects per list
-  (20 000). `summarize` applies ignores and scores 0–100: the mean over
-  kinds of per-object scores (worst finding: critical 0, warning 50,
-  info 90), graded A–F.
+  (20 000). `summarize` drops silenced findings and scores 0–100: the
+  mean over kinds of per-object scores (worst finding: critical 0,
+  warning 50, info 90), graded A–F. `isSilenced` (also used by the details
+  banner) is true for ignored findings and for findings of an opt-in rule
+  the cluster has not turned on. Opt-in findings are still computed, so
+  turning a rule on is instant and the engine stays pure.
 - `components/workbench/health/useHealthScan.ts` feeds the engine from the
   shared watch cache (the tables' keys, so watches are shared) with 15
   built-in lists plus cert-manager `Certificate`s when served. A scan runs
@@ -969,6 +973,18 @@ feed are described in `docs/RELEASING.md`.
 - Ignores are per cluster and rule, optionally per namespace, stored as
   `healthIgnores` in `workspace.json` (opaque to the backend) and synced
   across windows with the rest of the workspace snapshot.
+- Opt-in rules are turned on per cluster in the view's "Off by default"
+  card, stored as `healthOptIns` (`{ clusterId: ruleId[] }`) next to
+  `healthIgnores` and synced the same way. Files without it, or with a
+  malformed one, hydrate to "no opt-ins". The only opt-in rule so far is
+  `container-privilege-escalation-unset` (info: `allowPrivilegeEscalation`
+  not set, the Kubernetes default); an explicit `true` stays the warning
+  `container-privilege-escalation`, so its existing ignores keep working.
+- Tests: Vitest in the node environment
+  (`pnpm --filter @kubepit/desktop test`, `src/**/*.test.ts(x)`;
+  benchmarks `src/**/*.bench.ts` with `bench`). `health/testing.ts`
+  provides `emptyHealthInput()` for scan tests and is never imported by
+  app code.
 - `lib/kube/x509.ts` is a dependency-free PEM/DER X.509 reader (names,
   SANs, validity, serial, algorithms, CA flag, bundles). Secrets and
   ConfigMaps show certificate cards, the Secrets table an "Expires" column,

@@ -1,9 +1,9 @@
 import * as i18n from '@/i18n';
 import { useLocaleMemo as useMemo } from '@/i18n';
 import { useState } from 'react';
-import { isIgnored, mergeFindings, objectFindings, ruleDef } from '@/lib/kube/health';
+import { isSilenced, mergeFindings, objectFindings, ruleDef } from '@/lib/kube/health';
 import { cn } from '@/lib/cn';
-import { useHealthIgnores, useHealthStore } from '@/store/useHealthStore';
+import { useHealthIgnores, useHealthOptIns, useHealthStore } from '@/store/useHealthStore';
 import { VIEW, useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { KubeObject } from '@/types';
 import { Section } from '../details/primitives';
@@ -28,10 +28,14 @@ export function HealthBanner({
   i18n.useLocale();
   const [expanded, setExpanded] = useState(false);
   const ignores = useHealthIgnores(clusterId);
+  const optIns = useHealthOptIns(clusterId);
   const scanned = useHealthStore((s) => s.scans[clusterId]?.byUid.get(obj.metadata.uid));
   const findings = useMemo(
-    () => mergeFindings(objectFindings(obj, now), scanned).filter((f) => !isIgnored(f, ignores)),
-    [obj, now, scanned, ignores],
+    () =>
+      mergeFindings(objectFindings(obj, now), scanned).filter(
+        (f) => !isSilenced(f, ignores, optIns),
+      ),
+    [obj, now, scanned, ignores, optIns],
   );
   if (!findings.length) return null;
   const shown = expanded ? findings : findings.slice(0, COLLAPSED);

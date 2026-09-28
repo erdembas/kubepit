@@ -20,7 +20,7 @@ function security(
   hint: () => string,
   category: RuleDef['category'] = 'security',
 ): RuleDef {
-  return { id, category, severity, needs, local: false, title, hint };
+  return { id, category, severity, needs, local: false, optIn: false, title, hint };
 }
 
 export const SECURITY_RULES: readonly RuleDef[] = [

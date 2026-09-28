@@ -21,6 +21,7 @@ function hydrate(workspace: WorkspaceSnapshot) {
     sectionItemOrder: workspace.sectionItemOrder ?? {},
   });
   useHealthStore.getState().hydrateIgnores(workspace.healthIgnores ?? {});
+  useHealthStore.getState().hydrateOptIns(workspace.healthOptIns ?? {});
 }
 
 /**
@@ -87,7 +88,7 @@ export function useAppBootstrap() {
     };
   }, []);
 
-  // Persist the workspace layout (sections, membership, order, collapse) and health ignores.
+  // Persist the workspace layout (sections, membership, order, collapse), health ignores and opt-ins.
   useEffect(() => {
     let timer: number | undefined;
     const schedule = () => {
@@ -110,6 +111,7 @@ export function useAppBootstrap() {
             ]),
           ),
           healthIgnores: useHealthStore.getState().ignores,
+          healthOptIns: useHealthStore.getState().optIns,
         };
         void ipc.workspaceSave(snapshot).catch(console.error);
       }, SAVE_DEBOUNCE_MS);
@@ -127,7 +129,7 @@ export function useAppBootstrap() {
     });
     const unsubscribeHealth = useHealthStore.subscribe((state, prev) => {
       if (!useAppStore.getState().bootstrapped || applyingRemoteWorkspace) return;
-      if (state.ignores !== prev.ignores) schedule();
+      if (state.ignores !== prev.ignores || state.optIns !== prev.optIns) schedule();
     });
     return () => {
       window.clearTimeout(timer);

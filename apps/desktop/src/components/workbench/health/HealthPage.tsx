@@ -9,12 +9,15 @@ import {
   RotateCcw,
   Search,
   ShieldAlert,
+  ToggleLeft,
+  ToggleRight,
   X,
 } from 'lucide-react';
 import { IconButton } from '@/components/ui/IconButton';
 import { Select, type SelectOption } from '@/components/ui/Select';
 import {
   CATEGORIES,
+  RULES,
   SEVERITIES,
   categoryLabel,
   ruleTitle,
@@ -25,7 +28,7 @@ import {
 } from '@/lib/kube/health';
 import { cn } from '@/lib/cn';
 import { formatAge } from '@/lib/format';
-import { useHealthIgnores, useHealthStore } from '@/store/useHealthStore';
+import { useHealthIgnores, useHealthOptIns, useHealthStore } from '@/store/useHealthStore';
 import { VIEW, useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { ApiResourceInfo } from '@/types';
 import { Card, StatTile } from '../overview/charts';
@@ -36,6 +39,9 @@ import { CATEGORY_FILL, SEVERITY_ICON, SEVERITY_TEXT } from './severity';
 import { useHealthScan } from './useHealthScan';
 
 type Filter<T extends string> = T | 'all';
+
+/** Rules that stay silent until a cluster turns them on. */
+const OPT_IN_RULES = RULES.filter((r) => r.optIn);
 
 function scopeLabel(namespaces: string[]) {
   if (!namespaces.length) return i18n.t('All namespaces');
@@ -86,6 +92,7 @@ export function HealthPage({
   i18n.useLocale();
   const health = useHealthScan(clusterId, namespaces, isActive, apiResources);
   const ignores = useHealthIgnores(clusterId);
+  const optIns = useHealthOptIns(clusterId);
   const now = useNow(15_000, isActive);
   const query = useWorkbenchStore((s) => s.filters[`${clusterId}|${VIEW.clusterHealth}`] ?? '');
   const setQuery = (text: string) =>
@@ -331,6 +338,38 @@ export function HealthPage({
               ))
             )}
           </Card>
+          {OPT_IN_RULES.length > 0 && (
+            <Card title={i18n.t('Off by default')} icon={<ToggleLeft />}>
+              <p className="text-fg-dim px-4 pt-2.5 pb-1 text-[11px] leading-relaxed">
+                {i18n.t(
+                  'Findings of these rules stay hidden until you turn them on for this cluster.',
+                )}
+              </p>
+              <ul className="divide-border/60 divide-y">
+                {OPT_IN_RULES.map((r) => {
+                  const on = optIns.includes(r.id);
+                  const Icon = on ? ToggleRight : ToggleLeft;
+                  return (
+                    <li key={r.id} className="flex items-center gap-3 px-4 py-2 text-[12px]">
+                      <span className="text-fg min-w-0 flex-1 truncate">{r.title()}</span>
+                      <span className="text-fg-dim shrink-0 text-[11px]">
+                        {categoryLabel(r.category)}
+                      </span>
+                      <button
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => useHealthStore.getState().setOptIn(clusterId, r.id, !on)}
+                        className="text-fg-dim hover:text-accent flex shrink-0 items-center gap-1 text-[11px]"
+                      >
+                        <Icon className={cn('h-3 w-3', on && 'text-accent')} />
+                        {on ? i18n.t('Turn off') : i18n.t('Turn on')}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </Card>
+          )}
           {ignores.length > 0 && (
             <Card title={i18n.t('Ignored rules')} icon={<EyeOff />}>
               <ul className="divide-border/60 divide-y">

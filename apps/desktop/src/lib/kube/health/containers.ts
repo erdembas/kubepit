@@ -145,13 +145,13 @@ function securityFindings(
         owner,
         i18n.t('Container {container} sets allowPrivilegeEscalation: true', { container: name }),
         name,
-        'warning',
       ),
     );
+  // Unset is the Kubernetes default and very common; the rule is opt-in per cluster.
   else if (sc.allowPrivilegeEscalation === undefined && !privileged)
     emit(
       makeFinding(
-        'container-privilege-escalation',
+        'container-privilege-escalation-unset',
         owner,
         i18n.t('Container {container} does not set allowPrivilegeEscalation: false', {
           container: name,
