@@ -19,6 +19,7 @@ import { buildRbac } from './rbac';
 import { buildStorage } from './storage';
 import { buildRolloutHistory } from './rollouts';
 import { buildKubeSystem } from './system';
+import { buildUpgradeDemo } from './upgrade';
 
 /** Builds one demo cluster. Order matters: later steps reference earlier objects. */
 function buildCluster(db: ClusterDb) {
@@ -64,6 +65,7 @@ function buildCluster(db: ClusterDb) {
     });
   buildHealthDemo(db);
   buildHelm(db);
+  buildUpgradeDemo(db);
   buildGitOps(db);
   buildEvents(db);
   buildRolloutHistory(db);

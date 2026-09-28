@@ -31,6 +31,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { openFleetSearch } from '@/store/useFleetSearchStore';
 import { ClusterCard } from './ClusterCard';
 import { HeaderAction, SectionHeader } from './SectionHeader';
+import { UpgradeFleetCard } from './UpgradeFleetCard';
 import {
   TONE_CLASSES,
   fleetStats,
@@ -294,6 +295,8 @@ export function Dashboard({ visible }: { visible: boolean }) {
               </span>
             )}
           </div>
+
+          {stats.connected > 0 && <UpgradeFleetCard visible={visible} />}
 
           <div className="flex flex-wrap items-center gap-2">
             <div className="border-border/70 bg-surface-raised/60 focus-within:border-accent/40 flex h-8 w-72 max-w-full items-center gap-2 rounded-lg border px-2.5">

@@ -20,6 +20,9 @@ import './openapi';
 // Registered after './app': it wraps `port_forward_start` and `cluster_connect`.
 import './connectivity';
 import './changes';
+// Upgrade readiness scan, Helm values schemas and upgrade preview.
+import './upgrade';
+import './helmPreview';
 
 export { mockListen } from './bus';
 
