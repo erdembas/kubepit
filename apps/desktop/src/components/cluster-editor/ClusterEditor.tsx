@@ -14,6 +14,7 @@ import type { ClusterDef, ClusterInput, KubeconfigSource } from '@/types';
 import { ClusterFields, type ClusterFieldValues } from './ClusterFields';
 import { Field } from './Field';
 import { PrometheusFields, prometheusConfig, prometheusDraft } from './PrometheusFields';
+import { CostFields, costConfig, costDraft } from './CostFields';
 import { ProxyField } from './ProxyField';
 import { proxyUrlProblem } from '@/lib/proxy';
 
@@ -71,6 +72,7 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [prometheus, setPrometheus] = useState(() => prometheusDraft(editing?.prometheus));
+  const [cost, setCost] = useState(() => costDraft(editing?.cost));
   // Connectivity: per-cluster proxy override.
   const [proxy, setProxy] = useState(editing?.proxy_url ?? '');
 
@@ -140,6 +142,8 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
       if (editing) {
         const metrics = prometheusConfig(prometheus);
         if ('error' in metrics) return setError(metrics.error);
+        const costing = costConfig(cost);
+        if ('error' in costing) return setError(costing.error);
         const saved = await saveCluster({
           ...editing,
           name,
@@ -151,6 +155,7 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
           read_only: fields.read_only,
           notes: fields.notes,
           prometheus: metrics.config,
+          cost: costing.config,
           proxy_url: proxy.trim() || null,
         });
         store.assignClusterToSection(saved.id, fields.sectionId);
@@ -353,6 +358,11 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
         {editing && (
           <div className="border-border/60 border-t pt-4">
             <PrometheusFields clusterId={editing.id} value={prometheus} onChange={setPrometheus} />
+          </div>
+        )}
+        {editing && (
+          <div className="border-border/60 border-t pt-4">
+            <CostFields clusterId={editing.id} value={cost} onChange={setCost} />
           </div>
         )}
       </div>

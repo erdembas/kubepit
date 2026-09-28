@@ -10,6 +10,7 @@ import { HealthPage } from './health/HealthPage';
 import { ApiExplorerPage } from './explain/ApiExplorerPage';
 import { GitOpsPage } from './gitops/GitOpsPage';
 import { ChangesPage } from './changes/ChangesPage';
+import { CostPage } from './cost/CostPage';
 import { HelmChartsPage } from './helm/HelmChartsPage';
 import { HelmPage } from './helm/HelmPage';
 import { ClusterOverviewPage } from './overview/ClusterOverviewPage';
@@ -98,6 +99,8 @@ export const ViewHost = memo(function ViewHost({
         apiResources={apiResources}
       />
     );
+  if (activeKind === VIEW.cost)
+    return <CostPage clusterId={clusterId} namespaces={namespaces} isActive={isActive} />;
   if (activeKind === VIEW.gitops)
     return (
       <GitOpsPage

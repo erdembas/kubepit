@@ -30,6 +30,7 @@ import { useVisibleStore } from '@/lib/useVisibleStore';
 import { useAppStore } from '@/store/useAppStore';
 import { openFleetSearch } from '@/store/useFleetSearchStore';
 import { ClusterCard } from './ClusterCard';
+import { FleetCost } from './FleetCost';
 import { HeaderAction, SectionHeader } from './SectionHeader';
 import {
   TONE_CLASSES,
@@ -293,6 +294,7 @@ export function Dashboard({ visible }: { visible: boolean }) {
                 })}
               </span>
             )}
+            <FleetCost clusters={clusters} statuses={statuses} visible={visible} />
           </div>
 
           <div className="flex flex-wrap items-center gap-2">

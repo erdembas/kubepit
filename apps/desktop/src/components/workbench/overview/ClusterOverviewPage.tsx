@@ -22,6 +22,7 @@ import { useNow } from '../util';
 import { Card, GaugeRings, Legend, SegmentBar, StatTile, type Gauge, type Segment } from './charts';
 import { ClusterUsageHistory } from './ClusterUsageHistory';
 import { HealthSummaryCard } from '../health/HealthSummaryCard';
+import { CostOverviewCard } from '../cost/CostOverviewCard';
 import { ClientCertNotice } from '../health/ClientCertificate';
 import { WarningList } from './WarningList';
 
@@ -263,6 +264,7 @@ export function ClusterOverviewPage({
           apiResources={apiResources}
           podCount={o.pods.total}
         />
+        <CostOverviewCard clusterId={clusterId} isActive={isActive} />
         <div className="grid gap-3 lg:grid-cols-3">
           <ResourceCard
             title={i18n.t('CPU')}
