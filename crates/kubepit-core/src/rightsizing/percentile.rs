@@ -4,10 +4,12 @@
 //!   is compressible, so the p95 is the peak that matters.
 //! - Memory request = maximum working set + headroom (default 20 %); memory
 //!   is not compressible, so the maximum is the peak.
-//! - Memory limit = maximum + a larger headroom (default 40 %) when there is
-//!   none yet or when the current one still holds the new request; a limit
-//!   the new request exceeds is left to [`super::strategy::finalize`], which
-//!   raises it proportionally.
+//! - Memory limit: an existing limit tighter than the maximum + a larger
+//!   headroom (default 40 %) is raised to it; limits are never lowered (a
+//!   lower limit saves nothing and risks OOM kills) and never invented (a
+//!   new limit could OOM-kill a container that never was). A limit the new
+//!   request exceeds is left to [`super::strategy::finalize`], which raises
+//!   it proportionally.
 //! - CPU limits are left alone (raised with the request when needed).
 //! - Minimums, rounding up, never below the observed peak, and no churn on
 //!   small differences ([`super::math`]).
@@ -73,10 +75,13 @@ impl RecommendationStrategy for PercentileHeadroom {
         );
         let limit = memory_limit(u.memory_max, memory, settings);
         let memory_limit = match current.memory_limit {
-            Some(l) if memory <= l => Some(settle(Some(l), limit, MIN_MEMORY_CHANGE, u.memory_max)),
-            // The new request exceeds it: raised proportionally by `finalize`.
-            Some(_) => None,
-            None => Some(limit),
+            // Too tight for the peak + limit headroom: raise it; never lower it.
+            Some(l) if memory <= l => {
+                Some(settle(Some(l), limit, MIN_MEMORY_CHANGE, u.memory_max).max(l))
+            }
+            // The new request exceeds it (raised proportionally by `finalize`),
+            // or there is none (never invented).
+            _ => None,
         };
 
         let confidence = confidence(input.source, u.hours);
@@ -169,8 +174,12 @@ mod tests {
         assert_eq!(r.recommended.cpu_request, Some(140.0));
         assert_eq!(r.memory, Change::Decrease);
         assert_eq!(r.recommended.memory_request, Some(368.0 * MIB));
-        assert_eq!(r.memory_limit, Change::Decrease);
-        assert_eq!(r.recommended.memory_limit, Some(432.0 * MIB));
+        assert_eq!(
+            r.memory_limit,
+            Change::Unchanged,
+            "limits are never lowered"
+        );
+        assert_eq!(r.recommended.memory_limit, Some(2.0 * GIB));
         assert_eq!(r.cpu_limit, Change::Unchanged);
         assert_eq!(r.confidence, Confidence::High);
         assert!(r.warnings.is_empty(), "{:?}", r.warnings);
@@ -223,8 +232,25 @@ mod tests {
         assert_eq!(r.cpu, Change::Unchanged, "230m vs 240m");
         assert_eq!(r.recommended.cpu_request, Some(240.0));
         assert_eq!(r.memory, Change::Unchanged);
-        assert_eq!(r.memory_limit, Change::Set, "a missing limit is proposed");
-        assert!(!r.memory_limit_raised);
+        assert_eq!(r.memory_limit, Change::Unchanged, "no limit is invented");
+        assert_eq!(r.recommended.memory_limit, None);
+        assert!(!r.changed());
+        // A limit tighter than peak + 40 % is raised: 260 MiB → 368 MiB.
+        let tight = ResourceValues {
+            memory_limit: Some(330.0 * MIB),
+            ..current
+        };
+        let r = run(
+            tight,
+            Some(usage(200.0, 260.0 * MIB)),
+            RightsizingSource::Prometheus,
+        );
+        assert_eq!(r.memory_limit, Change::Increase);
+        assert_eq!(r.recommended.memory_limit, Some(368.0 * MIB));
+        assert!(
+            !r.memory_limit_raised,
+            "headroom, not the proportional raise"
+        );
         // A tiny request below the observed p95 always changes, however small the step.
         let tiny = ResourceValues {
             cpu_request: Some(5.0),
