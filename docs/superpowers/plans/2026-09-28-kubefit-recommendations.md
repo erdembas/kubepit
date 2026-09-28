@@ -964,7 +964,7 @@ git commit -m "feat(rightsizing): ownership-aware collection pipeline with autom
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn cronjob_patches_the_job_template() {
@@ -985,28 +985,28 @@ async fn cronjobs_are_recommended_and_dry_run_patched() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core rightsizing::patch && cargo test -p kubepit-core --test cost`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement the core and UI changes listed under Interfaces**
+- [x] **Step 3: Implement the core and UI changes listed under Interfaces**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core && pnpm typecheck`
 
 Expected: PASS.
 
-- [ ] **Step 5: Verify the demo**
+- [x] **Step 5: Verify the demo**
 
 Run: `pnpm dev:ui`, open a CronJob's details.
 
 Expected: a Right-sizing section, and "Review & apply" shows a dry-run diff at
 `jobTemplate`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/kubepit-core apps/desktop/src

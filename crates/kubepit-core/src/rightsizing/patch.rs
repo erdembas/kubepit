@@ -9,6 +9,9 @@
 //!    {"name":"app","resources":{"requests":{"cpu":"250m","memory":"320Mi"},"limits":{"memory":"448Mi"}}}]}}}}
 //! ```
 //!
+//! A CronJob's containers sit at `spec.jobTemplate.spec.template.spec`
+//! ([`template_path`]).
+//!
 //! Quantities are written the way people write them: whole cores as `2`,
 //! otherwise millicores (`250m`); memory in `Gi` when whole, else `Mi`
 //! (rounded up), else `Ki`.
@@ -23,10 +26,13 @@ const KIB: f64 = 1024.0;
 const MIB: f64 = 1024.0 * KIB;
 const GIB: f64 = 1024.0 * MIB;
 
-/// Kinds right-sizing can patch, with the path of their pod spec.
+/// Kinds right-sizing can patch, with the path of their pod spec. A
+/// CronJob's is its job template's, so only the Jobs it starts from then
+/// on get the new values.
 pub fn template_path(kind: &str) -> Option<&'static [&'static str]> {
     match kind {
         "Deployment" | "StatefulSet" | "DaemonSet" => Some(&["spec", "template", "spec"]),
+        "CronJob" => Some(&["spec", "jobTemplate", "spec", "template", "spec"]),
         _ => None,
     }
 }
@@ -237,8 +243,36 @@ mod tests {
         );
         assert!(template_path("StatefulSet").is_some());
         assert!(template_path("DaemonSet").is_some());
-        assert!(template_path("CronJob").is_none());
+        assert!(
+            template_path("Job").is_none(),
+            "Jobs are recommended through their CronJob"
+        );
         assert!(template_path("Pod").is_none());
+    }
+
+    #[test]
+    fn cronjob_patches_the_job_template() {
+        let path = template_path("CronJob").unwrap();
+        assert_eq!(path, &["spec", "jobTemplate", "spec", "template", "spec"]);
+        let body = resources_patch(
+            path,
+            &[change("job")],
+            Some(&change_cause("CronJob", "nightly")),
+        );
+        assert_eq!(
+            body.pointer(
+                "/spec/jobTemplate/spec/template/spec/containers/0/resources/requests/cpu"
+            ),
+            Some(&json!("250m"))
+        );
+        assert!(body.pointer("/spec/template").is_none());
+        assert_eq!(
+            body["metadata"]["annotations"]["kubernetes.io/change-cause"],
+            "kubepit right-size cronjob/nightly"
+        );
+        let live = json!({"spec": {"jobTemplate": {"spec": {"template": {"spec": {
+            "containers": [{"name": "job"}]}}}}}});
+        assert_eq!(live_containers(&live, path), vec!["job"]);
     }
 
     #[test]

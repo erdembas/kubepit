@@ -17,13 +17,13 @@ import {
   sortItems,
   type CostSortKey,
 } from '@/lib/kube/cost/breakdown';
+import { isRightsizable, workloadGvk } from '@/lib/kube/rightsizing/model';
 import { exportFileName, toCsv } from '@/lib/tableExport';
 import { useAppStore } from '@/store/useAppStore';
 import { navigateTo } from '@/store/useWorkbenchStore';
 import type { CostAggregate, CostItem, CostReport } from '@/types';
 import { saveExportFile } from '../table/exportStore';
 import { errorText } from '../util';
-import { appsGvk } from './RightsizingDialog';
 import { useCostPrefs } from './prefs';
 import { EFFICIENCY_TEXT } from './tones';
 
@@ -211,12 +211,9 @@ export function CostBreakdown({
     if (item.special) return null;
     if (report.aggregate === 'namespace' && item.namespace)
       return () => navigateTo(clusterId, NAMESPACE_GVK, null, item.namespace);
-    if (
-      report.aggregate === 'workload' &&
-      item.namespace &&
-      (item.kind === 'Deployment' || item.kind === 'StatefulSet' || item.kind === 'DaemonSet')
-    )
-      return () => navigateTo(clusterId, appsGvk(item.kind!), item.namespace, item.name);
+    const kind = item.kind;
+    if (report.aggregate === 'workload' && item.namespace && kind && isRightsizable(kind))
+      return () => navigateTo(clusterId, workloadGvk(kind), item.namespace, item.name);
     return null;
   };
   const exportCsv = async () => {
