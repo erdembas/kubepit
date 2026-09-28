@@ -113,36 +113,6 @@ export function groupByKind(resources: ManifestResource[]): Array<[string, Manif
   return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
 }
 
-export type ChangeKind = 'added' | 'changed' | 'removed' | 'unchanged';
-
-export interface ResourceChange {
-  change: ChangeKind;
-  resource: ManifestResource;
-}
-
-/** Object-level changes between two manifests (by kind + namespace + name). */
-export function manifestChanges(before: string, after: string): ResourceChange[] {
-  const key = (r: ManifestResource) => `${r.kind}/${r.namespace ?? ''}/${r.name}`;
-  const old = new Map(parseManifest(before).map((r) => [key(r), r]));
-  const out: ResourceChange[] = [];
-  for (const r of parseManifest(after)) {
-    const previous = old.get(key(r));
-    old.delete(key(r));
-    out.push({
-      change: !previous ? 'added' : previous.text === r.text ? 'unchanged' : 'changed',
-      resource: r,
-    });
-  }
-  for (const r of old.values()) out.push({ change: 'removed', resource: r });
-  const order: Record<ChangeKind, number> = { added: 0, changed: 1, removed: 2, unchanged: 3 };
-  return out.sort(
-    (a, b) =>
-      order[a.change] - order[b.change] ||
-      a.resource.kind.localeCompare(b.resource.kind) ||
-      a.resource.name.localeCompare(b.resource.name),
-  );
-}
-
 export function isHelmMissingError(error: string | null | undefined): boolean {
   return !!error && /helm was not found/i.test(error);
 }
@@ -182,5 +152,6 @@ export const CHART_KEYS = {
   catalog: 'helm-charts|catalog',
   versions: (ref: string) => `helm-charts|versions|${ref}`,
   show: (ref: string, version: string | null) => `helm-charts|show|${ref}|${version ?? ''}`,
+  schema: (ref: string, version: string | null) => `helm-charts|schema|${ref}|${version ?? ''}`,
   hub: (query: string) => `helm-charts|hub|${query}`,
 };

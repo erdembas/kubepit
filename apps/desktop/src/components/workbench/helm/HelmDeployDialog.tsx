@@ -12,7 +12,6 @@ import {
   RotateCcw,
   TriangleAlert,
 } from 'lucide-react';
-import { Badge, type BadgeTone } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { Field, Input } from '@/components/ui/Input';
@@ -21,8 +20,10 @@ import { Switch } from '@/components/ui/Switch';
 import { Tabs } from '@/components/ui/Tabs';
 import { ipc } from '@/lib/ipc';
 import { cn } from '@/lib/cn';
-import { kindKey, resolveKindName } from '@/lib/kube/catalog';
-import { kindIcon } from '@/lib/kube/icons';
+import { resolveKindName } from '@/lib/kube/catalog';
+import { deprecatedApi, deprecationMessage } from '@/lib/kube/deprecations';
+import type { SchemaIssue } from '@/lib/kube/schema/validate';
+import { valuesIssues, valuesSchema } from '@/lib/kube/schema/values';
 import { compareVersions, isPrerelease } from '@/lib/semver';
 import { useAppStore } from '@/store/useAppStore';
 import { VIEW, useWorkbenchStore } from '@/store/useWorkbenchStore';
@@ -31,6 +32,7 @@ import type {
   HelmInstallRequest,
   HelmInstallResult,
   HelmReleaseDetail,
+  HelmUpgradePreview,
   HelmUpgradeRequest,
 } from '@/types';
 import { confirmDestructive } from '../actions/guard';
@@ -41,18 +43,18 @@ import { refreshPolledPrefix, usePolled } from '../data/polled';
 import { CodeBlock } from '../details/primitives';
 import { errorText, useNow } from '../util';
 import { ChartAvatar } from './ChartBits';
+import { kindIconFor } from './changeBits';
 import {
   CHART_KEYS,
   formatElapsed,
   groupByKind,
-  manifestChanges,
   namespaceError,
   parseManifest,
   releaseNameError,
   sameValues,
   valuesError,
-  type ChangeKind,
 } from './charts';
+import { UpgradeChanges } from './UpgradeChanges';
 
 export type DeployTarget =
   | { mode: 'install'; chartRef: string; version: string | null }
@@ -63,6 +65,8 @@ type Pane = 'values' | 'preview';
 interface Preview {
   key: string;
   result?: HelmInstallResult;
+  /** Upgrades: the object-level review (helm-diff style). */
+  upgrade?: HelmUpgradePreview;
   error?: string;
 }
 
@@ -70,9 +74,12 @@ const NEWER_DOT = 'rgb(var(--accent))';
 
 /**
  * "Install chart" and "Upgrade release": chart version, release options and
- * a values editor, a dry-run preview (resources, manifest, notes — or diffs
- * against the running revision for upgrades), then the real run with
- * progress. Dry runs work on read-only clusters; the real run does not.
+ * a values editor (checked against the chart's `values.schema.json` when it
+ * has one), a dry-run preview (resources, manifest, notes — or, for
+ * upgrades, a review of added / changed / removed objects against the
+ * running revision and optionally the live objects), then the real run with
+ * progress. Upgrades are reviewed before they run. Dry runs work on
+ * read-only clusters; the real run does not.
  */
 export function HelmDeployDialog({
   clusterId,
@@ -158,6 +165,41 @@ export function HelmDeployDialog({
   }, [baseline]);
   const valuesProblem = draft ? valuesError(draft) : null;
 
+  // -- Values schema (advisory: completion, hovers, markers; never blocks) ------
+  const chartSchema = usePolled(
+    chartRef && version ? CHART_KEYS.schema(chartRef, version) : null,
+    () => ipc.helmChartValuesSchema(chartRef!, version),
+    null,
+  );
+  // Upgrades keep the running chart version when its repository is unknown.
+  const releaseSchema = usePolled(
+    upgrade &&
+      (!chartRef || chartSchema.error) &&
+      (version ?? upgrade.release.chart_version) === upgrade.release.chart_version
+      ? `${clusterId}|helm-schema|${upgrade.release.namespace}/${upgrade.release.name}|${upgrade.release.revision}`
+      : null,
+    () => ipc.helmReleaseValuesSchema(clusterId, upgrade!.release.namespace, upgrade!.release.name),
+    null,
+  );
+  const schemaJson = chartSchema.data ?? releaseSchema.data ?? null;
+  // Helm validates the values merged over the chart defaults.
+  const upgradeDefaults = usePolled(
+    upgrade && schemaJson && chartRef && version ? CHART_KEYS.show(chartRef, version) : null,
+    () => ipc.helmChartShow(chartRef!, version),
+    null,
+  );
+  const defaultsYaml = upgrade
+    ? (upgradeDefaults.data?.values_yaml ?? null)
+    : (defaults.data?.values_yaml ?? null);
+  const schema = useMemo(
+    () => (schemaJson ? valuesSchema(schemaJson, defaultsYaml) : null),
+    [schemaJson, defaultsYaml],
+  );
+  const schemaProblems = useMemo(
+    () => (schema && draft !== null && !valuesProblem ? valuesIssues(draft, schema) : []),
+    [schema, draft, valuesProblem],
+  );
+
   // -- Requests ---------------------------------------------------------------
   const timeoutSecs = Number.parseInt(timeout, 10) > 0 ? Number.parseInt(timeout, 10) : null;
   const nameProblem = upgrade ? null : releaseNameError(name);
@@ -206,21 +248,37 @@ export function HelmDeployDialog({
   const [previewing, setPreviewing] = useState(false);
   const [running, setRunning] = useState<number | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
+  const [liveDiff, setLiveDiff] = useState(false);
   const now = useNow(1000, running !== null);
 
-  const runPreview = async () => {
+  const runPreview = async (live = liveDiff) => {
     if (!ready) return;
     const key = inputsKey;
     setPane('preview');
     setPreviewing(true);
     try {
-      const result = await run(true);
-      if (mounted.current) setPreview({ key, result });
+      if (release) {
+        const review = await ipc.helmUpgradePreview(
+          clusterId,
+          release.namespace,
+          release.name,
+          upgradeRequest(true),
+          live,
+        );
+        if (mounted.current) setPreview({ key, result: review.result, upgrade: review });
+      } else {
+        const result = await run(true);
+        if (mounted.current) setPreview({ key, result });
+      }
     } catch (e) {
       if (mounted.current) setPreview({ key, error: errorText(e) });
     } finally {
       if (mounted.current) setPreviewing(false);
     }
+  };
+  const changeLiveDiff = (live: boolean) => {
+    setLiveDiff(live);
+    if (live && preview?.upgrade && !preview.upgrade.live_checked) void runPreview(true);
   };
 
   const execute = async () => {
@@ -310,6 +368,8 @@ export function HelmDeployDialog({
     : [];
   const stale = !!preview && preview.key !== inputsKey;
   const verb = release ? i18n.t('Upgrade') : i18n.t('Install');
+  // Upgrades show their review first (a failed dry run counts: it is the answer).
+  const needsReview = !!release && (!preview || stale);
 
   return (
     <Dialog
@@ -377,17 +437,27 @@ export function HelmDeployDialog({
             size="sm"
             variant="primary"
             leftIcon={
-              release ? (
+              needsReview ? (
+                <Eye className="h-3.5 w-3.5" />
+              ) : release ? (
                 <ArrowUpCircle className="h-3.5 w-3.5" />
               ) : (
                 <Download className="h-3.5 w-3.5" />
               )
             }
-            disabled={!ready || readOnly || running !== null}
-            title={readOnly ? i18n.t('Read-only cluster: changes are blocked') : undefined}
-            onClick={submit}
+            disabled={
+              !ready || running !== null || (needsReview ? previewing : readOnly || previewing)
+            }
+            title={
+              needsReview
+                ? i18n.t('Render the upgrade and review the changes before running it')
+                : readOnly
+                  ? i18n.t('Read-only cluster: changes are blocked')
+                  : undefined
+            }
+            onClick={needsReview ? () => void runPreview() : submit}
           >
-            {verb}
+            {needsReview ? i18n.t('Review changes') : verb}
           </Button>
         </>
       }
@@ -615,6 +685,11 @@ export function HelmDeployDialog({
               <ValuesStatus
                 edited={edited}
                 problem={valuesProblem}
+                schema={{
+                  present: !!schema,
+                  loading: chartSchema.loading || releaseSchema.loading,
+                  problems: schemaProblems,
+                }}
                 upgradeRevision={release?.revision ?? null}
                 onReset={() => seed && setDraft(seed.text)}
                 onDefaults={
@@ -671,7 +746,12 @@ export function HelmDeployDialog({
                     )}
                   </p>
                 )}
-                <MonacoView value={draft} readOnly={false} onChange={setDraft} />
+                <MonacoView
+                  value={draft}
+                  readOnly={false}
+                  onChange={setDraft}
+                  valuesSchema={schema}
+                />
               </>
             )
           ) : (
@@ -683,6 +763,8 @@ export function HelmDeployDialog({
               ready={ready}
               namespace={namespace}
               onRun={() => void runPreview()}
+              liveDiff={liveDiff}
+              onLiveDiffChange={changeLiveDiff}
             />
           )}
         </div>
@@ -774,12 +856,14 @@ function useVersionOptions(
 function ValuesStatus({
   edited,
   problem,
+  schema,
   upgradeRevision,
   onReset,
   onDefaults,
 }: {
   edited: boolean;
   problem: string | null;
+  schema: { present: boolean; loading: boolean; problems: SchemaIssue[] };
   upgradeRevision: number | null;
   onReset: () => void;
   onDefaults: (() => void) | null;
@@ -799,11 +883,34 @@ function ValuesStatus({
           <TriangleAlert className="h-3 w-3 shrink-0" />
           <span className="truncate">{i18n.t('Invalid YAML: {error}', { error: problem })}</span>
         </span>
+      ) : schema.present && schema.problems.length ? (
+        <span
+          className="text-status-starting flex min-w-0 items-center gap-1"
+          title={schema.problems
+            .slice(0, 8)
+            .map((p) => p.message)
+            .join('\n')}
+        >
+          <TriangleAlert className="h-3 w-3 shrink-0" />
+          <span className="truncate">
+            {i18n.plural(
+              '{count} problem against values.schema.json',
+              '{count} problems against values.schema.json',
+              schema.problems.length,
+            )}
+          </span>
+        </span>
       ) : (
         <span className="text-status-running flex shrink-0 items-center gap-1">
           <CircleCheck className="h-3 w-3" />
-          {i18n.t('Valid YAML')}
+          {schema.present ? i18n.t('Matches values.schema.json') : i18n.t('Valid YAML')}
         </span>
+      )}
+      {schema.loading && !schema.present && (
+        <Loader2
+          className="text-fg-dim h-3 w-3 shrink-0 animate-spin"
+          aria-label={i18n.t('Loading values.schema.json')}
+        />
       )}
       <div className="ml-auto flex shrink-0 items-center gap-1">
         {onDefaults && (
@@ -844,6 +951,8 @@ function PreviewPane({
   ready,
   namespace,
   onRun,
+  liveDiff,
+  onLiveDiffChange,
 }: {
   upgrade: HelmReleaseDetail | null;
   preview: Preview | null;
@@ -852,6 +961,8 @@ function PreviewPane({
   ready: boolean;
   namespace: string;
   onRun: () => void;
+  liveDiff: boolean;
+  onLiveDiffChange: (live: boolean) => void;
 }) {
   i18n.useLocale();
   const [installTab, setInstallTab] = useState<InstallTab>('resources');
@@ -859,12 +970,9 @@ function PreviewPane({
   const [computed, setComputed] = useState(false);
   const result = preview?.result;
   const resources = useMemo(() => (result ? parseManifest(result.manifest) : []), [result]);
-  const changes = useMemo(
-    () => (result && upgrade ? manifestChanges(upgrade.manifest, result.manifest) : []),
-    [result, upgrade],
-  );
 
-  if (previewing)
+  // Re-rendering with the live comparison keeps the current review on screen.
+  if (previewing && !(preview?.upgrade && liveDiff))
     return (
       <PaneMessage>
         <Loader2 className="h-4 w-4 animate-spin" />
@@ -978,10 +1086,6 @@ function PreviewPane({
       </div>
     );
 
-  const counts = changes.reduce<Record<ChangeKind, number>>(
-    (acc, c) => ({ ...acc, [c.change]: acc[c.change] + 1 }),
-    { added: 0, changed: 0, removed: 0, unchanged: 0 },
-  );
   const next = `${i18n.t('Preview')} · ${result.release?.chart_version ?? ''}`;
   const current = i18n.t('Revision {revision}', { revision: upgrade.release.revision });
   return (
@@ -1000,39 +1104,15 @@ function PreviewPane({
         />
       </div>
       {upgradeTab === 'changes' ? (
-        <div className="overlay-scroll min-h-0 flex-1 overflow-auto p-4">
-          <div className="mb-3 flex flex-wrap items-center gap-1.5">
-            <ChangeBadge change="added" count={counts.added} />
-            <ChangeBadge change="changed" count={counts.changed} />
-            <ChangeBadge change="removed" count={counts.removed} />
-            <ChangeBadge change="unchanged" count={counts.unchanged} />
-          </div>
-          {!changes.length ? (
-            <p className="text-fg-dim text-[12px]">{i18n.t('The chart renders no resources.')}</p>
-          ) : (
-            <ul className="border-border/60 divide-border/40 divide-y overflow-hidden rounded-lg border">
-              {changes.map(({ change, resource }) => {
-                const Icon = kindIconFor(resource.kind);
-                return (
-                  <li
-                    key={`${change}-${resource.kind}-${resource.namespace}-${resource.name}`}
-                    className={cn(
-                      'flex items-center gap-2.5 px-3 py-1.5 text-[12px]',
-                      change === 'unchanged' && 'opacity-60',
-                    )}
-                  >
-                    <Icon className="text-fg-dim h-3.5 w-3.5 shrink-0" />
-                    <span className="text-fg-muted w-36 shrink-0 truncate">{resource.kind}</span>
-                    <span className="text-fg min-w-0 flex-1 truncate font-mono text-[11.5px]">
-                      {resource.name}
-                    </span>
-                    <ChangeBadge change={change} />
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
+        preview.upgrade ? (
+          <UpgradeChanges
+            preview={preview.upgrade}
+            currentRevision={upgrade.release.revision}
+            live={liveDiff}
+            onLiveChange={onLiveDiffChange}
+            loadingLive={previewing}
+          />
+        ) : null
       ) : upgradeTab === 'manifest' ? (
         <DiffView
           original={upgrade.manifest}
@@ -1067,35 +1147,6 @@ function PreviewPane({
   );
 }
 
-function kindIconFor(kind: string) {
-  const gvk = resolveKindName(kind);
-  return kindIcon(gvk ? kindKey(gvk) : kind);
-}
-
-const CHANGE_TONE: Record<ChangeKind, BadgeTone> = {
-  added: 'success',
-  changed: 'warning',
-  removed: 'critical',
-  unchanged: 'neutral',
-};
-
-function ChangeBadge({ change, count }: { change: ChangeKind; count?: number }) {
-  i18n.useLocale();
-  const label =
-    change === 'added'
-      ? i18n.t('Added')
-      : change === 'changed'
-        ? i18n.t('Changed')
-        : change === 'removed'
-          ? i18n.t('Removed')
-          : i18n.t('Unchanged');
-  return (
-    <Badge tone={CHANGE_TONE[change]} size="xs">
-      {count === undefined ? label : `${label} ${count}`}
-    </Badge>
-  );
-}
-
 function ResourceGroups({
   resources,
   namespace,
@@ -1121,6 +1172,7 @@ function ResourceGroups({
               <span className="text-fg-dim ml-auto truncate font-mono text-[10.5px]">
                 {items[0]!.apiVersion}
               </span>
+              <DeprecatedMarker apiVersion={items[0]!.apiVersion} kind={kind} />
             </header>
             <ul>
               {items.map((r) => (
@@ -1144,5 +1196,18 @@ function ResourceGroups({
         );
       })}
     </div>
+  );
+}
+
+/** A warning icon when the rendered apiVersion is deprecated or removed. */
+function DeprecatedMarker({ apiVersion, kind }: { apiVersion: string; kind: string }) {
+  i18n.useLocale();
+  const entry = deprecatedApi(apiVersion, kind);
+  if (!entry) return null;
+  const message = deprecationMessage(entry);
+  return (
+    <TriangleAlert className="text-status-starting h-3 w-3 shrink-0" aria-label={message}>
+      <title>{message}</title>
+    </TriangleAlert>
   );
 }

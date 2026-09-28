@@ -13,9 +13,11 @@ import {
 
 /**
  * Schema diagnostics for one parsed manifest: unknown fields, wrong types,
- * missing required fields and unsupported enum values. Offsets are the
+ * missing required fields, unsupported enum values and value constraints
+ * (`minimum` / `maximum` and their exclusive forms, `minLength` /
+ * `maxLength`, `pattern`, `minItems` / `maxItems`). Offsets are the
  * absolute source ranges of the parsed YAML. Advisory only — nothing here
- * blocks editing or applying; the API server stays the authority.
+ * blocks editing or applying; the API server (or helm) stays the authority.
  */
 
 export type IssueSeverity = 'error' | 'warning';
@@ -25,6 +27,68 @@ export interface SchemaIssue {
   message: string;
   start: number;
   end: number;
+}
+
+export interface ValidateOptions {
+  /**
+   * Whether an absent required field counts as missing. Helm values are
+   * merged over the chart defaults, so a field the defaults provide is not
+   * missing from the user's values. Default: always missing.
+   */
+  isMissing?: (path: PathSegment[], field: string) => boolean;
+}
+
+const patterns = new Map<string, RegExp | null>();
+
+/** A schema `pattern` as a RegExp; `null` when JavaScript cannot compile it (never judged). */
+function compilePattern(pattern: string): RegExp | null {
+  let re = patterns.get(pattern);
+  if (re !== undefined) return re;
+  re = null;
+  for (const flags of ['u', '']) {
+    try {
+      re = new RegExp(pattern, flags);
+      break;
+    } catch {
+      /* try without unicode mode, else give up */
+    }
+  }
+  patterns.set(pattern, re);
+  return re;
+}
+
+/** Constraint violations of a scalar that already has an accepted type. */
+function constraintIssue(node: SchemaNode, value: unknown): string | null {
+  if (typeof value === 'number') {
+    if (node.minimum !== null && value < node.minimum)
+      return i18n.t('Must be at least {min}.', { min: node.minimum });
+    if (node.exclusiveMinimum !== null && value <= node.exclusiveMinimum)
+      return i18n.t('Must be greater than {min}.', { min: node.exclusiveMinimum });
+    if (node.maximum !== null && value > node.maximum)
+      return i18n.t('Must be at most {max}.', { max: node.maximum });
+    if (node.exclusiveMaximum !== null && value >= node.exclusiveMaximum)
+      return i18n.t('Must be less than {max}.', { max: node.exclusiveMaximum });
+    return null;
+  }
+  if (typeof value === 'string') {
+    const length = [...value].length;
+    if (node.minLength !== null && length < node.minLength)
+      return i18n.plural(
+        'Must be at least {count} character long.',
+        'Must be at least {count} characters long.',
+        node.minLength,
+      );
+    if (node.maxLength !== null && length > node.maxLength)
+      return i18n.plural(
+        'Must be at most {count} character long.',
+        'Must be at most {count} characters long.',
+        node.maxLength,
+      );
+    const re = node.pattern ? compilePattern(node.pattern) : null;
+    if (re && !re.test(value))
+      return i18n.t('Does not match the pattern {pattern}.', { pattern: node.pattern ?? '' });
+  }
+  return null;
 }
 
 type YamlType = JsonType | 'null';
@@ -76,7 +140,12 @@ function display(value: unknown): string {
   return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
-export function validateManifest(set: SchemaSet, root: SchemaNode, contents: Node): SchemaIssue[] {
+export function validateManifest(
+  set: SchemaSet,
+  root: SchemaNode,
+  contents: Node,
+  options: ValidateOptions = {},
+): SchemaIssue[] {
   const issues: SchemaIssue[] = [];
   const push = (severity: IssueSeverity, message: string, range: [number, number] | null) => {
     if (range) issues.push({ severity, message, start: range[0], end: range[1] });
@@ -112,7 +181,10 @@ export function validateManifest(set: SchemaSet, root: SchemaNode, contents: Nod
           }),
           rangeOf(value),
         );
+        return;
       }
+      const problem = constraintIssue(node, value.value);
+      if (problem) push('error', problem, rangeOf(value));
       return;
     }
     if (isMap(value)) {
@@ -142,6 +214,7 @@ export function validateManifest(set: SchemaSet, root: SchemaNode, contents: Nod
       if (path[0] !== 'status') {
         for (const field of node.required) {
           if (present.has(field)) continue;
+          if (options.isMissing && !options.isMissing(path, field)) continue;
           const child = node.properties[field];
           if (child && defaultsItself(set.node(child))) continue;
           push(
@@ -154,6 +227,27 @@ export function validateManifest(set: SchemaSet, root: SchemaNode, contents: Nod
       return;
     }
     if (isSeq(value)) {
+      const count = value.items.length;
+      if (node.minItems !== null && count < node.minItems)
+        push(
+          'error',
+          i18n.plural(
+            'Needs at least {count} item.',
+            'Needs at least {count} items.',
+            node.minItems,
+          ),
+          rangeOf(value),
+        );
+      else if (node.maxItems !== null && count > node.maxItems)
+        push(
+          'error',
+          i18n.plural(
+            'Allows at most {count} item.',
+            'Allows at most {count} items.',
+            node.maxItems,
+          ),
+          rangeOf(value),
+        );
       const items = node.items ? set.node(node.items) : ANY_NODE;
       value.items.forEach((item, i) => check(item as Node | null, items, null, [...path, i]));
     }

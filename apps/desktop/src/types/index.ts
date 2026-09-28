@@ -200,13 +200,15 @@ export interface OpenApiGvk {
 /** A schema node as Kubernetes publishes it (the OpenAPI v3 subset it uses). */
 export interface OpenApiSchema {
   $ref?: string;
-  type?: string;
+  /** JSON Schema (Helm `values.schema.json`) also allows a list: `[string, 'null']`. */
+  type?: string | string[];
   format?: string;
   title?: string;
   description?: string;
   properties?: Record<string, OpenApiSchema>;
   additionalProperties?: OpenApiSchema | boolean;
-  items?: OpenApiSchema;
+  /** JSON Schema tuples (`items: [...]`) are treated as "any item". */
+  items?: OpenApiSchema | OpenApiSchema[];
   required?: string[];
   enum?: unknown[];
   default?: unknown;
@@ -221,6 +223,14 @@ export interface OpenApiSchema {
   minItems?: number;
   maxItems?: number;
   pattern?: string;
+  // JSON Schema draft-07 (Helm values schemas); OpenAPI documents never set these.
+  const?: unknown;
+  exclusiveMinimum?: number | boolean;
+  exclusiveMaximum?: number | boolean;
+  patternProperties?: Record<string, OpenApiSchema>;
+  definitions?: Record<string, OpenApiSchema>;
+  $defs?: Record<string, OpenApiSchema>;
+  deprecated?: boolean;
   'x-kubernetes-group-version-kind'?: OpenApiGvk[];
   'x-kubernetes-int-or-string'?: boolean;
   'x-kubernetes-preserve-unknown-fields'?: boolean;
@@ -937,6 +947,40 @@ export interface HelmRevisionDetail {
   notes: string;
 }
 
+// -- Helm values schemas + upgrade preview (dry runs; allowed on read-only) --
+
+/** A chart's `values.schema.json` (JSON Schema, usually draft-07). */
+export type JsonSchema = Record<string, unknown>;
+
+export type HelmPreviewChange = 'added' | 'changed' | 'removed' | 'unchanged';
+
+/** One object of an upgrade preview (running revision → rendered upgrade). */
+export interface HelmPreviewObject {
+  /** `group/kind/namespace/name`. */
+  key: string;
+  /** Rendered apiVersion (the current one for removed objects). */
+  api_version: string;
+  kind: string;
+  namespace: string | null;
+  name: string;
+  /** Helm template that rendered it (`# Source:`). */
+  source: string | null;
+  change: HelmPreviewChange;
+  before: KubeObject | null;
+  after: KubeObject | null;
+  /** Server-side dry run against the live object (when requested). */
+  live: DryRunResult | null;
+}
+
+export interface HelmUpgradePreview {
+  result: HelmInstallResult;
+  current_revision: number;
+  objects: HelmPreviewObject[];
+  live_checked: boolean;
+  /** More objects than the live dry run covers (the rest have `live: null`). */
+  live_truncated: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Terminal (RunHQ PTY pipeline, extended for Kubernetes sessions)
 // ---------------------------------------------------------------------------
@@ -1401,4 +1445,87 @@ export interface FleetSearchEvent {
   /** `cluster-done` / `cluster-error`: kinds RBAC did not allow listing. */
   forbidden_kinds: string[];
   error: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Upgrade readiness (deprecated / removed API versions; read-only)
+// ---------------------------------------------------------------------------
+
+export type UpgradeSeverity = 'blocker' | 'warning';
+
+export type UpgradeSource =
+  'last-applied' | 'managed-fields' | 'helm-release' | 'crd' | 'api-service' | 'metrics';
+
+/** The object a finding points at (served apiVersion; Helm: the rendered one). */
+export interface UpgradeObjectRef {
+  api_version: string;
+  kind: string;
+  namespace: string | null;
+  name: string;
+}
+
+export interface UpgradeHelmRef {
+  namespace: string;
+  name: string;
+  revision: number;
+  chart: string;
+  chart_version: string;
+}
+
+export interface UpgradeFinding {
+  id: string;
+  severity: UpgradeSeverity;
+  source: UpgradeSource;
+  /** The deprecated apiVersion that was found. */
+  api_version: string;
+  kind: string;
+  deprecated_in: string | null;
+  removed_in: string | null;
+  replacement: string | null;
+  replacement_kind: string | null;
+  /** Note codes (`lib/kube/deprecations.ts` explains them). */
+  notes: string[];
+  /** Not served by the cluster's current version either. */
+  already_removed: boolean;
+  object: UpgradeObjectRef | null;
+  helm: UpgradeHelmRef | null;
+  /** managedFields managers that wrote through `api_version`. */
+  managers: string[];
+  /** Raw context: template (Helm), CRD warning, resource (metrics), service. */
+  detail: string | null;
+}
+
+export interface UpgradeSkipped {
+  what: string;
+  reason: string;
+}
+
+export type UpgradeMetricsState = 'used' | 'unavailable' | 'skipped';
+
+export interface UpgradeScanOptions {
+  /** `1.32`; null = the minor after the cluster's version. */
+  target_version: string | null;
+  /** Also query `apiserver_requested_deprecated_apis` through Prometheus. */
+  metrics: boolean;
+}
+
+export interface UpgradeReport {
+  cluster_id: ClusterId;
+  server_git_version: string;
+  /** `1.31`. */
+  server_version: string;
+  target_version: string;
+  next_version: string;
+  /** When the deprecated-API table was last reviewed (YYYY-MM-DD). */
+  table_updated: string;
+  scanned_at: number;
+  objects_scanned: number;
+  kinds_scanned: number;
+  helm_releases_scanned: number;
+  crds_scanned: number;
+  metrics: UpgradeMetricsState;
+  metrics_error: string | null;
+  skipped: UpgradeSkipped[];
+  truncated: boolean;
+  findings: UpgradeFinding[];
 }

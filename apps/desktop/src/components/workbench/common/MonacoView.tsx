@@ -2,10 +2,12 @@ import * as i18n from '@/i18n';
 import { useCallback, useRef, useState } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import type { editor as MonacoEditor } from 'monaco-editor';
+import { KUBE_YAML_EDITOR_OPTIONS } from '@/lib/kube/schema/monaco';
+import type { ValuesSchema } from '@/lib/kube/schema/values';
 import { useMonacoReady } from '@/lib/monacoRuntime';
 import { useMonacoTheme } from '@/lib/monacoTheme';
 import { useIsDark } from '../util';
-import { useKubeYaml } from './useKubeYaml';
+import { useKubeYaml, useValuesSchema } from './useKubeYaml';
 
 type MonacoApi = Parameters<OnMount>[1];
 
@@ -13,7 +15,9 @@ type MonacoApi = Parameters<OnMount>[1];
  * Monaco YAML surface (read-only by default). Falls back to a plain <pre>
  * while Monaco loads or if it fails to load (e.g. a strict CSP). With a
  * `clusterId`, Kubernetes manifests get schema hovers and "Explain field at
- * cursor" (plus markers when editable).
+ * cursor" (plus markers when editable). With a `valuesSchema`, a Helm
+ * values editor gets completion, hovers and markers from the chart's
+ * `values.schema.json` instead.
  */
 export function MonacoView({
   value,
@@ -21,12 +25,14 @@ export function MonacoView({
   onChange,
   language = 'yaml',
   clusterId,
+  valuesSchema,
 }: {
   value: string;
   readOnly?: boolean;
   onChange?: (value: string) => void;
   language?: string;
   clusterId?: string | null;
+  valuesSchema?: ValuesSchema | null;
 }) {
   i18n.useLocale();
   const { ready, error } = useMonacoReady();
@@ -40,6 +46,7 @@ export function MonacoView({
     setMounted(true);
   }, []);
   useKubeYaml(mounted, editorRef, monacoRef, language === 'yaml' ? clusterId : null, !readOnly);
+  useValuesSchema(mounted, editorRef, monacoRef, language === 'yaml' ? valuesSchema : null);
   if (!ready || error) {
     return readOnly || !onChange ? (
       <pre className="text-fg-muted min-h-0 flex-1 overflow-auto p-3 font-mono text-[11.5px] leading-[1.6] whitespace-pre">
@@ -82,6 +89,7 @@ export function MonacoView({
           scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8 },
           overviewRulerLanes: 0,
           contextmenu: !readOnly,
+          ...(valuesSchema ? KUBE_YAML_EDITOR_OPTIONS : {}),
         }}
       />
     </div>

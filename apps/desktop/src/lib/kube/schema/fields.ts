@@ -60,6 +60,8 @@ export function schemaHints(node: SchemaNode): string[] {
   if (node.minItems !== null) hints.push(`minItems: ${node.minItems}`);
   if (node.maxItems !== null) hints.push(`maxItems: ${node.maxItems}`);
   if (node.pattern) hints.push(`pattern: ${node.pattern}`);
+  if (node.exclusiveMinimum !== null) hints.push(`exclusiveMinimum: ${node.exclusiveMinimum}`);
+  if (node.exclusiveMaximum !== null) hints.push(`exclusiveMaximum: ${node.exclusiveMaximum}`);
   return hints;
 }
 
@@ -76,7 +78,7 @@ export function fieldInfo(
     path,
     type: typeLabel(set, node),
     required,
-    deprecated: isDeprecated(node.description),
+    deprecated: node.deprecated || isDeprecated(node.description),
     description: node.description,
     enum: node.enum ?? (isArrayNode(node) && node.items ? set.node(node.items).enum : null),
     hasDefault: node.hasDefault,
