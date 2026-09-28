@@ -45,6 +45,7 @@
 //! | [`credentials`] | managed kubeconfig storage, keychain migration         |
 //! | [`manifests`]   | local manifests: render folders, diff / apply to clusters |
 //! | [`change_journal`] | in-memory change timeline (per-cluster watchers)    |
+//! | [`custom_actions`] | user-defined actions (k9s-plugin style), `actions.json` |
 //!
 //! Push notifications to the UI go through [`EventSink`]; streams take plain
 //! `Fn(T) -> bool` callbacks (return `false` to stop) that the desktop shell
@@ -109,6 +110,8 @@ pub mod secrets;
 pub mod manifests;
 // Change timeline: in-memory journal of cluster changes.
 pub mod change_journal;
+// Power user: custom actions (k9s-plugin style).
+pub mod custom_actions;
 
 pub use app::Kubepit;
 pub use events::{EventSink, NullSink};

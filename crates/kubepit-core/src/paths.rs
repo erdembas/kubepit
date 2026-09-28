@@ -11,6 +11,7 @@
 //! | `kubeconfigs/<id>.yaml` | pasted kubeconfigs (`managed: true`), mode 0600   |
 //! | `run/<id>.kubeconfig`   | generated single-context kubeconfig, mode 0600    |
 //! | `port_forwards.json`    | saved port forwards (`SavedPortForward[]`)        |
+//! | `actions.json`          | custom actions (`CustomActionsFile`)              |
 //!
 //! All writes go through [`atomic_write`] so a crash mid-write can never leave
 //! a truncated `clusters.json` behind.
@@ -81,6 +82,11 @@ impl Paths {
     /// Saved port forwards (connectivity).
     pub fn port_forwards_file(&self) -> PathBuf {
         self.root.join("port_forwards.json")
+    }
+
+    /// Custom actions (power user).
+    pub fn custom_actions_file(&self) -> PathBuf {
+        self.root.join("actions.json")
     }
 
     pub fn kubeconfigs_dir(&self) -> PathBuf {

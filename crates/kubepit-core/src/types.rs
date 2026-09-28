@@ -993,6 +993,14 @@ pub enum TerminalSpec {
         cluster_id: String,
         node: String,
     },
+    /// A custom action in terminal mode, resolved and checked (read-only,
+    /// scope) by the backend from its saved definition.
+    CustomAction {
+        cluster_id: String,
+        action_id: String,
+        #[serde(default)]
+        target: crate::custom_actions::CustomActionTarget,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -1047,6 +1055,8 @@ pub struct Settings {
     pub change_journal: bool,
     /// Cluster ids that opted out of the change timeline.
     pub change_journal_disabled: Vec<String>,
+    /// Power user: vim / k9s-style keys in the workbench (UI only).
+    pub keyboard_mode: bool,
 }
 
 impl Default for Settings {
@@ -1066,6 +1076,7 @@ impl Default for Settings {
             keychain_kubeconfigs: false,
             change_journal: true,
             change_journal_disabled: Vec::new(),
+            keyboard_mode: false,
         }
     }
 }
