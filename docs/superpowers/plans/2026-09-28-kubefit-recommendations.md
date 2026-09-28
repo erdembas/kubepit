@@ -1426,7 +1426,7 @@ git commit -m "feat(history): blocking scan writes and re-evaluation of stored s
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn yaml_fragments_use_kubernetes_quantities() {
@@ -1452,21 +1452,21 @@ Steps:
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core rightsizing::export`
 
 Expected: FAIL to compile.
 
-- [ ] **Step 3: Implement both builders**
+- [x] **Step 3: Implement both builders**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core rightsizing::export`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/src/rightsizing

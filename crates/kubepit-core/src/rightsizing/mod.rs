@@ -20,6 +20,7 @@
 //!   then applied (refused on read-only clusters).
 
 pub mod evidence;
+pub mod export;
 pub mod math;
 pub mod ownership;
 pub mod patch;
