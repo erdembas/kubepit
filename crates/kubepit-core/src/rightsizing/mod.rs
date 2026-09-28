@@ -10,14 +10,19 @@
 //!   Prometheus, the last hour of metrics-server samples
 //!   ([`crate::metrics_history`]), split per container by the current
 //!   snapshot — always low confidence.
-//! - **Math** ([`math`]): headroom, minimums, rounding, never below the
-//!   observed peak, no churn on small differences.
+//! - **Strategies** ([`strategy`]): the recommendation math sits behind
+//!   [`strategy::RecommendationStrategy`] (usage stats + current values in,
+//!   values + confidence + warnings out); [`percentile`] (p95 / max +
+//!   headroom) is the default. Limits a new request would exceed are raised
+//!   proportionally for every strategy ([`strategy::finalize`]).
 //! - **Apply** ([`patch`]): a strategic merge patch of the pod template's
 //!   container resources, dry-run first (allowed on read-only clusters),
 //!   then applied (refused on read-only clusters).
 
 pub mod math;
 pub mod patch;
+pub mod percentile;
+pub mod strategy;
 pub mod types;
 
 pub use types::*;
@@ -211,13 +216,20 @@ pub fn recommend_workload(
     source: RightsizingSource,
     settings: &RightsizingSettings,
     pricing: &crate::cost::CostPricing,
+    strategy: &dyn strategy::RecommendationStrategy,
 ) -> WorkloadRecommendation {
     let containers: Vec<ContainerRecommendation> = w
         .containers
         .iter()
         .map(|(name, current)| {
-            let stats = usage.get(&(index, name.clone())).copied();
-            math::recommend_container(name, *current, stats, settings)
+            let input = strategy::ContainerInput {
+                name,
+                current: *current,
+                usage: usage.get(&(index, name.clone())).copied(),
+                source,
+                settings,
+            };
+            strategy::recommend(strategy, &input)
         })
         .collect();
     let coverage_hours = containers
@@ -226,18 +238,20 @@ pub fn recommend_workload(
         .fold(0.0, f64::max);
     let monthly_current = math::monthly_requests(&containers, w.replicas, pricing, false);
     let monthly_recommended = math::monthly_requests(&containers, w.replicas, pricing, true);
-    let has_usage = containers.iter().any(|c| c.usage.is_some());
+    // The weakest container with data decides.
+    let confidence = containers
+        .iter()
+        .filter(|c| c.usage.is_some())
+        .map(|c| c.confidence)
+        .min()
+        .unwrap_or(Confidence::Low);
     WorkloadRecommendation {
         kind: w.kind.clone(),
         namespace: w.namespace.clone(),
         name: w.name.clone(),
         uid: w.uid.clone(),
         replicas: w.replicas,
-        confidence: if has_usage {
-            math::confidence(source, coverage_hours)
-        } else {
-            Confidence::Low
-        },
+        confidence,
         verdict: math::verdict(&containers, monthly_current, monthly_recommended),
         coverage_hours,
         changed: containers.iter().any(ContainerRecommendation::changed),
@@ -320,6 +334,7 @@ impl Kubepit {
         let cluster = self.cluster_def(cluster_id)?;
         let client = self.client(cluster_id).await?;
         let settings = request.settings.clone().normalized();
+        let strategy = strategy::strategy(request.strategy.as_deref())?;
         let workloads = match &request.workload {
             Some(target) => {
                 if patch::template_path(&target.kind).is_none() {
@@ -410,10 +425,12 @@ impl Kubepit {
         let mut list: Vec<WorkloadRecommendation> = workloads
             .iter()
             .enumerate()
-            .map(|(i, w)| recommend_workload(w, &usage, i, source, &settings, &pricing))
+            .map(|(i, w)| recommend_workload(w, &usage, i, source, &settings, &pricing, strategy))
             .collect();
         sort_recommendations(&mut list);
         Ok(RightsizingReport {
+            strategy: strategy.info().id,
+            strategies: strategy::strategies(),
             source,
             window_secs,
             settings,
@@ -689,11 +706,12 @@ mod tests {
             RightsizingSource::Prometheus,
             &RightsizingSettings::default(),
             &pricing,
+            strategy::strategy(None).unwrap(),
         );
         assert_eq!(rec.confidence, Confidence::High);
         assert!(rec.changed);
         assert!(rec.monthly_delta < 0.0, "a saving");
-        // The proxy container has no requests and no usage: untouched, so under-provisioned? no data.
+        // The proxy container has no usage: untouched (and it does not lower the confidence).
         assert_eq!(rec.containers[1].usage, None);
         assert!(!rec.containers[1].changed());
         assert_eq!(rec.verdict, Verdict::Over);

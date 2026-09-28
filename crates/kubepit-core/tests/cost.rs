@@ -455,6 +455,8 @@ async fn right_sizing_recommends_from_prometheus_history() {
         report.notes
     );
     assert_eq!(report.window_secs, 7 * 86_400);
+    assert_eq!(report.strategy, "percentile-headroom");
+    assert_eq!(report.strategies[0].id, report.strategy);
     assert_eq!(report.workloads.len(), 1);
     let web = &report.workloads[0];
     assert_eq!(
@@ -471,6 +473,14 @@ async fn right_sizing_recommends_from_prometheus_history() {
     let usage = app_rec.usage.unwrap();
     assert_eq!((usage.cpu_p95, usage.cpu_max), (120.0, 300.0));
     assert_eq!(usage.hours, 84.0, "168 hours of one pod over two replicas");
+
+    assert_eq!(app_rec.confidence, Confidence::High);
+    assert!(!app_rec.memory_limit_raised, "368 MiB fits the 1 GiB limit");
+    let unknown = RightsizingRequest {
+        strategy: Some("nope".into()),
+        ..Default::default()
+    };
+    assert!(app.rightsizing_report(&id, &unknown).await.is_err());
 
     // The whole cluster was covered: no namespace matcher in the presets.
     let log = server.log.lock().clone();

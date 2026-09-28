@@ -54,6 +54,9 @@ pub struct RightsizingRequest {
     pub workload: Option<WorkloadRef>,
     #[serde(default)]
     pub settings: RightsizingSettings,
+    /// Recommendation strategy id (`None` = the default strategy).
+    #[serde(default)]
+    pub strategy: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -125,6 +128,47 @@ pub struct ContainerRecommendation {
     pub memory: Change,
     pub memory_limit: Change,
     pub cpu_limit: Change,
+    /// The strategy's confidence in this container's numbers.
+    pub confidence: Confidence,
+    /// Caveats of the strategy and of the limit adjustment.
+    pub warnings: Vec<RecommendationWarning>,
+    /// The CPU limit rose with the request (current limit ÷ request ratio kept).
+    pub cpu_limit_raised: bool,
+    /// The memory limit rose with the request (current limit ÷ request ratio kept).
+    pub memory_limit_raised: bool,
+}
+
+/// A caveat of a recommendation. `code` is a stable kebab-case id the UI
+/// translates (unknown codes of newer strategies fall back to `detail`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecommendationWarning {
+    pub code: String,
+    pub detail: Option<String>,
+}
+
+impl RecommendationWarning {
+    pub fn new(code: &str) -> Self {
+        Self {
+            code: code.to_string(),
+            detail: None,
+        }
+    }
+
+    pub fn with_detail(code: &str, detail: impl Into<String>) -> Self {
+        Self {
+            code: code.to_string(),
+            detail: Some(detail.into()),
+        }
+    }
+}
+
+/// A recommendation strategy the backend offers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RightsizingStrategyInfo {
+    /// Stable id (`percentile-headroom`).
+    pub id: String,
+    /// Display name in English (product names stay as they are).
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -161,6 +205,10 @@ pub struct RightsizingReport {
     pub workloads: Vec<WorkloadRecommendation>,
     /// Conditions worth telling the user (translated by the UI).
     pub notes: Vec<RightsizingNote>,
+    /// Id of the strategy that produced the recommendations.
+    pub strategy: String,
+    /// Every strategy the backend offers.
+    pub strategies: Vec<RightsizingStrategyInfo>,
     pub computed_at: i64,
 }
 

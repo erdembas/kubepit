@@ -1,26 +1,18 @@
-//! Recommendation math: percentiles, headroom, minimums and rounding.
+//! Strategy-independent building blocks: percentiles, rounding, headroom,
+//! the no-churn rule, sample statistics, cost of requests and the
+//! over / under verdict. Strategies ([`super::strategy`]) combine them.
 //!
-//! - CPU request = p95 of the usage + headroom (default 15 %). CPU is
-//!   compressible, so the p95 of 5-minute rates is the peak that matters.
-//! - Memory request = maximum working set + headroom (default 20 %); memory
-//!   limit = maximum + a larger headroom (default 40 %), never below the
-//!   request. Memory is not compressible, so the maximum is the peak.
 //! - Values round *up* to sane steps (5 m / 10 m / 50 m / 100 m, 8 / 16 / 64 /
-//!   256 MiB), never go below the minimums, and never below the observed
-//!   peak — neither the recommendation nor a current value that is kept.
+//!   256 MiB) and never below the minimums or the observed peak.
 //! - Small differences (under 10 % or under 10 m / 16 MiB) keep the current
-//!   value, so recommendations do not churn.
-//! - A CPU limit below the new request is raised to it (the API server
-//!   rejects requests above limits); CPU limits are otherwise left alone.
+//!   value, so recommendations do not churn — unless the current value is
+//!   below the observed peak.
 
-use super::types::{
-    Change, Confidence, ContainerRecommendation, ResourceValues, RightsizingSettings,
-    RightsizingSource, UsageStats, Verdict,
-};
+use super::types::{Change, ContainerRecommendation, RightsizingSettings, UsageStats, Verdict};
 use crate::cost::CostPricing;
 
-const MIB: f64 = 1024.0 * 1024.0;
-const GIB: f64 = 1024.0 * MIB;
+pub const MIB: f64 = 1024.0 * 1024.0;
+pub const GIB: f64 = 1024.0 * MIB;
 /// Relative change below which the current value is kept.
 pub const MIN_RELATIVE_CHANGE: f64 = 0.10;
 pub const MIN_CPU_CHANGE: f64 = 10.0;
@@ -110,25 +102,25 @@ pub fn round_up_memory(bytes: f64) -> f64 {
     round_up(b, step)
 }
 
-fn with_headroom(value: f64, percent: f64) -> f64 {
+pub fn with_headroom(value: f64, percent: f64) -> f64 {
     value.max(0.0) * (1.0 + percent / 100.0)
 }
 
-/// Recommended CPU request for a p95 usage (never below it).
+/// CPU request for a p95 usage + headroom (never below it or the minimum).
 pub fn cpu_request(p95: f64, settings: &RightsizingSettings) -> f64 {
     round_up_cpu(with_headroom(p95, settings.cpu_headroom_percent))
         .max(round_up_cpu(settings.min_cpu_millicores))
         .max(round_up_cpu(p95))
 }
 
-/// Recommended memory request for a maximum working set (never below it).
+/// Memory request for a maximum working set + headroom (never below it).
 pub fn memory_request(max: f64, settings: &RightsizingSettings) -> f64 {
     round_up_memory(with_headroom(max, settings.memory_headroom_percent))
         .max(round_up_memory(settings.min_memory_bytes))
         .max(round_up_memory(max))
 }
 
-/// Recommended memory limit: maximum + limit headroom, never below the request.
+/// Memory limit: maximum + limit headroom, never below the request.
 pub fn memory_limit(max: f64, request: f64, settings: &RightsizingSettings) -> f64 {
     round_up_memory(with_headroom(max, settings.memory_limit_headroom_percent))
         .max(request)
@@ -140,97 +132,23 @@ fn significant(current: f64, next: f64, absolute: f64) -> bool {
     delta >= absolute && (current <= 0.0 || delta / current >= MIN_RELATIVE_CHANGE)
 }
 
-/// Keep `current` unless the difference matters or it is below `floor`.
-fn settle(current: Option<f64>, next: f64, absolute: f64, floor: f64) -> (Option<f64>, Change) {
+/// `next`, or `current` when the difference is too small to matter and
+/// `current` is not below `floor` (the observed peak).
+pub fn settle(current: Option<f64>, next: f64, absolute: f64, floor: f64) -> f64 {
     match current {
-        None => (Some(next), Change::Set),
-        Some(c) if c >= floor && !significant(c, next, absolute) => (Some(c), Change::Unchanged),
-        Some(c) if next > c => (Some(next), Change::Increase),
-        Some(c) if next < c => (Some(next), Change::Decrease),
-        Some(c) => (Some(c), Change::Unchanged),
+        Some(c) if c >= floor && !significant(c, next, absolute) => c,
+        _ => next,
     }
 }
 
-/// The recommendation for one container (unchanged without usage).
-pub fn recommend_container(
-    name: &str,
-    current: ResourceValues,
-    usage: Option<UsageStats>,
-    settings: &RightsizingSettings,
-) -> ContainerRecommendation {
-    let Some(u) = usage else {
-        return ContainerRecommendation {
-            name: name.to_string(),
-            current,
-            recommended: current,
-            usage: None,
-            cpu: Change::Unchanged,
-            memory: Change::Unchanged,
-            memory_limit: Change::Unchanged,
-            cpu_limit: Change::Unchanged,
-        };
-    };
-    let (cpu_req, cpu) = settle(
-        current.cpu_request,
-        cpu_request(u.cpu_p95, settings),
-        MIN_CPU_CHANGE,
-        u.cpu_p95,
-    );
-    let (mem_req, memory) = settle(
-        current.memory_request,
-        memory_request(u.memory_max, settings),
-        MIN_MEMORY_CHANGE,
-        u.memory_max,
-    );
-    let mem_req_value = mem_req.unwrap_or_default();
-    let limit_next = memory_limit(u.memory_max, mem_req_value, settings);
-    let (mut mem_lim, mut memory_limit_change) = settle(
-        current.memory_limit,
-        limit_next,
-        MIN_MEMORY_CHANGE,
-        u.memory_max,
-    );
-    // A kept limit must still hold the (new) request.
-    if mem_lim.is_some_and(|l| l < mem_req_value) {
-        mem_lim = Some(limit_next);
-        memory_limit_change = Change::Increase;
-    }
-    let cpu_req_value = cpu_req.unwrap_or_default();
-    let (cpu_lim, cpu_limit) = match current.cpu_limit {
-        Some(l) if l < cpu_req_value => (Some(cpu_req_value), Change::Increase),
-        other => (other, Change::Unchanged),
-    };
-    ContainerRecommendation {
-        name: name.to_string(),
-        current,
-        recommended: ResourceValues {
-            cpu_request: cpu_req,
-            cpu_limit: cpu_lim,
-            memory_request: mem_req,
-            memory_limit: mem_lim,
-        },
-        usage: Some(u),
-        cpu,
-        memory,
-        memory_limit: memory_limit_change,
-        cpu_limit,
-    }
-}
-
-impl ContainerRecommendation {
-    pub fn changed(&self) -> bool {
-        [self.cpu, self.memory, self.memory_limit, self.cpu_limit]
-            .iter()
-            .any(|c| *c != Change::Unchanged)
-    }
-}
-
-/// How much to trust recommendations from `source` backed by `hours` of history.
-pub fn confidence(source: RightsizingSource, hours: f64) -> Confidence {
-    match source {
-        RightsizingSource::Prometheus if hours >= 72.0 => Confidence::High,
-        RightsizingSource::Prometheus if hours >= 12.0 => Confidence::Medium,
-        _ => Confidence::Low,
+/// How a value moves from `current` to `next` (`None` = left as is).
+pub fn change_of(current: Option<f64>, next: Option<f64>) -> Change {
+    match (current, next) {
+        (_, None) => Change::Unchanged,
+        (None, Some(_)) => Change::Set,
+        (Some(c), Some(n)) if (n - c).abs() < 1e-6 => Change::Unchanged,
+        (Some(c), Some(n)) if n > c => Change::Increase,
+        _ => Change::Decrease,
     }
 }
 
@@ -321,6 +239,9 @@ pub fn combine(stats: &[UsageStats]) -> Option<UsageStats> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rightsizing::strategy::{recommend, DEFAULT_STRATEGY_ID};
+    use crate::rightsizing::strategy::{strategy, ContainerInput};
+    use crate::rightsizing::types::{ResourceValues, RightsizingSource};
 
     fn settings() -> RightsizingSettings {
         RightsizingSettings::default()
@@ -333,6 +254,20 @@ mod tests {
             memory_max,
             hours: 168.0,
         }
+    }
+
+    fn rec(current: ResourceValues, usage: Option<UsageStats>) -> ContainerRecommendation {
+        let s = settings();
+        recommend(
+            strategy(Some(DEFAULT_STRATEGY_ID)).unwrap(),
+            &ContainerInput {
+                name: "app",
+                current,
+                usage,
+                source: RightsizingSource::Prometheus,
+                settings: &s,
+            },
+        )
     }
 
     #[test]
@@ -397,79 +332,22 @@ mod tests {
     }
 
     #[test]
-    fn over_provisioned_containers_shrink() {
-        let current = ResourceValues {
-            cpu_request: Some(1000.0),
-            cpu_limit: None,
-            memory_request: Some(2.0 * GIB),
-            memory_limit: Some(2.0 * GIB),
-        };
-        let r = recommend_container("app", current, Some(usage(120.0, 300.0 * MIB)), &settings());
-        assert_eq!(r.cpu, Change::Decrease);
-        assert_eq!(r.recommended.cpu_request, Some(140.0));
-        assert_eq!(r.memory, Change::Decrease);
-        assert_eq!(r.recommended.memory_request, Some(368.0 * MIB));
-        assert_eq!(r.memory_limit, Change::Decrease);
-        assert_eq!(r.recommended.memory_limit, Some(432.0 * MIB));
-        assert_eq!(r.cpu_limit, Change::Unchanged);
-        assert!(r.changed());
+    fn no_churn_unless_below_the_peak_and_change_kinds() {
+        assert_eq!(settle(Some(240.0), 230.0, MIN_CPU_CHANGE, 200.0), 240.0);
+        assert_eq!(settle(Some(1000.0), 140.0, MIN_CPU_CHANGE, 120.0), 140.0);
+        assert_eq!(settle(None, 140.0, MIN_CPU_CHANGE, 120.0), 140.0);
+        // Below the peak: always move, however small the step.
+        assert_eq!(settle(Some(5.0), 15.0, MIN_CPU_CHANGE, 9.0), 15.0);
+        assert_eq!(change_of(Some(1.0), Some(2.0)), Change::Increase);
+        assert_eq!(change_of(Some(2.0), Some(1.0)), Change::Decrease);
+        assert_eq!(change_of(Some(2.0), Some(2.0)), Change::Unchanged);
+        assert_eq!(change_of(None, Some(2.0)), Change::Set);
+        assert_eq!(change_of(Some(2.0), None), Change::Unchanged);
+        assert_eq!(change_of(None, None), Change::Unchanged);
     }
 
     #[test]
-    fn under_provisioned_containers_grow_and_limits_follow() {
-        let current = ResourceValues {
-            cpu_request: Some(100.0),
-            cpu_limit: Some(200.0),
-            memory_request: Some(128.0 * MIB),
-            memory_limit: Some(256.0 * MIB),
-        };
-        let r = recommend_container("app", current, Some(usage(400.0, 250.0 * MIB)), &settings());
-        assert_eq!(r.cpu, Change::Increase);
-        assert_eq!(r.recommended.cpu_request, Some(460.0));
-        assert_eq!(
-            r.cpu_limit,
-            Change::Increase,
-            "a limit below the request is raised"
-        );
-        assert_eq!(r.recommended.cpu_limit, Some(460.0));
-        assert_eq!(r.memory, Change::Increase);
-        assert_eq!(r.recommended.memory_request, Some(304.0 * MIB));
-        assert_eq!(r.memory_limit, Change::Increase);
-        assert!(r.recommended.memory_limit.unwrap() >= r.recommended.memory_request.unwrap());
-    }
-
-    #[test]
-    fn small_differences_keep_current_values_unless_below_the_peak() {
-        let current = ResourceValues {
-            cpu_request: Some(240.0),
-            cpu_limit: None,
-            memory_request: Some(320.0 * MIB),
-            memory_limit: None,
-        };
-        let r = recommend_container("app", current, Some(usage(200.0, 260.0 * MIB)), &settings());
-        assert_eq!(r.cpu, Change::Unchanged, "230m vs 240m");
-        assert_eq!(r.recommended.cpu_request, Some(240.0));
-        assert_eq!(r.memory, Change::Unchanged);
-        assert_eq!(r.memory_limit, Change::Set, "a missing limit is proposed");
-        // A tiny request below the observed p95 always changes, however small the step.
-        let tiny = ResourceValues {
-            cpu_request: Some(5.0),
-            memory_request: Some(20.0 * MIB),
-            ..Default::default()
-        };
-        let r = recommend_container("app", tiny, Some(usage(9.0, 24.0 * MIB)), &settings());
-        assert_eq!(r.cpu, Change::Increase);
-        assert!(r.recommended.cpu_request.unwrap() >= 9.0);
-        assert_eq!(r.memory, Change::Increase);
-        assert!(r.recommended.memory_request.unwrap() >= 24.0 * MIB);
-        // Without usage nothing changes.
-        let r = recommend_container("app", current, None, &settings());
-        assert!(!r.changed());
-        assert_eq!(r.recommended, current);
-    }
-
-    #[test]
-    fn verdicts_confidence_and_costs() {
+    fn verdicts_and_costs() {
         let pricing = CostPricing {
             currency: "USD".into(),
             cpu_hour: 0.04,
@@ -478,15 +356,13 @@ mod tests {
             storage_gib_month: None,
             discount_percent: 0.0,
         };
-        let over = recommend_container(
-            "app",
+        let over = rec(
             ResourceValues {
                 cpu_request: Some(1000.0),
                 memory_request: Some(GIB),
                 ..Default::default()
             },
             Some(usage(100.0, 200.0 * MIB)),
-            &settings(),
         );
         let containers = vec![over];
         let current = monthly_requests(&containers, 3, &pricing, false);
@@ -495,36 +371,17 @@ mod tests {
         assert!(recommended < current);
         assert_eq!(verdict(&containers, current, recommended), Verdict::Over);
 
-        let under = recommend_container(
-            "app",
+        let under = rec(
             ResourceValues {
                 cpu_request: Some(100.0),
                 memory_request: Some(128.0 * MIB),
                 ..Default::default()
             },
             Some(usage(90.0, 200.0 * MIB)),
-            &settings(),
         );
         assert_eq!(verdict(&[under], 1.0, 2.0), Verdict::Under);
-        let none = recommend_container("app", ResourceValues::default(), None, &settings());
+        let none = rec(ResourceValues::default(), None);
         assert_eq!(verdict(&[none], 0.0, 0.0), Verdict::NoData);
-
-        assert_eq!(
-            confidence(RightsizingSource::Prometheus, 168.0),
-            Confidence::High
-        );
-        assert_eq!(
-            confidence(RightsizingSource::Prometheus, 24.0),
-            Confidence::Medium
-        );
-        assert_eq!(
-            confidence(RightsizingSource::Prometheus, 2.0),
-            Confidence::Low
-        );
-        assert_eq!(
-            confidence(RightsizingSource::MetricsServer, 1000.0),
-            Confidence::Low
-        );
     }
 
     #[test]
