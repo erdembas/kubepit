@@ -866,7 +866,15 @@ applying a recommendation only reads, so read-only clusters get it all.
   by the pod names their kind generates (longest name wins), worst replica
   wins, hours are per replica. Without Prometheus the last metrics-server
   hour is used, split per container by the current snapshot (always low
-  confidence). The math sits behind `rightsizing::strategy::RecommendationStrategy`
+  confidence). Ownership-aware collection is built from
+  `rightsizing/ownership.rs`: kube-state-metrics owner series
+  (`kube_pod_owner`, `kube_replicaset_owner`, `kube_job_owner`) index pod
+  names per namespace; `<none>`, empty and non-controller owners are
+  dropped; `OwnerIndex::resolve` follows one hop (ReplicaSet → Deployment,
+  Job → CronJob, StatefulSet / DaemonSet directly) and reports bare pods,
+  orphan ReplicaSets and standalone Jobs as unowned, other parents
+  (`Node`, `Rollout`) as unsupported, and a pod name with several owners
+  as ambiguous with its sorted candidates. The math sits behind `rightsizing::strategy::RecommendationStrategy`
   (`fn info() -> RightsizingStrategyInfo`, `fn recommend(&ContainerInput) ->
   StrategyOutput`; input = name, current requests/limits, `UsageStats`,
   source, settings; output = recommended values, confidence, warnings).

@@ -337,7 +337,7 @@ git commit -m "feat(rightsizing): evidence, lens and settings contract"
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn none_and_non_controller_owners_are_ignored() {
@@ -361,25 +361,25 @@ Steps:
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core rightsizing::ownership`
 
 Expected: FAIL to compile (`OwnerIndex` not defined).
 
-- [ ] **Step 3: Implement `ownership.rs` per the Interfaces block**
+- [x] **Step 3: Implement `ownership.rs` per the Interfaces block**
 
 Index keys are `(namespace, subject)`, where the subject is the `pod`, `replicaset` or
 `job_name` label. The values are `BTreeSet<(kind, name)>`, so `Ambiguous` lists its
 candidates in sorted order.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core rightsizing::ownership`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/src/rightsizing/ownership.rs crates/kubepit-core/src/rightsizing/mod.rs
