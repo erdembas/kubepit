@@ -7,6 +7,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use kubepit_core::cost::{CostConfig, CostSourceConfig};
+use kubepit_core::prometheus::access::PrometheusAccess;
+use kubepit_core::rightsizing::{RightsizingNoteKind, RightsizingRequest, RightsizingSource};
 use kubepit_core::types::{
     ClusterInput, LokiConfig, PromScheme, PrometheusConfig, PrometheusKind, PrometheusMetric,
     PrometheusRange, PrometheusSource, PrometheusState, PrometheusTarget,
@@ -560,4 +562,190 @@ fn cluster_add_keeps_observability_settings() {
     };
     assert!(app.cluster_add(vec![good, bad]).is_err());
     assert_eq!(app.cluster_list().len(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// Shared and secured Prometheus: tenant header and cluster-label selector
+// ---------------------------------------------------------------------------
+
+fn deployment_web() -> Value {
+    json!({
+        "apiVersion": "apps/v1", "kind": "Deployment",
+        "metadata": {"name": "web", "namespace": "shop", "uid": "uid-web", "resourceVersion": "7"},
+        "spec": {"replicas": 2, "selector": {"matchLabels": {"app": "web"}},
+                 "template": {"metadata": {"labels": {"app": "web"}}, "spec": {"containers": [
+                     {"name": "app", "image": "web:1",
+                      "resources": {"requests": {"cpu": "1", "memory": "1Gi"},
+                                    "limits": {"memory": "1Gi"}}}
+                 ]}}}
+    })
+}
+
+fn instant(labels: Value, value: &str) -> Reply {
+    success(
+        "vector",
+        json!([{"metric": labels, "value": [1_790_000_000, value]}]),
+    )
+}
+
+fn list_of(kind: &str, items: Vec<Value>) -> Reply {
+    Reply::Json(
+        200,
+        json!({"kind": kind, "apiVersion": "v1", "metadata": {"resourceVersion": "1"},
+               "items": items}),
+    )
+}
+
+/// The access settings of a cluster in a shared, multi-tenant Prometheus.
+fn shared_access() -> PrometheusAccess {
+    PrometheusAccess {
+        tenant: "team-a".into(),
+        cluster_labels: [("cluster".to_string(), "production".to_string())]
+            .into_iter()
+            .collect(),
+        ..Default::default()
+    }
+}
+
+/// kube-prometheus-stack behind a multi-tenant query layer holding several
+/// clusters, plus one Deployment for right-sizing. With `mismatch`, the
+/// right-sizing answer comes back with another cluster's label (a source
+/// that ignored the selector).
+fn shared_router(mismatch: Arc<AtomicBool>) -> Router {
+    let detection = stack_router(Arc::default());
+    Arc::new(move |req: &Request, log: &Log| match req.path_only() {
+        "/apis/apps/v1/deployments" => list_of("DeploymentList", vec![deployment_web()]),
+        "/apis/apps/v1/statefulsets" => list_of("StatefulSetList", vec![]),
+        "/apis/apps/v1/daemonsets" => list_of("DaemonSetList", vec![]),
+        "/api/v1/pods" => list_of("PodList", vec![]),
+        p if p == format!("{OPERATED}/api/v1/query") => {
+            let q = param(&req.path, "query").unwrap_or_default();
+            let cluster = if mismatch.load(Ordering::SeqCst) {
+                "staging"
+            } else {
+                "production"
+            };
+            let key = json!({"namespace": "shop", "pod": "web-6d4b75cb6d-x2x9z",
+                             "container": "app", "cluster": cluster});
+            if q == "1" {
+                scalar_one()
+            } else if q.contains("max_over_time(container_memory_working_set_bytes") {
+                instant(key, "314572800")
+            } else if q.starts_with("quantile_over_time(0.95") {
+                instant(key, "120")
+            } else if q.starts_with("count_over_time") {
+                instant(key, "168")
+            } else {
+                instant(
+                    json!({"namespace": "shop", "pod": "web-6d4b75cb6d-x2x9z"}),
+                    "1",
+                )
+            }
+        }
+        _ => detection(req, log),
+    })
+}
+
+/// The decoded `query` of every Prometheus request except the probe.
+fn sent_queries(log: &Log) -> Vec<String> {
+    log.lock()
+        .iter()
+        .filter(|r| r.path.starts_with(OPERATED))
+        .filter_map(|r| param(&r.path, "query"))
+        .filter(|q| q != "1")
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn every_preset_query_carries_the_cluster_label_and_mismatches_fail() {
+    let mismatch = Arc::new(AtomicBool::new(false));
+    let server = start(shared_router(mismatch.clone())).await;
+    let (_dir, app, _recorder, id) = setup(&server.url, true);
+    let mut def = app.cluster_def(&id).unwrap();
+    def.prometheus_access = shared_access();
+    app.cluster_update(def).unwrap();
+
+    // Detection probes with the tenant, but the probe itself is not rewritten.
+    let st = app.prometheus_status(&id, false).await.unwrap();
+    assert_eq!(st.state, PrometheusState::Available, "{st:?}");
+    let probes: Vec<Request> = server
+        .log
+        .lock()
+        .iter()
+        .filter(|r| param(&r.path, "query").as_deref() == Some("1"))
+        .cloned()
+        .collect();
+    assert!(!probes.is_empty());
+    assert!(probes
+        .iter()
+        .all(|r| r.header("x-scope-orgid") == Some("team-a")));
+
+    // Chart presets (cluster and pod), cost usage and right-sizing.
+    let cluster = app
+        .prometheus_metrics(&id, &PrometheusTarget::Cluster, &[], &last_hour())
+        .await
+        .unwrap();
+    assert!(cluster.series.len() >= 6);
+    let pod = PrometheusTarget::Pod {
+        namespace: "shop".into(),
+        name: "web-1".into(),
+    };
+    let pod_charts = app
+        .prometheus_metrics(&id, &pod, &[], &last_hour())
+        .await
+        .unwrap();
+    app.prometheus_pod_usage(&id, 604_800).await.unwrap();
+    let report = app
+        .rightsizing_report(&id, &RightsizingRequest::default())
+        .await
+        .unwrap();
+    assert_eq!(
+        report.source,
+        RightsizingSource::Prometheus,
+        "{:?}",
+        report.notes
+    );
+    let queries = sent_queries(&server.log);
+    assert!(queries.len() >= 20, "{queries:#?}");
+    assert!(
+        queries
+            .iter()
+            .all(|q| q.contains(r#"cluster="production""#)),
+        "{queries:#?}"
+    );
+    // The charts report the query they sent, so a PromQL tab opened from
+    // them gets the same data.
+    for series in cluster.series.iter().chain(&pod_charts.series) {
+        assert!(queries.contains(&series.query), "{}", series.query);
+    }
+
+    // The PromQL tab sends the user's query unchanged, with the tenant.
+    app.prometheus_query_range(&id, "up", &last_hour())
+        .await
+        .unwrap();
+    assert!(sent_queries(&server.log).iter().any(|q| q == "up"));
+    let log = server.log.lock().clone();
+    assert!(log
+        .iter()
+        .filter(|r| r.path.starts_with(OPERATED))
+        .all(|r| r.header("x-scope-orgid") == Some("team-a")));
+    // …and nothing but Prometheus requests carries it.
+    assert!(log
+        .iter()
+        .filter(|r| !r.path.contains("/proxy"))
+        .all(|r| r.header("x-scope-orgid").is_none()));
+
+    // A source that answers for another cluster fails closed.
+    mismatch.store(true, Ordering::SeqCst);
+    let report = app
+        .rightsizing_report(&id, &RightsizingRequest::default())
+        .await
+        .unwrap();
+    assert_ne!(report.source, RightsizingSource::Prometheus);
+    let note = report
+        .notes
+        .iter()
+        .find(|n| n.kind == RightsizingNoteKind::PrometheusFailed)
+        .expect("Prometheus refused");
+    assert_eq!(note.detail.as_deref(), Some("cluster-label-mismatch"));
 }

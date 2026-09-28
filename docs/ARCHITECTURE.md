@@ -470,7 +470,26 @@ An optional, richer metrics source next to the metrics-server history
   with the cluster's credentials — no port-forward, RBAC applies
   (`services/proxy`). A second client per connection without kube's
   default retry keeps a 503 ("no endpoints available") from backing off
-  for minutes.
+  for minutes. `Kubepit::prometheus_get` (with `prometheus_source` +
+  `prometheus_send` for callers that send several queries) is the one
+  transport of every caller — chart presets, cost usage and trend,
+  right-sizing, upgrade readiness and the PromQL tab: it sends
+  `X-Scope-OrgID` when a tenant is set (the detection probe too), injects
+  the cluster-label selector into `Origin::Preset` queries and makes the
+  next status request detect again after a proxy failure.
+- **Cluster-label selector** (`matchers.rs`): `with_matchers` is a small
+  PromQL lexer that adds `,k="v"` to every vector selector (a bare metric
+  name, a `{…}` block, `{__name__=~…}`) and skips string literals,
+  function and aggregation names, keywords, label lists after `by` / `on`
+  / `without` / `ignoring` / `group_left` / `group_right`, `[…]` ranges and
+  numbers. It is never applied to the probe (`query=1`) or to PromQL typed
+  in the PromQL tab (`Origin::User`). Charts report the query they sent,
+  so a PromQL tab opened from one gets the same data. It fails closed:
+  right-sizing keeps the configured label keys in its memory answer
+  (`by (namespace, pod, container, cluster)`), and a series without them
+  or with another value fails the Prometheus part with
+  `cluster-label-mismatch` (a source that ignored the selector); the report
+  then falls back to metrics-server with that note.
 - **States**: `available` when any probed candidate answers; `forbidden`
   when the API server denied every probed candidate
   (`service_proxy::is_proxy_forbidden`: its own 403 `Status` with reason

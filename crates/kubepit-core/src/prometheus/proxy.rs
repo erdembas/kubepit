@@ -56,11 +56,17 @@ pub fn proxy_path(
     service_proxy::proxy_path(&service.endpoint(), endpoint, params)
 }
 
-/// GET `path` and parse the Prometheus envelope. Non-2xx answers become an
-/// [`ApiError`] carrying the status code and the most useful message: the
-/// Prometheus error, the API server's `Status` message, or the body.
-pub async fn get(client: &Client, path: &str, timeout: Duration) -> Result<PromData> {
-    let response = service_proxy::get(client, path, &[], timeout, "Prometheus").await?;
+/// GET `path` with extra `headers` (the tenant) and parse the Prometheus
+/// envelope. Non-2xx answers become an [`ApiError`] carrying the status
+/// code and the most useful message: the Prometheus error, the API server's
+/// `Status` message, or the body.
+pub async fn get(
+    client: &Client,
+    path: &str,
+    headers: &[(&str, &str)],
+    timeout: Duration,
+) -> Result<PromData> {
+    let response = service_proxy::get(client, path, headers, timeout, "Prometheus").await?;
     if response.is_success() {
         return parse_response(&response.body);
     }

@@ -2628,7 +2628,7 @@ git commit -m "feat(prometheus): tenant, cluster labels and secret auth settings
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn matchers_reach_every_vector_selector() {
@@ -2651,21 +2651,21 @@ async fn every_scan_query_carries_the_cluster_label_and_mismatches_fail() {
 The fake server's `Request` gains `headers: Vec<(String, String)>` in
 `tests/support/mod.rs`.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core prometheus::matchers && cargo test -p kubepit-core --test recommendations cluster_label`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement the lexer and the single transport, and move every caller to it**
+- [x] **Step 3: Implement the lexer and the single transport, and move every caller to it**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test --workspace`
 
 Expected: PASS, including `tests/prometheus.rs`, `cost.rs` and `upgrade.rs`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core

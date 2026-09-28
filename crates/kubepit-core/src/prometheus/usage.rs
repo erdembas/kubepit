@@ -9,15 +9,21 @@
 //!
 //! Same series as the chart presets (cAdvisor, real containers only), CPU in
 //! millicores for containers and cores for pods. Read-only like the rest.
+//!
+//! On a shared Prometheus every query gets the cluster-label selector, and
+//! the right-sizing memory answer keeps those labels so it can be checked:
+//! a series without them fails closed with
+//! [`CLUSTER_LABEL_MISMATCH`](super::matchers::CLUSTER_LABEL_MISMATCH).
 
 use std::collections::HashMap;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 
+use super::matchers::{by_labels, series_carry_labels, CLUSTER_LABEL_MISMATCH};
 use super::parse::PromData;
 use super::promql::{quote, regex_escape};
-use super::proxy;
+use super::{Origin, Source};
 use crate::app::Kubepit;
 use crate::cost::estimate::{PodUsage, UsageMap};
 
@@ -57,10 +63,12 @@ pub fn container_cpu_max(namespaces: &[String], days: u32) -> String {
     )
 }
 
-/// Highest working set (bytes) of each container over `days`.
-pub fn container_memory_max(namespaces: &[String], days: u32) -> String {
+/// Highest working set (bytes) of each container over `days`. `keep`
+/// (`", cluster"`, see [`super::matchers::by_labels`]) keeps the cluster
+/// labels of a shared Prometheus in the answer, so it can be checked.
+pub fn container_memory_max(namespaces: &[String], days: u32, keep: &str) -> String {
     format!(
-        "max by (namespace, pod, container) \
+        "max by (namespace, pod, container{keep}) \
          (max_over_time(container_memory_working_set_bytes{{{}}}[{days}d]))",
         container_selector(namespaces)
     )
@@ -166,43 +174,45 @@ pub fn merge_pod_usage(cpu: &PromData, memory: &PromData) -> UsageMap {
 }
 
 impl Kubepit {
-    /// One instant query against the cluster's Prometheus.
-    async fn prometheus_instant(&self, cluster_id: &str, query: &str) -> Result<PromData> {
-        let (service, client) = self.prometheus_service(cluster_id).await?;
-        let path = proxy::proxy_path(&service, "/api/v1/query", &[("query", query.to_string())]);
-        proxy::get(&client, &path, USAGE_TIMEOUT)
-            .await
-            .inspect_err(|e| {
-                if super::is_proxy_failure(e) {
-                    self.prometheus.invalidate(cluster_id);
-                }
-            })
+    /// One instant preset query against `source`.
+    async fn prometheus_instant(&self, source: &Source, query: &str) -> Result<PromData> {
+        self.prometheus_send(
+            source,
+            "/api/v1/query",
+            vec![("query", query.to_string())],
+            Origin::Preset,
+            USAGE_TIMEOUT,
+        )
+        .await
     }
 
     /// Right-sizing history of every container in `namespaces` (all when
-    /// empty) over `days`. Fails when Prometheus is not available.
+    /// empty) over `days`. Fails when Prometheus is not available, and when
+    /// a shared Prometheus answers without this cluster's labels.
     pub async fn prometheus_container_stats(
         &self,
         cluster_id: &str,
         namespaces: &[String],
         days: u32,
     ) -> Result<ContainerStatsMap> {
+        let source = self.prometheus_source(cluster_id).await?;
+        let labels = &source.access.cluster_labels;
         let queries = [
             container_cpu_p95(namespaces, days),
             container_cpu_max(namespaces, days),
-            container_memory_max(namespaces, days),
+            container_memory_max(namespaces, days, &by_labels(labels)),
             container_hours(namespaces, days),
         ];
-        let [p95, max, mem, hours] = futures::future::join_all(
-            queries
-                .iter()
-                .map(|q| self.prometheus_instant(cluster_id, q)),
-        )
-        .await
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("unexpected number of Prometheus answers"))?;
+        let [p95, max, mem, hours] =
+            futures::future::join_all(queries.iter().map(|q| self.prometheus_instant(&source, q)))
+                .await
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("unexpected number of Prometheus answers"))?;
         // Memory and CPU p95 are required; the rest only refine.
         let (p95, mem) = (p95?, mem?);
+        if !series_carry_labels(&mem.series, labels) {
+            bail!(CLUSTER_LABEL_MISMATCH);
+        }
         let empty = || PromData {
             result_type: "vector".into(),
             series: Vec::new(),
@@ -222,9 +232,10 @@ impl Kubepit {
         cluster_id: &str,
         window_secs: u64,
     ) -> Result<UsageMap> {
+        let source = self.prometheus_source(cluster_id).await?;
         let (cpu, memory) = futures::future::join(
-            self.prometheus_instant(cluster_id, &pod_cpu_avg(window_secs)),
-            self.prometheus_instant(cluster_id, &pod_memory_avg(window_secs)),
+            self.prometheus_instant(&source, &pod_cpu_avg(window_secs)),
+            self.prometheus_instant(&source, &pod_memory_avg(window_secs)),
         )
         .await;
         Ok(merge_pod_usage(&cpu?, &memory?))
@@ -266,7 +277,7 @@ mod tests {
             .starts_with("max_over_time((sum by (namespace, pod, container)"));
         assert!(container_cpu_max(&[], 7).contains(r#"{container!="",container!="POD"}"#));
         assert_eq!(
-            container_memory_max(&["db".into()], 7),
+            container_memory_max(&["db".into()], 7, ""),
             r#"max by (namespace, pod, container) (max_over_time(container_memory_working_set_bytes{container!="",container!="POD",namespace=~"db"}[7d]))"#
         );
         assert!(container_hours(&[], 7).ends_with("[7d:1h])"));

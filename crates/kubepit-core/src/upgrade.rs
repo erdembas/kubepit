@@ -44,6 +44,7 @@ use crate::app::Kubepit;
 use crate::error::{is_forbidden, is_not_found, kube_error};
 use crate::helm::{fetch_release, list_revisions, RevisionRef};
 use crate::objects::{api_resource_from_info, dynamic_api};
+use crate::prometheus::Origin;
 use crate::types::{ApiResourceInfo, PrometheusConfig, PrometheusRange};
 use deprecations::{parse_target, Minor};
 use scan::Versions;
@@ -54,7 +55,8 @@ const PAGE_SIZE: u32 = 500;
 const LIST_CONCURRENCY: usize = 4;
 const HELM_CONCURRENCY: usize = 8;
 /// Over the last hour; the gauge stays 1 once an API was requested.
-const METRIC_QUERY: &str = "max by (group, version, resource, subresource, removed_release) \
+pub(crate) const METRIC_QUERY: &str =
+    "max by (group, version, resource, subresource, removed_release) \
                             (apiserver_requested_deprecated_apis)";
 const METRIC_WINDOW_MS: i64 = 3_600_000;
 
@@ -426,7 +428,7 @@ impl Kubepit {
             step: None,
         };
         match self
-            .prometheus_query_range(cluster_id, METRIC_QUERY, &range)
+            .prometheus_range(cluster_id, METRIC_QUERY, &range, Origin::Preset)
             .await
         {
             Ok(result) => (
