@@ -27,6 +27,8 @@ import {
   type Severity,
 } from './types';
 import { cronJobFindings, singleReplicaFindings } from './workloads';
+import { podSecurityFindings } from './podSecurity';
+import { rbacFindings } from './rbac';
 
 /**
  * Runs every rule family over a `HealthInput`. The scan is split into
@@ -81,6 +83,9 @@ const PASSES: Pass[] = [
       certManagerFindings(cert, input.now, withExpiry, emit);
     }
   },
+  // Security: Pod Security Standards per namespace, risky RBAC grants.
+  (input, emit) => podSecurityFindings(input, emit),
+  (input, emit) => rbacFindings(input, emit),
 ];
 
 const KIND_LISTS: HealthKind[] = [
@@ -99,12 +104,17 @@ const KIND_LISTS: HealthKind[] = [
   'hpas',
   'nodes',
   'certificates',
+  'roleBindings',
+  'clusterRoleBindings',
 ];
+
+/** Lists rules read for context only (their objects get no findings of their own). */
+const CONTEXT_LISTS: HealthKind[] = ['serviceAccounts', 'namespaces', 'roles', 'clusterRoles'];
 
 function capped(input: HealthInput): { input: HealthInput; truncated: HealthKind[] } {
   const truncated: HealthKind[] = [];
   const next = { ...input };
-  for (const kind of [...KIND_LISTS, 'serviceAccounts'] as HealthKind[]) {
+  for (const kind of [...KIND_LISTS, ...CONTEXT_LISTS]) {
     if (input[kind].length > MAX_OBJECTS_PER_KIND) {
       next[kind] = input[kind].slice(0, MAX_OBJECTS_PER_KIND);
       truncated.push(kind);

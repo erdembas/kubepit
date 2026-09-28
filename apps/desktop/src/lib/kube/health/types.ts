@@ -31,7 +31,13 @@ export type HealthKind =
   | 'pdbs'
   | 'hpas'
   | 'nodes'
-  | 'certificates';
+  | 'certificates'
+  // Security: Pod Security labels and RBAC objects.
+  | 'namespaces'
+  | 'roles'
+  | 'clusterRoles'
+  | 'roleBindings'
+  | 'clusterRoleBindings';
 
 export type HealthLists = Record<HealthKind, readonly KubeObject[]>;
 
