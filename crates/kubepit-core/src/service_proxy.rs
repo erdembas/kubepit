@@ -78,19 +78,23 @@ pub fn proxy_base(endpoint: &Endpoint<'_>) -> String {
     )
 }
 
-/// Full request path of `path` (`/api/v1/query_range`) with `params`.
-pub fn proxy_path(endpoint: &Endpoint<'_>, path: &str, params: &[(&str, String)]) -> String {
+/// `path` with `params` as its percent-encoded query string.
+pub fn with_query(path: &str, params: &[(&str, String)]) -> String {
     let query = params
         .iter()
         .map(|(k, v)| format!("{}={}", encode_component(k), encode_component(v)))
         .collect::<Vec<_>>()
         .join("&");
-    let base = proxy_base(endpoint);
     if query.is_empty() {
-        format!("{base}{path}")
+        path.to_string()
     } else {
-        format!("{base}{path}?{query}")
+        format!("{path}?{query}")
     }
+}
+
+/// Full request path of `path` (`/api/v1/query_range`) with `params`.
+pub fn proxy_path(endpoint: &Endpoint<'_>, path: &str, params: &[(&str, String)]) -> String {
+    with_query(&format!("{}{path}", proxy_base(endpoint)), params)
 }
 
 /// Status and body of an answer (any status code).

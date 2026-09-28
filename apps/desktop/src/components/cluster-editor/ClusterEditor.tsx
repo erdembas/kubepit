@@ -9,6 +9,7 @@ import { saveCluster } from '@/lib/clusterActions';
 import { guessEnvironment, prettyContextName } from '@/lib/clusterMeta';
 import { cn } from '@/lib/cn';
 import { ipc, isTauri } from '@/lib/ipc';
+import { accessDraft, accessFromDraft, withoutCredentials } from '@/lib/prometheusAccess';
 import { useAppStore, type ClusterEditorState } from '@/store/useAppStore';
 import type { ClusterDef, ClusterInput, KubeconfigSource } from '@/types';
 import { ClusterFields, type ClusterFieldValues } from './ClusterFields';
@@ -75,6 +76,7 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [prometheus, setPrometheus] = useState(() => prometheusDraft(editing?.prometheus));
+  const [access, setAccess] = useState(() => accessDraft(editing?.prometheus_access));
   const [loki, setLoki] = useState(() => lokiDraft(editing?.loki));
   const [cost, setCost] = useState(() => costDraft(editing?.cost));
   // Connectivity: per-cluster proxy override.
@@ -142,6 +144,13 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
     if (proxyProblem) return setError(proxyProblem);
     const metrics = prometheusConfig(prometheus);
     if ('error' in metrics) return setError(metrics.error);
+    // Hidden while Prometheus is off: kept as saved, without credentials
+    // (they need a chosen service).
+    const secured =
+      metrics.config.mode === 'off'
+        ? { access: withoutCredentials(editing?.prometheus_access) }
+        : accessFromDraft(access, metrics.config);
+    if ('error' in secured) return setError(secured.error);
     const logs = lokiConfig(loki);
     if ('error' in logs) return setError(logs.error);
     const costing = costConfig(cost);
@@ -161,6 +170,7 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
           read_only: fields.read_only,
           notes: fields.notes,
           prometheus: metrics.config,
+          prometheus_access: secured.access,
           loki: logs.config,
           cost: costing.config,
           proxy_url: proxy.trim() || null,
@@ -183,6 +193,7 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
           notes: fields.notes,
           proxy_url: proxy.trim() || null,
           prometheus: metrics.config,
+          prometheus_access: secured.access,
           loki: logs.config,
           cost: costing.config,
         };
@@ -366,7 +377,13 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
         </div>
 
         <div className="border-border/60 border-t pt-4">
-          <PrometheusFields clusterId={clusterId} value={prometheus} onChange={setPrometheus} />
+          <PrometheusFields
+            clusterId={clusterId}
+            value={prometheus}
+            onChange={setPrometheus}
+            access={access}
+            onAccessChange={setAccess}
+          />
         </div>
         <div className="border-border/60 border-t pt-4">
           <LokiFields clusterId={clusterId} value={loki} onChange={setLoki} />

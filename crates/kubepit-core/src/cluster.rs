@@ -17,6 +17,7 @@ use crate::cost::CostConfig;
 use crate::kubeconfig;
 use crate::objects::now_millis;
 use crate::paths::{atomic_write, expand_tilde};
+use crate::prometheus::access::{overlapping_sources, PrometheusAccess};
 use crate::proxy;
 use crate::types::{ClusterDef, ClusterInput, LokiConfig, PrometheusConfig};
 
@@ -60,7 +61,33 @@ fn resolve_kubeconfig_path(raw: &str) -> Result<PathBuf> {
 struct Sources {
     cost: CostConfig,
     prometheus: PrometheusConfig,
+    prometheus_access: PrometheusAccess,
     loki: LokiConfig,
+}
+
+/// Refuse `candidate` when it would read the data of a cluster in `others`
+/// from a shared Prometheus (see [`overlapping_sources`]).
+fn ensure_disjoint_sources<'a>(
+    candidate: &ClusterDef,
+    others: impl IntoIterator<Item = &'a ClusterDef>,
+) -> Result<()> {
+    let clash = others.into_iter().find(|other| {
+        other.id != candidate.id
+            && overlapping_sources(
+                (&candidate.prometheus, &candidate.prometheus_access),
+                (&other.prometheus, &other.prometheus_access),
+            )
+    });
+    if let Some(other) = clash {
+        bail!(
+            "Prometheus: the cluster labels of \"{}\" and \"{}\" overlap on the same service and \
+             tenant; give each cluster its own value of one label (for example cluster=\"{}\")",
+            candidate.name,
+            other.name,
+            candidate.name
+        );
+    }
+    Ok(())
 }
 
 fn validate_input(index: usize, input: &ClusterInput) -> Result<(Origin, Sources)> {
@@ -84,12 +111,21 @@ fn validate_input(index: usize, input: &ClusterInput) -> Result<(Origin, Sources
             .clone()
             .normalized()
             .with_context(|| label.clone())?,
+        prometheus_access: input
+            .prometheus_access
+            .clone()
+            .normalized()
+            .with_context(|| label.clone())?,
         loki: input
             .loki
             .clone()
             .normalized()
             .with_context(|| label.clone())?,
     };
+    sources
+        .prometheus_access
+        .ensure_source(&sources.prometheus)
+        .with_context(|| label.clone())?;
     let origin = match (
         non_blank(&input.kubeconfig_path),
         non_blank(&input.kubeconfig_text),
@@ -173,6 +209,7 @@ impl Kubepit {
                     last_connected_at: None,
                     cost: sources.cost,
                     prometheus: sources.prometheus,
+                    prometheus_access: sources.prometheus_access,
                     loki: sources.loki,
                     proxy_url: proxy::normalize(input.proxy_url.as_deref())?,
                 });
@@ -182,6 +219,9 @@ impl Kubepit {
         let commit = write_result.and_then(|()| {
             let new_defs = defs.clone();
             self.store.update_clusters(move |list| {
+                for (i, def) in new_defs.iter().enumerate() {
+                    ensure_disjoint_sources(def, list.iter().chain(&new_defs[..i]))?;
+                }
                 list.extend(new_defs);
                 Ok(())
             })
@@ -249,15 +289,18 @@ impl Kubepit {
             last_connected_at: existing.last_connected_at,
             cost: cluster.cost.normalized()?,
             prometheus: cluster.prometheus.normalized()?,
+            prometheus_access: cluster.prometheus_access.normalized()?,
             loki: cluster.loki.normalized()?,
             proxy_url,
         };
+        next.prometheus_access.ensure_source(&next.prometheus)?;
         if target_changed {
             let kc = self.load_cluster_source(&next)?;
             kubeconfig::ensure_context(&kc, &next.context)?;
         }
         let stored = next.clone();
         let ((), list) = self.store.update_clusters(move |list| {
+            ensure_disjoint_sources(&stored, list.iter())?;
             let slot = list
                 .iter_mut()
                 .find(|c| c.id == stored.id)
@@ -267,6 +310,12 @@ impl Kubepit {
         })?;
         if connection_changed {
             self.cluster_disconnect(&next.id);
+        }
+        // Secret values read for the old settings must not outlive them.
+        if next.prometheus != existing.prometheus
+            || next.prometheus_access != existing.prometheus_access
+        {
+            self.prometheus_tunnels.forget(&next.id);
         }
         if !self.run_kubeconfig_is_transient(&next) {
             if let Err(e) = self.write_run_kubeconfig(&next) {
@@ -520,6 +569,174 @@ mod tests {
         assert!(!run.exists());
         assert!(file.exists(), "user kubeconfig must never be deleted");
         assert!(app.cluster_list().is_empty());
+    }
+
+    #[test]
+    fn prometheus_credentials_need_a_chosen_service() {
+        use crate::prometheus::access::{PrometheusAccess, PrometheusAuth};
+        use crate::types::PromScheme;
+
+        let (_dir, app, _) = setup();
+        let secured = PrometheusAccess {
+            auth: Some(PrometheusAuth::Bearer {
+                namespace: "monitoring".into(),
+                secret: "prom-auth".into(),
+                token_key: "token".into(),
+            }),
+            ..Default::default()
+        };
+        let service = PrometheusConfig::Service {
+            namespace: "monitoring".into(),
+            service: "thanos-query".into(),
+            port: 9090,
+            scheme: PromScheme::Https,
+            path_prefix: String::new(),
+        };
+        let add = |prometheus: PrometheusConfig| ClusterInput {
+            kubeconfig_text: Some(TWO_CONTEXTS.to_string()),
+            prometheus,
+            prometheus_access: secured.clone(),
+            ..input("dev")
+        };
+        // Detection (or nothing) with credentials is refused before anything is stored.
+        for config in [PrometheusConfig::Auto, PrometheusConfig::Off] {
+            let err = app.cluster_add(vec![add(config)]).unwrap_err();
+            assert!(
+                format!("{err:#}").contains("chosen in the cluster settings"),
+                "{err:#}"
+            );
+        }
+        assert!(app.cluster_list().is_empty());
+        let added = app.cluster_add(vec![add(service)]).unwrap().remove(0);
+        assert!(added.prometheus_access.auth.is_some());
+
+        // Switching back to detection keeps the credentials out.
+        let mut auto = added.clone();
+        auto.prometheus = PrometheusConfig::Auto;
+        let err = app.cluster_update(auto.clone()).unwrap_err();
+        assert!(
+            err.to_string().contains("chosen in the cluster settings"),
+            "{err}"
+        );
+        assert_eq!(
+            app.cluster_def(&added.id).unwrap().prometheus,
+            added.prometheus
+        );
+        auto.prometheus_access.auth = None;
+        app.cluster_update(auto).unwrap();
+    }
+
+    #[test]
+    fn access_changes_drop_cached_secret_values() {
+        use crate::prometheus::access::PrometheusAccess;
+
+        let (_dir, app, _) = setup();
+        let added = app
+            .cluster_add(vec![ClusterInput {
+                kubeconfig_text: Some(TWO_CONTEXTS.to_string()),
+                ..input("dev")
+            }])
+            .unwrap()
+            .remove(0);
+        let tunnels = &app.prometheus_tunnels;
+        tunnels.seed(&added.id, &added.prometheus_access);
+        // Other edits keep them…
+        let mut renamed = added.clone();
+        renamed.name = "Renamed".into();
+        let renamed = app.cluster_update(renamed).unwrap();
+        assert!(tunnels.holds(&added.id));
+        // …new access settings or another source drop them at once.
+        let mut tenant = renamed.clone();
+        tenant.prometheus_access = PrometheusAccess {
+            tenant: "team-a".into(),
+            ..Default::default()
+        };
+        let tenant = app.cluster_update(tenant).unwrap();
+        assert!(!tunnels.holds(&added.id));
+        tunnels.seed(&added.id, &tenant.prometheus_access);
+        let mut off = tenant.clone();
+        off.prometheus = PrometheusConfig::Off;
+        app.cluster_update(off).unwrap();
+        assert!(!tunnels.holds(&added.id));
+        // Disconnect and removal drop them too.
+        tunnels.seed(&added.id, &tenant.prometheus_access);
+        app.cluster_disconnect(&added.id);
+        assert!(!tunnels.holds(&added.id));
+    }
+
+    #[test]
+    fn prometheus_access_is_validated_and_shared_sources_stay_disjoint() {
+        use crate::prometheus::access::PrometheusAccess;
+        use crate::types::PromScheme;
+
+        let (_dir, app, _) = setup();
+        let shared = PrometheusConfig::Service {
+            namespace: "monitoring".into(),
+            service: "thanos-query".into(),
+            port: 9090,
+            scheme: PromScheme::Http,
+            path_prefix: String::new(),
+        };
+        let labelled = |name: &str, value: &str| PrometheusAccess {
+            tenant: " team-a ".into(),
+            cluster_labels: [(name.to_string(), value.to_string())]
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        };
+        let add = |context: &str, access: PrometheusAccess| ClusterInput {
+            kubeconfig_text: Some(TWO_CONTEXTS.to_string()),
+            prometheus: shared.clone(),
+            prometheus_access: access,
+            ..input(context)
+        };
+
+        // A reserved label key is refused before anything is stored.
+        assert!(app
+            .cluster_add(vec![add("dev", labelled("pod", "x"))])
+            .is_err());
+        // Two new clusters of one batch that would read each other's data.
+        let err = app
+            .cluster_add(vec![
+                add("dev", labelled("cluster", "dev")),
+                add("prod", labelled("region", "eu")),
+            ])
+            .unwrap_err();
+        assert!(format!("{err:#}").contains("overlap"), "{err:#}");
+        assert!(app.cluster_list().is_empty());
+
+        let added = app
+            .cluster_add(vec![
+                add("dev", labelled("cluster", "dev")),
+                add("prod", labelled("cluster", "prod")),
+            ])
+            .unwrap();
+        assert_eq!(added[0].prometheus_access.tenant, "team-a", "normalized");
+        assert_eq!(
+            app.cluster_list()[1].prometheus_access,
+            added[1].prometheus_access
+        );
+
+        // Against a stored cluster: on add…
+        let err = app
+            .cluster_add(vec![add("dev", labelled("region", "eu"))])
+            .unwrap_err();
+        assert!(format!("{err:#}").contains("overlap"), "{err:#}");
+        assert_eq!(app.cluster_list().len(), 2);
+        // …and on update; a cluster is never compared with itself.
+        let mut edited = added[1].clone();
+        edited.prometheus_access = labelled("cluster", "dev");
+        assert!(app.cluster_update(edited).is_err());
+        let mut renamed = added[0].clone();
+        renamed.name = "Dev 2".into();
+        app.cluster_update(renamed).unwrap();
+        let mut reserved = added[0].clone();
+        reserved.prometheus_access = labelled("namespace", "x");
+        assert!(app.cluster_update(reserved).is_err());
+        assert_eq!(
+            app.cluster_def(&added[1].id).unwrap().prometheus_access,
+            added[1].prometheus_access
+        );
     }
 
     #[test]

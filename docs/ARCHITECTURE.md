@@ -446,13 +446,83 @@ An optional, richer metrics source next to the metrics-server history
   and `cluster_add` normalizes them like `cluster_update` before anything is
   saved. The field groups take a `null` cluster id while adding, so no
   status lookup runs before the cluster exists.
+- **Access** (`access.rs`, `ClusterDef.prometheus_access`, both `auto` and
+  `service` modes) for shared or secured sources: a `tenant`
+  (`X-Scope-OrgID`, ≤ 200 visible ASCII characters — a header value, so
+  no spaces or non-ASCII), `cluster_labels` (a
+  selector such as `cluster="prod-eu"`; names match
+  `^[a-zA-Z_][a-zA-Z0-9_]*$` and are none of the labels the presets use —
+  `__name__`, `namespace`, `pod`, `container`, `resource`, `uid`,
+  `owner_name`, `owner_kind`, `job`, `instance`, `replicaset`, `job_name`,
+  `reason` — and values are non-empty), an optional `auth` that *references*
+  a Secret (bearer token key, or username and password keys; names DNS-1123,
+  keys Kubernetes key names) and `tls` for an `https` service behind the
+  tunnel (a CA from a ConfigMap or Secret key, else the system roots, or an
+  explicit `insecure_skip_verify`). `cluster_add` and `cluster_update`
+  normalize it like `prometheus`. Credentials need an explicitly chosen
+  `service`: detection ranks services from a cluster-wide list, so anyone
+  who may create a Service named `prometheus-operated` (and a pod behind
+  it) would otherwise receive them. Validation refuses `auth` with `auto`
+  or `off`, and at runtime (`access::credentials_allowed`) only the
+  configured service itself gets them — with an older `clusters.json` that
+  still pairs `auto` with `auth`, requests fail instead. The cluster editor
+  shows the auth fields in service mode only. Two clusters that name the same
+  hand-configured service with the same tenant and both declare cluster
+  labels must have provably disjoint selectors (a shared label with
+  different values); clusters without labels are not compared, since every
+  cluster has its own `monitoring/prometheus-operated` behind its own API
+  server.
 - **Transport** (`proxy.rs`): every request goes through the API server's
   service proxy
   (`/api/v1/namespaces/{ns}/services/{scheme}:{name}:{port}/proxy{prefix}/api/v1/…`)
   with the cluster's credentials — no port-forward, RBAC applies
   (`services/proxy`). A second client per connection without kube's
   default retry keeps a 503 ("no endpoints available") from backing off
-  for minutes.
+  for minutes. `Kubepit::prometheus_source` (the service, client and
+  access settings of the connection, resolved once per command) +
+  `prometheus_send` is the one transport of every caller — chart presets,
+  cost usage and trend, right-sizing, the statistics batches, upgrade
+  readiness and the PromQL tab (`prometheus_get` is its single-request
+  form, used by `prometheus_instant_at`): it sends
+  `X-Scope-OrgID` when a tenant is set (the detection probe too), injects
+  the cluster-label selector into `Origin::Preset` queries and makes the
+  next status request detect again after a proxy or tunnel failure.
+- **Tunnel** (`tunnel.rs`): the service proxy does not forward
+  `Authorization`, so with `auth` set every request (the probe too) goes
+  through an in-process port-forward instead — no local listener, so no
+  other local process can use it. The credentials are read from the
+  referenced Secret (`get secrets`, the user's RBAC; a bearer token or
+  `Basic base64(user:password)`; one read per cluster at a time, given up
+  after 15 s so a hung cluster holds up nothing else) and kept in memory for
+  at most five minutes per connection and settings (`TunnelCache`: a timer
+  drops an entry when it expires even if nothing asks again, a mismatching
+  entry is dropped on sight, and disconnect, removal and access changes
+  drop it at once); they are
+  never logged, stored, returned or quoted in errors, which name the Secret
+  and key only (`Credentials` prints as `<redacted>`). Each request
+  re-resolves a ready pod behind the service
+  (`portforward::resolve_target`, so restarts are survived), opens
+  `pods/portforward` to it and speaks HTTP/1.1 over the stream (hyper's
+  `client::conn::http1`) with `Authorization`, the tenant and
+  `Host: <service>.<namespace>.svc:<port>`. `https` services get TLS over
+  the stream (tokio-rustls, ring) with the server name
+  `<service>.<namespace>.svc`, trusting the CA of `tls.ca` (a ConfigMap or
+  Secret key), else the system roots, or nothing with
+  `insecure_skip_verify`.
+- **Cluster-label selector** (`matchers.rs`): `with_matchers` is a small
+  PromQL lexer that adds `,k="v"` to every vector selector (a bare metric
+  name, a `{…}` block, `{__name__=~…}`) and skips string literals,
+  function and aggregation names, keywords, label lists after `by` / `on`
+  / `without` / `ignoring` / `group_left` / `group_right`, `[…]` ranges and
+  numbers. It is never applied to the probe (`query=1`) or to PromQL typed
+  in the PromQL tab (`Origin::User`). Charts report the query they sent,
+  so a PromQL tab opened from one gets the same data. It fails closed: the
+  live right-sizing report keeps the configured label keys in its memory
+  answer (`by (namespace, pod, container, cluster)`) and the statistics
+  batches in Q11 (pod owners); a series without them or with another value
+  fails with `cluster-label-mismatch` (a source that ignored the selector)
+  — the live report then falls back to metrics-server with that note, a
+  batch aborts with `BatchFailure::Proxy`.
 - **States**: `available` when any probed candidate answers; `forbidden`
   when the API server denied every probed candidate
   (`service_proxy::is_proxy_forbidden`: its own 403 `Status` with reason
@@ -463,7 +533,7 @@ An optional, richer metrics source next to the metrics-server history
   auth proxy in front of it, with its message). `not-found` and `off` as
   before.
 - **Cache**: the status (`prometheus_status`) is kept per connection
-  (`connected_at`) and setting; negative answers (`forbidden` included) are
+  (`connected_at`), setting and access settings; negative answers (`forbidden` included) are
   rechecked after five minutes, a vanished service (proxy 404/502/503) is
   re-detected, and disconnect drops it.
 - **Queries**: `prometheus_metrics` runs backend presets (`promql.rs`) for
@@ -483,10 +553,22 @@ An optional, richer metrics source next to the metrics-server history
   namespace, the API server's message verbatim and a copyable
   `kubectl auth can-i get services/proxy -n <ns>`.
   `dock/promql/PromqlView.tsx` draws results with `MultiSeriesChart`
-  (SVG, like `TimeSeriesChart`). The demo backend
+  (SVG, like `TimeSeriesChart`); with cluster labels configured its status
+  line says "Cluster selector {…} is not added to your own queries." The
+  cluster editor's Prometheus block has a collapsible "Shared or secured
+  Prometheus" section (`cluster-editor/PrometheusAccessFields.tsx`,
+  container queries): the tenant, label pair rows and, in service mode
+  only (a hint says why otherwise), auth (none / bearer token / basic auth
+  with the Secret namespace, name and keys) and, for an https service, the
+  CA reference and "Skip TLS verification" with a warning badge. Inline checks
+  (`lib/prometheusAccess.ts`) mirror `PrometheusAccess::normalized`; the
+  backend stays the final check. The status cache key of the UI includes
+  the access settings, so a change re-reads the status. The demo backend
   (`lib/ipc/mock/prometheus.ts`) fakes kube-prometheus-stack on
   prod-eu-west-1, the prometheus chart on the other cloud clusters and no
-  Prometheus on the local ones.
+  Prometheus on the local ones; it keeps `prometheus_access` with the
+  cluster, keys the status on it and reports a missing credentials Secret
+  or key like the backend (the tunnel itself is not simulated).
 
 ## Structured logs
 
@@ -884,9 +966,13 @@ applying a recommendation only reads, so read-only clusters get it all.
   flight. Answers merge per `(namespace, pod, container)`: duplicates keep
   the maximum, negative counts clamp at 0, Prometheus warnings mark the
   batch partial. CPU p95 and memory max are required: a failed answer or
-  one above 50,000 series makes the batch splittable, a service-proxy
-  failure aborts (and re-detects Prometheus), other failures are listed as
-  failed queries. `rightsizing/evidence.rs` folds a batch into
+  one above 50,000 series makes the batch splittable, a service-proxy or
+  tunnel failure aborts (and re-detects Prometheus), other failures are
+  listed as failed queries. Every query goes through the one Prometheus
+  transport as a preset (tenant, tunnel, cluster-label selector); on a
+  shared Prometheus Q11 keeps the configured label names in its `by (…)`,
+  and an owner series without them (or with another value) fails the batch
+  with `cluster-label-mismatch`. `rightsizing/evidence.rs` folds a batch into
   per-(workload, container) usage (`ContainerUsage`: `UsageStats` plus
   `UsageEvidence`): pods resolve through the owner index (or, without
   owner series, by name with identity `name-match`), only containers of

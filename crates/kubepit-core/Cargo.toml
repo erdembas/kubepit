@@ -31,6 +31,14 @@ regex = "1"
 # Raw GETs through the API server: the service proxy (Prometheus queries)
 # and `/openapi/v3` documents (already in kube's tree).
 http = "1"
+# Authenticated Prometheus: HTTP/1.1, and TLS for `https` services, over an
+# in-process port-forward stream (all already in kube's tree).
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
+http-body-util = "0.1"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12"] }
+rustls-native-certs = "0.8"
 # Connectivity: kubeconfig file watching, OS credential store (keychain mode).
 notify = "8"
 keyring = "4"
