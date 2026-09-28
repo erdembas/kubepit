@@ -110,6 +110,88 @@ with `--output json` and reuse the release decoding above; dry runs
 clusters. Values go through a private temp file and repository passwords
 through `--password-stdin`.
 
+### Values schemas and the upgrade preview
+
+`helm_preview.rs`; nothing here changes a cluster, so read-only clusters
+allow all of it (the upgrade itself stays blocked there).
+
+- **`values.schema.json`.** `helm_release_values_schema` reads `chart.schema`
+  (base64 JSON, like every `[]byte` in helm's release JSON) from the newest
+  revision's secret; `helm_chart_values_schema` runs `helm pull --untar` into
+  a private scratch directory (`run/helm-pull-<uuid>`, mode 0700, removed
+  right away) and reads the top-level chart's schema, cached for five
+  minutes and cleared with the chart cache. `null` = the chart has none.
+- **Validation in the deploy dialog** (`HelmDeployDialog.tsx`): the values
+  editor binds the schema through `attachValuesSchema` (`lib/kube/schema/
+monaco.ts`, `values.ts`): completion, hovers and markers from the same
+  schema layer as manifests, with `SchemaSet.fromJsonSchema` handling the
+  draft-07 differences (`$ref` JSON pointers to `#/definitions` / `$defs`,
+  `type` lists, open objects unless `additionalProperties: false`, `oneOf` /
+  `anyOf` branch properties, `const`, exclusive bounds). `validate.ts` also
+  checks `minimum`/`maximum`, lengths, `pattern` and item counts (for
+  manifests too). Helm validates the _merged_ values, so a required field
+  the chart defaults provide is never reported missing. The status bar
+  counts problems; nothing blocks a preview or a deploy. Upgrades use the
+  target chart version's schema, else (same version, unknown repository)
+  the release's.
+- **Upgrade preview** (`helm_upgrade_preview`, helm-diff style): the dry-run
+  upgrade renders the next manifest; both manifests are split into objects
+  (`split_manifest`: `---` documents, `# Source:` templates, `kind: List`
+  items) and matched by API group, kind, namespace (the release namespace
+  for namespaced kinds without one) and name into added / changed / removed
+  / unchanged with before and after documents. With `live`, every rendered
+  object also goes through `dry_run.rs` (server-side apply, `dryRun=All`, at
+  most 300) for a live → after diff; fields a chart stops setting are not
+  removed by that dry run (helm's three-way merge removes them). The dialog
+  makes this a review step: "Upgrade" first renders the review
+  (`helm/UpgradeChanges.tsx`: filterable object list, per-object
+  `DiffView` in `edit` normalisation, release / live toggle, deprecated
+  apiVersions flagged), and only a reviewed, unchanged input runs the
+  upgrade (still behind the typed-name confirmation).
+
+## Upgrade readiness (deprecated APIs)
+
+`upgrade.rs` + `upgrade/` answer "what breaks when this cluster moves to a
+newer Kubernetes minor" (`upgrade_readiness_scan`, read-only).
+
+- **Table.** `upgrade/deprecated_apis.json` is the single source of truth:
+  apiVersion + kind, plural resource, deprecated-in, removed-in (null while
+  none is scheduled), replacement (and replacement kind) and note codes,
+  dated (`updated`) and covering the 1.16 → 1.32 removals plus `v1
+Endpoints` (deprecated in 1.33). The Rust side embeds it
+  (`include_str!`); the UI imports the same file
+  (`lib/kube/deprecations.ts`, which also translates the note codes). The
+  file's `_comment` says how to update it; a unit test checks it.
+- **Scan** against a target (default: the minor after the server's
+  `gitVersion`), concurrently: metadata-only lists (paged, 20 000 per kind)
+  of every table kind the cluster serves — one resource per kind, the
+  replacement group first — matching the last-applied annotation and every
+  `managedFields[].apiVersion` (managers listed; events and endpoints are
+  never listed); the stored manifest of each Helm release's newest revision
+  (native decoding, helm rebuilds those objects on every upgrade and
+  rollback); CRDs serving versions they mark `deprecated`; aggregated API
+  services registering a table group-version; and, when asked and
+  Prometheus is available, `apiserver_requested_deprecated_apis` over the
+  last hour. Removed in the target (or earlier, `already_removed`) =
+  blocker, deprecated by then = warning. Kinds forbidden cluster-wide fall
+  back to `accessible_namespaces`; what stays unreadable is reported as
+  skipped. No background work: scans run on request.
+- **UI.** The `@upgrade` view (`VIEW_KEYS.upgradeReadiness`, Cluster section,
+  `components/workbench/upgrade/`): target picker (next four minors),
+  blockers / warnings / Helm tiles, sources, filters and findings grouped by
+  apiVersion + kind with the replacement and notes; rows open the object or
+  the Helm release. Reports live in `store/useUpgradeStore.ts` (per cluster
+  and target, this session only) and feed the dashboard's fleet card
+  (`components/dashboard/UpgradeFleetCard.tsx`: every connected cluster
+  against its next minor, "Check all" scans three at a time). Schema-aware
+  editors mark deprecated or removed apiVersions (with the replacement), and
+  the Manifests tab flags such documents in its list and details.
+- **Demo.** `mock/fixtures/upgrade.ts` adds legacy objects (last-applied and
+  side-table managedFields), a `legacy-portal` Helm release with removed
+  APIs and a CRD with a deprecated version on the cloud clusters (kind stays
+  clean); `mock/upgrade.ts` mirrors the scan and `mock/helmPreview.ts` the
+  schemas (generated from the demo charts' parameters) and the preview.
+
 ## GitOps (Argo CD, Flux)
 
 GitOps support is UI-side on top of the generic resource commands; there is
@@ -519,9 +601,12 @@ v3, so CRDs work like builtins.
   `attachKubeYaml(monaco, editor, { clusterId })` (the model → cluster
   mapping; `useKubeYaml` in the dock editors and the details YAML tab).
   Diagnostics run debounced on documents that parse (unknown field, wrong
-  type, missing required field, unsupported enum value, unserved
-  apiVersion/kind). No schema means no suggestions and no markers; nothing
-  blocks editing or applying. Helm values and other YAML stay unbound.
+  type, missing required field, unsupported enum value, value constraints,
+  unserved apiVersion/kind, deprecated or removed apiVersion with its
+  replacement). No schema means no suggestions and no markers; nothing
+  blocks editing or applying. Helm values editors bind their chart's
+  `values.schema.json` instead (`attachValuesSchema`, see Helm); other YAML
+  stays unbound.
 - API explorer: view `@explain` (`VIEW_KEYS.apiExplorer`,
   `components/workbench/explain/`), opened through `openExplain()` in
   `store/useExplainStore.ts` from the navigator, the command palette
