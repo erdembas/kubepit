@@ -19,7 +19,9 @@ pub const MIN_CPU_CHANGE: f64 = 10.0;
 pub const MIN_MEMORY_CHANGE: f64 = 16.0 * MIB;
 
 impl RightsizingSettings {
-    /// Clamped to sane ranges (headroom 0–300 %, 1–30 days).
+    /// Clamped to sane ranges: headroom 0–300 %, 1–30 days, minimum history
+    /// 1–720 hours (at most the window), minimum coverage 0.1–1, throttling
+    /// threshold 1–50 %.
     pub fn normalized(self) -> Self {
         let pct = |v: f64, default: f64| {
             if v.is_finite() {
@@ -36,6 +38,15 @@ impl RightsizingSettings {
                 default
             }
         };
+        let clamp = |v: f64, lo: f64, hi: f64, default: f64| {
+            if v.is_finite() {
+                v.clamp(lo, hi)
+            } else {
+                default.clamp(lo, hi)
+            }
+        };
+        let days = self.days.clamp(1, 30);
+        let max_hours = (f64::from(days) * 24.0).min(720.0);
         Self {
             cpu_headroom_percent: pct(self.cpu_headroom_percent, defaults.cpu_headroom_percent),
             memory_headroom_percent: pct(
@@ -48,7 +59,15 @@ impl RightsizingSettings {
             ),
             min_cpu_millicores: min(self.min_cpu_millicores, defaults.min_cpu_millicores),
             min_memory_bytes: min(self.min_memory_bytes, defaults.min_memory_bytes),
-            days: self.days.clamp(1, 30),
+            days,
+            min_hours: clamp(self.min_hours, 1.0, max_hours, defaults.min_hours),
+            min_coverage: clamp(self.min_coverage, 0.1, 1.0, defaults.min_coverage),
+            throttle_threshold_percent: clamp(
+                self.throttle_threshold_percent,
+                1.0,
+                50.0,
+                defaults.throttle_threshold_percent,
+            ),
         }
     }
 }
@@ -220,6 +239,8 @@ pub fn stats_from_samples(cpu: &[f64], memory: &[f64], interval_secs: f64) -> Op
         cpu_max,
         memory_max,
         hours: cpu.len() as f64 * interval_secs / 3600.0,
+        cpu_avg: None,
+        memory_avg: None,
     })
 }
 
@@ -233,6 +254,8 @@ pub fn combine(stats: &[UsageStats]) -> Option<UsageStats> {
         cpu_max: acc.cpu_max.max(s.cpu_max),
         memory_max: acc.memory_max.max(s.memory_max),
         hours: acc.hours + s.hours,
+        cpu_avg: None,
+        memory_avg: None,
     }))
 }
 
@@ -253,6 +276,7 @@ mod tests {
             cpu_max: cpu_p95 * 1.5,
             memory_max,
             hours: 168.0,
+            ..Default::default()
         }
     }
 
@@ -266,6 +290,8 @@ mod tests {
                 usage,
                 source: RightsizingSource::Prometheus,
                 settings: &s,
+                evidence: None,
+                hpa: None,
             },
         )
     }
@@ -318,7 +344,7 @@ mod tests {
             memory_limit_headroom_percent: 0.0,
             min_cpu_millicores: 0.0,
             min_memory_bytes: 0.0,
-            days: 7,
+            ..settings()
         };
         for peak in [0.3, 7.0, 99.9, 333.3, 1234.5, 9999.0] {
             assert!(cpu_request(peak, &bare) >= peak, "{peak}");
@@ -403,6 +429,7 @@ mod tests {
                 cpu_max: 900.0,
                 memory_max: 1.0,
                 hours: 0.5,
+                ..Default::default()
             },
         ])
         .unwrap();

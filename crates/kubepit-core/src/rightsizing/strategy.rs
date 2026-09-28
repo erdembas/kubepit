@@ -21,8 +21,8 @@ use anyhow::{bail, Result};
 use super::math::{change_of, round_up_cpu, round_up_memory};
 use super::percentile::PercentileHeadroom;
 use super::types::{
-    Confidence, ContainerRecommendation, RecommendationWarning, ResourceValues,
-    RightsizingSettings, RightsizingSource, RightsizingStrategyInfo, UsageStats,
+    Confidence, ContainerRecommendation, HpaInfo, RecommendationWarning, ResourceValues,
+    RightsizingSettings, RightsizingSource, RightsizingStrategyInfo, UsageEvidence, UsageStats,
 };
 
 /// Id of the strategy used when a request names none.
@@ -43,6 +43,10 @@ pub struct ContainerInput<'a> {
     /// Where the usage came from (how much to trust it).
     pub source: RightsizingSource,
     pub settings: &'a RightsizingSettings,
+    /// How far the usage can be trusted (`None` = no evidence collected).
+    pub evidence: Option<&'a UsageEvidence>,
+    /// The HPA that scales the workload.
+    pub hpa: Option<&'a HpaInfo>,
 }
 
 /// What a strategy recommends for one container.
@@ -154,6 +158,7 @@ pub fn finalize(input: &ContainerInput<'_>, output: StrategyOutput) -> Container
         warnings,
         cpu_limit_raised,
         memory_limit_raised,
+        evidence: input.evidence.cloned(),
     }
 }
 
@@ -188,6 +193,8 @@ mod tests {
             RightsizingStrategyInfo {
                 id: "fixed".into(),
                 name: "Fixed".into(),
+                defaults: RightsizingSettings::default(),
+                settings_keys: Vec::new(),
             }
         }
         fn recommend(&self, _input: &ContainerInput<'_>) -> StrategyOutput {
@@ -232,6 +239,8 @@ mod tests {
                 usage: None,
                 source: RightsizingSource::Prometheus,
                 settings: &settings,
+                evidence: None,
+                hpa: None,
             },
         );
         // CPU: ratio 2 → 920m. Memory: ratio 1.5 → 450 MiB → 464 MiB (16 MiB steps).
@@ -264,6 +273,8 @@ mod tests {
                 usage: None,
                 source: RightsizingSource::Prometheus,
                 settings: &settings,
+                evidence: None,
+                hpa: None,
             },
         );
         assert_eq!(low.recommended.cpu_limit, Some(500.0));
@@ -280,6 +291,8 @@ mod tests {
                 usage: None,
                 source: RightsizingSource::Prometheus,
                 settings: &settings,
+                evidence: None,
+                hpa: None,
             },
         );
         assert_eq!(high.recommended.cpu_limit, Some(730.0));

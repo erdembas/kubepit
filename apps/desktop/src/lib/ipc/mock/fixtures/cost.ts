@@ -439,6 +439,9 @@ export const DEFAULT_SETTINGS: RightsizingSettings = {
   min_cpu_millicores: 10,
   min_memory_bytes: 32 * MiB,
   days: 7,
+  min_hours: 24,
+  min_coverage: 0.9,
+  throttle_threshold_percent: 5,
 };
 
 function roundUp(value: number, step: number) {
@@ -611,6 +614,7 @@ function finalize(
     warnings,
     cpu_limit_raised: cpuLimit != null,
     memory_limit_raised: memLimit != null,
+    evidence: null,
   };
 }
 
@@ -625,7 +629,17 @@ export function recommendContainer(
 }
 
 export const STRATEGIES: RightsizingStrategyInfo[] = [
-  { id: 'percentile-headroom', name: 'Percentile + headroom' },
+  {
+    id: 'percentile-headroom',
+    name: 'Percentile + headroom',
+    defaults: DEFAULT_SETTINGS,
+    settings_keys: [
+      'cpu_headroom_percent',
+      'memory_headroom_percent',
+      'memory_limit_headroom_percent',
+      'days',
+    ],
+  },
 ];
 
 const changed = (c: ContainerRecommendation) =>
@@ -659,6 +673,8 @@ function syntheticUsage(seed: string, current: ResourceValues, hours: number): U
     cpu_max: cpu * (1.3 + r2 * 0.8),
     memory_max: mem,
     hours,
+    cpu_avg: null,
+    memory_avg: null,
   };
 }
 
@@ -776,6 +792,11 @@ export function workloadRecommendations(
         monthly_delta: next - current,
         monthly_current: current,
         changed: recs.some(changed),
+        pods: [],
+        pods_truncated: false,
+        hpa: null,
+        lenses: [],
+        cost_replicas: replicas,
       });
     }
   }

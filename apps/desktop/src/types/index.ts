@@ -2196,6 +2196,12 @@ export interface RightsizingSettings {
   min_memory_bytes: number;
   /** Days of Prometheus history (1–30). */
   days: number;
+  /** Observed hours below which a recommendation is `insufficient-history` (1–720, ≤ days × 24). */
+  min_hours: number;
+  /** Share of running samples with usage below which it is `low-coverage` (0.1–1). */
+  min_coverage: number;
+  /** Throttled CFS periods ÷ periods, in %, from which it is `cpu-throttled` (1–50). */
+  throttle_threshold_percent: number;
 }
 
 export interface WorkloadRef {
@@ -2208,7 +2214,8 @@ export interface RightsizingRequest {
   /** Empty = every namespace the user can read. */
   namespaces: string[];
   workload?: WorkloadRef | null;
-  settings?: Partial<RightsizingSettings>;
+  /** Null or absent = the strategy's effective settings. */
+  settings?: Partial<RightsizingSettings> | null;
   /** Recommendation strategy id (null = the backend's default). */
   strategy?: string | null;
 }
@@ -2219,6 +2226,10 @@ export interface RightsizingStrategyInfo {
   id: string;
   /** English display name (product names stay as they are). */
   name: string;
+  /** The strategy's own defaults. */
+  defaults: RightsizingSettings;
+  /** The settings the strategy reads (render only these fields). */
+  settings_keys: string[];
 }
 
 /** A caveat of a recommendation; `code` is a stable id the UI translates. */
@@ -2245,7 +2256,59 @@ export interface UsageStats {
   cpu_max: number;
   memory_max: number;
   hours: number;
+  /** Sample-weighted average CPU over the pods (millicores). */
+  cpu_avg: number | null;
+  /** Sample-weighted average working set over the pods (bytes). */
+  memory_avg: number | null;
 }
+
+/** How the pods behind a container's usage were tied to its workload. */
+export type EvidenceIdentity = 'owner-metrics' | 'name-match' | 'ambiguous';
+
+/** How far the usage behind a recommendation can be trusted. */
+export interface UsageEvidence {
+  /** Hours in which at least one pod of the workload ran. */
+  observed_hours: number;
+  /** CPU samples ÷ running samples (null without running samples). */
+  cpu_coverage: number | null;
+  memory_coverage: number | null;
+  cpu_samples: number;
+  memory_samples: number;
+  /** Pod names behind the numbers. */
+  pods: number;
+  /** Average running pods over the window (a CronJob's duty cycle). */
+  duty: number | null;
+  /** Throttled CFS periods ÷ periods (null with too few periods). */
+  throttle_ratio: number | null;
+  oom_killed: boolean;
+  /** Part of the usage queries failed or warned. */
+  partial: boolean;
+  identity: EvidenceIdentity;
+}
+
+export interface HpaMetric {
+  resource: 'cpu' | 'memory' | 'other';
+  /** Target average utilization in % of the request, when the target is one. */
+  target_utilization: number | null;
+}
+
+/** The HorizontalPodAutoscaler that scales a workload. */
+export interface HpaInfo {
+  name: string;
+  min_replicas: number | null;
+  max_replicas: number;
+  metrics: HpaMetric[];
+}
+
+/** Quick-focus groups of the recommendations list. */
+export type RecommendationLens =
+  | 'cpu-reduction'
+  | 'memory-reduction'
+  | 'increase'
+  | 'request-unset'
+  | 'missing-data'
+  | 'needs-review'
+  | 'limit-raised';
 
 export interface ContainerRecommendation {
   name: string;
@@ -2262,6 +2325,8 @@ export interface ContainerRecommendation {
   cpu_limit_raised: boolean;
   /** The memory limit rose with the request, keeping the current limit ÷ request ratio. */
   memory_limit_raised: boolean;
+  /** How far the usage can be trusted (null = no evidence collected). */
+  evidence: UsageEvidence | null;
 }
 
 export interface WorkloadRecommendation {
@@ -2278,9 +2343,25 @@ export interface WorkloadRecommendation {
   monthly_delta: number;
   monthly_current: number;
   changed: boolean;
+  /** Pod names behind the usage, sorted (at most 50). */
+  pods: string[];
+  pods_truncated: boolean;
+  /** The HPA that scales this workload. */
+  hpa: HpaInfo | null;
+  lenses: RecommendationLens[];
+  /** Replicas behind totals and monthly amounts (a CronJob's duty cycle). */
+  cost_replicas: number;
 }
 
-export type RightsizingNoteKind = 'prometheus-failed' | 'no-usage' | 'pods-unavailable';
+export type RightsizingNoteKind =
+  | 'prometheus-failed'
+  | 'no-usage'
+  | 'pods-unavailable'
+  | 'ownership-unavailable'
+  | 'partial-data'
+  | 'namespace-failed'
+  | 'query-budget-exceeded'
+  | 'hpa-unavailable';
 
 export interface RightsizingNote {
   kind: RightsizingNoteKind;
@@ -2300,6 +2381,10 @@ export interface RightsizingReport {
   strategy: string;
   strategies: RightsizingStrategyInfo[];
   computed_at: number;
+  /** The strategy was chosen automatically (none was requested). */
+  strategy_auto: boolean;
+  /** End of the usage window (ms). */
+  window_end: number;
 }
 
 /** New values of one container (`null` = unchanged). */

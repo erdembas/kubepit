@@ -24,7 +24,8 @@ use super::strategy::{
     ContainerInput, RecommendationStrategy, StrategyOutput, DEFAULT_STRATEGY_ID,
 };
 use super::types::{
-    Confidence, RecommendationWarning, ResourceValues, RightsizingSource, RightsizingStrategyInfo,
+    Confidence, RecommendationWarning, ResourceValues, RightsizingSettings, RightsizingSource,
+    RightsizingStrategyInfo,
 };
 
 pub const WARN_NO_USAGE: &str = "no-usage";
@@ -50,6 +51,15 @@ impl RecommendationStrategy for PercentileHeadroom {
         RightsizingStrategyInfo {
             id: DEFAULT_STRATEGY_ID.to_string(),
             name: "Percentile + headroom".to_string(),
+            defaults: RightsizingSettings::default(),
+            settings_keys: [
+                "cpu_headroom_percent",
+                "memory_headroom_percent",
+                "memory_limit_headroom_percent",
+                "days",
+            ]
+            .map(String::from)
+            .to_vec(),
         }
     }
 
@@ -128,9 +138,7 @@ mod tests {
     use super::*;
     use crate::rightsizing::math::{GIB, MIB};
     use crate::rightsizing::strategy::{recommend, WARN_MEMORY_LIMIT_RAISED};
-    use crate::rightsizing::types::{
-        Change, ContainerRecommendation, RightsizingSettings, UsageStats,
-    };
+    use crate::rightsizing::types::{Change, ContainerRecommendation, UsageStats};
 
     fn usage(cpu_p95: f64, memory_max: f64) -> UsageStats {
         UsageStats {
@@ -138,6 +146,7 @@ mod tests {
             cpu_max: cpu_p95 * 1.5,
             memory_max,
             hours: 168.0,
+            ..Default::default()
         }
     }
 
@@ -155,6 +164,8 @@ mod tests {
                 usage,
                 source,
                 settings: &settings,
+                evidence: None,
+                hpa: None,
             },
         )
     }

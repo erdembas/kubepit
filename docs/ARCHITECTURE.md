@@ -869,9 +869,18 @@ applying a recommendation only reads, so read-only clusters get it all.
   confidence). The math sits behind `rightsizing::strategy::RecommendationStrategy`
   (`fn info() -> RightsizingStrategyInfo`, `fn recommend(&ContainerInput) ->
   StrategyOutput`; input = name, current requests/limits, `UsageStats`,
-  source, settings; output = recommended values, confidence, warnings).
-  `STRATEGIES` lists them, requests pick one by id and reports list them
-  all, so a new strategy needs no UI, apply or preset changes. The default
+  source, settings, optional `UsageEvidence` and `HpaInfo`; output =
+  recommended values, confidence, warnings). `info()` also carries the
+  strategy's own `defaults` and the `settings_keys` it reads, so the UI
+  renders only those fields; a request without settings uses the
+  strategy's defaults. `STRATEGIES` lists them, requests pick one by id and
+  reports list them all, so a new strategy needs no UI, apply or preset
+  changes. Settings clamp to headroom 0–300 %, 1–30 days, `min_hours`
+  1–720 (at most the window), `min_coverage` 0.1–1 and
+  `throttle_threshold_percent` 1–50. New report, workload and container
+  fields (`evidence`, `pods`, `hpa`, `lenses`, `cost_replicas`,
+  `strategy_auto`, `window_end`, `cpu_avg` / `memory_avg`) default when
+  absent, so JSON of older builds still reads. The default
   `percentile-headroom` (`rightsizing/percentile.rs`): CPU request = p95 +
   15 %, memory request = max + 20 %, memory limit = max + 40 % — proposed
   for containers without one (`memory-limit-added`), raised when tighter,

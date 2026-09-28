@@ -171,6 +171,7 @@ pub fn usage_from_prometheus(
                 cpu_max: s.cpu_max_millicores.unwrap_or(p95).max(p95),
                 memory_max: memory,
                 hours: s.hours,
+                ..Default::default()
             });
     }
     let max_hours = f64::from(days) * 24.0;
@@ -228,6 +229,8 @@ pub fn recommend_workload(
                 usage: usage.get(&(index, name.clone())).copied(),
                 source,
                 settings,
+                evidence: None,
+                hpa: None,
             };
             strategy::recommend(strategy, &input)
         })
@@ -258,6 +261,11 @@ pub fn recommend_workload(
         monthly_delta: monthly_recommended - monthly_current,
         monthly_current,
         containers,
+        pods: Vec::new(),
+        pods_truncated: false,
+        hpa: None,
+        lenses: Vec::new(),
+        cost_replicas: f64::from(w.replicas),
     }
 }
 
@@ -333,8 +341,12 @@ impl Kubepit {
     ) -> Result<RightsizingReport> {
         let cluster = self.cluster_def(cluster_id)?;
         let client = self.client(cluster_id).await?;
-        let settings = request.settings.clone().normalized();
         let strategy = strategy::strategy(request.strategy.as_deref())?;
+        let settings = request
+            .settings
+            .clone()
+            .unwrap_or_else(|| strategy.info().defaults)
+            .normalized();
         let workloads = match &request.workload {
             Some(target) => {
                 if patch::template_path(&target.kind).is_none() {
@@ -428,6 +440,7 @@ impl Kubepit {
             .map(|(i, w)| recommend_workload(w, &usage, i, source, &settings, &pricing, strategy))
             .collect();
         sort_recommendations(&mut list);
+        let now = now_millis();
         Ok(RightsizingReport {
             strategy: strategy.info().id,
             strategies: strategy::strategies(),
@@ -438,7 +451,9 @@ impl Kubepit {
             pricing,
             workloads: list,
             notes,
-            computed_at: now_millis(),
+            computed_at: now,
+            strategy_auto: false,
+            window_end: now,
         })
     }
 

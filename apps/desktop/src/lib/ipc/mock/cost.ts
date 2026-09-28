@@ -192,10 +192,10 @@ async function report(clusterId: string, query: CostQuery): Promise<CostReport> 
 async function rightsizing(clusterId: string, request: RightsizingRequest) {
   const cluster = clusterDef(clusterId);
   const conn = connection(clusterId);
-  const settings = { ...DEFAULT_SETTINGS, ...request.settings };
   const strategy = request.strategy?.trim() || STRATEGIES[0]!.id;
-  if (!STRATEGIES.some((s) => s.id === strategy))
-    throw new Error(`unknown right-sizing strategy "${strategy}"`);
+  const info = STRATEGIES.find((s) => s.id === strategy);
+  if (!info) throw new Error(`unknown right-sizing strategy "${strategy}"`);
+  const settings = { ...DEFAULT_SETTINGS, ...(request.settings ?? info.defaults) };
   settings.days = Math.min(30, Math.max(1, Math.round(settings.days)));
   const pricing = cluster.cost?.pricing ?? defaultPricing(platformOf(conn.platform));
   const prometheus = await prometheusAvailable(clusterId);
@@ -220,6 +220,8 @@ async function rightsizing(clusterId: string, request: RightsizingRequest) {
     strategy,
     strategies: STRATEGIES,
     computed_at: Date.now(),
+    strategy_auto: false,
+    window_end: Date.now(),
   };
   return result;
 }

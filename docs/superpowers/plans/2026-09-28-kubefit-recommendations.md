@@ -252,7 +252,7 @@ workload details, Health and the dashboard.
 
 Steps:
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 #[test]
@@ -276,13 +276,13 @@ fn contract_defaults_normalize_and_old_json_reads() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p kubepit-core rightsizing::types`
 
 Expected: compile errors (`min_hours`, `UsageEvidence` … not found).
 
-- [ ] **Step 3: Implement the types, clamps and field plumbing listed under Interfaces**
+- [x] **Step 3: Implement the types, clamps and field plumbing listed under Interfaces**
 
 - Add `evidence: None, hpa: None` to every existing `ContainerInput` literal: the tests
   in `strategy.rs`, `percentile.rs`, `math.rs` and `mod.rs`.
@@ -293,19 +293,19 @@ Expected: compile errors (`min_hours`, `UsageEvidence` … not found).
     and `cost_replicas: replicas`;
   - containers get `evidence: null`.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core rightsizing && pnpm typecheck`
 
 Expected: PASS. Every existing right-sizing test is still green.
 
-- [ ] **Step 5: Verify the demo**
+- [x] **Step 5: Verify the demo**
 
 Run: `pnpm dev:ui`, open a cloud cluster → Cost → Right-sizing.
 
 Expected: the list renders as before, with no console errors.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/kubepit-core/src/rightsizing apps/desktop/src/types/index.ts apps/desktop/src/lib/kube/rightsizing/model.ts apps/desktop/src/lib/ipc/mock/cost.ts
