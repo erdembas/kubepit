@@ -1288,7 +1288,7 @@ git commit -m "feat(alerts): open the notified alert when Kubepit is focused fro
   - `UpgradeReport.table_checked_through: String`.
   - TS `DEPRECATIONS_CHECKED_THROUGH: string`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 #[test]
@@ -1312,26 +1312,26 @@ fn table_accounts_for_every_minor() {
 
 Match `Minor`'s real API: `parse` returns an `Option` or a `Result`; it provides `next()` and `Display`.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p kubepit-core upgrade::deprecations`
 Expected: FAIL (`table_checked_through` not found).
 
-- [ ] **Step 3: Update the table.**
+- [x] **Step 3: Update the table.**
   1. Check https://kubernetes.io/docs/reference/using-api/deprecation-guide/ and the "Deprecation" sections of `CHANGELOG-1.33.md` and every newer released `CHANGELOG-1.xx.md`. On 2026-09-28 the guide lists removals only for 1.16, 1.22, 1.25, 1.26, 1.27, 1.29 and 1.32.
   2. Add any newly scheduled removal of a beta or GA API as an entry.
   3. Set `no_removals` to `["1.17","1.18","1.19","1.20","1.21","1.23","1.24","1.28","1.30","1.31","1.33"]` plus every newer checked minor without removals.
   4. Set `checked_through` to the newest checked minor and bump `updated`.
   5. Extend `_comment` with how to maintain both fields.
 
-- [ ] **Step 4: Implement the readers, the report field, the mock and the UI note.** The note reads "The deprecated-API table was checked through Kubernetes {version}; later releases may remove more APIs." and is shown when the target minor is newer than `checked_through`.
+- [x] **Step 4: Implement the readers, the report field, the mock and the UI note.** The note reads "The deprecated-API table was checked through Kubernetes {version}; later releases may remove more APIs." and is shown when the target minor is newer than `checked_through`.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core upgrade && pnpm typecheck && pnpm i18n:check`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates apps/desktop docs/ARCHITECTURE.md

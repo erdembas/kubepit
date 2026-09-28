@@ -247,6 +247,10 @@ async fn scan_reports_blockers_and_warnings_without_writing() {
     assert_eq!(report.server_version, "1.24");
     assert_eq!(report.target_version, "1.25", "defaults to the next minor");
     assert_eq!(report.next_version, "1.25");
+    assert_eq!(
+        report.table_checked_through,
+        kubepit_core::upgrade::deprecations::table_checked_through()
+    );
     assert_eq!(report.metrics, UpgradeMetricsState::Skipped);
     assert_eq!(report.helm_releases_scanned, 1, "only the newest revision");
     assert_eq!(report.crds_scanned, 1);

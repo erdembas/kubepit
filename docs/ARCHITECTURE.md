@@ -160,10 +160,15 @@ newer Kubernetes minor" (`upgrade_readiness_scan`, read-only).
   apiVersion + kind, plural resource, deprecated-in, removed-in (null while
   none is scheduled), replacement (and replacement kind) and note codes,
   dated (`updated`) and covering the 1.16 → 1.32 removals plus `v1
-Endpoints` (deprecated in 1.33). The Rust side embeds it
+Endpoints` (deprecated in 1.33). Coverage is explicit: `checked_through`
+  is the newest minor whose deprecation guide and release notes were
+  checked, and `no_removals` lists the checked minors that remove nothing.
+  A unit test (`table_accounts_for_every_minor`) requires every minor from
+  1.16 through `checked_through` to be some entry's `removed_in` or in
+  `no_removals`, never both. The Rust side embeds it
   (`include_str!`); the UI imports the same file
   (`lib/kube/deprecations.ts`, which also translates the note codes). The
-  file's `_comment` says how to update it; a unit test checks it.
+  file's `_comment` says how to update it; unit tests check it.
 - **Scan** against a target (default: the minor after the server's
   `gitVersion`), concurrently: metadata-only lists (paged, 20 000 per kind)
   of every table kind the cluster serves — one resource per kind, the
@@ -182,7 +187,8 @@ Endpoints` (deprecated in 1.33). The Rust side embeds it
   `components/workbench/upgrade/`): target picker (next four minors),
   blockers / warnings / Helm tiles, sources, filters and findings grouped by
   apiVersion + kind with the replacement and notes; rows open the object or
-  the Helm release. Reports live in `store/useUpgradeStore.ts` (per cluster
+  the Helm release. The target card notes when the target is newer than the
+  report's `table_checked_through` (later releases may remove more APIs). Reports live in `store/useUpgradeStore.ts` (per cluster
   and target, this session only) and feed the dashboard's fleet card
   (`components/dashboard/UpgradeFleetCard.tsx`: every connected cluster
   against its next minor, "Check all" scans three at a time). Schema-aware

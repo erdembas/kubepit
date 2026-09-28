@@ -17,7 +17,14 @@ import { IconButton } from '@/components/ui/IconButton';
 import { Select, type SelectOption } from '@/components/ui/Select';
 import { cn } from '@/lib/cn';
 import { formatAge } from '@/lib/format';
-import { DEPRECATIONS_UPDATED, minorOf, sourceLabel, targetOptions } from '@/lib/kube/deprecations';
+import {
+  DEPRECATIONS_CHECKED_THROUGH,
+  DEPRECATIONS_UPDATED,
+  compareMinor,
+  minorOf,
+  sourceLabel,
+  targetOptions,
+} from '@/lib/kube/deprecations';
 import {
   UPGRADE_SOURCES,
   countFindings,
@@ -79,6 +86,9 @@ export function UpgradeReadinessPage({
   const filtered = severity !== 'all' || source !== 'all' || !!query.trim();
 
   const current = report?.server_version ?? minorOf(version);
+  const shownTarget = report?.target_version ?? target ?? targetOptions(version, 1)[0] ?? null;
+  const checkedThrough = report?.table_checked_through ?? DEPRECATIONS_CHECKED_THROUGH;
+  const pastCheckedThrough = !!shownTarget && compareMinor(shownTarget, checkedThrough) > 0;
   const targetValue = target ?? DEFAULT_TARGET;
   const options = useMemo<SelectOption[]>(() => {
     const next = targetOptions(version);
@@ -179,7 +189,7 @@ export function UpgradeReadinessPage({
                 <p className="text-fg text-[22px] leading-none font-semibold tracking-tight tabular-nums">
                   {current ?? '—'}
                   <span className="text-fg-dim mx-2 font-normal">→</span>
-                  {report?.target_version ?? target ?? targetOptions(version, 1)[0] ?? '—'}
+                  {shownTarget ?? '—'}
                 </p>
                 <p className="text-fg-dim mt-2 text-[11px]">
                   {report
@@ -197,6 +207,14 @@ export function UpgradeReadinessPage({
                     date: report?.table_updated ?? DEPRECATIONS_UPDATED,
                   })}
                 </p>
+                {pastCheckedThrough && (
+                  <p className="text-status-starting mt-1 text-[11px]">
+                    {i18n.t(
+                      'The deprecated-API table was checked through Kubernetes {version}; later releases may remove more APIs.',
+                      { version: checkedThrough },
+                    )}
+                  </p>
+                )}
                 {report?.metrics === 'unavailable' && (
                   <p
                     className="text-fg-dim mt-1 truncate text-[11px]"

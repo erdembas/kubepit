@@ -2328,6 +2328,7 @@
   "The CRD marks every served version deprecated; a newer release of its operator usually adds a successor.": "CRD sunulan tüm sürümleri kullanımdan kalkmış olarak işaretliyor; operatörünün daha yeni bir sürümü genellikle yerine geçecek bir sürüm ekler.",
   "The CRD marks this version deprecated. Move clients and stored objects to {replacement}.": "CRD bu sürümü kullanımdan kalkmış olarak işaretliyor. İstemcileri ve depolanan nesneleri {replacement} sürümüne taşıyın.",
   "The CRD still serves versions it marks deprecated.": "CRD, kullanımdan kalkmış olarak işaretlediği sürümleri hâlâ sunuyor.",
+  "The deprecated-API table was checked through Kubernetes {version}; later releases may remove more APIs.": "Kullanımdan kalkan API tablosu Kubernetes {version} sürümüne kadar kontrol edildi; sonraki sürümler başka API'leri de kaldırabilir.",
   "The destination does not declare the asked port, so nothing listens there.": "Hedef istenen portu bildirmiyor, yani orada dinleyen bir şey yok.",
   "The destination has no running pods to evaluate.": "Hedefte değerlendirilecek çalışan pod yok.",
   "The destination is outside the cluster: no ingress policy applies.": "Hedef küme dışında: hiçbir gelen trafik politikası uygulanmaz.",

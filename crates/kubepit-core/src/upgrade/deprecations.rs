@@ -32,6 +32,8 @@ pub struct DeprecatedApi {
 #[derive(Debug, Deserialize)]
 struct TableFile {
     updated: String,
+    checked_through: String,
+    no_removals: Vec<String>,
     entries: Vec<DeprecatedApi>,
 }
 
@@ -48,6 +50,17 @@ pub fn table() -> &'static [DeprecatedApi] {
 /// When the table was last reviewed (`YYYY-MM-DD`).
 pub fn table_updated() -> &'static str {
     &TABLE.updated
+}
+
+/// The newest minor whose deprecation guide and release notes were checked
+/// (`1.37`); later minors may remove APIs the table does not list yet.
+pub fn table_checked_through() -> &'static str {
+    &TABLE.checked_through
+}
+
+/// Minors checked and found to stop serving no beta or GA API.
+pub fn no_removals() -> &'static [String] {
+    &TABLE.no_removals
 }
 
 /// The entry for exactly this `apiVersion` + `kind`.
@@ -186,6 +199,39 @@ mod tests {
             Some("1.32")
         );
         assert!(lookup("apps/v1", "Deployment").is_none());
+    }
+
+    #[test]
+    fn table_accounts_for_every_minor() {
+        let through = Minor::parse(table_checked_through()).expect("checked_through parses");
+        let removed: HashSet<String> = table()
+            .iter()
+            .filter_map(|e| e.removed_in.clone())
+            .collect();
+        let quiet: HashSet<&str> = no_removals().iter().map(String::as_str).collect();
+        let newest = table()
+            .iter()
+            .flat_map(|e| [Some(&e.deprecated_in), e.removed_in.as_ref()])
+            .flatten()
+            .filter_map(|v| Minor::parse(v))
+            .max()
+            .unwrap();
+        assert!(
+            through >= newest,
+            "checked_through {through} is older than {newest}"
+        );
+        let mut minor = Minor::parse("1.16").unwrap();
+        while minor <= through {
+            let v = minor.to_string();
+            assert!(
+                removed.contains(&v) ^ quiet.contains(v.as_str()),
+                "{v}: removed_in xor no_removals"
+            );
+            minor = minor.next();
+        }
+        assert!(quiet
+            .iter()
+            .all(|v| Minor::parse(v).is_some_and(|m| m <= through)));
     }
 
     #[test]

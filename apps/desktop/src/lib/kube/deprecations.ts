@@ -24,6 +24,8 @@ export interface DeprecatedApi {
 
 interface TableFile {
   updated: string;
+  checked_through: string;
+  no_removals: string[];
   entries: DeprecatedApi[];
 }
 
@@ -32,6 +34,8 @@ const TABLE = tableFile as unknown as TableFile;
 export const DEPRECATED_APIS: readonly DeprecatedApi[] = TABLE.entries;
 /** When the table was last reviewed (`YYYY-MM-DD`). */
 export const DEPRECATIONS_UPDATED: string = TABLE.updated;
+/** The newest minor the table was checked through (`1.37`). */
+export const DEPRECATIONS_CHECKED_THROUGH: string = TABLE.checked_through;
 
 const BY_KEY = new Map(DEPRECATED_APIS.map((e) => [`${e.api_version}|${e.kind}`, e]));
 

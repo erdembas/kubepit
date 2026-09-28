@@ -2328,6 +2328,7 @@
   "The CRD marks every served version deprecated; a newer release of its operator usually adds a successor.": "The CRD marks every served version deprecated; a newer release of its operator usually adds a successor.",
   "The CRD marks this version deprecated. Move clients and stored objects to {replacement}.": "The CRD marks this version deprecated. Move clients and stored objects to {replacement}.",
   "The CRD still serves versions it marks deprecated.": "The CRD still serves versions it marks deprecated.",
+  "The deprecated-API table was checked through Kubernetes {version}; later releases may remove more APIs.": "The deprecated-API table was checked through Kubernetes {version}; later releases may remove more APIs.",
   "The destination does not declare the asked port, so nothing listens there.": "The destination does not declare the asked port, so nothing listens there.",
   "The destination has no running pods to evaluate.": "The destination has no running pods to evaluate.",
   "The destination is outside the cluster: no ingress policy applies.": "The destination is outside the cluster: no ingress policy applies.",
