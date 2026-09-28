@@ -177,6 +177,9 @@ enum ProxyAnswer {
     /// The first candidate (`prometheus-operated`) is refused, the second
     /// (`kps-kube-prometheus-prometheus`) has no endpoints.
     ForbiddenThen503,
+    /// An auth proxy in front of every candidate answers 403 itself (the
+    /// API server let the request through).
+    UpstreamForbidden,
 }
 
 /// The kube-prometheus-stack detection router of [`stack_router`], with
@@ -193,8 +196,19 @@ fn router_with(answer: ProxyAnswer) -> Router {
                 proxy_forbidden(&req.path)
             }
             ProxyAnswer::ForbiddenThen503 => no_endpoints("kps-kube-prometheus-prometheus"),
+            ProxyAnswer::UpstreamForbidden => Reply::Json(403, json!({"error": "forbidden"})),
         }
     })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn upstream_403_is_unreachable_not_forbidden() {
+    let server = start(router_with(ProxyAnswer::UpstreamForbidden)).await;
+    let (_dir, app, _rec, id) = setup(&server.url, false);
+    app.cluster_connect(&id).await.unwrap();
+    let st = app.prometheus_status(&id, false).await.unwrap();
+    assert_eq!(st.state, PrometheusState::Unreachable, "{st:?}");
+    assert!(st.error.as_deref().unwrap().contains("forbidden"), "{st:?}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

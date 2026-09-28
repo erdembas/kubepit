@@ -16,6 +16,12 @@ describe('formatMoney', () => {
     expect(formatMoney(0, 'USD')).toBe('$0.00');
     expect(formatMoney(Number.NaN, 'USD')).toBe('$0.00');
   });
+  it('never shows a negative zero', () => {
+    expect(formatMoney(-0.004, 'USD')).toBe('$0.00');
+    expect(formatMoney(-0, 'USD')).toBe('$0.00');
+    expect(formatMoney(-0.004, 'USD', { signed: true })).toBe('$0.00');
+    expect(formatMoney(-0.004, 'EURO')).toBe('0.00 EURO');
+  });
   it('compacts only from one million', () => {
     expect(formatMoney(1_234_567, 'USD', { compact: true })).toBe('$1.2M');
     expect(formatMoney(1_234_567, 'USD')).toBe('$1,234,567');

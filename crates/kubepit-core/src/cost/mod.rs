@@ -102,7 +102,10 @@ impl CostState {
     }
 }
 
-/// Whether a status entry may be reused.
+/// Whether a status entry may be reused. A found cost API and a chosen
+/// source are kept for the connection; "no cost API" and a refused proxy
+/// (`forbidden`, configured or detected) are rechecked after
+/// [`RECHECK_AFTER`], like Prometheus and Loki.
 fn status_fresh(
     entry: &StatusEntry,
     connected_at: Option<i64>,
@@ -110,7 +113,8 @@ fn status_fresh(
     platform: &Option<String>,
     now: Instant,
 ) -> bool {
-    let positive = entry.status.source != CostSourceKind::Estimate || entry.status.configured;
+    let positive = entry.status.source != CostSourceKind::Estimate
+        || (entry.status.configured && !entry.status.forbidden);
     entry.connected_at == connected_at
         && &entry.config == config
         && &entry.platform == platform
@@ -680,6 +684,31 @@ mod tests {
             &eks,
             now + RECHECK_AFTER * 4
         ));
+    }
+
+    #[test]
+    fn forbidden_cost_sources_are_rechecked_like_other_negative_answers() {
+        let now = Instant::now();
+        let config = CostConfig::default();
+        let eks = Some("EKS".to_string());
+        let later = now + RECHECK_AFTER + Duration::from_secs(1);
+        for configured in [true, false] {
+            let entry = StatusEntry {
+                connected_at: Some(1),
+                config: CostConfig::default(),
+                platform: Some("EKS".into()),
+                status: CostStatus {
+                    forbidden: true,
+                    ..status(CostSourceKind::Estimate, configured)
+                },
+                at: now,
+            };
+            assert!(status_fresh(&entry, Some(1), &config, &eks, now));
+            assert!(
+                !status_fresh(&entry, Some(1), &config, &eks, later),
+                "configured: {configured}"
+            );
+        }
     }
 
     #[test]

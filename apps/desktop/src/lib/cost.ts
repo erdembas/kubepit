@@ -20,7 +20,8 @@ export function formatMoney(
   currency: string,
   { compact = false, signed = false }: { compact?: boolean; signed?: boolean } = {},
 ): string {
-  const amount = Number.isFinite(value) ? Math.round(value * 100) / 100 : 0;
+  // `|| 0` turns a rounded -0 (e.g. -0.004) into 0, so it never shows "-$0.00".
+  const amount = Number.isFinite(value) ? Math.round(value * 100) / 100 || 0 : 0;
   const decimals = Math.abs(amount) < 1000 ? 2 : 0;
   const short = compact && Math.abs(amount) >= 1_000_000;
   const digits: Intl.NumberFormatOptions = short

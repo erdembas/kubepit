@@ -399,11 +399,14 @@ An optional, richer metrics source next to the metrics-server history
   default retry keeps a 503 ("no endpoints available") from backing off
   for minutes.
 - **States**: `available` when any probed candidate answers; `forbidden`
-  when every probed candidate got a 403 on the proxy path
-  (`service_proxy::is_proxy_forbidden`: no `get` on `services/proxy`),
+  when the API server denied every probed candidate
+  (`service_proxy::is_proxy_forbidden`: its own 403 `Status` with reason
+  `Forbidden` naming `services/proxy`, i.e. no `get` on `services/proxy`),
   with the best candidate as `service` and the API server's message as
-  `error`; otherwise `unreachable` (one 403 next to a 503 or a timeout
-  stays `unreachable`). `not-found` and `off` as before.
+  `error`; otherwise `unreachable` (one denial next to a 503 or a timeout
+  stays `unreachable`, and so does a 403 of the service itself or of an
+  auth proxy in front of it, with its message). `not-found` and `off` as
+  before.
 - **Cache**: the status (`prometheus_status`) is kept per connection
   (`connected_at`) and setting; negative answers (`forbidden` included) are
   rechecked after five minutes, a vanished service (proxy 404/502/503) is
@@ -481,8 +484,10 @@ read-only, over the same transport as Prometheus.
   connection (`Kubepit::proxy_clients`), service listing with a namespace
   fallback, prefix/name validation, the generic per-connection
   detection cache (`DetectCache`) used by both Prometheus and Loki, and
-  the `forbidden` rule shared with cost (`is_proxy_forbidden`: a 403 with
-  reason `ServiceProxy`; `all_forbidden`: every probe refused).
+  the `forbidden` rule shared with cost (`proxy_error` tags the API
+  server's 403 denial of `services/proxy` with reason
+  `ServiceProxyForbidden`, which `is_proxy_forbidden` matches; any other
+  403 keeps `ServiceProxy`; `all_forbidden`: every probe denied).
 - **Detection** (`loki/detect.rs`) ranks the grafana/loki gateway
   (`loki-gateway`), the microservices query frontend, the simple scalable
   read path (`loki-read`), a single binary (`loki`, loki-stack) and a bare
@@ -716,10 +721,11 @@ applying a recommendation only reads, so read-only clusters get it all.
   Detection is cached per connection and setting; "no cost API" is
   rechecked after five minutes, a proxy 404/502/503 re-detects, disconnect
   drops everything. A cost API that fails a query falls back to an
-  estimate with an `api-failed` note. When every probed cost API (or the
-  configured one) got a 403 on the proxy path, `CostStatus.forbidden` is
-  set, costs are estimated and the source card shows
-  `ProxyForbiddenNotice` instead of "did not answer".
+  estimate with an `api-failed` note. When the API server denied the
+  proxy for every probed cost API (or the configured one),
+  `CostStatus.forbidden` is set, costs are estimated, the answer is
+  rechecked after five minutes like "no cost API", and the source card
+  shows `ProxyForbiddenNotice` instead of "did not answer".
 - **Allocations** (`cost/allocation.rs`): an accumulated breakdown
   (`aggregate=namespace`, `namespace,controllerKind,controller` or
   `label:<prometheus-style key>`, idle included) and daily totals
