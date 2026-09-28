@@ -260,6 +260,20 @@ async fn read_only_clusters_never_reach_the_server() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn request_headers_are_recorded() {
+    let server = start(cluster_router()).await;
+    let (_dir, app, _rec, id) = setup(&server.url, false);
+    app.cluster_connect(&id).await.unwrap();
+    let log = server.log.lock();
+    let version = log.iter().find(|r| r.path_only() == "/version").unwrap();
+    assert_eq!(version.header("Authorization"), Some("Bearer test-token"));
+    assert!(version
+        .headers
+        .iter()
+        .all(|(name, _)| *name == name.to_lowercase()));
+}
+
 #[tokio::test]
 async fn unreachable_server_reports_error_status() {
     // Grab a free port and close it again so nothing listens there.

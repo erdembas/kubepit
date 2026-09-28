@@ -55,6 +55,7 @@ export const AUDIT_ACTIONS: readonly AuditAction[] = [
   'file-upload',
   'node-shell',
   'rightsize',
+  'custom-action',
 ];
 
 export function actionLabel(action: AuditAction): string {
@@ -103,6 +104,8 @@ export function actionLabel(action: AuditAction): string {
       return i18n.t('Node shell');
     case 'rightsize':
       return i18n.t('Right-size');
+    case 'custom-action':
+      return i18n.t('Custom action');
   }
 }
 
@@ -194,9 +197,28 @@ export function requestSummary(entry: AuditEntry): string | null {
       const changes = Array.isArray(r.changes) ? (r.changes as Record<string, unknown>[]) : [];
       return changes.map((c) => String(c.container)).join(', ') || null;
     }
+    // The action's name is user content: shown verbatim.
+    case 'custom-action':
+      return typeof r.action === 'string' && r.action ? r.action : null;
     default:
       return null;
   }
+}
+
+/** Result keyword of a terminal custom action launch (`history/audited.rs`). */
+export const TERMINAL_STARTED = 'terminal-started';
+
+/**
+ * What an entry's result says. Custom action keywords (`terminal-started`,
+ * `exit {code}`) are translated; every other result (Job, container, helper
+ * pod, Helm revision) is Kubernetes data and stays verbatim.
+ */
+export function resultText(entry: AuditEntry): string | null {
+  const result = entry.result;
+  if (!result || entry.action !== 'custom-action') return result;
+  if (result === TERMINAL_STARTED) return i18n.t('Started in a terminal');
+  const exit = /^exit (-?\d+)$/.exec(result);
+  return exit ? i18n.t('Exit code {code}', { code: Number(exit[1]) }) : result;
 }
 
 export type AuditRange = '24h' | '7d' | '30d' | 'all';

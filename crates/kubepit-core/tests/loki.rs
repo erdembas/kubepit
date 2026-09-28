@@ -419,6 +419,60 @@ async fn dead_gateway_falls_back_and_vanished_services_are_redetected() {
     assert!(err.contains("not reachable"), "{err}");
 }
 
+/// Configures the chart's gateway explicitly, with `tenant`.
+fn configure_gateway(app: &kubepit_core::Kubepit, id: &str, tenant: Option<&str>) {
+    let mut def = app.cluster_def(id).unwrap();
+    def.loki = LokiConfig::Service {
+        namespace: "loki".into(),
+        service: "loki-gateway".into(),
+        port: 80,
+        scheme: PromScheme::Http,
+        path_prefix: String::new(),
+        tenant: tenant.unwrap_or_default().into(),
+    };
+    app.cluster_update(def).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn configured_tenant_reaches_every_loki_request() {
+    let server = start(chart_router(Arc::default(), Arc::default())).await;
+    let (_dir, app, _rec, id) = setup(&server.url, false);
+    configure_gateway(&app, &id, Some(" team-a "));
+    app.cluster_connect(&id).await.unwrap();
+    let (start_ns, end_ns) = ((END_NS - HOUR_NS).to_string(), END_NS.to_string());
+    app.loki_labels(&id, &start_ns, &end_ns, None)
+        .await
+        .unwrap();
+    app.loki_query_range(&id, &last_hour(r#"{namespace="shop"}"#))
+        .await
+        .unwrap();
+    let log = server.log.lock();
+    let proxied: Vec<_> = log.iter().filter(|r| r.path.contains("/proxy/")).collect();
+    assert!(!proxied.is_empty());
+    assert!(
+        proxied
+            .iter()
+            .all(|r| r.header("x-scope-orgid") == Some("team-a")),
+        "{proxied:#?}"
+    );
+    assert!(log
+        .iter()
+        .filter(|r| !r.path.contains("/proxy/"))
+        .all(|r| r.header("x-scope-orgid").is_none()));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn detected_loki_sends_no_tenant() {
+    let server = start(chart_router(Arc::default(), Arc::default())).await;
+    let (_dir, app, _rec, id) = setup(&server.url, false);
+    app.cluster_connect(&id).await.unwrap();
+    let st = app.loki_status(&id, false).await.unwrap();
+    assert_eq!(st.state, LokiState::Available, "{st:?}");
+    let log = server.log.lock();
+    assert!(log.iter().any(|r| r.path.contains("/proxy/")));
+    assert!(log.iter().all(|r| r.header("x-scope-orgid").is_none()));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn configured_service_off_and_not_found() {
     const CUSTOM: &str = "/api/v1/namespaces/obs/services/https:logs:8443/proxy/loki-api";

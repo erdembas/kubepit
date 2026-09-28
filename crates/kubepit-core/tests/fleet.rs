@@ -383,6 +383,8 @@ async fn metrics_history_is_sampled_while_connected() {
     let beta = start(beta_router()).await;
     let (_dir, app, _recorder, alpha_id) = setup(&alpha.url, false);
     let beta_id = add_cluster(&app, "Beta", &beta.url);
+    // Sampling is opt-in per process (the desktop shell turns it on).
+    app.set_metrics_sampling(true);
 
     // Nothing is sampled before connecting.
     let before = app

@@ -741,7 +741,8 @@ export type AuditAction =
   | 'pod-debug'
   | 'file-upload'
   | 'node-shell'
-  | 'rightsize';
+  | 'rightsize'
+  | 'custom-action';
 
 export type AuditOutcome = 'ok' | 'error';
 

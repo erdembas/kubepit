@@ -27,6 +27,8 @@ pub(crate) fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::
     core.set_change_journal_recording(true);
     // ... and keeps the audit log and opted-in persistent history (see `history.rs`).
     core.set_history_recording(true);
+    // ... and samples metrics-server usage for charts (see `metrics_history.rs`).
+    core.set_metrics_sampling(true);
     tracing::info!(data_dir = %core.paths().root().display(), "kubepit core ready");
     core.start_kubeconfig_watch();
 

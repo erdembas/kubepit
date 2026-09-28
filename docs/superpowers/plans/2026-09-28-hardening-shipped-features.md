@@ -1420,7 +1420,7 @@ git commit -m "feat(helm): show fields the new chart drops from live objects in 
   - `Request::header(&self, name: &str) -> Option<&str>` (case-insensitive).
   - `Request::path_only(&self) -> &str` (the path without the query).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 // tests/fake_apiserver.rs
@@ -1462,19 +1462,19 @@ async fn detected_loki_sends_no_tenant() {
 
 `configure_gateway`, `labels_query` and `query` reuse the builders already in `tests/loki.rs` (see `configured_service_off_and_not_found`); take the call signatures from that file.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core --test fake_apiserver request_headers && cargo test -p kubepit-core --test loki tenant`
 Expected: FAIL (`header` not found).
 
-- [ ] **Step 3: Implement.** In `handle`, parse every `name: value` line of the request head into `headers`, with trimmed values and lowercase names.
+- [x] **Step 3: Implement.** In `handle`, parse every `name: value` line of the request head into `headers`, with trimmed values and lowercase names.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/tests
@@ -1499,7 +1499,7 @@ git commit -m "test(harness): record request headers; test the Loki tenant heade
   - Off: every sampler stops and histories are dropped.
   - Default: off.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 // tests/background.rs
@@ -1549,22 +1549,22 @@ async fn each_opt_in_starts_its_own_traffic() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core --test background`
 Expected: FAIL. `set_metrics_sampling` is not found; without it the first test also sees the metrics lists.
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
   - `MetricsHistory` gains `active: AtomicBool`. `start_metrics_sampler` returns early while it is false, and `set_metrics_sampling(false)` calls `stop_all`.
   - `setup.rs` calls `core.set_metrics_sampling(true)` next to the other switches.
   - `tests/fleet.rs::metrics_history_is_sampled_while_connected` calls `app.set_metrics_sampling(true)` before connecting.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test --workspace`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates apps/desktop/src-tauri docs/ARCHITECTURE.md
@@ -1594,7 +1594,7 @@ git commit -m "fix(core): metrics sampling is opt-in per process; guard backgrou
   - Audit result: `exit {code}`, or the error `timed out after {s}s`; a non-zero exit is recorded with `Audit::fail`.
   - Targets: `AuditTarget::document(api_version, kind, namespace, name)` per selected name (≤ 20); cluster runs use the cluster as the target.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 // tests/history.rs
@@ -1707,24 +1707,24 @@ fn mutating_commands_call_audited_entry_points() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core --test history mutating_custom_actions && cargo test -p kubepit-desktop audit_coverage`
 Expected: FAIL. `AuditAction::CustomAction` is missing; `custom_action_run` and `prepare_custom_action_terminal` are not defined in `audited.rs`.
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
   - Wrappers per the Interfaces: audit only `mutating` actions in `Background` or `Terminal` mode.
   - A read-only refusal happens inside `runnable_action`, before `self.audit(...)` returns `Some`, so nothing is recorded.
   - Fill `NOT_MUTATING` from the current `generate_handler!` list.
   - The TS union, `AUDIT_ACTIONS`, `actionLabel` ("Custom action") and `actionTone` (tone of `patch`) gain `custom-action`.
   - The mock history wraps `custom_action_run` when the saved action is mutating.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test --workspace && pnpm typecheck && pnpm i18n:check`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates apps/desktop docs/ARCHITECTURE.md

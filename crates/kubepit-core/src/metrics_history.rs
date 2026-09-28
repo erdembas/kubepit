@@ -1,7 +1,9 @@
 //! Metrics history: a short in-memory time series of metrics-server usage,
 //! so charts work without Prometheus.
 //!
-//! While a cluster is connected, one sampler task (started after a
+//! Sampling is opt-in per process ([`Kubepit::set_metrics_sampling`]; the
+//! desktop shell turns it on, tests and headless tools do not). While it is
+//! on and a cluster is connected, one sampler task (started after a
 //! successful connect, stopped on disconnect, removal and shutdown) polls
 //! `metrics.k8s.io` every [`SAMPLE_INTERVAL`] and appends to fixed-size ring
 //! buffers covering the last [`HISTORY_WINDOW`]:
@@ -22,6 +24,7 @@
 //! (5 000 pods) ≈ 11 MiB.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -274,6 +277,8 @@ type Histories = Arc<Mutex<HashMap<String, ClusterHistory>>>;
 pub struct MetricsHistory {
     clusters: Histories,
     samplers: TaskRegistry,
+    /// This process samples (off by default; see [`Kubepit::set_metrics_sampling`]).
+    active: AtomicBool,
 }
 
 fn sampler_id(cluster_id: &str) -> String {
@@ -365,8 +370,28 @@ async fn bounded<T>(request: impl std::future::Future<Output = Result<T>>) -> Re
 }
 
 impl Kubepit {
-    /// Called once a connect succeeded.
+    /// Turn metrics sampling on or off for this process, like
+    /// [`Kubepit::set_alert_monitoring`]: the desktop shell enables it; tests
+    /// and headless tools do not, so request logs stay deterministic. On:
+    /// clusters that connect from now on are sampled. Off: every sampler
+    /// stops and the histories are dropped.
+    pub fn set_metrics_sampling(&self, on: bool) {
+        self.metrics_history.active.store(on, Ordering::SeqCst);
+        if !on {
+            self.metrics_history.stop_all();
+        }
+    }
+
+    /// Whether this process samples metrics-server usage.
+    pub fn metrics_sampling(&self) -> bool {
+        self.metrics_history.active.load(Ordering::SeqCst)
+    }
+
+    /// Called once a connect succeeded; a no-op unless sampling is on.
     pub(crate) fn start_metrics_sampler(&self, cluster_id: &str, client: Client) {
+        if !self.metrics_sampling() {
+            return;
+        }
         self.metrics_history
             .start(cluster_id, client, self.metrics_gate.clone());
     }

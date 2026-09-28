@@ -20,8 +20,26 @@ use tokio::net::{TcpListener, TcpStream};
 #[derive(Debug, Clone)]
 pub struct Request {
     pub method: String,
+    /// Path and query, as sent.
     pub path: String,
     pub body: String,
+    /// Every header of the request head: lowercase names, trimmed values.
+    pub headers: Vec<(String, String)>,
+}
+
+impl Request {
+    /// The value of header `name` (case-insensitive).
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// The path without the query.
+    pub fn path_only(&self) -> &str {
+        self.path.split_once('?').map_or(&self.path, |(p, _)| p)
+    }
 }
 
 pub enum Reply {
@@ -80,10 +98,14 @@ async fn handle(mut socket: TcpStream, router: Router, log: Log) -> std::io::Res
     let mut request_line = lines.next().unwrap_or_default().split_whitespace();
     let method = request_line.next().unwrap_or_default().to_string();
     let path = request_line.next().unwrap_or_default().to_string();
-    let content_length = lines
+    let headers: Vec<(String, String)> = lines
         .filter_map(|l| l.split_once(':'))
-        .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
-        .and_then(|(_, v)| v.trim().parse::<usize>().ok())
+        .map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string()))
+        .collect();
+    let content_length = headers
+        .iter()
+        .find(|(k, _)| k == "content-length")
+        .and_then(|(_, v)| v.parse::<usize>().ok())
         .unwrap_or(0);
     let mut body = buf[head_end..].to_vec();
     while body.len() < content_length {
@@ -97,6 +119,7 @@ async fn handle(mut socket: TcpStream, router: Router, log: Log) -> std::io::Res
         method,
         path,
         body: String::from_utf8_lossy(&body).to_string(),
+        headers,
     };
     let reply = router(&request, &log);
     log.lock().push(request);

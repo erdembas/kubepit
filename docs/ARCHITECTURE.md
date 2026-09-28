@@ -332,7 +332,14 @@ typed confirmations, `read_only` in the backend, RBAC all unchanged).
 
 - `metrics_history.rs` samples metrics-server every 15 s while a cluster is
   connected and keeps 60 minutes of f32 ring buffers for the cluster, each
-  node and up to 5 000 pods; it stops with the connection.
+  node and up to 5 000 pods; it stops with the connection. Sampling is
+  opt-in per process (`Kubepit::set_metrics_sampling`): the desktop shell
+  enables it next to the other switches; tests and headless tools do not.
+  Turning it off stops every sampler and drops the histories.
+- `tests/background.rs` guards the rule for every switch: a connect with
+  the defaults sends only `GET /version` and `GET /apis`, and each switch
+  (metrics sampling, alerts, change journal, persistent history) shows its
+  own traffic once turned on.
 - `fleet_search.rs` searches every connected cluster concurrently with
   metadata-only lists (substring, glob or `/regex/` names, server-side label
   selectors) and streams results per cluster.
@@ -534,7 +541,9 @@ read-only, over the same transport as Prometheus.
   and `loki_label_values` (optionally narrowed by a selector) for the
   query builder. A vanished service (proxy 404/502/503) marks the
   detection stale. Loki's own errors (bad LogQL, missing tenant, limits)
-  come back verbatim.
+  come back verbatim. A configured tenant rides on every proxied Loki
+  request and on nothing else; `tests/loki.rs` checks the header end to end
+  (the fake API server in `tests/support` records request headers).
 - **UI** (`dock/loki/`, dock tab kind `loki`): a query builder
   (namespace, workload, pod and container pickers fed by Loki's label
   values — label names follow what the Loki uses, e.g.
@@ -662,7 +671,11 @@ that never leaves the machine.
   CronJob trigger, cordon / uncordon, drain (one entry, its own cordon is
   not separate), Helm install / upgrade / rollback / uninstall, manifests
   apply (one entry, one target per document, failed when any document
-  failed), debug containers, file upload and node-shell helper pods. An
+  failed), debug containers, file upload, node-shell helper pods,
+  right-sizing and mutating custom actions (below). A src-tauri guard
+  (`ipc/audit_coverage.rs`, test-only) parses `generate_handler!`: every
+  registered command must be classified as mutating or not, and every
+  mutating one must call a method defined in `history/audited.rs`. An
   entry holds cluster id / name / context, the identity of the cluster's
   last `access_whoami` (else unknown), action, targets, a redacted
   request, the dry-run flag, outcome and error, duration, a result (Job,
@@ -672,6 +685,22 @@ that never leaves the machine.
   **not** recorded (nothing reached the cluster; the wrapper does not even
   send its GET); dry runs, which read-only clusters allow, are recorded
   with `dry_run: true`. Validation and API errors are recorded as errors.
+- **Custom actions** (`custom-action`, never revertible): background runs
+  and terminal launches of `mutating` actions go through the audited
+  `custom_action_run` / `prepare_custom_action_terminal`, which resolve the
+  saved action once and pass it to the `*_unaudited` body, so the entry
+  describes what ran. The request keeps the action's name, id, mode,
+  number of targets and the command re-rendered with every
+  `annotations.*` value (and, for Secret-like kinds, every `labels.*`
+  value) replaced by a marker; stdout and stderr are never stored.
+  Background runs record `exit {code}` (a non-zero exit fails the entry; a
+  timeout fails it with `timed out after {s}s`, a signal with `terminated
+  by a signal`), terminal launches the keyword `terminal-started`. The
+  Activity view translates both results (`resultText` in
+  `lib/history/audit.ts`); other results stay verbatim. Targets are the
+  selected objects (≤ 20) or the cluster. Non-mutating and open-url runs
+  are not audited; refused runs (read-only, disabled, out of scope) are
+  not recorded.
 - **Secrets**: objects go through the change journal's `normalize`
   (Secret `data` / `stringData` become keyed-hash markers, bookkeeping and
   `status` dropped); patch bodies to secret-like kinds (`*Secret`), custom
@@ -1279,7 +1308,10 @@ Custom actions).
   with a timeout (the whole group is killed) and 256 KiB of stdout / stderr.
   Open-url mode returns the URL for the UI to open. `custom_action_resolve`
   previews a possibly unsaved definition (sample cluster values without a
-  cluster) and reports missing and misspelled placeholders.
+  cluster) and reports missing and misspelled placeholders. Runs of
+  `mutating` actions are recorded in the audit log without their output
+  (see Persistent history); the run entry points live in
+  `history/audited.rs` around `*_unaudited` implementations here.
 - **Import** (`import.rs`, `custom_actions_import`): a file the user picked
   (path) or its text (browser previews). Kubepit's JSON export or a k9s
   `plugins.yaml` / single-plugin file: resource-name scopes become kinds,
@@ -1303,7 +1335,8 @@ Custom actions).
   backend (`lib/customActions.ts`).
 - The demo backend (`lib/ipc/mock/customActions.ts`) keeps the list in
   memory, resolves with POSIX quoting, fakes plausible output
-  (`kubectl top`, `-o wide`, `neat`, `annotate`) and plays terminal runs.
+  (`kubectl top`, `-o wide`, `neat`, `annotate`) and plays terminal runs;
+  `lib/ipc/mock/history.ts` audits mutating runs like the backend.
 
 ## Keyboard mode
 
