@@ -573,7 +573,7 @@ Expected: FAIL. `./dataKey` is missing; `hideKinds` is not exported.
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck`
 Expected: PASS.
 
-- [x] **Step 6: Verify the timing.** _(2026-09-28, browser demo on staging-gke: leaving the Resource Map for Deployments now costs the same as leaving Pods, 806–816 ms vs 807–813 ms over 4 runs each, i.e. the map adds nothing; that time is the Deployments view itself. Before this task leaving the map added over a second.)_
+- [ ] **Step 6: Verify the timing.** _(Partly verified on 2026-09-28, not with the procedure below: no Chrome Performance recording was available. Headless: the exit no longer recomputes the 12–15 ms of graph work on the prod-eu-west-1 fixture. Browser demo on staging-gke: leaving the Resource Map for Deployments costs the same as leaving Pods (806–816 ms vs 807–813 ms over 4 runs each); that time is the Deployments view itself. The < 200 ms figure for Resource Map → Overview on prod-eu-west-1 still needs a Chrome recording.)_
   1. In `pnpm dev:ui` on prod-eu-west-1, open the Resource Map with all namespaces.
   2. Start a Chrome Performance recording and switch to the Overview view.
   3. Expected: the task after the click takes < 200 ms (it took > 1 s before). Put both numbers in the commit body.
