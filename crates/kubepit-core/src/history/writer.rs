@@ -5,8 +5,15 @@
 //!   the write is dropped and counted (`dropped`), never blocking the caller
 //!   — recording must not slow down or fail the user's action.
 //! - Operations are applied strictly in queue order. Consecutive data writes
-//!   share one transaction; control operations (clear, prune, flush) act as
-//!   barriers after everything queued before them.
+//!   share one transaction; control operations (clear, prune, flush and the
+//!   recommendation scan writes) act as barriers after everything queued
+//!   before them.
+//! - Scan writes are never dropped: [`Writer::scan_begin`] and
+//!   [`Writer::scan_finish`] wait for room (blocking pool only), and
+//!   [`Writer::send_detached`] hands a full queue's operation to a
+//!   short-lived thread instead of dropping it (drop guards).
+//! - [`Writer::start`] marks runs a previous process left `running` as
+//!   interrupted (`app-restarted`) before the thread takes any operation.
 //! - Dropping the last handle closes the channel; the thread drains what is
 //!   queued and exits.
 
@@ -20,7 +27,9 @@ use anyhow::{anyhow, Result};
 use rusqlite::Connection;
 
 use super::db::{self, AuditRecord, ChangeRow, EventRow, PrunePolicy, PruneReport};
+use super::recommendations::{self as rec, ScanBegin, ScanOutcome};
 use super::types::HistoryKind;
+use crate::objects::now_millis;
 
 /// Queued operations before producers start dropping writes.
 pub const QUEUE_CAPACITY: usize = 1024;
@@ -35,6 +44,11 @@ pub enum WriteOp {
     Clear(HistoryKind, Option<String>, mpsc::Sender<Result<()>>),
     /// Barrier: answered once everything queued before it is written.
     Flush(mpsc::Sender<()>),
+    /// Insert a `running` recommendation run; answers its id.
+    ScanBegin(ScanBegin, mpsc::Sender<Result<i64>>),
+    /// Record how run `.0` ended at `.1` (epoch ms); answered when a
+    /// sender is given (drop guards pass none).
+    ScanFinish(i64, i64, Box<ScanOutcome>, Option<mpsc::Sender<Result<()>>>),
     /// Tests: park the thread until the sender side is dropped or signals.
     #[cfg(test)]
     Block(Receiver<()>),
@@ -60,9 +74,17 @@ pub struct Writer {
 }
 
 impl Writer {
-    /// Open the database at `path` (migrating it) and start the thread.
+    /// Open the database at `path` (migrating it), mark recommendation runs
+    /// a previous process left `running` as interrupted, and start the
+    /// thread. The sweep runs here, on the caller's thread, so no scan can
+    /// be begun through this writer before it.
     pub fn start(path: PathBuf, capacity: usize) -> Result<Self> {
         let conn = db::open(&path)?;
+        match rec::sweep_interrupted(&conn, now_millis()) {
+            Ok(0) => {}
+            Ok(n) => tracing::info!("{n} recommendation scan(s) interrupted by a restart"),
+            Err(e) => tracing::warn!("failed to sweep interrupted recommendation scans: {e:#}"),
+        }
         let (tx, rx) = mpsc::sync_channel(capacity.max(1));
         let stats = Arc::new(WriterStats::default());
         let thread_stats = stats.clone();
@@ -91,6 +113,48 @@ impl Writer {
         self.tx
             .send(op)
             .map_err(|_| anyhow!("the history writer stopped"))
+    }
+
+    /// Queue `op` without blocking and without dropping it: when the queue
+    /// is full, a short-lived thread waits for room. False only when the
+    /// writer is gone.
+    pub fn send_detached(&self, op: WriteOp) -> bool {
+        match self.tx.try_send(op) {
+            Ok(()) => true,
+            Err(TrySendError::Full(op)) => {
+                let tx = self.tx.clone();
+                std::thread::Builder::new()
+                    .name("kubepit-history-send".into())
+                    .spawn(move || {
+                        let _ = tx.send(op);
+                    })
+                    .is_ok()
+            }
+            Err(TrySendError::Disconnected(_)) => false,
+        }
+    }
+
+    /// Insert a `running` recommendation run after everything queued
+    /// before; waits for room and for the id (blocking pool only).
+    pub fn scan_begin(&self, scan: ScanBegin) -> Result<i64> {
+        let (done, wait) = mpsc::channel();
+        self.send_blocking(WriteOp::ScanBegin(scan, done))?;
+        wait.recv_timeout(Duration::from_secs(30))
+            .map_err(|_| anyhow!("timed out starting a recommendation scan"))?
+    }
+
+    /// Record how run `run_id` ended at `finished` (epoch ms), after
+    /// everything queued before; waits (blocking pool only).
+    pub fn scan_finish(&self, run_id: i64, finished: i64, outcome: ScanOutcome) -> Result<()> {
+        let (done, wait) = mpsc::channel();
+        self.send_blocking(WriteOp::ScanFinish(
+            run_id,
+            finished,
+            Box::new(outcome),
+            Some(done),
+        ))?;
+        wait.recv_timeout(Duration::from_secs(60))
+            .map_err(|_| anyhow!("timed out storing a recommendation scan"))?
     }
 
     /// Wait until everything queued so far is written (bounded).
@@ -139,7 +203,7 @@ fn run(mut conn: Connection, rx: Receiver<WriteOp>, stats: Arc<WriterStats>) {
                 continue;
             }
             commit(&mut conn, std::mem::take(&mut pending), &stats);
-            control(&conn, op);
+            control(&mut conn, op);
         }
         commit(&mut conn, pending, &stats);
     }
@@ -176,7 +240,7 @@ fn commit(conn: &mut Connection, ops: Vec<WriteOp>, stats: &WriterStats) {
     }
 }
 
-fn control(conn: &Connection, op: WriteOp) {
+fn control(conn: &mut Connection, op: WriteOp) {
     match op {
         WriteOp::Prune(policy, reply) => {
             let report = db::prune(conn, &policy);
@@ -195,6 +259,18 @@ fn control(conn: &Connection, op: WriteOp) {
         WriteOp::Flush(reply) => {
             let _ = reply.send(());
         }
+        WriteOp::ScanBegin(scan, reply) => {
+            let _ = reply.send(rec::begin(conn, &scan));
+        }
+        WriteOp::ScanFinish(run_id, finished, outcome, reply) => {
+            let result = rec::finish(conn, run_id, finished, &outcome);
+            if let Err(e) = &result {
+                tracing::warn!("failed to store recommendation run {run_id}: {e:#}");
+            }
+            if let Some(reply) = reply {
+                let _ = reply.send(result);
+            }
+        }
         #[cfg(test)]
         WriteOp::Block(gate) => {
             let _ = gate.recv();
@@ -206,7 +282,9 @@ fn control(conn: &Connection, op: WriteOp) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::history::recommendations::{self as rec, ScanBegin, ScanOutcome};
     use crate::history::types::{AuditAction, AuditFilter, AuditOutcome, AuditTarget};
+    use crate::recommendations::{RunStatus, ScanTrigger};
     use std::time::Instant;
 
     fn record(ts: i64) -> AuditRecord {
@@ -292,5 +370,116 @@ mod tests {
         let page = db::list_audit(&conn, &AuditFilter::default()).unwrap();
         let ts: Vec<i64> = page.entries.iter().map(|e| e.ts).collect();
         assert_eq!(ts, vec![2, 1]);
+    }
+
+    fn scan(started: i64) -> ScanBegin {
+        ScanBegin {
+            cluster_id: "c1".into(),
+            started,
+            trigger: ScanTrigger::Manual,
+            source_config: "{}".into(),
+        }
+    }
+
+    fn data_op() -> WriteOp {
+        WriteOp::Audit(Box::new(record(1)))
+    }
+
+    fn audit_rows(path: &std::path::Path) -> u64 {
+        let conn = db::open(path).unwrap();
+        db::table_status(&conn, "audit", "ts").unwrap().rows
+    }
+
+    #[test]
+    fn scan_ops_are_barriers_and_never_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.db");
+        let writer = Arc::new(Writer::start(path.clone(), 2).unwrap());
+        let (release, gate) = mpsc::channel();
+        writer.send_blocking(WriteOp::Block(gate)).unwrap();
+        // Let the thread pick up the gate so the queue is empty again.
+        std::thread::sleep(Duration::from_millis(50));
+        while writer.submit(data_op()) {}
+        assert!(!writer.submit(data_op()), "data writes are dropped");
+        let dropped = writer.stats().dropped.load(Ordering::Relaxed);
+
+        let w = writer.clone();
+        let handle = std::thread::spawn(move || w.scan_begin(scan(1_000)));
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(!handle.is_finished(), "waits for room instead of dropping");
+        release.send(()).unwrap();
+        let run_id = handle.join().unwrap().unwrap();
+        assert_eq!(audit_rows(&path), 2, "writes queued before it land first");
+        assert_eq!(writer.stats().dropped.load(Ordering::Relaxed), dropped);
+
+        assert!(writer.submit(data_op()));
+        writer
+            .scan_finish(run_id, 2_000, ScanOutcome::Failed("boom".into()))
+            .unwrap();
+        assert_eq!(audit_rows(&path), 3);
+        let conn = db::open(&path).unwrap();
+        let run = &rec::runs(&conn, "c1", 5).unwrap()[0];
+        assert_eq!((run.id, run.status), (run_id, RunStatus::Failed));
+        assert_eq!(run.error.as_deref(), Some("boom"));
+    }
+
+    #[test]
+    fn detached_finishes_wait_for_room() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.db");
+        let writer = Writer::start(path.clone(), 2).unwrap();
+        let run_id = writer.scan_begin(scan(1_000)).unwrap();
+        let (release, gate) = mpsc::channel();
+        writer.send_blocking(WriteOp::Block(gate)).unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        while writer.submit(data_op()) {}
+        let dropped = writer.stats().dropped.load(Ordering::Relaxed);
+        let started = Instant::now();
+        assert!(writer.send_detached(WriteOp::ScanFinish(
+            run_id,
+            2_000,
+            Box::new(ScanOutcome::Interrupted("stopped".into())),
+            None,
+        )));
+        assert!(
+            started.elapsed() < Duration::from_millis(200),
+            "never blocks"
+        );
+        assert_eq!(writer.stats().dropped.load(Ordering::Relaxed), dropped);
+        release.send(()).unwrap();
+        let conn = db::open(&path).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            assert!(writer.flush(Duration::from_secs(10)));
+            let run = &rec::runs(&conn, "c1", 1).unwrap()[0];
+            if run.status == RunStatus::Interrupted {
+                assert_eq!(run.error.as_deref(), Some("stopped"));
+                break;
+            }
+            assert!(Instant::now() < deadline, "the finish never landed");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn writer_start_sweeps_running_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.db");
+        let conn = db::open(&path).unwrap();
+        let running = rec::begin(&conn, &scan(1_000)).unwrap();
+        drop(conn);
+        let writer = Writer::start(path.clone(), 8).unwrap();
+        let reader = db::open(&path).unwrap();
+        let run = &rec::runs(&reader, "c1", 5).unwrap()[0];
+        assert_eq!((run.id, run.status), (running, RunStatus::Interrupted));
+        assert_eq!(run.error.as_deref(), Some(rec::ERROR_APP_RESTARTED));
+        assert!(run.finished_at.is_some());
+        // Runs begun through this writer are its own: not swept again.
+        let next = writer.scan_begin(scan(2_000)).unwrap();
+        assert_eq!(rec::runs(&reader, "c1", 5).unwrap()[0].id, next);
+        assert_eq!(
+            rec::runs(&reader, "c1", 5).unwrap()[0].status,
+            RunStatus::Running
+        );
     }
 }

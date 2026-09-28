@@ -718,8 +718,13 @@ that never leaves the machine.
   the write and counts it (`HistoryStatus.dropped`), so a command never
   waits for the disk and recording never fails the user's action.
   Operations apply in queue order; consecutive data writes share one
-  transaction; clear, prune and flush are barriers. Queries use their own
-  read connection on the blocking pool at the IPC edge.
+  transaction; clear, prune, flush and the recommendation scan writes
+  (`ScanBegin`, `ScanFinish`) are barriers. Scan writes are never
+  dropped: they wait for room on the blocking pool, and a drop guard's
+  detached finish hands a full queue's operation to a short-lived thread.
+  `Writer::start` sweeps runs a previous process left `running` before
+  the thread takes its first operation. Queries use their own read
+  connection on the blocking pool at the IPC edge.
 - **Audit log** (on by default, `Settings.history.audit`): every mutating
   command's public entry point lives in `history/audited.rs` and wraps the
   unaudited implementation in its domain module (`*_unaudited` in

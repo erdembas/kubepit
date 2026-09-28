@@ -50,6 +50,7 @@ use crate::change_journal::{ChangeDetail, ChangeFilter};
 use crate::objects::now_millis;
 use crate::tasks::TaskRegistry;
 use db::{PrunePolicy, PruneReport};
+use recommendations::{ScanBegin, ScanOutcome};
 use writer::{WriteOp, Writer, QUEUE_CAPACITY};
 
 pub use types::*;
@@ -182,6 +183,55 @@ impl History {
             *slot = Some(db::open(&self.path)?);
         }
         f(slot.as_ref().expect("opened above"))
+    }
+
+    /// Insert a `running` recommendation run (a blocking control operation
+    /// on the writer, never dropped; call from the blocking pool). Works
+    /// whether or not this process records history.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the scan runner is not wired yet")
+    )]
+    pub(crate) fn rec_begin(&self, scan: ScanBegin) -> Result<i64> {
+        self.require_writer()?.scan_begin(scan)
+    }
+
+    /// Record how run `run_id` ended, now (blocking, like [`Self::rec_begin`]).
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the scan runner is not wired yet")
+    )]
+    pub(crate) fn rec_finish(&self, run_id: i64, outcome: ScanOutcome) -> Result<()> {
+        self.require_writer()?
+            .scan_finish(run_id, now_millis(), outcome)
+    }
+
+    /// [`Self::rec_finish`] without waiting (drop guards of aborted scans):
+    /// queued, or handed to a thread that waits for room; false only when
+    /// the database is unavailable.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the scan runner is not wired yet")
+    )]
+    pub(crate) fn rec_finish_detached(&self, run_id: i64, outcome: ScanOutcome) -> bool {
+        match self.writer() {
+            Some(writer) => writer.send_detached(WriteOp::ScanFinish(
+                run_id,
+                now_millis(),
+                Box::new(outcome),
+                None,
+            )),
+            None => false,
+        }
+    }
+
+    /// Run `f` on the read connection (stored recommendation scans).
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the scan runner is not wired yet")
+    )]
+    pub(crate) fn rec_read<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        self.read(f)
     }
 
     pub fn remember_identity(&self, cluster_id: &str, username: &str) {
@@ -526,5 +576,37 @@ mod tests {
         h.forget_cluster("c1");
         assert_eq!(h.identity("c1"), None);
         assert!(!dir.path().join("history.db").exists(), "opened lazily");
+    }
+
+    #[test]
+    fn recommendation_scans_go_through_the_writer() {
+        use crate::recommendations::{RunStatus, ScanTrigger};
+
+        let dir = tempfile::tempdir().unwrap();
+        let h = History::new(dir.path().join("history.db"));
+        let scan = |started| ScanBegin {
+            cluster_id: "c1".into(),
+            started,
+            trigger: ScanTrigger::Schedule,
+            source_config: "{}".into(),
+        };
+        let first = h.rec_begin(scan(1_000)).unwrap();
+        h.rec_finish(first, ScanOutcome::Failed("boom".into()))
+            .unwrap();
+        let runs = h
+            .rec_read(|conn| recommendations::runs(conn, "c1", 5))
+            .unwrap();
+        assert_eq!((runs[0].id, runs[0].status), (first, RunStatus::Failed));
+        assert!(runs[0].finished_at.is_some());
+
+        let second = h.rec_begin(scan(2_000)).unwrap();
+        assert!(h.rec_finish_detached(second, ScanOutcome::Interrupted("stopped".into())));
+        assert!(h.writer().unwrap().flush(Duration::from_secs(10)));
+        let last = h
+            .rec_read(|conn| recommendations::last_attempt(conn, "c1"))
+            .unwrap()
+            .unwrap();
+        assert_eq!((last.id, last.status), (second, RunStatus::Interrupted));
+        assert!(!h.is_active(), "scans are stored without history recording");
     }
 }

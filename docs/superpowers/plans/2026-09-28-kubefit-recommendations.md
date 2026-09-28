@@ -1360,7 +1360,7 @@ git commit -m "feat(history): retention and thinning of recommendation scans"
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn scan_ops_are_barriers_and_never_dropped() {
@@ -1378,21 +1378,21 @@ Steps:
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core -- history::writer rightsizing::tests`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement the operations, the API and `reevaluate`**
+- [x] **Step 3: Implement the operations, the API and `reevaluate`**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/src

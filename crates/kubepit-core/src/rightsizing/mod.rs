@@ -24,11 +24,13 @@ pub mod math;
 pub mod ownership;
 pub mod patch;
 pub mod percentile;
+pub mod reevaluate;
 pub mod strategy;
 pub mod summary;
 pub mod types;
 pub mod workload_history;
 
+pub use reevaluate::{cost_replicas, reevaluate};
 pub use types::*;
 
 use std::collections::HashMap;
