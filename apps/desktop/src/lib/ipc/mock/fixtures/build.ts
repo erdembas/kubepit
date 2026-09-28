@@ -14,6 +14,7 @@ import { buildMonitoring } from './monitoring';
 import { buildIngress, buildNetworkPolicies } from './network';
 import { buildNodes } from './nodes';
 import { buildPrometheusServices } from './prometheus';
+import { buildCostServices } from './cost';
 import { buildPolicies } from './policies';
 import { buildRbac } from './rbac';
 import { buildStorage } from './storage';
@@ -32,6 +33,7 @@ function buildCluster(db: ClusterDb) {
   buildCertManager(db);
   buildMonitoring(db);
   buildPrometheusServices(db);
+  buildCostServices(db);
   buildArgo(db);
   buildCheckout(db);
   buildWeb(db);

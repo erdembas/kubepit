@@ -20,6 +20,8 @@ import './openapi';
 // Registered after './app': it wraps `port_forward_start` and `cluster_connect`.
 import './connectivity';
 import './changes';
+// Cost insight and right-sizing (reads prometheus_status, wraps nothing).
+import './cost';
 
 export { mockListen } from './bus';
 

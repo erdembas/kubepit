@@ -13,6 +13,11 @@ import type {
   ChangeDetail,
   ChangeFilter,
   ChangePage,
+  ContainerResourceChange,
+  CostQuery,
+  CostReport,
+  CostStatus,
+  CostSummary,
   ClusterDef,
   ClusterId,
   ClusterInput,
@@ -70,6 +75,8 @@ import type {
   PrometheusTarget,
   PromQueryResult,
   ResourceList,
+  RightsizingReport,
+  RightsizingRequest,
   RolloutRevision,
   SavedPortForward,
   SavedPortForwardInput,
@@ -81,6 +88,7 @@ import type {
   WhoAmI,
   WorkloadLogBatch,
   WorkloadLogOptions,
+  WorkloadRef,
   WorkspaceChanged,
   WorkspaceSnapshot,
 } from '@/types';
@@ -448,6 +456,28 @@ export const ipc = {
   /** One change with its normalized before/after YAML (Secret values are never kept). */
   changesGet: (clusterId: ClusterId, id: number) =>
     call<ChangeDetail>('changes_get', { clusterId, id }),
+  // -- Cost insight and right-sizing (read-only except rightsizingApply) ----
+  /** Cost source (OpenCost, Kubecost or estimate), price model, Prometheus availability. */
+  costStatus: (clusterId: ClusterId, refresh = false) =>
+    call<CostStatus>('cost_status', { clusterId, refresh }),
+  /** Monthly totals, breakdown and daily trend; cached for a few minutes unless `refresh`. */
+  costReport: (clusterId: ClusterId, query: CostQuery) =>
+    call<CostReport>('cost_report', { clusterId, query }),
+  /** Totals of the 7-day namespace report (dashboard). */
+  costSummary: (clusterId: ClusterId) => call<CostSummary>('cost_summary', { clusterId }),
+  /** Request recommendations per container from usage history. */
+  rightsizingReport: (clusterId: ClusterId, request: RightsizingRequest) =>
+    call<RightsizingReport>('rightsizing_report', { clusterId, request }),
+  /**
+   * Patch a workload's container resources. `dryRun` reviews (allowed on
+   * read-only clusters); otherwise the backend refuses read-only clusters.
+   */
+  rightsizingApply: (
+    clusterId: ClusterId,
+    target: WorkloadRef,
+    changes: ContainerResourceChange[],
+    dryRun: boolean,
+  ) => call<DryRunResult>('rightsizing_apply', { clusterId, target, changes, dryRun }),
   // -- Helm charts (repositories and catalog are local helm commands) -------
   helmRepoList: () => call<HelmRepo[]>('helm_repo_list'),
   helmRepoAdd: (name: string, url: string, options: HelmRepoAddOptions) =>

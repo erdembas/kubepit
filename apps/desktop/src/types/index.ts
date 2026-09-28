@@ -78,6 +78,8 @@ export interface ClusterDef {
   last_connected_at: number | null;
   /** Where charts read Prometheus metrics from (auto-detected by default). */
   prometheus: PrometheusConfig;
+  /** Cost insight: cost source and price model (missing = auto, platform prices). */
+  cost?: CostConfig;
   /**
    * Connectivity: proxy for this cluster (`http://`, `https://`, `socks5://`,
    * `socks5h://`). Overrides the kubeconfig's `proxy-url`; null = none.
@@ -1401,4 +1403,295 @@ export interface FleetSearchEvent {
   /** `cluster-done` / `cluster-error`: kinds RBAC did not allow listing. */
   forbidden_kinds: string[];
   error: string | null;
+}
+
+// -- Cost insight and right-sizing (`cost/`, `rightsizing/` in the core) ------
+//
+// Money in a CostReport is a monthly run rate (730 h) in `currency`, except
+// trend points (the cost of one day). CPU in right-sizing is millicores,
+// memory bytes.
+
+/** Where a cluster's costs come from (`ClusterDef.cost.source`). */
+export type CostSourceConfig =
+  | { mode: 'auto' }
+  | {
+      mode: 'opencost' | 'kubecost';
+      namespace: string;
+      service: string;
+      port: number;
+      scheme: PromScheme;
+      path_prefix: string;
+    }
+  | { mode: 'estimate' };
+
+/** Price model of estimates; prices are before `discount_percent`. */
+export interface CostPricing {
+  /** ISO 4217 code. */
+  currency: string;
+  cpu_hour: number;
+  memory_gib_hour: number;
+  gpu_hour: number | null;
+  storage_gib_month: number | null;
+  discount_percent: number;
+}
+
+export interface CostConfig {
+  source: CostSourceConfig;
+  /** Null = the defaults of the detected platform. */
+  pricing: CostPricing | null;
+}
+
+export type CostSourceKind = 'opencost' | 'kubecost' | 'estimate';
+export type CostApiKind = 'opencost' | 'kubecost';
+export type CostPlatform = 'eks' | 'gke' | 'aks' | 'generic';
+
+export interface CostService {
+  kind: CostApiKind;
+  namespace: string;
+  service: string;
+  port: number;
+  scheme: PromScheme;
+  path_prefix: string;
+}
+
+export interface CostStatus {
+  source: CostSourceKind;
+  /** The cost API in use, or the one that failed. */
+  service: CostService | null;
+  /** From the cluster setting rather than detection. */
+  configured: boolean;
+  /** Why a found or configured cost API is not used. */
+  error: string | null;
+  candidates: CostService[];
+  platform: CostPlatform;
+  platform_label: string | null;
+  /** Effective price model of estimates. */
+  pricing: CostPricing;
+  pricing_custom: boolean;
+  /** Prometheus answers (usage and trend for estimates). */
+  prometheus: boolean;
+  checked_at: number;
+}
+
+export type CostWindow = '7d' | '30d';
+export type CostAggregate = 'namespace' | 'workload' | 'label';
+
+export interface CostQuery {
+  window: CostWindow;
+  aggregate: CostAggregate;
+  /** Label key of `aggregate: 'label'`. */
+  label?: string | null;
+  refresh?: boolean;
+}
+
+export type CostUsageSource = 'cost-api' | 'prometheus' | 'metrics-server' | 'none';
+export type CostTrendBasis = 'total' | 'requests' | 'none';
+export type CostSpecial = 'idle' | 'unallocated';
+
+export interface CostTotals {
+  total: number;
+  allocated: number;
+  /** Null when capacity is unknown. */
+  idle: number | null;
+  cpu: number;
+  memory: number;
+  gpu: number;
+  storage: number;
+  /** Network, load balancers, shared and external costs (cost APIs). */
+  other: number;
+  /** Cost-weighted usage ÷ requests. */
+  efficiency: number | null;
+  cpu_efficiency: number | null;
+  memory_efficiency: number | null;
+}
+
+export interface CostItem {
+  key: string;
+  /** Namespace, workload name or label value; `__idle__` / `__unallocated__` for special rows. */
+  name: string;
+  namespace: string | null;
+  /** Workload kind for `aggregate: 'workload'`. */
+  kind: string | null;
+  pods: number;
+  cpu_request_cores: number;
+  cpu_usage_cores: number | null;
+  memory_request_bytes: number;
+  memory_usage_bytes: number | null;
+  gpus: number;
+  storage_bytes: number;
+  cpu_cost: number;
+  memory_cost: number;
+  gpu_cost: number;
+  storage_cost: number;
+  other_cost: number;
+  total_cost: number;
+  efficiency: number | null;
+  special: CostSpecial | null;
+}
+
+/** Cost of one day starting at `ts` (UTC). */
+export interface CostTrendPoint {
+  ts: number;
+  total: number;
+}
+
+export type CostNoteKind =
+  'api-failed' | 'nodes-unavailable' | 'volumes-unavailable' | 'usage-failed' | 'trend-failed';
+
+export interface CostNote {
+  kind: CostNoteKind;
+  /** The underlying error, verbatim. */
+  detail: string | null;
+}
+
+export interface CostReport {
+  status: CostStatus;
+  window: CostWindow;
+  aggregate: CostAggregate;
+  label: string | null;
+  currency: string;
+  start: number;
+  end: number;
+  totals: CostTotals;
+  /** Most expensive first. */
+  items: CostItem[];
+  trend: CostTrendPoint[];
+  trend_basis: CostTrendBasis;
+  usage: CostUsageSource;
+  notes: CostNote[];
+  computed_at: number;
+}
+
+/** Totals of the 7-day namespace report (dashboard). */
+export interface CostSummary {
+  source: CostSourceKind;
+  currency: string;
+  total: number;
+  allocated: number;
+  idle: number | null;
+  efficiency: number | null;
+  computed_at: number;
+}
+
+export interface RightsizingSettings {
+  cpu_headroom_percent: number;
+  memory_headroom_percent: number;
+  memory_limit_headroom_percent: number;
+  min_cpu_millicores: number;
+  min_memory_bytes: number;
+  /** Days of Prometheus history (1–30). */
+  days: number;
+}
+
+export interface WorkloadRef {
+  kind: string;
+  namespace: string;
+  name: string;
+}
+
+export interface RightsizingRequest {
+  /** Empty = every namespace the user can read. */
+  namespaces: string[];
+  workload?: WorkloadRef | null;
+  settings?: Partial<RightsizingSettings>;
+  /** Recommendation strategy id (null = the backend's default). */
+  strategy?: string | null;
+}
+
+/** A recommendation strategy the backend offers. */
+export interface RightsizingStrategyInfo {
+  /** Stable id, e.g. 'percentile-headroom'. */
+  id: string;
+  /** English display name (product names stay as they are). */
+  name: string;
+}
+
+/** A caveat of a recommendation; `code` is a stable id the UI translates. */
+export interface RecommendationWarning {
+  code: string;
+  detail: string | null;
+}
+
+export type RightsizingSource = 'prometheus' | 'metrics-server' | 'none';
+export type RightsizingConfidence = 'low' | 'medium' | 'high';
+export type RightsizingVerdict = 'over' | 'under' | 'balanced' | 'no-data';
+export type ResourceChange = 'increase' | 'decrease' | 'unchanged' | 'set';
+
+export interface ResourceValues {
+  cpu_request: number | null;
+  cpu_limit: number | null;
+  memory_request: number | null;
+  memory_limit: number | null;
+}
+
+/** Observed usage of one container (worst replica). */
+export interface UsageStats {
+  cpu_p95: number;
+  cpu_max: number;
+  memory_max: number;
+  hours: number;
+}
+
+export interface ContainerRecommendation {
+  name: string;
+  current: ResourceValues;
+  recommended: ResourceValues;
+  usage: UsageStats | null;
+  cpu: ResourceChange;
+  memory: ResourceChange;
+  memory_limit: ResourceChange;
+  cpu_limit: ResourceChange;
+  confidence: RightsizingConfidence;
+  warnings: RecommendationWarning[];
+  /** The CPU limit rose with the request, keeping the current limit ÷ request ratio. */
+  cpu_limit_raised: boolean;
+  /** The memory limit rose with the request, keeping the current limit ÷ request ratio. */
+  memory_limit_raised: boolean;
+}
+
+export interface WorkloadRecommendation {
+  kind: string;
+  namespace: string;
+  name: string;
+  uid: string;
+  replicas: number;
+  confidence: RightsizingConfidence;
+  verdict: RightsizingVerdict;
+  coverage_hours: number;
+  containers: ContainerRecommendation[];
+  /** Recommended − current requests per month, all replicas (negative = saving). */
+  monthly_delta: number;
+  monthly_current: number;
+  changed: boolean;
+}
+
+export type RightsizingNoteKind = 'prometheus-failed' | 'no-usage' | 'pods-unavailable';
+
+export interface RightsizingNote {
+  kind: RightsizingNoteKind;
+  detail: string | null;
+}
+
+export interface RightsizingReport {
+  source: RightsizingSource;
+  window_secs: number;
+  settings: RightsizingSettings;
+  currency: string;
+  pricing: CostPricing;
+  /** Changed first, then the largest saving. */
+  workloads: WorkloadRecommendation[];
+  notes: RightsizingNote[];
+  /** Id of the strategy that produced the recommendations. */
+  strategy: string;
+  strategies: RightsizingStrategyInfo[];
+  computed_at: number;
+}
+
+/** New values of one container (`null` = unchanged). */
+export interface ContainerResourceChange {
+  container: string;
+  cpu_request: number | null;
+  cpu_limit: number | null;
+  memory_request: number | null;
+  memory_limit: number | null;
 }
