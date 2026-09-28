@@ -295,10 +295,11 @@ export function LokiView({
   const autoRan = useRef(false);
   useEffect(() => {
     if (autoRan.current || !available || !(tab.query.trim() || tab.builder)) return;
-    if (tab.builder && labels.loading && !labels.data && !labels.error) return;
+    // Builder tabs wait for the label names (or their failure) so the selector fits this Loki.
+    if (tab.builder && !labels.data && !labels.error) return;
     autoRan.current = true;
     void runRef.current('new');
-  }, [available, tab.query, tab.builder, labels.loading, labels.data, labels.error]);
+  }, [available, tab.query, tab.builder, labels.data, labels.error]);
 
   const changeRange = (next: LokiRange) => {
     setRange(next);
