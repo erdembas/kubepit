@@ -363,16 +363,17 @@ impl Kubepit {
     ) -> Result<RightsizingReport> {
         let cluster = self.cluster_def(cluster_id)?;
         let client = self.client(cluster_id).await?;
-        // The request's strategy, else the saved one, else automatic. Owner
-        // metrics come with the collection pipeline; name-matched presets
-        // never resolve pods through them.
+        // The request's strategy (an unknown one is an error), else the saved
+        // one (an unknown one is ignored), else automatic. Owner metrics come
+        // with the collection pipeline; name-matched presets never resolve
+        // pods through them.
         let recommendations = self.settings().recommendations;
         let requested = request
             .strategy
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .or(recommendations.strategy.as_deref());
+            .or(recommendations.saved_strategy());
         let (strategy, strategy_auto) = strategy::resolve(requested, false)?;
         // The request's own settings, else the strategy's effective ones.
         let settings = match &request.settings {

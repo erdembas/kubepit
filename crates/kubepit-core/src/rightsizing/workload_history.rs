@@ -336,6 +336,30 @@ mod tests {
     }
 
     #[test]
+    fn memory_no_churn_settles_on_the_floored_peak() {
+        // 200 MiB peak × 1.2 = 240 MiB is within 16 MiB of the 250 MiB request: kept.
+        let r = run(
+            current(1000.0, 250.0 * MIB),
+            usage(100.0, 200.0 * MIB, 168.0),
+        );
+        assert_eq!(r.recommended.memory_request, Some(250.0 * MIB));
+        assert_eq!(r.memory, Change::Unchanged);
+        // After an OOM kill the settle floor is the current limit, not the
+        // peak: 64 MiB is below the 65 MiB limit, so the small step to
+        // 65 MiB × 1.2 → 78 MiB is taken (with the 40 MiB peak as the floor,
+        // 14 MiB < 16 MiB would have kept 64 MiB).
+        let tight = ResourceValues {
+            cpu_request: Some(1000.0),
+            memory_request: Some(64.0 * MIB),
+            memory_limit: Some(65.0 * MIB),
+            ..Default::default()
+        };
+        let r = run_oom(tight, usage(100.0, 40.0 * MIB, 168.0));
+        assert_eq!(r.recommended.memory_request, Some(78.0 * MIB));
+        assert_eq!(r.memory, Change::Increase);
+    }
+
+    #[test]
     fn confidence_tiers_and_no_churn() {
         assert_eq!(
             run(current(1000.0, GIB), usage(100.0, 200.0 * MIB, 168.0)).confidence,

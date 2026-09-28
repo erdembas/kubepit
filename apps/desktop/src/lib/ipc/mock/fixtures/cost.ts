@@ -628,17 +628,33 @@ export function recommendContainer(
   return finalize(name, current, usage, percentileHeadroom(current, usage, source, s));
 }
 
+/** Settings every backend strategy reads (the last three feed the shared evidence step). */
+const SETTINGS_KEYS = [
+  'cpu_headroom_percent',
+  'memory_headroom_percent',
+  'memory_limit_headroom_percent',
+  'days',
+  'min_hours',
+  'min_coverage',
+  'throttle_threshold_percent',
+];
+
+/**
+ * The backend's strategies. The demo computes both with the percentile math;
+ * only their defaults (15 % vs. 20 % CPU headroom) differ.
+ */
 export const STRATEGIES: RightsizingStrategyInfo[] = [
   {
     id: 'percentile-headroom',
     name: 'Percentile + headroom',
     defaults: DEFAULT_SETTINGS,
-    settings_keys: [
-      'cpu_headroom_percent',
-      'memory_headroom_percent',
-      'memory_limit_headroom_percent',
-      'days',
-    ],
+    settings_keys: SETTINGS_KEYS,
+  },
+  {
+    id: 'workload-history',
+    name: 'Workload history',
+    defaults: { ...DEFAULT_SETTINGS, cpu_headroom_percent: 20, memory_headroom_percent: 20 },
+    settings_keys: SETTINGS_KEYS,
   },
 ];
 

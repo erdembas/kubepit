@@ -195,8 +195,11 @@ async function rightsizing(clusterId: string, request: RightsizingRequest) {
   const conn = connection(clusterId);
   // Like the backend: the request's strategy, else the saved one, else automatic;
   // the request's settings, else the saved override, else the strategy's defaults.
+  // An unknown saved strategy is ignored (automatic), an unknown requested one fails.
   const saved = (handlers.settings_get?.({}) as Settings | undefined)?.recommendations;
-  const requested = request.strategy?.trim() || saved?.strategy?.trim() || null;
+  const savedId = saved?.strategy?.trim();
+  const savedKnown = STRATEGIES.some((s) => s.id === savedId) ? savedId : null;
+  const requested = request.strategy?.trim() || savedKnown || null;
   const strategy = requested ?? STRATEGIES[0]!.id;
   const info = STRATEGIES.find((s) => s.id === strategy);
   if (!info) throw new Error(`unknown right-sizing strategy "${strategy}"`);

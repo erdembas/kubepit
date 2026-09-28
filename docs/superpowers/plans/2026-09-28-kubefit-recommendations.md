@@ -247,6 +247,7 @@ workload details, Health and the dashboard.
   - `defaults = RightsizingSettings::default()`;
   - `settings_keys = ["cpu_headroom_percent", "memory_headroom_percent",
     "memory_limit_headroom_percent", "days"]`.
+  - *Review decision:* every strategy also lists `min_hours`, `min_coverage` and `throttle_threshold_percent`, which the shared evidence step reads.
 - `rightsizing_report` uses `request.settings` or else the resolved strategy's
   `info().defaults` (Task 10 replaces this with the effective settings).
 

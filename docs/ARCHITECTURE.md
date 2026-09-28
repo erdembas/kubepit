@@ -909,8 +909,10 @@ applying a recommendation only reads, so read-only clusters get it all.
   source, settings, optional `UsageEvidence` and `HpaInfo`; output =
   recommended values, confidence, warnings). `info()` also carries the
   strategy's own `defaults` and the `settings_keys` it reads, so the UI
-  renders only those fields; a request without settings uses the
-  strategy's defaults. `STRATEGIES` lists them, requests pick one by id and
+  renders only those fields (every strategy lists `min_hours`,
+  `min_coverage` and `throttle_threshold_percent`, which the shared
+  evidence step reads); a request without settings uses the strategy's
+  defaults. `STRATEGIES` lists them, requests pick one by id and
   reports list them all, so a new strategy needs no UI, apply or preset
   changes. Settings clamp to headroom 0–300 %, 1–30 days, `min_hours`
   1–720 (at most the window), `min_coverage` 0.1–1 and
@@ -941,7 +943,7 @@ applying a recommendation only reads, so read-only clusters get it all.
   confidence and never change a value (a recommendation is always
   computed): `identity-unclear`, `insufficient-history` (< `min_hours`,
   detail whole hours) and `low-coverage` (< `min_coverage`, detail whole
-  %) cap it at low; `partial-data`, `hpa-target` (detail the HPA name),
+  %, both rounded down) cap it at low; `partial-data`, `hpa-target` (detail the HPA name),
   `hpa-utilization` (a Utilization target on a request that changes,
   detail `cpu 70%`), `oom-killed`, `cpu-throttled` (throttled ÷ CFS
   periods ≥ the threshold, detail one decimal %) and `identity-by-name`
@@ -973,9 +975,11 @@ applying a recommendation only reads, so read-only clusters get it all.
   `interval_minutes` (60, 15–1440), `retention_days` (30, 1–90),
   `strategy` (`None` = automatic), `overrides` per strategy id and
   `alerts` (off). `settings_set` normalizes them (clamps, sorted and
-  deduplicated clusters without blanks, blank strategy = automatic, every
-  override normalized). `rightsizing_report` takes the request's strategy,
-  else the saved one, else resolves automatically, and the request's
+  deduplicated clusters without blanks, a blank or unknown strategy =
+  automatic, every override normalized). `rightsizing_report` takes the
+  request's strategy (unknown = an error), else the saved one (unknown,
+  e.g. from a newer build or a hand edit, = ignored), else resolves
+  automatically, and the request's
   settings, else `effective_settings` (the strategy's override, else its
   `info().defaults`).
 - **Apply** (`rightsizing_apply`): a strategic merge patch of the named

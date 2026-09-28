@@ -39,7 +39,8 @@ pub const WARN_MEMORY_LIMIT_RAISED: &str = "memory-limit-raised";
 pub const WARN_IDENTITY_UNCLEAR: &str = "identity-unclear";
 /// Fewer observed hours than `min_hours` (detail: whole hours; cap: low).
 pub const WARN_INSUFFICIENT_HISTORY: &str = "insufficient-history";
-/// CPU or memory coverage below `min_coverage` (detail: whole %; cap: low).
+/// CPU or memory coverage below `min_coverage` (detail: whole %, rounded
+/// down; cap: low).
 pub const WARN_LOW_COVERAGE: &str = "low-coverage";
 /// Part of the usage queries failed or warned (cap: medium).
 pub const WARN_PARTIAL_DATA: &str = "partial-data";
@@ -244,7 +245,8 @@ pub fn apply_evidence(input: &ContainerInput<'_>, output: StrategyOutput) -> Str
             flag(
                 RecommendationWarning::with_detail(
                     WARN_LOW_COVERAGE,
-                    format!("{:.0}%", coverage.max(0.0) * 100.0),
+                    // Rounded down: 0.899 under a 0.9 threshold reads 89 %, not 90 %.
+                    format!("{}%", (coverage.max(0.0) * 100.0).floor()),
                 ),
                 Confidence::Low,
             );
@@ -642,7 +644,15 @@ mod tests {
                 &run_with(|e, _| e.memory_coverage = Some(0.456)),
                 WARN_LOW_COVERAGE
             ),
-            Some("46%")
+            Some("45%")
+        );
+        // Rounded down, so a coverage just under the threshold never reads as it.
+        assert_eq!(
+            detail(
+                &run_with(|e, _| e.cpu_coverage = Some(0.899)),
+                WARN_LOW_COVERAGE
+            ),
+            Some("89%")
         );
         assert_eq!(
             detail(

@@ -52,11 +52,16 @@ impl RecommendationStrategy for PercentileHeadroom {
             id: DEFAULT_STRATEGY_ID.to_string(),
             name: "Percentile + headroom".to_string(),
             defaults: RightsizingSettings::default(),
+            // The last three feed the shared evidence step, which runs after
+            // every strategy.
             settings_keys: [
                 "cpu_headroom_percent",
                 "memory_headroom_percent",
                 "memory_limit_headroom_percent",
                 "days",
+                "min_hours",
+                "min_coverage",
+                "throttle_threshold_percent",
             ]
             .map(String::from)
             .to_vec(),
@@ -291,6 +296,25 @@ mod tests {
         assert!(!r.changed());
         assert_eq!(r.recommended, current);
         assert_eq!(codes(&r), vec![WARN_NO_USAGE]);
+    }
+
+    #[test]
+    fn info_lists_its_defaults_and_the_evidence_keys() {
+        let info = PercentileHeadroom.info();
+        assert_eq!(info.defaults, RightsizingSettings::default());
+        assert_eq!(
+            info.settings_keys,
+            vec![
+                "cpu_headroom_percent",
+                "memory_headroom_percent",
+                "memory_limit_headroom_percent",
+                "days",
+                "min_hours",
+                "min_coverage",
+                "throttle_threshold_percent",
+            ],
+            "the shared evidence step reads the last three for every strategy"
+        );
     }
 
     #[test]

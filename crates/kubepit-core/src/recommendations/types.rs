@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::rightsizing::strategy::RecommendationStrategy;
+use crate::rightsizing::strategy::{RecommendationStrategy, STRATEGIES};
 use crate::rightsizing::RightsizingSettings;
 
 /// Default minutes between background scans.
@@ -49,8 +49,8 @@ impl Default for RecommendationSettings {
 impl RecommendationSettings {
     /// Clamp out-of-range values instead of persisting them: the interval
     /// to 15–1440 minutes, the retention to 1–90 days; sorted, deduplicated
-    /// clusters without blanks; a blank strategy is automatic; every
-    /// override normalized (blank ids dropped).
+    /// clusters without blanks; a blank or unknown strategy is automatic;
+    /// every override normalized (blank ids dropped).
     pub fn normalized(mut self) -> Self {
         self.interval_minutes = self.interval_minutes.clamp(15, 1440);
         self.retention_days = self.retention_days.clamp(1, 90);
@@ -60,7 +60,7 @@ impl RecommendationSettings {
         self.strategy = self
             .strategy
             .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
+            .filter(|s| is_known_strategy(s));
         self.overrides = self
             .overrides
             .into_iter()
@@ -76,6 +76,22 @@ impl RecommendationSettings {
     pub fn scans(&self, cluster_id: &str) -> bool {
         self.scan_clusters.iter().any(|id| id == cluster_id)
     }
+
+    /// The saved strategy id when this build offers it; `None` (automatic)
+    /// for a blank or unknown one — settings files are not normalized on
+    /// load, so an id from a newer build or a hand edit must not make every
+    /// report fail.
+    pub fn saved_strategy(&self) -> Option<&str> {
+        self.strategy
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| is_known_strategy(s))
+    }
+}
+
+/// Whether `id` names a strategy this build offers.
+fn is_known_strategy(id: &str) -> bool {
+    STRATEGIES.iter().any(|s| s.info().id == id)
 }
 
 /// The settings `strategy` runs with: its override, else its own
@@ -145,6 +161,27 @@ mod tests {
         // Settings saved before this field existed still load.
         let old: crate::types::Settings = serde_json::from_str("{}").unwrap();
         assert_eq!(old.recommendations, RecommendationSettings::default());
+    }
+
+    #[test]
+    fn unknown_saved_strategies_fall_back_to_automatic() {
+        // A strategy id this build does not know (a downgrade, a hand-edited
+        // settings.json) must not make every report fail.
+        let gone = RecommendationSettings {
+            strategy: Some("gone-strategy".into()),
+            ..RecommendationSettings::default()
+        };
+        assert_eq!(gone.saved_strategy(), None, "never normalized: ignored");
+        assert_eq!(gone.normalized().strategy, None, "dropped when saved");
+        let known = RecommendationSettings {
+            strategy: Some("workload-history".into()),
+            ..RecommendationSettings::default()
+        };
+        assert_eq!(known.saved_strategy(), Some("workload-history"));
+        assert_eq!(
+            known.normalized().strategy.as_deref(),
+            Some("workload-history")
+        );
     }
 
     #[test]
