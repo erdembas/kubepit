@@ -3,6 +3,7 @@ import {
   ArrowRightLeft,
   Ban,
   Bug,
+  CalendarSearch,
   FolderTree,
   Copy,
   Link2,
@@ -36,6 +37,7 @@ import { gitopsActions } from './gitopsActions';
 import { withGitOpsWarning } from '../gitops/owner';
 import { MERGED_LOG_KINDS, openPodDebug, openPodFiles, openWorkloadLogs } from './logsDebugActions';
 import { workloadActions } from './workloadActions';
+import { hasLokiLogs, openLokiForObject } from './lokiActions';
 
 import {
   openPodLogs,
@@ -160,6 +162,15 @@ export function resourceActions({
       run: () => openWorkloadLogs(clusterId, obj),
     });
   }
+  // Loki: historical logs of the pod or the workload's pods (read-only).
+  if (hasLokiLogs(kind))
+    add({
+      id: 'loki-logs',
+      label: i18n.t('Historical logs (Loki)'),
+      icon: CalendarSearch,
+      mutating: false,
+      run: () => openLokiForObject(clusterId, obj),
+    });
   if (SCALABLE.has(kind))
     add({
       id: 'scale',

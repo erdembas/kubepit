@@ -2,15 +2,23 @@ import * as i18n from '@/i18n';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Copy, Eraser, Eye, EyeOff, Focus, Search, TextSelect } from 'lucide-react';
 import { FileContextMenu, type FileContextMenuEntry } from '@/components/ui/FileContextMenu';
+import { cn } from '@/lib/cn';
+import { ALL_LEVELS } from '@/lib/logs/filter';
+import { LEVEL_KEYS, emptyLevelCounts, type LevelCounts } from '@/lib/logs/levels';
+import { LOKI_WORKLOAD_KINDS } from '@/lib/logs/logql';
+import { RecordIndex, type LogRecord } from '@/lib/logs/records';
 import { modChord } from '@/lib/platform';
 import { usePersistentBoolean } from '@/lib/usePersistentBoolean';
 import { XTERM_DARK_BG, XTERM_LIGHT_BG } from '@/lib/xtermTheme';
 import { useAppStore } from '@/store/useAppStore';
 import { useDockStore, type DockTab } from '@/store/useDockStore';
 import type { ClusterId, WorkloadLogBatch, WorkloadLogOptions } from '@/types';
+import { openLokiForWorkload } from '../../actions/lokiActions';
 import { stripAnsi, type LogFormatOptions } from '../logs/format';
 import type { LogEntry } from '../logs/logBuffer';
 import { LogTerminal, type LogTerminalHandle } from '../logs/LogTerminal';
+import { StructuredLogView, type SourceColumn } from '../logs/structured/StructuredLogView';
+import { useLogFilters } from '../logs/structured/useLogFilters';
 import type { StreamStatus } from '../logs/useLogStream';
 import { copyText } from '../shared/platform';
 import { saveTextAs } from '../shared/saveFile';
@@ -24,6 +32,7 @@ import {
   isVisible,
   labelLayout,
   livePodCount,
+  podCssColor,
   readPodPalette,
   type LabelLayout,
   type LogSource,
@@ -49,7 +58,9 @@ const EMPTY_SET: ReadonlySet<string> = new Set();
  * coloured `pod/container` prefix per line, a legend to toggle pods and
  * containers, and the pod log view's pause / search / export. Pods that
  * appear later (rollouts, scale-ups, restarts) join on their own; toggling
- * sources only re-renders, it never restarts the stream.
+ * sources only re-renders, it never restarts the stream. Lines are folded
+ * into records per source (levels, stack traces) for the level filter and
+ * the structured table.
  */
 export const WorkloadLogView = memo(function WorkloadLogView({ clusterId, tab, active }: Props) {
   i18n.useLocale();
@@ -58,6 +69,9 @@ export const WorkloadLogView = memo(function WorkloadLogView({ clusterId, tab, a
   const pushToast = useAppStore((s) => s.pushToast);
   const updateTab = useDockStore((s) => s.updateTab);
   const isDark = useIsDark();
+  const filters = useLogFilters('kp.workload-logs.structured');
+  const structured = filters.mode === 'structured';
+  const { levelShown } = filters;
 
   const [container, setContainer] = useState<string | null>(null);
   const [initContainers, setInitContainers] = useState(false);
@@ -71,6 +85,9 @@ export const WorkloadLogView = memo(function WorkloadLogView({ clusterId, tab, a
   const [pending, setPending] = useState(0);
   const [lineCount, setLineCount] = useState(0);
   const [sources, setSources] = useState<LogSource[]>([]);
+  const [recordsVersion, setRecordsVersion] = useState(0);
+  const [counts, setCounts] = useState<LevelCounts>(emptyLevelCounts);
+  const [focusRequest, setFocusRequest] = useState(0);
   const [filter, setFilter] = useState<SourceFilter>({
     hiddenPods: EMPTY_SET,
     hiddenContainers: EMPTY_SET,
@@ -81,6 +98,7 @@ export const WorkloadLogView = memo(function WorkloadLogView({ clusterId, tab, a
 
   const bufferRef = useRef(new MergedLogBuffer());
   const registryRef = useRef(new SourceRegistry());
+  const indexRef = useRef(new RecordIndex());
   const termRef = useRef<LogTerminalHandle>(null);
   const pausedRef = useRef(false);
   const pendingRef = useRef<MergedEntry[]>([]);
@@ -93,8 +111,10 @@ export const WorkloadLogView = memo(function WorkloadLogView({ clusterId, tab, a
   const shownCountRef = useRef(0);
 
   const visible = useCallback(
-    (entry: MergedEntry) => isVisible(entry, registryRef.current, filterRef.current),
-    [],
+    (entry: MergedEntry) =>
+      isVisible(entry, registryRef.current, filterRef.current) &&
+      (entry.source === SYSTEM_SOURCE || levelShown(entry.level)),
+    [levelShown],
   );
 
   const visibleEntries = useCallback((): MergedEntry[] => {
@@ -125,6 +145,8 @@ export const WorkloadLogView = memo(function WorkloadLogView({ clusterId, tab, a
       setLineCount(visibleEntries().length);
       setPending(pendingRef.current.length);
       setSources(list);
+      setRecordsVersion(indexRef.current.version);
+      setCounts({ ...indexRef.current.counts });
       const pods = livePodCount(list);
       const current = useDockStore
         .getState()
@@ -175,13 +197,17 @@ export const WorkloadLogView = memo(function WorkloadLogView({ clusterId, tab, a
       for (const event of batch.events) {
         const { source, marker } = registry.apply(event);
         if (event.kind === 'lines' && source) {
-          for (const entry of buffer.add(source.id, event.lines)) added.push(entry);
+          const lines = buffer.add(source.id, event.lines);
+          indexRef.current.ingest(lines);
+          for (const entry of lines) added.push(entry);
         }
         if (marker && marker.text) {
           for (const entry of buffer.add(SYSTEM_SOURCE, [marker.text], marker.tone))
             added.push(entry);
         }
       }
+      const first = buffer.entries[0];
+      if (first) indexRef.current.trimBefore(first.seq);
       // New sources can change the prefix column; then everything is re-rendered.
       if (updateLayout(registry.list())) {
         deliver(added);
@@ -197,6 +223,7 @@ export const WorkloadLogView = memo(function WorkloadLogView({ clusterId, tab, a
   const resetView = useCallback(() => {
     bufferRef.current.clear();
     registryRef.current.reset();
+    indexRef.current.clear();
     pendingRef.current = [];
     shownSeqRef.current = -1;
     layoutRef.current = { width: 8, strip: 0 };
@@ -260,6 +287,48 @@ export const WorkloadLogView = memo(function WorkloadLogView({ clusterId, tab, a
   const showAll = () => setFilterAndRender({ hiddenPods: EMPTY_SET, hiddenContainers: EMPTY_SET });
   const hideAll = () => setFilterAndRender({ hiddenPods: allPods(), hiddenContainers: EMPTY_SET });
 
+  // A new level filter repaints the terminal from the buffer.
+  const levelsMounted = useRef(false);
+  useEffect(() => {
+    if (!levelsMounted.current) {
+      levelsMounted.current = true;
+      return;
+    }
+    rerender();
+    scheduleSync();
+  }, [filters.levels, rerender, scheduleSync]);
+
+  const sourceColumn = useMemo<SourceColumn>(
+    () => ({
+      label: (r: LogRecord) => {
+        const s = registryRef.current.get(r.source);
+        return s ? `${s.pod}/${s.container}` : '?';
+      },
+      color: (r: LogRecord) => {
+        const s = registryRef.current.get(r.source);
+        return s ? podCssColor(registryRef.current.colorIndex(s.pod)) : undefined;
+      },
+      fields: (r: LogRecord) => {
+        const s = registryRef.current.get(r.source);
+        return s ? { pod: s.pod, container: s.container } : undefined;
+      },
+    }),
+    [],
+  );
+  const hiddenBySource = useCallback(
+    (r: LogRecord) => {
+      const s = registryRef.current.get(r.source);
+      return !!s && (filter.hiddenPods.has(s.pod) || filter.hiddenContainers.has(s.container));
+    },
+    [filter],
+  );
+  const hiddenKey = `${[...filter.hiddenPods].join(',')}|${[...filter.hiddenContainers].join(',')}`;
+
+  const openSearch = useCallback(() => {
+    if (structured) setFocusRequest((n) => n + 1);
+    else termRef.current?.openSearch();
+  }, [structured]);
+
   const togglePause = useCallback(() => {
     if (!pausedRef.current) {
       pausedRef.current = true;
@@ -280,6 +349,7 @@ export const WorkloadLogView = memo(function WorkloadLogView({ clusterId, tab, a
   const clear = useCallback(() => {
     bufferRef.current.clear();
     registryRef.current.resetCounts();
+    indexRef.current.clear();
     pendingRef.current = [];
     termRef.current?.reset([]);
     scheduleSync();
@@ -366,6 +436,8 @@ export const WorkloadLogView = memo(function WorkloadLogView({ clusterId, tab, a
     lineCount === 0 &&
     bufferRef.current.length > 0 &&
     (filter.hiddenPods.size > 0 || filter.hiddenContainers.size > 0);
+  const hiddenByLevel =
+    lineCount === 0 && bufferRef.current.length > 0 && filters.levels.size < LEVEL_KEYS.length;
 
   return (
     <div
@@ -373,7 +445,7 @@ export const WorkloadLogView = memo(function WorkloadLogView({ clusterId, tab, a
       onKeyDown={(event) => {
         if (isFindShortcut(event)) {
           event.preventDefault();
-          termRef.current?.openSearch();
+          openSearch();
         }
       }}
     >
@@ -399,12 +471,23 @@ export const WorkloadLogView = memo(function WorkloadLogView({ clusterId, tab, a
         onSince={setSince}
         onTail={setTail}
         onLegend={setLegend}
-        onSearch={() => termRef.current?.openSearch()}
+        onSearch={openSearch}
         onPauseToggle={togglePause}
         onClear={clear}
         onCopy={copyAll}
         onSave={save}
         onRetry={restart}
+        mode={filters.mode}
+        onMode={filters.setMode}
+        levels={filters.levels}
+        counts={counts}
+        onLevels={filters.setLevels}
+        onLoki={
+          LOKI_WORKLOAD_KINDS.has(tab.workload.kind)
+            ? () =>
+                openLokiForWorkload(clusterId, tab.namespace, tab.workload.kind, tab.workload.name)
+            : undefined
+        }
       />
       {skipped > 0 && (
         <div className="border-tone-warning/30 bg-tone-warning/8 text-tone-warning-fg flex shrink-0 items-center gap-2 border-b px-3 py-1 text-[11.5px]">
@@ -417,10 +500,42 @@ export const WorkloadLogView = memo(function WorkloadLogView({ clusterId, tab, a
         </div>
       )}
       <div className="flex min-h-0 flex-1">
-        <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden pt-1 pl-2">
+        {structured && (
+          <div className="bg-surface min-h-0 min-w-0 flex-1">
+            <StructuredLogView
+              index={indexRef.current}
+              version={recordsVersion}
+              counts={counts}
+              filters={filters}
+              source={sourceColumn}
+              hidden={hiddenBySource}
+              hiddenKey={hiddenKey}
+              maxId={paused ? shownSeqRef.current : Infinity}
+              follow={!paused}
+              exportName={`${tab.workload.name}-${tab.namespace}`}
+              emptyState={
+                <MergedEmptyMessage
+                  status={status}
+                  selector={tab.selector}
+                  hasSources={sources.length > 0}
+                  hiddenEverything={false}
+                  onRetry={restart}
+                  onShowAll={showAll}
+                />
+              }
+              focusRequest={focusRequest}
+            />
+          </div>
+        )}
+        <div
+          className={cn(
+            'relative min-h-0 min-w-0 flex-1 overflow-hidden pt-1 pl-2',
+            structured && 'hidden',
+          )}
+        >
           <LogTerminal
             ref={termRef}
-            active={active}
+            active={active && !structured}
             isDark={isDark}
             fontSize={fontSize}
             wrap={wrap}
@@ -434,6 +549,8 @@ export const WorkloadLogView = memo(function WorkloadLogView({ clusterId, tab, a
               selector={tab.selector}
               hasSources={sources.length > 0}
               hiddenEverything={hiddenEverything}
+              hiddenByLevel={hiddenByLevel}
+              onShowAllLevels={() => filters.setLevels(ALL_LEVELS)}
               isDark={isDark}
               onRetry={restart}
               onShowAll={showAll}
@@ -461,21 +578,37 @@ export const WorkloadLogView = memo(function WorkloadLogView({ clusterId, tab, a
 });
 
 function MergedEmptyState({
+  isDark,
+  ...props
+}: Parameters<typeof MergedEmptyMessage>[0] & { isDark: boolean }) {
+  return (
+    <div
+      className="text-fg-dim pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center text-[11px]"
+      style={{ backgroundColor: isDark ? XTERM_DARK_BG : XTERM_LIGHT_BG }}
+    >
+      <MergedEmptyMessage {...props} />
+    </div>
+  );
+}
+
+function MergedEmptyMessage({
   status,
   selector,
   hasSources,
   hiddenEverything,
-  isDark,
+  hiddenByLevel = false,
   onRetry,
   onShowAll,
+  onShowAllLevels,
 }: {
   status: StreamStatus;
   selector: string;
   hasSources: boolean;
   hiddenEverything: boolean;
-  isDark: boolean;
+  hiddenByLevel?: boolean;
   onRetry: () => void;
   onShowAll: () => void;
+  onShowAllLevels?: () => void;
 }) {
   i18n.useLocale();
   const button = 'btn-chrome rounded-app-sm pointer-events-auto h-6 px-2.5 text-[11px] font-medium';
@@ -498,6 +631,15 @@ function MergedEmptyState({
         </button>
       </>
     );
+  } else if (hiddenByLevel) {
+    body = (
+      <>
+        {i18n.t('No lines at the selected levels.')}
+        <button type="button" onClick={onShowAllLevels} className={button}>
+          {i18n.t('Show all levels')}
+        </button>
+      </>
+    );
   } else if (status.state === 'connecting') {
     body = i18n.t('Loading logs…');
   } else if (!hasSources) {
@@ -511,12 +653,5 @@ function MergedEmptyState({
   } else {
     body = status.state === 'ended' ? i18n.t('No log lines.') : i18n.t('Waiting for log output…');
   }
-  return (
-    <div
-      className="text-fg-dim pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center text-[11px]"
-      style={{ backgroundColor: isDark ? XTERM_DARK_BG : XTERM_LIGHT_BG }}
-    >
-      {body}
-    </div>
-  );
+  return <>{body}</>;
 }

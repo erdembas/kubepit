@@ -1,4 +1,6 @@
 import { create } from 'zustand';
+import { builderQuery, type LokiBuilder } from '@/lib/logs/logql';
+import type { LokiRangeKey } from '@/lib/logs/loki';
 import type { PromRangeKey } from '@/lib/prometheus';
 import type { ClusterId, Gvk, ManifestSource, TerminalSpec } from '@/types';
 import { useAppStore } from './useAppStore';
@@ -104,6 +106,18 @@ export type DockTab =
       title: string;
       /** What is open; null until a folder or files are picked. */
       source: ManifestSource | null;
+    }
+  // -- Loki (historical logs) --------------------------------------------------
+  /** LogQL against the cluster's Loki (see `dock/loki/`). */
+  | {
+      id: string;
+      kind: 'loki';
+      title: string;
+      /** LogQL in the editor; run once Loki answers. */
+      query: string;
+      /** Builder state the query came from; null = hand-written LogQL. */
+      builder: LokiBuilder | null;
+      range: LokiRangeKey;
     };
 
 /** One side of a cross-cluster compare. */
@@ -122,7 +136,8 @@ type DockTabInput =
   | Omit<Extract<DockTab, { kind: 'workload-logs' }>, 'id'>
   | Omit<Extract<DockTab, { kind: 'files' }>, 'id'>
   | Omit<Extract<DockTab, { kind: 'promql' }>, 'id'>
-  | Omit<Extract<DockTab, { kind: 'manifests' }>, 'id'>;
+  | Omit<Extract<DockTab, { kind: 'manifests' }>, 'id'>
+  | Omit<Extract<DockTab, { kind: 'loki' }>, 'id'>;
 
 export interface ClusterDock {
   tabs: DockTab[];
@@ -194,6 +209,7 @@ function sameTarget(a: DockTab, b: DockTabInput): boolean {
   if (a.kind === 'promql' && b.kind === 'promql') return !!b.query && a.query === b.query;
   if (a.kind === 'manifests' && b.kind === 'manifests')
     return sameManifestPaths(a.source, b.source);
+  if (a.kind === 'loki' && b.kind === 'loki') return !!b.query && a.query === b.query;
   return false;
 }
 
@@ -492,6 +508,20 @@ export const dock = {
   /** PromQL console; `query` prefills (and runs) an expression, e.g. a chart's preset. */
   promql: (clusterId: ClusterId, query = '', range: PromRangeKey = '1h') =>
     useDockStore.getState().openTab(clusterId, { kind: 'promql', title: 'PromQL', query, range }),
+  /** Loki historical logs; a builder (pod / workload preselected) or LogQL prefills and runs. */
+  loki: (
+    clusterId: ClusterId,
+    init: { builder?: LokiBuilder | null; query?: string; range?: LokiRangeKey } = {},
+  ) => {
+    const builder = init.builder ?? null;
+    return useDockStore.getState().openTab(clusterId, {
+      kind: 'loki',
+      title: 'Loki',
+      query: init.query ?? (builder ? builderQuery(builder) : ''),
+      builder,
+      range: init.range ?? '1h',
+    });
+  },
   /** Local manifests workspace; focuses the tab that already has `source` open. */
   manifests: (clusterId: ClusterId, source: ManifestSource | null = null) =>
     useDockStore.getState().openTab(clusterId, {

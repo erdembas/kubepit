@@ -4,9 +4,11 @@ import { handlers, register, type MockArgs } from './registry';
 
 /**
  * Demo log streams for the dock in browser previews. Output looks like real
- * workloads — nginx access logs, Spring Boot with stack traces, Go zap JSON
- * and klog, pino-pretty style ANSI colour — picked from the pod/container
- * name, and honours tail / since / timestamps / previous / follow.
+ * workloads — nginx access logs, Spring Boot with stack traces, Go zap JSON,
+ * logfmt, klog (structured), Python logging with tracebacks, pino-pretty
+ * style ANSI colour — picked from the pod/container name (mixed on generic
+ * pods, so the structured view has something to parse), and honours tail /
+ * since / timestamps / previous / follow.
  */
 
 type Event = string[];
@@ -165,7 +167,7 @@ const klog: Generator = (ts) => {
       `W${tag}       1 reflector.go:561] k8s.io/client-go/informers/factory.go:160: watch of *v1.Secret ended with: an error on the server ("unable to decode an event from the watch stream: http2: client connection lost") has prevented the request from succeeding`,
     ];
   return [
-    `I${tag}       1 ${pick(['controller.go:197] "Starting workers" worker count=2', 'leaderelection.go:258] successfully acquired lease kube-system/cert-manager-controller', 'trigger_controller.go:223] "Certificate does not need re-issuance" key="checkout/cart-tls"'])}`,
+    `I${tag}       1 ${pick(['controller.go:197] "Starting workers" controller="certificate" worker_count=2', 'leaderelection.go:258] successfully acquired lease kube-system/cert-manager-controller', 'trigger_controller.go:223] "Certificate does not need re-issuance" key="checkout/cart-tls"'])}`,
   ];
 };
 
@@ -191,7 +193,50 @@ const ansi: Generator = (ts) => {
   ];
 };
 
-const mix: Generator = (ts) => pick([nginx, java, goJson, klog, ansi, ansi])(ts);
+const logfmt: Generator = (ts) => {
+  const t = ts.toISOString();
+  const roll = Math.random();
+  if (roll < 0.05)
+    return [
+      `time=${t} level=error msg="job failed" queue=${pick(['emails', 'invoices', 'thumbnails'])} job_id=${hex(8)} attempt=${1 + rand(5)} err="redis: connection pool timeout"`,
+    ];
+  if (roll < 0.13)
+    return [
+      `time=${t} level=warn msg="queue backlog growing" queue=${pick(['emails', 'invoices'])} depth=${200 + rand(800)} consumers=${1 + rand(4)}`,
+    ];
+  if (roll < 0.25)
+    return [
+      `time=${t} level=debug msg=poll queue=${pick(['emails', 'invoices'])} waited=${rand(900)}ms`,
+    ];
+  return [
+    `time=${t} level=info msg="job done" queue=${pick(['emails', 'invoices', 'thumbnails'])} job_id=${hex(8)} duration=${(Math.random() * 900).toFixed(1)}ms size=${rand(90_000)}`,
+  ];
+};
+
+const python: Generator = (ts) => {
+  const stamp = `${ts.toISOString().slice(0, 10)} ${clock(ts).replace('.', ',')}`;
+  const roll = Math.random();
+  if (roll < 0.04)
+    return [
+      `${stamp} - app.reports - ERROR - Report generation failed for tenant=${rand(400)}`,
+      'Traceback (most recent call last):',
+      '  File "/app/reports/render.py", line 88, in render',
+      '    rows = fetch_rows(tenant, window)',
+      '  File "/app/reports/db.py", line 41, in fetch_rows',
+      '    raise TimeoutError("statement timeout after 30s")',
+      'TimeoutError: statement timeout after 30s',
+    ];
+  if (roll < 0.12)
+    return [
+      `${stamp} - app.cache - WARNING - Cache hit ratio dropped to ${(Math.random() * 40 + 40).toFixed(1)}%`,
+    ];
+  return [
+    `${stamp} - app.api - INFO - ${pick(['GET', 'POST'])} /api/reports/${rand(900)} ${pick([200, 200, 201, 404])} ${rand(300)}ms`,
+  ];
+};
+
+const mix: Generator = (ts) =>
+  pick([nginx, java, goJson, goJson, klog, logfmt, logfmt, python, ansi])(ts);
 
 export function generatorFor(pod: string, container: string | null): Generator {
   const key = `${pod} ${container ?? ''}`.toLowerCase();
@@ -200,7 +245,9 @@ export function generatorFor(pod: string, container: string | null): Generator {
   if (/controller|operator|cert-manager|argocd|coredns/.test(key))
     return (ts) => (chance(0.5) ? goJson(ts) : klog(ts));
   if (/kube-|etcd|scheduler/.test(key)) return klog;
-  if (/node|api|cart|checkout|worker|redis/.test(key)) return ansi;
+  if (/worker|queue|cron|job|sidekiq/.test(key)) return logfmt;
+  if (/python|report|django|flask|celery|ml-/.test(key)) return python;
+  if (/node|api|cart|checkout|redis/.test(key)) return ansi;
   return mix;
 }
 

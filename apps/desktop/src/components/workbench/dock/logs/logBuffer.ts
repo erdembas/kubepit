@@ -1,10 +1,13 @@
-import { stripAnsi } from './format';
+import { stripAnsi } from '@/lib/logs/ansi';
+import type { LogLevel } from '@/lib/logs/levels';
 
 export interface LogEntry {
   /** Monotonic per buffer; survives head trimming, so it doubles as an address. */
   seq: number;
   /** Raw line without the trailing newline (may contain ANSI). */
   text: string;
+  /** Level of the line's record (continuation lines inherit it); set on ingest. */
+  level?: LogLevel | null;
 }
 
 /** Memory bound shared by the buffer and the xterm scrollback. */

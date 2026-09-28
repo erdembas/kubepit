@@ -3,6 +3,7 @@ import type { ComponentType } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import {
+  CalendarSearch,
   ChartSpline,
   FileCode2,
   FolderGit2,
@@ -25,6 +26,7 @@ const TAB_ICON: Record<DockTab['kind'], ComponentType<{ className?: string }>> =
   files: FolderTree,
   promql: ChartSpline,
   manifests: FolderGit2,
+  loki: CalendarSearch,
 };
 
 interface Props {

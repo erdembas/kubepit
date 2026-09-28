@@ -1,23 +1,24 @@
 import * as i18n from '@/i18n';
-import { Flame } from 'lucide-react';
-import { usePrometheusStatus } from '@/components/workbench/metrics/usePrometheus';
+import { CalendarSearch } from 'lucide-react';
+import { useLokiStatus } from '@/components/workbench/dock/loki/useLoki';
 import { Input } from '@/components/ui/Input';
-import { cn } from '@/lib/cn';
-import { serviceLabel } from '@/lib/prometheus';
-import type { ClusterId, PromScheme, PrometheusConfig } from '@/types';
+import { lokiServiceLabel } from '@/lib/logs/loki';
+import type { ClusterId, LokiConfig, PromScheme } from '@/types';
 import { Field } from './Field';
+import { Chip } from './PrometheusFields';
 
-/** Form state of `ClusterDef.prometheus` (the port stays text while typing). */
-export interface PrometheusDraft {
-  mode: PrometheusConfig['mode'];
+/** Form state of `ClusterDef.loki` (the port stays text while typing). */
+export interface LokiDraft {
+  mode: LokiConfig['mode'];
   namespace: string;
   service: string;
   port: string;
   scheme: PromScheme;
   path_prefix: string;
+  tenant: string;
 }
 
-export function prometheusDraft(config: PrometheusConfig | undefined): PrometheusDraft {
+export function lokiDraft(config: LokiConfig | undefined): LokiDraft {
   if (config?.mode === 'service')
     return {
       mode: 'service',
@@ -26,26 +27,25 @@ export function prometheusDraft(config: PrometheusConfig | undefined): Prometheu
       port: String(config.port),
       scheme: config.scheme,
       path_prefix: config.path_prefix,
+      tenant: config.tenant,
     };
   return {
     mode: config?.mode ?? 'auto',
-    namespace: 'monitoring',
+    namespace: 'loki',
     service: '',
-    port: '9090',
+    port: '80',
     scheme: 'http',
     path_prefix: '',
+    tenant: '',
   };
 }
 
 /** The setting to save, or a message explaining what is missing. */
-export function prometheusConfig(
-  draft: PrometheusDraft,
-): { config: PrometheusConfig } | { error: string } {
+export function lokiConfig(draft: LokiDraft): { config: LokiConfig } | { error: string } {
   if (draft.mode !== 'service') return { config: { mode: draft.mode } };
   const port = Number(draft.port.trim());
-  if (!draft.namespace.trim())
-    return { error: i18n.t('Enter the namespace of the Prometheus service.') };
-  if (!draft.service.trim()) return { error: i18n.t('Enter the name of the Prometheus service.') };
+  if (!draft.namespace.trim()) return { error: i18n.t('Enter the namespace of the Loki service.') };
+  if (!draft.service.trim()) return { error: i18n.t('Enter the name of the Loki service.') };
   if (!Number.isInteger(port) || port < 1 || port > 65535)
     return { error: i18n.t('Enter a port between 1 and 65535.') };
   return {
@@ -56,49 +56,24 @@ export function prometheusConfig(
       port,
       scheme: draft.scheme,
       path_prefix: draft.path_prefix.trim(),
+      tenant: draft.tenant.trim(),
     },
   };
 }
 
-export function Chip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        'rounded-app-sm inline-flex h-7 items-center gap-1.5 border px-2 text-[11.5px] transition',
-        active
-          ? 'border-accent/40 bg-accent/12 text-fg font-medium'
-          : 'border-border text-fg-muted hover:text-fg hover:border-border-strong',
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
-/** "Metrics source" of the cluster editor: auto-detect, a specific service, or off. */
-export function PrometheusFields({
+/** "Historical logs" of the cluster editor: auto-detect Loki, a specific service, or off. */
+export function LokiFields({
   clusterId,
   value,
   onChange,
 }: {
   clusterId: ClusterId;
-  value: PrometheusDraft;
-  onChange: (next: PrometheusDraft) => void;
+  value: LokiDraft;
+  onChange: (next: LokiDraft) => void;
 }) {
   i18n.useLocale();
-  const status = usePrometheusStatus(clusterId).data;
-  const set = <K extends keyof PrometheusDraft>(key: K, v: PrometheusDraft[K]) =>
+  const status = useLokiStatus(clusterId).data;
+  const set = <K extends keyof LokiDraft>(key: K, v: LokiDraft[K]) =>
     onChange({ ...value, [key]: v });
   const detected =
     status?.state === 'available' && status.source === 'detected' && status.service
@@ -107,7 +82,7 @@ export function PrometheusFields({
 
   return (
     <div className="space-y-3">
-      <Field label={i18n.t('Prometheus')}>
+      <Field label={i18n.t('Loki')}>
         <div className="flex flex-wrap items-center gap-1">
           <Chip active={value.mode === 'auto'} onClick={() => set('mode', 'auto')}>
             {i18n.t('Detect automatically')}
@@ -120,18 +95,18 @@ export function PrometheusFields({
           </Chip>
           {value.mode === 'auto' && detected && (
             <span className="text-fg-dim ml-2 flex items-center gap-1 text-[11px]">
-              <Flame className="text-accent/80 h-3 w-3" aria-hidden />
-              {i18n.t('Found {service}', { service: serviceLabel(detected) })}
+              <CalendarSearch className="text-accent/80 h-3 w-3" aria-hidden />
+              {i18n.t('Found {service}', { service: lokiServiceLabel(detected) })}
             </span>
           )}
         </div>
       </Field>
       <p className="text-fg-dim -mt-1.5 text-[11px]">
         {value.mode === 'off'
-          ? i18n.t('Charts use the last hour from metrics-server only.')
+          ? i18n.t('Historical logs are not offered; live pod logs still work.')
           : value.mode === 'auto'
             ? i18n.t(
-                'Looks for kube-prometheus-stack, the Prometheus chart, Thanos, VictoriaMetrics, Mimir or OpenShift monitoring and falls back to metrics-server.',
+                'Looks for the Loki gateway, query frontend, read path or single binary in namespaces such as loki, logging, monitoring and observability.',
               )
             : i18n.t(
                 'Queried through the API server’s service proxy with this cluster’s credentials (needs get on services/proxy).',
@@ -144,7 +119,7 @@ export function PrometheusFields({
               <Input
                 mono
                 value={value.namespace}
-                placeholder="monitoring"
+                placeholder="loki"
                 onChange={(e) => set('namespace', e.target.value)}
               />
             </Field>
@@ -152,7 +127,7 @@ export function PrometheusFields({
               <Input
                 mono
                 value={value.service}
-                placeholder="prometheus-operated"
+                placeholder="loki-gateway"
                 onChange={(e) => set('service', e.target.value)}
               />
             </Field>
@@ -161,12 +136,12 @@ export function PrometheusFields({
                 mono
                 inputMode="numeric"
                 value={value.port}
-                placeholder="9090"
+                placeholder="80"
                 onChange={(e) => set('port', e.target.value.replace(/[^0-9]/g, ''))}
               />
             </Field>
           </div>
-          <div className="grid grid-cols-[auto_1fr] items-end gap-3">
+          <div className="grid grid-cols-[auto_1fr_1fr] items-end gap-3">
             <Field label={i18n.t('Scheme')}>
               <div className="flex h-8 items-center gap-1">
                 {(['http', 'https'] as const).map((scheme) => (
@@ -180,15 +155,20 @@ export function PrometheusFields({
                 ))}
               </div>
             </Field>
-            <Field
-              label={i18n.t('Path prefix')}
-              hint={i18n.t('For example /select/0/prometheus (vmselect) or /prometheus (Mimir).')}
-            >
+            <Field label={i18n.t('Path prefix')}>
               <Input
                 mono
                 value={value.path_prefix}
                 placeholder="/"
                 onChange={(e) => set('path_prefix', e.target.value)}
+              />
+            </Field>
+            <Field label={i18n.t('Tenant')} hint={i18n.t('X-Scope-OrgID of a multi-tenant Loki.')}>
+              <Input
+                mono
+                value={value.tenant}
+                placeholder={i18n.t('none')}
+                onChange={(e) => set('tenant', e.target.value)}
               />
             </Field>
           </div>
@@ -211,7 +191,7 @@ export function PrometheusFields({
                   }
                   className="text-fg-muted hover:text-fg hover:bg-fg/5 rounded px-1.5 py-0.5 font-mono text-[10.5px]"
                 >
-                  {`${serviceLabel(c)}:${c.port}`}
+                  {`${lokiServiceLabel(c)}:${c.port}`}
                 </button>
               ))}
             </div>

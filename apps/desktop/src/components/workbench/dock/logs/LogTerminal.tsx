@@ -37,7 +37,7 @@ interface Props {
   wrap: boolean;
   /** Lines that should be on screen, for re-rendering after wrap / width changes. */
   getEntries: () => LogEntry[];
-  /** Bytes for one entry; defaults to `formatLogLine(entry.text)` (merged logs add a prefix). */
+  /** Bytes for one entry; defaults to `formatLogLine` with the entry's level (merged logs add a prefix). */
   formatEntry?: (entry: LogEntry, opts: LogFormatOptions) => string;
   onContextMenu: (seq: number | null, x: number, y: number, selection: string) => void;
 }
@@ -161,7 +161,7 @@ export const LogTerminal = forwardRef<LogTerminalHandle, Props>(function LogTerm
         append: (index) => {
           const entry = batch[index]!;
           const format = formatEntryRef.current;
-          const bytes = format ? format(entry, opts) : formatLogLine(entry.text, opts);
+          const bytes = format ? format(entry, opts) : formatLogLine(entry.text, opts, entry.level);
           appendLineWithMarker(term, entry.seq, bytes, markers);
           return entry.text.length + 16;
         },

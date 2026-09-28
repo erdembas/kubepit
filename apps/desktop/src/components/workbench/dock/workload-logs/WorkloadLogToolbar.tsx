@@ -16,7 +16,10 @@ import { IconButton } from '@/components/ui/IconButton';
 import { Select, type SelectOption } from '@/components/ui/Select';
 import { cn } from '@/lib/cn';
 import { modChord } from '@/lib/platform';
-import { ToggleChip } from '../logs/LogToolbar';
+import type { LevelSet } from '@/lib/logs/filter';
+import type { LevelCounts } from '@/lib/logs/levels';
+import { LogModeChips, LokiButton, ToggleChip } from '../logs/LogToolbar';
+import type { LogMode } from '../logs/structured/useLogFilters';
 import { sinceSelectOptions, tailSelectOptions } from '../logs/options';
 import { StreamIndicator } from '../logs/StreamIndicator';
 import type { StreamStatus } from '../logs/useLogStream';
@@ -53,6 +56,14 @@ export interface WorkloadLogToolbarProps {
   onCopy: () => void;
   onSave: () => void;
   onRetry: () => void;
+  /** Structured logs: mode, level filter and counts. */
+  mode: LogMode;
+  onMode: (mode: LogMode) => void;
+  levels: LevelSet;
+  counts: LevelCounts;
+  onLevels: (levels: LevelSet) => void;
+  /** Opens the workload's historical logs in a Loki tab (workload kinds only). */
+  onLoki?: () => void;
 }
 
 /** Toolbar of the merged workload log view (same language as the pod log toolbar). */
@@ -110,6 +121,13 @@ export function WorkloadLogToolbar(props: WorkloadLogToolbarProps) {
         label={i18n.t('Wrap')}
         title={i18n.t('Wrap long lines')}
       />
+      <LogModeChips
+        mode={props.mode}
+        onMode={props.onMode}
+        levels={props.levels}
+        counts={props.counts}
+        onLevels={props.onLevels}
+      />
       <Select
         value={props.since === null ? 'all' : String(props.since)}
         onChange={(v) => props.onSince(v === 'all' ? null : Number(v))}
@@ -128,6 +146,7 @@ export function WorkloadLogToolbar(props: WorkloadLogToolbarProps) {
         <span className="text-fg-dim mr-1.5 hidden text-[10.5px] whitespace-nowrap tabular-nums @3xl:inline">
           {i18n.plural('{count} line', '{count} lines', props.lineCount)}
         </span>
+        {props.onLoki && <LokiButton onClick={props.onLoki} />}
         <IconButton
           size="xs"
           label={i18n.t('Find in logs ({shortcut})', { shortcut: modChord('F') })}

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import {
   ArrowDownToLine,
   Box,
+  CalendarSearch,
   Clock,
   Copy,
   Download,
@@ -11,14 +12,19 @@ import {
   Pause,
   Play,
   Search,
+  Table2,
   WrapText,
 } from 'lucide-react';
 import { IconButton } from '@/components/ui/IconButton';
 import { Select } from '@/components/ui/Select';
 import { cn } from '@/lib/cn';
 import { modChord } from '@/lib/platform';
+import type { LevelSet } from '@/lib/logs/filter';
+import type { LevelCounts } from '@/lib/logs/levels';
 import { sinceSelectOptions, tailSelectOptions } from './options';
 import { StreamIndicator } from './StreamIndicator';
+import { LevelFilterButton } from './structured/LevelFilterButton';
+import type { LogMode } from './structured/useLogFilters';
 import type { StreamStatus } from './useLogStream';
 
 export interface LogToolbarProps {
@@ -48,6 +54,14 @@ export interface LogToolbarProps {
   onCopy: () => void;
   onSave: () => void;
   onRetry: () => void;
+  /** Structured logs: mode, level filter and counts. */
+  mode: LogMode;
+  onMode: (mode: LogMode) => void;
+  levels: LevelSet;
+  counts: LevelCounts;
+  onLevels: (levels: LevelSet) => void;
+  /** Opens the pod's historical logs in a Loki tab. */
+  onLoki?: () => void;
 }
 
 /** Single-row log toolbar in RunHQ's LogPanelToolbar language (chips, compact selects, icon actions). */
@@ -110,6 +124,13 @@ export function LogToolbar(props: LogToolbarProps) {
         label={i18n.t('Wrap')}
         title={i18n.t('Wrap long lines')}
       />
+      <LogModeChips
+        mode={props.mode}
+        onMode={props.onMode}
+        levels={props.levels}
+        counts={props.counts}
+        onLevels={props.onLevels}
+      />
       <Select
         value={props.since === null ? 'all' : String(props.since)}
         onChange={(v) => props.onSince(v === 'all' ? null : Number(v))}
@@ -128,6 +149,7 @@ export function LogToolbar(props: LogToolbarProps) {
         <span className="text-fg-dim mr-1.5 hidden text-[10.5px] whitespace-nowrap tabular-nums @3xl:inline">
           {i18n.plural('{count} line', '{count} lines', props.lineCount)}
         </span>
+        {props.onLoki && <LokiButton onClick={props.onLoki} />}
         <IconButton
           size="xs"
           label={i18n.t('Find in logs ({shortcut})', { shortcut: modChord('F') })}
@@ -152,6 +174,42 @@ export function LogToolbar(props: LogToolbarProps) {
         />
       </div>
     </div>
+  );
+}
+
+/** Level filter and the structured-mode toggle (pod and workload log toolbars). */
+export function LogModeChips(props: {
+  mode: LogMode;
+  onMode: (mode: LogMode) => void;
+  levels: LevelSet;
+  counts: LevelCounts;
+  onLevels: (levels: LevelSet) => void;
+}) {
+  i18n.useLocale();
+  return (
+    <>
+      <LevelFilterButton levels={props.levels} counts={props.counts} onChange={props.onLevels} />
+      <ToggleChip
+        active={props.mode === 'structured'}
+        onClick={() => props.onMode(props.mode === 'structured' ? 'raw' : 'structured')}
+        icon={<Table2 />}
+        label={i18n.t('Structured')}
+        title={i18n.t('Parse JSON, logfmt and common formats into a filterable table')}
+      />
+    </>
+  );
+}
+
+/** Opens historical logs of the same target in a Loki tab. */
+export function LokiButton({ onClick }: { onClick: () => void }) {
+  i18n.useLocale();
+  return (
+    <IconButton
+      size="xs"
+      label={i18n.t('Historical logs (Loki)')}
+      icon={<CalendarSearch />}
+      onClick={onClick}
+    />
   );
 }
 

@@ -649,6 +649,7 @@
   "Hide resource navigator": "Kaynak gezginini gizle",
   "Hide value of {key}": "{key} değerini gizle",
   "Highlights matching names; Enter jumps to the next match": "Eşleşen adları vurgular; Enter sonraki eşleşmeye atlar",
+  "Historical logs (Loki)": "Geçmiş loglar (Loki)",
   "History": "Geçmiş",
   "History builds up every 15 seconds while the cluster stays connected.": "Cluster bağlı kaldıkça geçmiş her 15 saniyede bir birikir.",
   "History limit {limit}": "Geçmiş sınırı {limit}",
