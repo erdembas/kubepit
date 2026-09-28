@@ -17,6 +17,7 @@ import { WorkloadsOverviewPage } from './overview/WorkloadsOverviewPage';
 import { PortForwardsPage } from './portforward/PortForwardsPage';
 import { ResourcePage } from './table/ResourcePage';
 import { ResourceMapPage } from './topology/ResourceMapPage';
+import { NetpolPage } from './netpol/NetpolPage';
 
 /**
  * Renders the page of one view tab. Hidden tabs stay mounted with
@@ -92,6 +93,15 @@ export const ViewHost = memo(function ViewHost({
   if (activeKind === VIEW.changes)
     return (
       <ChangesPage
+        clusterId={clusterId}
+        namespaces={namespaces}
+        isActive={isActive}
+        apiResources={apiResources}
+      />
+    );
+  if (activeKind === VIEW.netpolSimulator)
+    return (
+      <NetpolPage
         clusterId={clusterId}
         namespaces={namespaces}
         isActive={isActive}

@@ -22,6 +22,9 @@ import {
 } from '@/lib/kube/topology';
 import { useEvent } from '../util';
 import { edgeDescription, flagLabel } from './labels';
+// NetworkPolicy simulator: optional reachability overlay.
+import { aggregateReach, type ReachState } from '@/lib/kube/netpol/overlay';
+import { REACH_FILL, REACH_STROKE } from '../netpol/labels';
 import {
   FAMILY_DASH,
   FAMILY_FILL,
@@ -58,6 +61,20 @@ interface Props {
   fitRequest: number;
   focusRequest: FocusRequest | null;
   onActivate: (node: TopoNode) => void;
+  /** Reachability overlay: nodes coloured by state, the rest dimmed. */
+  overlay?: ReadonlyMap<string, ReachState> | null;
+}
+
+/** Overlay state of a node; collapsed pod groups combine their members. */
+function reachOf(
+  overlay: ReadonlyMap<string, ReachState> | null | undefined,
+  node: TopoNode | undefined,
+): ReachState | undefined {
+  if (!overlay || !node) return undefined;
+  return (
+    overlay.get(node.id) ??
+    (node.group ? aggregateReach(node.group.members.map((id) => overlay.get(id))) : undefined)
+  );
 }
 
 const LABEL_FONT = 'system-ui, sans-serif';
@@ -113,6 +130,8 @@ const NodeView = memo(function NodeView({
   focused,
   tabbable,
   showNamespace,
+  reach,
+  overlayOn,
 }: {
   node: TopoNode;
   placed: PlacedNode;
@@ -122,6 +141,8 @@ const NodeView = memo(function NodeView({
   focused: boolean;
   tabbable: boolean;
   showNamespace: boolean;
+  reach?: ReachState;
+  overlayOn?: boolean;
 }) {
   i18n.useLocale();
   const { x, y, w, h } = placed;
@@ -184,6 +205,7 @@ const NodeView = memo(function NodeView({
       className={cn(
         'cursor-pointer transition-opacity duration-150 outline-none',
         emphasis === 'dim' && 'opacity-30',
+        overlayOn && !reach && emphasis !== 'dim' && 'opacity-40',
       )}
     >
       <title>{tooltip}</title>
@@ -224,21 +246,26 @@ const NodeView = memo(function NodeView({
         width={w}
         height={h}
         rx={9}
-        strokeWidth={active ? 1.5 : 1}
+        strokeWidth={active ? 1.5 : reach ? 2 : 1}
         strokeDasharray={placeholder || node.aggregate ? '4 3' : undefined}
         className={cn(
           placeholder ? 'fill-surface' : 'fill-surface-raised',
           active
             ? 'stroke-accent'
-            : node.flag === 'missing'
-              ? 'stroke-status-error/70'
-              : emphasis === 'strong'
-                ? 'stroke-border-strong'
-                : 'stroke-border',
+            : reach
+              ? REACH_STROKE[reach]
+              : node.flag === 'missing'
+                ? 'stroke-status-error/70'
+                : emphasis === 'strong'
+                  ? 'stroke-border-strong'
+                  : 'stroke-border',
         )}
       />
       {active && (
         <rect x={x} y={y + 9} width={3} height={h - 18} rx={1.5} className="fill-accent" />
+      )}
+      {reach && !active && (
+        <rect x={x} y={y + 9} width={3} height={h - 18} rx={1.5} className={REACH_FILL[reach]} />
       )}
       <rect
         x={x + 10}
@@ -311,6 +338,7 @@ const EdgesLayer = memo(function EdgesLayer({
   hoveredId,
   dimAll,
   markerPrefix,
+  overlay,
 }: {
   layout: TopologyLayout;
   edges: readonly TopoEdge[];
@@ -318,6 +346,7 @@ const EdgesLayer = memo(function EdgesLayer({
   hoveredId: string | null;
   dimAll: boolean;
   markerPrefix: string;
+  overlay?: ReadonlyMap<string, ReachState> | null;
 }) {
   i18n.useLocale();
   const byId = useMemo(() => new Map(edges.map((e) => [e.id, e])), [edges]);
@@ -332,7 +361,8 @@ const EdgesLayer = memo(function EdgesLayer({
         if (!edge) return null;
         const family = EDGE_FAMILY[edge.kind];
         const touching = hoveredId !== null && (edge.from === hoveredId || edge.to === hoveredId);
-        const dimmed = hoveredId !== null ? !touching : dimAll;
+        const reach = overlay ? reachOf(overlay, nodes.get(edge.to)) : undefined;
+        const dimmed = hoveredId !== null ? !touching : dimAll || (!!overlay && !reach);
         return (
           <g key={pe.id}>
             <path
@@ -341,7 +371,7 @@ const EdgesLayer = memo(function EdgesLayer({
               strokeDasharray={FAMILY_DASH[family]}
               markerEnd={`url(#${markerPrefix}-${family})`}
               className={cn(
-                FAMILY_STROKE[family],
+                reach && reach !== 'source' ? REACH_STROKE[reach] : FAMILY_STROKE[family],
                 'transition-opacity duration-150',
                 dimmed ? 'opacity-15' : touching ? 'opacity-100' : 'opacity-60',
               )}
@@ -376,6 +406,7 @@ export function TopologyCanvas({
   fitRequest,
   focusRequest,
   onActivate,
+  overlay,
 }: Props) {
   i18n.useLocale();
   const uid = useId().replace(/:/g, '');
@@ -668,6 +699,7 @@ export function TopologyCanvas({
             hoveredId={hoveredId}
             dimAll={searching}
             markerPrefix={uid}
+            overlay={overlay}
           />
           <g>
             {[...layout.nodes.values()].map((placed) => {
@@ -691,6 +723,8 @@ export function TopologyCanvas({
                   focused={keyboard && placed.id === focusedId}
                   tabbable={placed.id === tabbableId}
                   showNamespace={showNamespace}
+                  reach={reachOf(overlay, node)}
+                  overlayOn={!!overlay}
                 />
               );
             })}
