@@ -997,13 +997,10 @@ async fn statistics_batches_carry_the_selector_and_fail_closed() {
         assert_eq!(request.header("x-scope-orgid"), Some("team-a"));
     }
     // Q11 keeps the label, so its answer can be checked.
+    let owners = "max by (namespace, pod, owner_kind, owner_name, cluster) (max_over_time(";
     assert!(stats
         .iter()
-        .any(|r| {
-            param(&r.path, "query").unwrap().starts_with(
-        "max by (namespace, pod, owner_kind, owner_name, cluster) (max_over_time(kube_pod_owner{"
-    )
-        }));
+        .any(|r| param(&r.path, "query").unwrap().starts_with(owners)));
 
     mismatch.store(true, Ordering::SeqCst);
     let err = app
