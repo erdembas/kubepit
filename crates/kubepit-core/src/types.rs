@@ -1088,6 +1088,9 @@ pub struct Settings {
     pub history: crate::history::HistorySettings,
     /// Power user: vim / k9s-style keys in the workbench (UI only).
     pub keyboard_mode: bool,
+    /// Recommendations: background scans, strategy and per-strategy
+    /// settings (`recommendations.rs`).
+    pub recommendations: crate::recommendations::RecommendationSettings,
 }
 
 impl Default for Settings {
@@ -1109,6 +1112,7 @@ impl Default for Settings {
             change_journal_disabled: Vec::new(),
             history: crate::history::HistorySettings::default(),
             keyboard_mode: false,
+            recommendations: crate::recommendations::RecommendationSettings::default(),
         }
     }
 }

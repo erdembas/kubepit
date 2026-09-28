@@ -24,7 +24,8 @@ use super::strategy::{
     ContainerInput, RecommendationStrategy, StrategyOutput, DEFAULT_STRATEGY_ID,
 };
 use super::types::{
-    Confidence, RecommendationWarning, ResourceValues, RightsizingSource, RightsizingStrategyInfo,
+    Confidence, RecommendationWarning, ResourceValues, RightsizingSettings, RightsizingSource,
+    RightsizingStrategyInfo,
 };
 
 pub const WARN_NO_USAGE: &str = "no-usage";
@@ -50,6 +51,20 @@ impl RecommendationStrategy for PercentileHeadroom {
         RightsizingStrategyInfo {
             id: DEFAULT_STRATEGY_ID.to_string(),
             name: "Percentile + headroom".to_string(),
+            defaults: RightsizingSettings::default(),
+            // The last three feed the shared evidence step, which runs after
+            // every strategy.
+            settings_keys: [
+                "cpu_headroom_percent",
+                "memory_headroom_percent",
+                "memory_limit_headroom_percent",
+                "days",
+                "min_hours",
+                "min_coverage",
+                "throttle_threshold_percent",
+            ]
+            .map(String::from)
+            .to_vec(),
         }
     }
 
@@ -128,9 +143,7 @@ mod tests {
     use super::*;
     use crate::rightsizing::math::{GIB, MIB};
     use crate::rightsizing::strategy::{recommend, WARN_MEMORY_LIMIT_RAISED};
-    use crate::rightsizing::types::{
-        Change, ContainerRecommendation, RightsizingSettings, UsageStats,
-    };
+    use crate::rightsizing::types::{Change, ContainerRecommendation, UsageStats};
 
     fn usage(cpu_p95: f64, memory_max: f64) -> UsageStats {
         UsageStats {
@@ -157,6 +170,8 @@ mod tests {
                 usage,
                 source,
                 settings: &settings,
+                evidence: None,
+                hpa: None,
             },
         )
     }
@@ -281,6 +296,25 @@ mod tests {
         assert!(!r.changed());
         assert_eq!(r.recommended, current);
         assert_eq!(codes(&r), vec![WARN_NO_USAGE]);
+    }
+
+    #[test]
+    fn info_lists_its_defaults_and_the_evidence_keys() {
+        let info = PercentileHeadroom.info();
+        assert_eq!(info.defaults, RightsizingSettings::default());
+        assert_eq!(
+            info.settings_keys,
+            vec![
+                "cpu_headroom_percent",
+                "memory_headroom_percent",
+                "memory_limit_headroom_percent",
+                "days",
+                "min_hours",
+                "min_coverage",
+                "throttle_threshold_percent",
+            ],
+            "the shared evidence step reads the last three for every strategy"
+        );
     }
 
     #[test]

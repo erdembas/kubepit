@@ -720,6 +720,7 @@ fields cross verbatim.
   - `defaults: RightsizingSettings`;
   - `settings_keys: string[]`, the settings the strategy reads, so the UI renders only
     those fields.
+    Every strategy lists `min_hours`, `min_coverage` and `throttle_threshold_percent`, which the shared evidence step (§6.7) reads.
 - `UsageStats` gains `cpu_avg: number | null` and `memory_avg: number | null`.
 - `ContainerRecommendation` gains `evidence: UsageEvidence | null`.
 - `WorkloadRecommendation` gains:

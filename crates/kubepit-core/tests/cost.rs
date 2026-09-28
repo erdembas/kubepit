@@ -11,9 +11,10 @@ use kubepit_core::cost::{
     CostSourceKind, CostSpecial, CostTrendBasis, CostUsageSource, CostWindow,
 };
 use kubepit_core::history::{AuditAction, AuditFilter, AuditOutcome};
+use kubepit_core::recommendations::RecommendationSettings;
 use kubepit_core::rightsizing::{
     Change, Confidence, ContainerResourceChange, RightsizingNoteKind, RightsizingRequest,
-    RightsizingSource, Verdict, WorkloadRef,
+    RightsizingSettings, RightsizingSource, Verdict, WorkloadRef,
 };
 use kubepit_core::types::{DryRunOperation, PromScheme};
 use serde_json::{json, Value};
@@ -566,6 +567,74 @@ async fn right_sizing_recommends_from_prometheus_history() {
         .find(|q| q.starts_with("quantile_over_time"))
         .unwrap();
     assert!(!p95.contains("namespace=~"), "{p95}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn right_sizing_uses_the_backend_recommendation_settings() {
+    let server = start(rightsizing_router(true)).await;
+    let (_dir, app, _recorder, id) = setup(&server.url, true);
+    let mut settings = app.settings();
+    settings.recommendations = RecommendationSettings {
+        strategy: Some("workload-history".into()),
+        overrides: [(
+            "workload-history".into(),
+            RightsizingSettings {
+                cpu_headroom_percent: 50.0,
+                ..RightsizingSettings::default()
+            },
+        )]
+        .into(),
+        ..RecommendationSettings::default()
+    };
+    app.set_settings(settings).unwrap();
+
+    // No strategy or settings in the request: the saved strategy and its override.
+    let report = app
+        .rightsizing_report(&id, &RightsizingRequest::default())
+        .await
+        .unwrap();
+    assert_eq!(
+        (report.strategy.as_str(), report.strategy_auto),
+        ("workload-history", false)
+    );
+    assert_eq!(report.settings.cpu_headroom_percent, 50.0);
+    // 120m p95 + 50 % = 180m.
+    assert_eq!(
+        report.workloads[0].containers[0].recommended.cpu_request,
+        Some(180.0)
+    );
+
+    // The request's own strategy and settings win; a strategy without an
+    // override runs with its defaults.
+    let explicit = RightsizingRequest {
+        strategy: Some("percentile-headroom".into()),
+        ..Default::default()
+    };
+    let report = app.rightsizing_report(&id, &explicit).await.unwrap();
+    assert_eq!(report.strategy, "percentile-headroom");
+    assert_eq!(report.settings.cpu_headroom_percent, 15.0);
+    let own = RightsizingRequest {
+        settings: Some(RightsizingSettings {
+            cpu_headroom_percent: 400.0,
+            ..RightsizingSettings::default()
+        }),
+        ..Default::default()
+    };
+    let report = app.rightsizing_report(&id, &own).await.unwrap();
+    assert_eq!(report.settings.cpu_headroom_percent, 300.0, "normalized");
+
+    // Nothing saved and nothing requested: chosen automatically.
+    let mut settings = app.settings();
+    settings.recommendations = RecommendationSettings::default();
+    app.set_settings(settings).unwrap();
+    let report = app
+        .rightsizing_report(&id, &RightsizingRequest::default())
+        .await
+        .unwrap();
+    assert_eq!(
+        (report.strategy.as_str(), report.strategy_auto),
+        ("percentile-headroom", true)
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

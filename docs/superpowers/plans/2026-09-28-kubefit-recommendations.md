@@ -247,12 +247,13 @@ workload details, Health and the dashboard.
   - `defaults = RightsizingSettings::default()`;
   - `settings_keys = ["cpu_headroom_percent", "memory_headroom_percent",
     "memory_limit_headroom_percent", "days"]`.
+  - *Review decision:* every strategy also lists `min_hours`, `min_coverage` and `throttle_threshold_percent`, which the shared evidence step reads.
 - `rightsizing_report` uses `request.settings` or else the resolved strategy's
   `info().defaults` (Task 10 replaces this with the effective settings).
 
 Steps:
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 #[test]
@@ -276,13 +277,13 @@ fn contract_defaults_normalize_and_old_json_reads() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p kubepit-core rightsizing::types`
 
 Expected: compile errors (`min_hours`, `UsageEvidence` … not found).
 
-- [ ] **Step 3: Implement the types, clamps and field plumbing listed under Interfaces**
+- [x] **Step 3: Implement the types, clamps and field plumbing listed under Interfaces**
 
 - Add `evidence: None, hpa: None` to every existing `ContainerInput` literal: the tests
   in `strategy.rs`, `percentile.rs`, `math.rs` and `mod.rs`.
@@ -293,19 +294,19 @@ Expected: compile errors (`min_hours`, `UsageEvidence` … not found).
     and `cost_replicas: replicas`;
   - containers get `evidence: null`.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core rightsizing && pnpm typecheck`
 
 Expected: PASS. Every existing right-sizing test is still green.
 
-- [ ] **Step 5: Verify the demo**
+- [x] **Step 5: Verify the demo**
 
 Run: `pnpm dev:ui`, open a cloud cluster → Cost → Right-sizing.
 
 Expected: the list renders as before, with no console errors.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/kubepit-core/src/rightsizing apps/desktop/src/types/index.ts apps/desktop/src/lib/kube/rightsizing/model.ts apps/desktop/src/lib/ipc/mock/cost.ts
@@ -622,7 +623,7 @@ git commit -m "feat(rightsizing): fold per-pod statistics into workload evidence
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn evidence_caps_confidence_and_adds_flags() {
@@ -647,21 +648,21 @@ Steps:
 #[test] fn oom_makes_the_verdict_under() { assert_eq!(verdict(&[oom_container], 10.0, 5.0), Verdict::Under); }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core -- rightsizing::strategy rightsizing::math`
 
 Expected: FAIL (`apply_evidence` not found).
 
-- [ ] **Step 3: Implement `apply_evidence`, wire it into `recommend`, and add the verdict rule**
+- [x] **Step 3: Implement `apply_evidence`, wire it into `recommend`, and add the verdict rule**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core rightsizing`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/src/rightsizing
@@ -702,7 +703,7 @@ git commit -m "feat(rightsizing): flags and confidence caps from usage evidence"
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Test helpers: `current(cpu, mem)` sets both requests and a memory limit of `mem`;
 `requests_only(cpu, mem)` sets the two requests and no limits.
@@ -746,21 +747,21 @@ Test helpers: `current(cpu, mem)` sets both requests and a memory limit of `mem`
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core -- rightsizing::workload_history rightsizing::strategy`
 
 Expected: FAIL to compile.
 
-- [ ] **Step 3: Implement the strategy and `resolve`**
+- [x] **Step 3: Implement the strategy and `resolve`**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core rightsizing`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/src/rightsizing
@@ -1046,7 +1047,7 @@ git commit -m "feat(rightsizing): recommend and patch CronJobs"
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn lenses_follow_kubefit_semantics() {
@@ -1065,21 +1066,21 @@ Steps:
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core rightsizing::summary`
 
 Expected: FAIL to compile.
 
-- [ ] **Step 3: Implement `summary.rs`, set the lenses, mirror the TS types, and update the docs section**
+- [x] **Step 3: Implement `summary.rs`, set the lenses, mirror the TS types, and update the docs section**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core && pnpm typecheck`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/src/rightsizing apps/desktop/src/types/index.ts docs/ARCHITECTURE.md
@@ -1123,7 +1124,7 @@ git commit -m "feat(rightsizing): lenses, risk score and run summaries"
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn recommendation_settings_default_and_normalize() {
@@ -1144,21 +1145,21 @@ Steps:
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core recommendations`
 
 Expected: FAIL to compile.
 
-- [ ] **Step 3: Implement the settings, normalization and wiring, and mirror them in TS and the demo**
+- [x] **Step 3: Implement the settings, normalization and wiring, and mirror them in TS and the demo**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core && pnpm typecheck`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core apps/desktop/src/types/index.ts apps/desktop/src/lib/ipc/mock/app.ts

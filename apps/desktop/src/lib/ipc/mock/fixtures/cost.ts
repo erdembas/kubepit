@@ -439,6 +439,9 @@ export const DEFAULT_SETTINGS: RightsizingSettings = {
   min_cpu_millicores: 10,
   min_memory_bytes: 32 * MiB,
   days: 7,
+  min_hours: 24,
+  min_coverage: 0.9,
+  throttle_threshold_percent: 5,
 };
 
 function roundUp(value: number, step: number) {
@@ -611,6 +614,7 @@ function finalize(
     warnings,
     cpu_limit_raised: cpuLimit != null,
     memory_limit_raised: memLimit != null,
+    evidence: null,
   };
 }
 
@@ -624,8 +628,34 @@ export function recommendContainer(
   return finalize(name, current, usage, percentileHeadroom(current, usage, source, s));
 }
 
+/** Settings every backend strategy reads (the last three feed the shared evidence step). */
+const SETTINGS_KEYS = [
+  'cpu_headroom_percent',
+  'memory_headroom_percent',
+  'memory_limit_headroom_percent',
+  'days',
+  'min_hours',
+  'min_coverage',
+  'throttle_threshold_percent',
+];
+
+/**
+ * The backend's strategies. The demo computes both with the percentile math;
+ * only their defaults (15 % vs. 20 % CPU headroom) differ.
+ */
 export const STRATEGIES: RightsizingStrategyInfo[] = [
-  { id: 'percentile-headroom', name: 'Percentile + headroom' },
+  {
+    id: 'percentile-headroom',
+    name: 'Percentile + headroom',
+    defaults: DEFAULT_SETTINGS,
+    settings_keys: SETTINGS_KEYS,
+  },
+  {
+    id: 'workload-history',
+    name: 'Workload history',
+    defaults: { ...DEFAULT_SETTINGS, cpu_headroom_percent: 20, memory_headroom_percent: 20 },
+    settings_keys: SETTINGS_KEYS,
+  },
 ];
 
 const changed = (c: ContainerRecommendation) =>
@@ -778,6 +808,11 @@ export function workloadRecommendations(
         monthly_delta: next - current,
         monthly_current: current,
         changed: recs.some(changed),
+        pods: [],
+        pods_truncated: false,
+        hpa: null,
+        lenses: [],
+        cost_replicas: replicas,
       });
     }
   }

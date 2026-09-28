@@ -25,7 +25,9 @@ pub mod ownership;
 pub mod patch;
 pub mod percentile;
 pub mod strategy;
+pub mod summary;
 pub mod types;
+pub mod workload_history;
 
 pub use types::*;
 
@@ -240,12 +242,15 @@ pub fn recommend_workload(
         .containers
         .iter()
         .map(|(name, current)| {
+            let u = usage.get(&(index, name.clone()));
             let input = strategy::ContainerInput {
                 name,
                 current: *current,
-                usage: usage.get(&(index, name.clone())).map(|u| u.stats),
+                usage: u.map(|u| u.stats),
                 source,
                 settings,
+                evidence: u.and_then(|u| u.evidence.as_ref()),
+                hpa: None,
             };
             strategy::recommend(strategy, &input)
         })
@@ -263,7 +268,7 @@ pub fn recommend_workload(
         .map(|c| c.confidence)
         .min()
         .unwrap_or(Confidence::Low);
-    WorkloadRecommendation {
+    let mut rec = WorkloadRecommendation {
         kind: w.kind.clone(),
         namespace: w.namespace.clone(),
         name: w.name.clone(),
@@ -276,7 +281,14 @@ pub fn recommend_workload(
         monthly_delta: monthly_recommended - monthly_current,
         monthly_current,
         containers,
-    }
+        pods: Vec::new(),
+        pods_truncated: false,
+        hpa: None,
+        lenses: Vec::new(),
+        cost_replicas: f64::from(w.replicas),
+    };
+    rec.lenses = summary::lenses_of(&rec);
+    rec
 }
 
 /// Changed first, then the largest saving, then the largest increase.
@@ -351,8 +363,23 @@ impl Kubepit {
     ) -> Result<RightsizingReport> {
         let cluster = self.cluster_def(cluster_id)?;
         let client = self.client(cluster_id).await?;
-        let settings = request.settings.clone().normalized();
-        let strategy = strategy::strategy(request.strategy.as_deref())?;
+        // The request's strategy (an unknown one is an error), else the saved
+        // one (an unknown one is ignored), else automatic. Owner metrics come
+        // with the collection pipeline; name-matched presets never resolve
+        // pods through them.
+        let recommendations = self.settings().recommendations;
+        let requested = request
+            .strategy
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .or(recommendations.saved_strategy());
+        let (strategy, strategy_auto) = strategy::resolve(requested, false)?;
+        // The request's own settings, else the strategy's effective ones.
+        let settings = match &request.settings {
+            Some(s) => s.clone().normalized(),
+            None => crate::recommendations::effective_settings(&recommendations, strategy),
+        };
         let workloads = match &request.workload {
             Some(target) => {
                 if patch::template_path(&target.kind).is_none() {
@@ -446,6 +473,7 @@ impl Kubepit {
             .map(|(i, w)| recommend_workload(w, &usage, i, source, &settings, &pricing, strategy))
             .collect();
         sort_recommendations(&mut list);
+        let now = now_millis();
         Ok(RightsizingReport {
             strategy: strategy.info().id,
             strategies: strategy::strategies(),
@@ -456,7 +484,9 @@ impl Kubepit {
             pricing,
             workloads: list,
             notes,
-            computed_at: now_millis(),
+            computed_at: now,
+            strategy_auto,
+            window_end: now,
         })
     }
 
@@ -734,6 +764,8 @@ mod tests {
             strategy::strategy(None).unwrap(),
         );
         assert_eq!(rec.confidence, Confidence::High);
+        assert_eq!(rec.lenses, summary::lenses_of(&rec), "lenses are set");
+        assert!(rec.lenses.contains(&RecommendationLens::CpuReduction));
         assert!(rec.changed);
         assert!(rec.monthly_delta < 0.0, "a saving");
         // The proxy container has no usage: untouched (and it does not lower the confidence).
