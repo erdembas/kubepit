@@ -42,6 +42,7 @@ import type {
   KubeconfigChanged,
   KubeconfigSource,
   KubeObject,
+  LocalFile,
   LocalPortStatus,
   LogChunk,
   LogOptions,
@@ -484,6 +485,10 @@ export const ipc = {
   alertsMarkRead: (ids: string[] | null) => call<void>('alerts_mark_read', { ids }),
   /** `ids: null` clears everything; broadcasts `alerts://changed`. */
   alertsClear: (ids: string[] | null) => call<void>('alerts_clear', { ids }),
+
+  // -- Resource wizards -----------------------------------------------------
+  /** Bytes of a file picked in the open dialog, base64 (at most 1 MiB; never logged). */
+  localFileRead: (path: string) => call<LocalFile>('local_file_read', { path }),
 
   // -- Terminal -------------------------------------------------------------
   ...terminalIpc,

@@ -36,6 +36,7 @@ import { gitopsActions } from './gitopsActions';
 import { withGitOpsWarning } from '../gitops/owner';
 import { MERGED_LOG_KINDS, openPodDebug, openPodFiles, openWorkloadLogs } from './logsDebugActions';
 import { workloadActions } from './workloadActions';
+import { wizardActions } from './wizardActions';
 
 import {
   openPodLogs,
@@ -200,6 +201,8 @@ export function resourceActions({
   workloadActions({ clusterId, cluster, gvk, obj }).forEach(add);
   // GitOps: Argo CD sync / refresh / terminate / auto-sync, Flux reconcile / suspend.
   gitopsActions({ clusterId, cluster, gvk, obj }).forEach(add);
+  // Resource wizards: expose, create ingress, add role binding (forms → create editor).
+  wizardActions({ clusterId, cluster, obj }).forEach(add);
   if (kind === 'Service') {
     const ports = servicePortOptions(obj);
     if (ports.length && asString(spec(obj).type) !== 'ExternalName')

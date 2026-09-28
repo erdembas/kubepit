@@ -16,6 +16,7 @@ import {
   type PaletteFilter,
   type PaletteItem,
 } from './paletteItems';
+import { createItems } from './createItems';
 import { explainKindItems } from './explainItems';
 import { fleetSearchItem } from './fleetSearchItem';
 import { updateActions, workbenchItems } from './workbenchItems';
@@ -91,9 +92,11 @@ export function CommandPalette() {
     }
     const active = clusters.find((c) => c.id === selectedClusterId);
     if (active && (filter === 'all' || filter === 'resources')) {
-      const jumps = [...resourceJumps(active), ...explainKindItems(active, q)].filter(
-        (item) => item.type === 'action' && matches(q, item.label, item.keywords),
-      );
+      const jumps = [
+        ...resourceJumps(active),
+        ...explainKindItems(active, q),
+        ...createItems(active),
+      ].filter((item) => item.type === 'action' && matches(q, item.label, item.keywords));
       // Without a query, keep the list short: resources only when filtered.
       if (jumps.length && (q || filter === 'resources')) {
         out.push({

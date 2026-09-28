@@ -36,6 +36,8 @@ export type DockTab =
       /** Initial YAML (template or empty). */
       yaml: string;
       namespace: string | null;
+      /** Start with the dry-run review of `yaml` (manifests handed over by wizards). */
+      review?: boolean;
     }
   | {
       id: string;
@@ -399,13 +401,19 @@ export const dock = {
       container: container ?? containers[0] ?? null,
       previous,
     }),
-  create: (clusterId: ClusterId, namespace: string | null, yaml = '') =>
+  create: (
+    clusterId: ClusterId,
+    namespace: string | null,
+    yaml = '',
+    opts: { review?: boolean } = {},
+  ) =>
     useDockStore.getState().openTab(clusterId, {
       kind: 'editor',
       mode: 'create',
       title: 'Create resource',
       yaml,
       namespace,
+      ...(opts.review ? { review: true } : {}),
     }),
   edit: (clusterId: ClusterId, gvk: Gvk, namespace: string | null, name: string) =>
     useDockStore.getState().openTab(clusterId, {

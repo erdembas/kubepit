@@ -1402,3 +1402,18 @@ export interface FleetSearchEvent {
   forbidden_kinds: string[];
   error: string | null;
 }
+
+// -- Resource wizards ----------------------------------------------------------
+
+/** A local file the user picked for a wizard (`local_file_read`, at most 1 MiB). */
+export interface LocalFile {
+  /** The path as read. */
+  path: string;
+  /** Last path segment, the default data key. */
+  name: string;
+  size: number;
+  /** Valid UTF-8 (text); everything else belongs in `binaryData`. */
+  utf8: boolean;
+  /** Standard base64 of the whole file. */
+  base64: string;
+}

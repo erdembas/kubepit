@@ -7,6 +7,7 @@ import { useAppStore } from '@/store/useAppStore';
 import type { ApplyMode, ClusterId, DryRunResult } from '@/types';
 import { errorText } from '../../util';
 import { yamlIssues } from './documents';
+import { resolvePendingNamespaces } from './pendingNamespaces';
 
 /**
  * "Review changes": a server-side dry run of the editor text (same mode and
@@ -92,7 +93,12 @@ export function useDryRunReview(clusterId: ClusterId) {
       ipc
         .resourceDryRunYaml(clusterId, text, mode, namespace)
         .then((results) => {
-          if (id === seq.current) setReview({ status: 'ready', mode, results });
+          if (id === seq.current)
+            setReview({
+              status: 'ready',
+              mode,
+              results: resolvePendingNamespaces(text, results, namespace),
+            });
         })
         .catch((e: unknown) => {
           if (id === seq.current) setReview({ status: 'error', mode, message: errorText(e) });

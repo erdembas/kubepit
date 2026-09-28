@@ -164,6 +164,56 @@ no backend code and no dependency on the `argocd` or `flux` CLIs.
   before applying (always on production clusters). Dry runs never mutate,
   so they are allowed on read-only clusters.
 
+## Resource wizards
+
+Form-based `kubectl create` / `kubectl expose` (`components/workbench/wizards/`).
+Wizards only build YAML: the manifest goes to the create editor, which runs
+the usual server-side dry-run review and applies it (production review and
+typed confirmations, `read_only` in the backend, RBAC all unchanged).
+
+- Generators are pure TS in `lib/kube/wizards/` (validation mirrors the API
+  server's name/key/port rules; the dry run stays the final check):
+  `expose.ts` (Service from a workload or pod: ports from the pod template,
+  named ports kept as target ports, selector from the workload's own
+  selector, pods it would match beyond the target), `ingress.ts` (rules,
+  classes, TLS from a `kubernetes.io/tls` Secret or cert-manager
+  `cluster-issuer` / `issuer` annotations, ingress-nginx annotation toggles
+  when the chosen or default IngressClass is ingress-nginx, SAN coverage),
+  `secret.ts` (generic, docker-registry `.dockerconfigjson`, tls, basic-auth,
+  ssh-auth; base64 done for the user, previews redacted until "Reveal"),
+  `tls.ts` (PKCS#1 / SEC1 / PKCS#8 key parsing and a key ↔ leaf certificate
+  match for RSA, ECDSA and Ed25519 keys that embed their public key; the key
+  is only compared, never shown), `configmap.ts` (literals, files — non-UTF-8
+  ones as `binaryData` — and `.env` imports), `namespace.ts` (Pod Security
+  Standards labels, ResourceQuota / LimitRange presets), `rbac.ts`
+  (ServiceAccount + RoleBinding to a Role or ClusterRole), `cron.ts` /
+  `cronjob.ts` (schedule parsing incl. macros, localized description built
+  from two translated phrases, next runs in the CronJob's time zone).
+- `WizardShell` is the frame: form and live YAML preview side by side (or
+  stacked, by container query), a footer that names the first blocking
+  problem, a non-blocking RBAC hint for what will be created, and "Open in
+  editor" / "Review & create". `handOff` opens a create tab with
+  `review: true` (the editor starts the dry run in `create` mode) or, when the
+  wizard was opened from the editor's template picker, replaces that
+  editor's content. Wizard state lives in memory only; secret values are
+  never logged or persisted outside the object being created.
+- The create editor's review treats "namespaces … not found" as a new
+  object when an earlier document of the same manifest creates that
+  Namespace (`dock/editor/pendingNamespaces.ts`), since documents are
+  applied in order.
+- Entry points: a Create menu on the resource page's "+" for kinds with
+  wizards (`wizards/catalog.ts`), object actions Expose / Create Ingress /
+  Add RoleBinding (`actions/wizardActions.ts`, gated in `ACTION_ACCESS`),
+  the create editor's template picker and the palette (`create secret`,
+  `expose`, …; not on read-only clusters). "Job from a CronJob" lists the
+  namespace's CronJobs and runs their existing "Trigger now" action.
+- Local files: `local_file_read` (`local_files.rs`) reads a file picked in
+  the open dialog — regular files up to 1 MiB, bytes as base64 plus a UTF-8
+  flag, content never logged, errors name only path and sizes.
+- Demo: `mock/wizards.ts` serves fixture files for the demo picker paths; the
+  TLS certificate and key are generated with WebCrypto on first use, so no
+  key material ships.
+
 ## Logs & debug
 
 - `workload_logs.rs` watches the pods of a label selector and fans out one

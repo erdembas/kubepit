@@ -411,6 +411,7 @@
   "The session ended.": "Oturum sona erdi.",
   "The source cluster does not serve this kind.": "Kaynak cluster bu türü sunmuyor.",
   "The terminal could not be started.": "Terminal başlatılamadı.",
+  "The wizard's manifest replaces what you typed.": "Sihirbazın manifesti yazdıklarının yerini alır.",
   "This cluster is read-only. Changes cannot be saved or applied.": "Bu cluster salt okunur. Değişiklikler kaydedilemez veya uygulanamaz.",
   "This folder is empty": "Bu klasör boş",
   "This query returns a string, which cannot be charted.": "Bu sorgu bir metin döndürüyor; grafiği çizilemez.",

@@ -11,6 +11,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { useDockStore, type DockTab } from '@/store/useDockStore';
 import type { ApplyMode, ClusterId } from '@/types';
 import { RESOURCE_TEMPLATES } from '../templates';
+import { editorWizardOptions, openEditorWizard } from '../../wizards/editorWizards';
 import { ApplyResults } from './ApplyResults';
 import { applyManifest, type DocResult } from './applyManifest';
 import { BarLabel, EditorBar, ReadOnlyNotice } from './EditorChrome';
@@ -81,7 +82,28 @@ export const CreateEditor = memo(function CreateEditor({
     return [...names].sort().map((n) => ({ value: n, label: n }));
   }, [namespace, namespaces, cluster?.accessible_namespaces]);
 
+  // Wizards build a manifest and hand it back to this editor (see `wizards/`).
+  const onWizardYaml = (text: string, ns: string | null, reviewNow: boolean) => {
+    const apply = () => {
+      setTemplateId('');
+      setText(text);
+      setBaseline('');
+      setResults(null);
+      if (ns) setNamespace(ns);
+      if (reviewNow) startDryRun(text, 'create', ns ?? namespace);
+    };
+    if (!dirty) return apply();
+    requestConfirm({
+      title: i18n.t('Replace editor content?'),
+      message: i18n.t("The wizard's manifest replaces what you typed."),
+      confirmLabel: i18n.t('Replace'),
+      tone: 'danger',
+      onConfirm: apply,
+    });
+  };
+
   const pickTemplate = (id: string) => {
+    if (openEditorWizard(id, clusterId, namespace, onWizardYaml)) return;
     const template = RESOURCE_TEMPLATES.find((t) => t.id === id);
     if (!template) return;
     const apply = () => {
@@ -140,6 +162,14 @@ export const CreateEditor = memo(function CreateEditor({
     (mode: ApplyMode = 'apply') => startDryRun(yamlRef.current, mode, namespace),
     [namespace, startDryRun],
   );
+  // A manifest handed over by a wizard opens straight in the dry-run review.
+  useEffect(() => {
+    if (!tab.review) return;
+    useDockStore.getState().updateTab(clusterId, tab.id, { review: false });
+    startDryRun(tab.yaml, 'create', tab.namespace ?? namespace);
+    // Once, when the tab opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Production clusters always review before creating or applying (Cmd+S included).
   const commit = useCallback(
     (mode: ApplyMode) => (reviewFirst ? startReview(mode) : void run(mode)),
@@ -169,7 +199,10 @@ export const CreateEditor = memo(function CreateEditor({
           <Select
             value={templateId}
             onChange={pickTemplate}
-            options={RESOURCE_TEMPLATES.map((t) => ({ value: t.id, label: t.label }))}
+            options={[
+              ...RESOURCE_TEMPLATES.map((t) => ({ value: t.id, label: t.label })),
+              ...editorWizardOptions(),
+            ]}
             placeholder={i18n.t('Template…')}
             ariaLabel={i18n.t('Template')}
             leading={<Layers size={12} />}

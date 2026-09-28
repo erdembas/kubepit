@@ -177,6 +177,8 @@ pub fn run() {
             ipc::alerts_list,
             ipc::alerts_mark_read,
             ipc::alerts_clear,
+            // Resource wizards
+            ipc::local_file_read,
             // Terminal
             terminal::commands::terminal_create,
             terminal::commands::terminal_write,

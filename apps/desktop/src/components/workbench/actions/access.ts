@@ -26,6 +26,9 @@ type Requirement = (target: Target) => AccessNeed;
 const POD = toGvk(BUILTIN.Pod);
 const JOB = toGvk(BUILTIN.Job);
 const NODE = toGvk(BUILTIN.Node);
+const SERVICE = toGvk(BUILTIN.Service);
+const INGRESS = toGvk(BUILTIN.Ingress);
+const ROLE_BINDING = toGvk(BUILTIN.RoleBinding);
 
 /** Where the node-shell helper pod may be created, in the order `node_shell.rs` tries. */
 export const NODE_SHELL_NAMESPACES = ['kube-system', 'default'] as const;
@@ -101,6 +104,10 @@ export const ACTION_ACCESS: Record<string, Requirement> = {
     }),
     accessCheck('create', POD, { namespace: ns, subresource: 'attach', name: obj.metadata.name }),
   ],
+  // Resource wizards: what the generated manifest creates.
+  expose: ({ ns }) => [accessCheck('create', SERVICE, { namespace: ns })],
+  'create-ingress': ({ ns }) => [accessCheck('create', INGRESS, { namespace: ns })],
+  'add-rolebinding': ({ ns }) => [accessCheck('create', ROLE_BINDING, { namespace: ns })],
 };
 
 /** What action `actionId` needs on `obj`, or `undefined` when it is not gated. */
