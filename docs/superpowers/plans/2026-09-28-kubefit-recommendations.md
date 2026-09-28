@@ -106,7 +106,8 @@ workload details, Health and the dashboard.
 | Pod names stored per workload | 50 | |
 
 **Dependencies:** no new crates, except phase 7's in-tree `hyper`, `hyper-util`,
-`http-body-util`, `tokio-rustls` and `rustls`.
+`http-body-util`, `tokio-rustls`, `rustls` and `rustls-native-certs` (the system roots
+for the tunnel's TLS).
 
 **Checks** (every task ends green):
 - `pnpm typecheck`
@@ -2682,7 +2683,7 @@ git commit -m "feat(prometheus): cluster-label selector on every preset and tena
 - Create: `crates/kubepit-core/src/prometheus/tunnel.rs`
 - Modify:
   - `crates/kubepit-core/Cargo.toml` (hyper 1, hyper-util, http-body-util, tokio-rustls,
-    rustls, all already in `Cargo.lock`)
+    rustls, rustls-native-certs, all already in `Cargo.lock`)
   - `crates/kubepit-core/src/portforward.rs:352` (`resolve_target` becomes `pub(crate)`)
   - `crates/kubepit-core/src/prometheus/mod.rs` (`prometheus_get` chooses the tunnel
     when `auth` is set, and only for the configured service: a detected candidate
