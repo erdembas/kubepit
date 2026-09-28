@@ -58,6 +58,7 @@ export function buildKubeSystem(db: ClusterDb) {
           {
             name: 'aws-eks-nodeagent',
             image: `602401143452.dkr.ecr.${p.region}.amazonaws.com/amazon/aws-network-policy-agent:v1.1.6-eksbuild.1`,
+            args: ['--enable-network-policy=true'],
             cpu: ['25m'],
           },
         ],
