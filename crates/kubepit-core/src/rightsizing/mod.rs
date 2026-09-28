@@ -19,7 +19,9 @@
 //!   container resources, dry-run first (allowed on read-only clusters),
 //!   then applied (refused on read-only clusters).
 
+pub mod evidence;
 pub mod math;
+pub mod ownership;
 pub mod patch;
 pub mod percentile;
 pub mod strategy;
@@ -52,6 +54,7 @@ use crate::prometheus::usage::ContainerStatsMap;
 use crate::quantity::{parse_cpu_millicores, parse_memory_bytes};
 use crate::resources::object_api;
 use crate::types::{DryRunResult, Gvk, MetricsHistoryQuery, PodMetric, PrometheusState};
+use evidence::{ContainerUsage, WorkloadUsage};
 
 /// A workload with the resources of its pod template.
 #[derive(Debug, Clone, PartialEq)]
@@ -129,17 +132,24 @@ impl PodMatcher {
     /// The workload a pod belongs to; the longest matching name wins, so the
     /// pods of `web-api` never count for `web`.
     pub fn find(&self, namespace: &str, pod: &str) -> Option<usize> {
+        self.find_where(namespace, pod, |_| true)
+    }
+
+    /// [`find`](Self::find) among the workloads `keep` accepts (by index).
+    pub fn find_where(
+        &self,
+        namespace: &str,
+        pod: &str,
+        keep: impl Fn(usize) -> bool,
+    ) -> Option<usize> {
         self.by_namespace
             .get(namespace)?
             .iter()
-            .filter(|(_, re, _)| re.is_match(pod))
+            .filter(|(i, re, _)| keep(*i) && re.is_match(pod))
             .max_by_key(|(_, _, len)| *len)
             .map(|(i, _, _)| *i)
     }
 }
-
-/// Usage per `(workload index, container)`.
-pub type WorkloadUsage = HashMap<(usize, String), UsageStats>;
 
 /// Per-container Prometheus statistics folded into workloads: worst
 /// replica wins, hours are per replica (at most the window).
@@ -173,7 +183,8 @@ pub fn usage_from_prometheus(
                 cpu_max: s.cpu_max_millicores.unwrap_or(p95).max(p95),
                 memory_max: memory,
                 hours: s.hours,
-                ..Default::default()
+                cpu_avg: None,
+                memory_avg: None,
             });
     }
     let max_hours = f64::from(days) * 24.0;
@@ -183,7 +194,13 @@ pub fn usage_from_prometheus(
             let mut merged = math::combine(&list)?;
             let replicas = f64::from(workloads[i].replicas.max(1));
             merged.hours = (merged.hours / replicas).min(max_hours);
-            Some(((i, container), merged))
+            Some((
+                (i, container),
+                ContainerUsage {
+                    stats: merged,
+                    evidence: None,
+                },
+            ))
         })
         .collect()
 }
@@ -225,13 +242,14 @@ pub fn recommend_workload(
         .containers
         .iter()
         .map(|(name, current)| {
+            let u = usage.get(&(index, name.clone()));
             let input = strategy::ContainerInput {
                 name,
                 current: *current,
-                usage: usage.get(&(index, name.clone())).copied(),
+                usage: u.map(|u| u.stats),
                 source,
                 settings,
-                evidence: None,
+                evidence: u.and_then(|u| u.evidence.as_ref()),
                 hpa: None,
             };
             strategy::recommend(strategy, &input)
@@ -559,7 +577,13 @@ impl Kubepit {
                     let mut merged = math::combine(&list)?;
                     merged.hours =
                         (merged.hours / f64::from(workloads[i].replicas.max(1))).min(1.0);
-                    Some(((i, container), merged))
+                    Some((
+                        (i, container),
+                        ContainerUsage {
+                            stats: merged,
+                            evidence: None,
+                        },
+                    ))
                 })
                 .collect(),
         ))
@@ -716,7 +740,7 @@ mod tests {
         put("unrelated-x", "app", 999.0, 1.0, 1.0);
         let usage = usage_from_prometheus(&workloads, &stats, 7);
         assert_eq!(usage.len(), 1, "sidecars outside the template are skipped");
-        let app = usage[&(0, "app".to_string())];
+        let app = usage[&(0, "app".to_string())].stats;
         assert_eq!(app.cpu_p95, 150.0, "worst replica");
         assert_eq!(app.memory_max, 200.0 * MIB);
         assert_eq!(app.hours, 168.0, "per replica, capped at the window");

@@ -337,7 +337,7 @@ git commit -m "feat(rightsizing): evidence, lens and settings contract"
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn none_and_non_controller_owners_are_ignored() {
@@ -361,25 +361,25 @@ Steps:
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core rightsizing::ownership`
 
 Expected: FAIL to compile (`OwnerIndex` not defined).
 
-- [ ] **Step 3: Implement `ownership.rs` per the Interfaces block**
+- [x] **Step 3: Implement `ownership.rs` per the Interfaces block**
 
 Index keys are `(namespace, subject)`, where the subject is the `pod`, `replicaset` or
 `job_name` label. The values are `BTreeSet<(kind, name)>`, so `Ambiguous` lists its
 candidates in sorted order.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core rightsizing::ownership`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/src/rightsizing/ownership.rs crates/kubepit-core/src/rightsizing/mod.rs
@@ -435,7 +435,7 @@ git commit -m "feat(rightsizing): resolve pods to workloads through kube-state-m
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn stat_queries_follow_the_spec() {
@@ -467,24 +467,24 @@ Steps:
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core prometheus::workload_stats`
 
 Expected: FAIL to compile.
 
-- [ ] **Step 3: Implement the builders, `merge` and `prometheus_stats_batch`**
+- [x] **Step 3: Implement the builders, `merge` and `prometheus_stats_batch`**
 
 Ownership comes from `OwnerIndex::from_data`, with the answers of Q11–Q13 (an empty
 `PromData` for failed ones).
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core prometheus`
 
 Expected: PASS, and the existing Prometheus tests are still green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/src/prometheus
@@ -533,7 +533,7 @@ git commit -m "feat(prometheus): server-side workload statistics queries"
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn rollout_pods_fold_into_one_deployment() {
@@ -571,21 +571,21 @@ Steps:
 #[test] fn hpa_attaches_by_scale_target() { assert_eq!(f.extras[0].hpa.as_ref().unwrap().name, "api"); }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core rightsizing::evidence`
 
 Expected: FAIL to compile.
 
-- [ ] **Step 3: Implement `fold` and `union_hours`, and update the `mod.rs` call sites**
+- [x] **Step 3: Implement `fold` and `union_hours`, and update the `mod.rs` call sites**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core rightsizing`
 
 Expected: PASS, with the existing `mod.rs` tests adapted to `ContainerUsage`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/src/rightsizing
