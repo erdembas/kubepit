@@ -233,7 +233,7 @@ git commit -m "test(perf): scale presets and a paged, selector-aware fake API se
 
   Task 12 (H1) and Task 15 (H4) update the expectations pinned here.
 
-- [ ] **Step 1: Write the test** (a snapshot of today's behaviour; it passes on the current code)
+- [x] **Step 1: Write the test** (a snapshot of today's behaviour; it passes on the current code)
 
 ```rust
 // crates/kubepit-core/tests/perf_probe.rs
@@ -271,14 +271,14 @@ Where the counts come from:
 - secrets and configmaps = journal;
 - events = history persistence.
 
-The helpers `scale_setup`, `persist_history`, `wait_synced` and `gvk` live in this file.
+The helpers `scale_setup`, `persist_history`, `wait_synced` and `gvk` live in this file. _(Done: they, `watch_streams_per_path` and `unpaged_lists` live in `tests/support/perf.rs` instead, so `benches/e2e.rs` shares them. Every other path is also pinned at one stream. An ignored test repeats the snapshot at `m` and `l`: `cargo test -p kubepit-core --test perf_probe -- --ignored`. The counts matched at all three presets.)_
 
-- [ ] **Step 2: Run the test**
+- [x] **Step 2: Run the test**
 
 Run: `cargo test -p kubepit-core --test perf_probe -- --nocapture`
 Expected: PASS. If a count differs, the code changed after this plan was written. Pin the observed value, state it in the commit body, and record it in the spec's Results table (`structural/fanout`).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add crates/kubepit-core/tests/perf_probe.rs docs/superpowers/specs

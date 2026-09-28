@@ -412,6 +412,16 @@ impl ScaleCluster {
         self.collections.keys().cloned().collect()
     }
 
+    /// Whether `path` (without its query) is a collection this cluster
+    /// serves, cluster-wide or in one namespace.
+    pub fn serves_collection(&self, path: &str) -> bool {
+        resolve(path).is_some_and(|(key, namespace)| {
+            self.collections
+                .get(&key)
+                .is_some_and(|c| namespace.is_none() || c.namespaced)
+        })
+    }
+
     pub fn router(self: Arc<Self>, serve: ScaleServe) -> Router {
         Arc::new(move |req: &Request, _log: &Log| self.reply(req, &serve))
     }

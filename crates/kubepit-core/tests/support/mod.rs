@@ -7,6 +7,7 @@
 //! [`Router`] closure.
 #![allow(dead_code)]
 
+pub mod perf;
 pub mod scale;
 
 use std::sync::Arc;
