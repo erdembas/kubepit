@@ -8,47 +8,81 @@
 
 const LIB: &str = include_str!("../lib.rs");
 const AUDITED: &str = include_str!("../../../../../crates/kubepit-core/src/history/audited.rs");
-const CORE_TERMINAL: &str = include_str!("../../../../../crates/kubepit-core/src/terminal.rs");
-const TERMINAL_COMMANDS: &str = include_str!("../terminal/commands.rs");
-const RESOURCES: &str = include_str!("resources.rs");
-const WORKLOADS: &str = include_str!("workloads.rs");
-const MANIFESTS: &str = include_str!("manifests.rs");
-const HELM: &str = include_str!("helm.rs");
-const HELM_CHARTS: &str = include_str!("helm_charts.rs");
-const LOGS_DEBUG: &str = include_str!("logs_debug.rs");
-const COST: &str = include_str!("cost.rs");
-const CUSTOM_ACTIONS: &str = include_str!("custom_actions.rs");
 
-/// (command, source that must call the methods, audited core methods)
-const MUTATING: &[(&str, &str, &[&str])] = &[
-    ("resource_apply_yaml", RESOURCES, &["resource_apply_yaml"]),
-    ("resource_delete", RESOURCES, &["resource_delete"]),
-    ("resource_patch", RESOURCES, &["resource_patch"]),
-    ("resource_scale", RESOURCES, &["resource_scale"]),
-    ("resource_restart", RESOURCES, &["resource_restart"]),
-    ("cronjob_trigger", RESOURCES, &["cronjob_trigger"]),
-    ("node_cordon", RESOURCES, &["node_cordon"]),
-    ("node_drain", RESOURCES, &["node_drain"]),
-    ("rollout_undo", WORKLOADS, &["rollout_undo"]),
-    ("resource_set_image", WORKLOADS, &["resource_set_image"]),
-    ("manifests_apply", MANIFESTS, &["manifests_apply"]),
-    ("helm_rollback", HELM, &["helm_rollback"]),
-    ("helm_uninstall", HELM, &["helm_uninstall"]),
-    ("helm_upgrade_values", HELM, &["helm_upgrade_values"]),
-    ("helm_install", HELM_CHARTS, &["helm_install"]),
-    ("helm_upgrade", HELM_CHARTS, &["helm_upgrade"]),
-    ("pod_debug", LOGS_DEBUG, &["pod_debug"]),
-    ("pod_fs_upload", LOGS_DEBUG, &["pod_fs_upload"]),
-    ("rightsizing_apply", COST, &["rightsizing_apply"]),
-    ("custom_action_run", CUSTOM_ACTIONS, &["custom_action_run"]),
-    // `terminal_create` → `Kubepit::prepare_terminal` (core `terminal.rs`),
+/// A source file: (name for messages, contents).
+type Source = (&'static str, &'static str);
+
+const CORE_TERMINAL: Source = (
+    "kubepit-core/src/terminal.rs",
+    include_str!("../../../../../crates/kubepit-core/src/terminal.rs"),
+);
+const TERMINAL_COMMANDS: Source = (
+    "terminal/commands.rs",
+    include_str!("../terminal/commands.rs"),
+);
+const RESOURCES: Source = ("ipc/resources.rs", include_str!("resources.rs"));
+const WORKLOADS: Source = ("ipc/workloads.rs", include_str!("workloads.rs"));
+const MANIFESTS: Source = ("ipc/manifests.rs", include_str!("manifests.rs"));
+const HELM: Source = ("ipc/helm.rs", include_str!("helm.rs"));
+const HELM_CHARTS: Source = ("ipc/helm_charts.rs", include_str!("helm_charts.rs"));
+const LOGS_DEBUG: Source = ("ipc/logs_debug.rs", include_str!("logs_debug.rs"));
+const COST: Source = ("ipc/cost.rs", include_str!("cost.rs"));
+const CUSTOM_ACTIONS: Source = ("ipc/custom_actions.rs", include_str!("custom_actions.rs"));
+
+/// Mutating IPC commands: (command, its source). Each command's body must
+/// call the core method of the same name, defined in `history/audited.rs`.
+const MUTATING: &[(&str, Source)] = &[
+    ("resource_apply_yaml", RESOURCES),
+    ("resource_delete", RESOURCES),
+    ("resource_patch", RESOURCES),
+    ("resource_scale", RESOURCES),
+    ("resource_restart", RESOURCES),
+    ("cronjob_trigger", RESOURCES),
+    ("node_cordon", RESOURCES),
+    ("node_drain", RESOURCES),
+    ("rollout_undo", WORKLOADS),
+    ("resource_set_image", WORKLOADS),
+    ("manifests_apply", MANIFESTS),
+    ("helm_rollback", HELM),
+    ("helm_uninstall", HELM),
+    ("helm_upgrade_values", HELM),
+    ("helm_install", HELM_CHARTS),
+    ("helm_upgrade", HELM_CHARTS),
+    ("pod_debug", LOGS_DEBUG),
+    ("pod_fs_upload", LOGS_DEBUG),
+    ("rightsizing_apply", COST),
+    ("custom_action_run", CUSTOM_ACTIONS),
+];
+
+/// Mutating commands that reach the core through another function:
+/// (command, source, function of `source` whose body must call the methods,
+/// audited core methods).
+const MUTATING_VIA: &[(&str, Source, &str, &[&str])] = &[
+    // `terminal_create` calls `Kubepit::prepare_terminal` (checked below),
     // which creates node-shell pods and launches terminal custom actions.
     (
         "terminal_create",
         CORE_TERMINAL,
+        "prepare_terminal",
         &["start_node_shell", "prepare_custom_action_terminal"],
     ),
 ];
+
+/// Every mutating command with the function to inspect and the methods it
+/// must call.
+fn mutating() -> Vec<(&'static str, Source, &'static str, Vec<&'static str>)> {
+    MUTATING
+        .iter()
+        .map(|&(command, source)| (command, source, command, vec![command]))
+        .chain(
+            MUTATING_VIA
+                .iter()
+                .map(|&(command, source, function, methods)| {
+                    (command, source, function, methods.to_vec())
+                }),
+        )
+        .collect()
+}
 
 /// Read-only, dry-run-only or local-state commands (explicitly listed).
 const NOT_MUTATING: &[&str] = &[
@@ -201,16 +235,29 @@ fn registered() -> Vec<String> {
         .collect()
 }
 
-/// The body of `command` in `src`: from `pub async fn {command}(` to the next
-/// `#[tauri::command]` or the end; the whole file when not found (core
-/// sources).
-fn body<'a>(src: &'a str, command: &str) -> &'a str {
-    let Some(start) = src.find(&format!("pub async fn {command}(")) else {
-        return src;
+/// The body of `fn {function}` in `src` (`name`, for messages): from its
+/// line to the closing brace at the same indentation. Panics unless the
+/// function is defined exactly once, so a renamed, moved or generic command
+/// cannot pass by accident.
+fn body<'a>(src: &'a str, name: &str, function: &str) -> &'a str {
+    let needles = [format!("fn {function}("), format!("fn {function}<")];
+    let found: Vec<usize> = needles
+        .iter()
+        .flat_map(|needle| src.match_indices(needle.as_str()).map(|(i, _)| i))
+        .collect();
+    let [start] = found[..] else {
+        panic!(
+            "`fn {function}` is defined {} times in {name}; update audit_coverage.rs",
+            found.len()
+        );
     };
-    let rest = &src[start..];
-    let end = rest.find("#[tauri::command]").unwrap_or(rest.len());
-    &rest[..end]
+    let line = src[..start].rfind('\n').map_or(0, |i| i + 1);
+    let indent: String = src[line..].chars().take_while(|c| *c == ' ').collect();
+    let close = format!("\n{indent}}}\n");
+    let end = src[start..]
+        .find(&close)
+        .unwrap_or_else(|| panic!("the end of `fn {function}` in {name} was not found"));
+    &src[line..start + end + close.len()]
 }
 
 #[test]
@@ -224,45 +271,67 @@ fn registration_is_parsed() {
 }
 
 #[test]
+fn body_finds_exactly_one_function() {
+    let src = "#[tauri::command]\npub async fn a(x: u8) -> u8 {\n    x.b()\n}\n\n#[tauri::command]\npub fn c() {}\n";
+    assert_eq!(
+        body(src, "test", "a"),
+        "pub async fn a(x: u8) -> u8 {\n    x.b()\n}\n"
+    );
+    let generic = "    pub async fn g<R: Runtime>(r: R) {\n        r.h()\n    }\n";
+    assert!(body(generic, "test", "g").contains(".h("));
+    assert!(std::panic::catch_unwind(|| body(src, "test", "missing")).is_err());
+    assert!(std::panic::catch_unwind(|| body("fn a() {\n}\nfn a() {\n}\n", "test", "a")).is_err());
+}
+
+#[test]
 fn every_registered_command_is_classified() {
+    let rows = mutating();
+    let mut unclassified = Vec::new();
+    let mut twice = Vec::new();
     for name in registered() {
-        let mutating = MUTATING.iter().any(|(c, ..)| *c == name);
-        assert!(
-            mutating ^ NOT_MUTATING.contains(&name.as_str()),
-            "classify `{name}` in audit_coverage.rs (exactly once)"
-        );
+        let mutating = rows.iter().any(|(c, ..)| *c == name);
+        match (mutating, NOT_MUTATING.contains(&name.as_str())) {
+            (false, false) => unclassified.push(name),
+            (true, true) => twice.push(name),
+            _ => {}
+        }
     }
+    assert!(
+        unclassified.is_empty() && twice.is_empty(),
+        "classify in audit_coverage.rs: {unclassified:?}; listed as both mutating and not: {twice:?}"
+    );
 }
 
 #[test]
 fn classification_has_no_stale_names() {
     let names = registered();
-    for c in MUTATING
-        .iter()
-        .map(|(c, ..)| *c)
+    let stale: Vec<&str> = mutating()
+        .into_iter()
+        .map(|(c, ..)| c)
         .chain(NOT_MUTATING.iter().copied())
-    {
-        assert!(
-            names.iter().any(|n| n == c),
-            "`{c}` is not registered any more"
-        );
-    }
+        .filter(|c| !names.iter().any(|n| n == c))
+        .collect();
+    assert!(stale.is_empty(), "not registered any more: {stale:?}");
 }
 
 #[test]
 fn mutating_commands_call_audited_entry_points() {
-    for (command, source, methods) in MUTATING {
-        for method in *methods {
-            assert!(
-                body(source, command).contains(&format!(".{method}(")),
-                "`{command}` must call `{method}`"
-            );
-            assert!(
-                AUDITED.contains(&format!("fn {method}(")),
-                "`{method}` must be defined in history/audited.rs"
-            );
+    let mut problems = Vec::new();
+    for (command, source, function, methods) in mutating() {
+        let code = body(source.1, source.0, function);
+        for method in methods {
+            if !code.contains(&format!(".{method}(")) {
+                problems.push(format!("`{command}` ({function}) must call `{method}`"));
+            }
+            if !AUDITED.contains(&format!("fn {method}(")) {
+                problems.push(format!("`{method}` must be defined in history/audited.rs"));
+            }
         }
     }
-    // The terminal row checks the core: the command must reach it.
-    assert!(body(TERMINAL_COMMANDS, "terminal_create").contains(".prepare_terminal("));
+    // The terminal row checks `prepare_terminal`: the command must reach it.
+    let terminal = body(TERMINAL_COMMANDS.1, TERMINAL_COMMANDS.0, "terminal_create");
+    if !terminal.contains(".prepare_terminal(") {
+        problems.push("`terminal_create` must call `prepare_terminal`".to_string());
+    }
+    assert!(problems.is_empty(), "{problems:#?}");
 }

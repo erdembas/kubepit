@@ -952,6 +952,8 @@ async fn mutating_custom_actions_are_audited_without_output() {
                     { "id": "read", "name": "Read", "mode": "background", "command": "printf ok" },
                     { "id": "fail", "name": "Fail", "mode": "background", "mutating": true,
                       "command": "printf %s {annotations.kubectl.kubernetes.io/last-applied-configuration}; exit 3" },
+                    { "id": "sig", "name": "Killed", "mode": "background", "mutating": true,
+                      "command": "kill -KILL $$" },
                     { "id": "term", "name": "Shell", "mode": "terminal", "mutating": true,
                       "command": "echo {annotations.kubectl.kubernetes.io/last-applied-configuration} {labels.app}" }
                 ])
@@ -1005,6 +1007,9 @@ async fn mutating_custom_actions_are_audited_without_output() {
     // A non-zero exit fails the entry; its output is not kept either.
     let failed = app.custom_action_run(&id, "fail", &target).await.unwrap();
     assert_eq!(failed.exit_code, Some(3));
+    // So does a run killed by a signal (no exit code, no timeout).
+    let killed = app.custom_action_run(&id, "sig", &target).await.unwrap();
+    assert_eq!((killed.exit_code, killed.timed_out), (None, false));
     // Terminal launches are recorded when the terminal starts.
     target.labels.insert("app".into(), "web".into());
     app.prepare_terminal(
@@ -1023,16 +1028,20 @@ async fn mutating_custom_actions_are_audited_without_output() {
         .iter()
         .filter(|e| e.action == AuditAction::CustomAction)
         .collect();
-    assert_eq!(runs.len(), 3, "{runs:#?}");
+    assert_eq!(runs.len(), 4, "{runs:#?}");
     assert_eq!(runs[1].outcome, AuditOutcome::Error);
     assert_eq!(runs[1].result.as_deref(), Some("exit 3"));
-    let terminal = runs[2];
+    assert_eq!(runs[2].outcome, AuditOutcome::Error);
+    assert_eq!(runs[2].error.as_deref(), Some("terminated by a signal"));
+    assert_eq!(runs[2].result, None);
+    let terminal = runs[3];
     let request = terminal.request.as_ref().unwrap();
     assert_eq!(request["mode"], "terminal");
     // Labels of Secret-like targets are redacted too.
     let command = request["command"].as_str().unwrap();
     assert!(!command.contains("web"), "{command}");
-    assert_eq!(terminal.result.as_deref(), Some("started in a terminal"));
+    // A keyword the Activity view translates.
+    assert_eq!(terminal.result.as_deref(), Some("terminal-started"));
 
     let mut stored = serde_json::to_string(&all).unwrap();
     stored.push_str(&app.history_audit_export(&AuditFilter::default()).unwrap());

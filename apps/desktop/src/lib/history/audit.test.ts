@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { AuditEntry } from '@/types';
-import { actionLabel, actionTone, AUDIT_ACTIONS, requestSummary } from './audit';
+import {
+  actionLabel,
+  actionTone,
+  AUDIT_ACTIONS,
+  requestSummary,
+  resultText,
+  TERMINAL_STARTED,
+} from './audit';
 
 const entry = (request: Record<string, unknown> | null): AuditEntry => ({
   id: 1,
@@ -26,6 +33,15 @@ describe('custom action audit entries', () => {
     expect(AUDIT_ACTIONS).toContain('custom-action');
     expect(actionLabel('custom-action')).toBe('Custom action');
     expect(actionTone('custom-action')).toBe(actionTone('patch'));
+  });
+
+  it('translate result keywords; other results stay verbatim', () => {
+    expect(resultText(entry(null))).toBe('Exit code 0');
+    expect(resultText({ ...entry(null), result: TERMINAL_STARTED })).toBe('Started in a terminal');
+    expect(resultText({ ...entry(null), result: null })).toBeNull();
+    expect(resultText({ ...entry(null), action: 'cronjob-trigger', result: 'Job shop/x' })).toBe(
+      'Job shop/x',
+    );
   });
 
   it('summarize the action name verbatim', () => {

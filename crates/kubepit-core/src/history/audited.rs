@@ -51,6 +51,10 @@ fn doc_audit_target(doc: &Value, namespace: Option<&str>) -> AuditTarget {
     )
 }
 
+/// Result of a terminal custom action launch: a keyword the Activity view
+/// translates (`lib/history/audit.ts`).
+pub const TERMINAL_STARTED: &str = "terminal-started";
+
 /// Targets of a custom action run: every selected object (at most
 /// [`MAX_CAPTURED_OBJECTS`]), or the cluster for cluster-level runs.
 fn custom_action_targets(cluster: &ClusterDef, target: &CustomActionTarget) -> Vec<AuditTarget> {
@@ -760,71 +764,65 @@ impl Kubepit {
     }
 
     /// `custom_action_run`, audited for `mutating` background actions: the
-    /// redacted command and the exit code are kept, never the output.
-    /// Refusals (read-only cluster, disabled, out of scope) are not
-    /// recorded; non-mutating and open-url runs are not audited.
+    /// redacted command and the exit code are kept, never the output. The
+    /// action is resolved once, so the entry describes what ran. Refusals
+    /// (read-only cluster, disabled, out of scope) are not recorded;
+    /// non-mutating and open-url runs are not audited.
     pub async fn custom_action_run(
         &self,
         cluster_id: &str,
         action_id: &str,
         target: &CustomActionTarget,
     ) -> Result<CustomActionResult> {
-        let audit = match self.runnable_action(cluster_id, action_id, target) {
-            Ok((action, cluster))
-                if action.mutating && action.mode == CustomActionMode::Background =>
-            {
-                self.custom_action_audit(&action, &cluster, target, "background")
-                    .map(|audit| (audit, action.timeout_secs.max(1)))
-            }
-            _ => None,
-        };
-        let Some((mut audit, timeout_secs)) = audit else {
+        let (action, cluster) = self.runnable_action(cluster_id, action_id, target)?;
+        let audit = (action.mutating && action.mode == CustomActionMode::Background)
+            .then(|| self.custom_action_audit(&action, &cluster, target, "background"))
+            .flatten();
+        let Some(mut audit) = audit else {
             return self
-                .custom_action_run_unaudited(cluster_id, action_id, target)
+                .custom_action_run_unaudited(&action, &cluster, target)
                 .await;
         };
         let result = self
-            .custom_action_run_unaudited(cluster_id, action_id, target)
+            .custom_action_run_unaudited(&action, &cluster, target)
             .await;
-        match &result {
-            Ok(out) if out.timed_out => audit.fail(format!("timed out after {timeout_secs}s")),
-            Ok(out) => {
-                if let Some(code) = out.exit_code {
+        if let Ok(out) = &result {
+            match out.exit_code {
+                _ if out.timed_out => {
+                    audit.fail(format!("timed out after {}s", action.timeout_secs.max(1)))
+                }
+                Some(code) => {
                     audit.result(format!("exit {code}"));
                     if code != 0 {
                         audit.fail(format!("exit {code}"));
                     }
                 }
+                None => audit.fail("terminated by a signal"),
             }
-            Err(_) => {}
         }
         audit.finish(self, &result);
         result
     }
 
     /// Launch plan of a terminal custom action, audited for `mutating`
-    /// actions when the plan is ready ("started in a terminal"); what runs
-    /// in the terminal afterwards is not recorded.
+    /// actions when the plan is ready (result [`TERMINAL_STARTED`]); what
+    /// runs in the terminal afterwards is not recorded.
     pub(crate) fn prepare_custom_action_terminal(
         &self,
         cluster_id: &str,
         action_id: &str,
         target: &CustomActionTarget,
     ) -> Result<TerminalLaunch> {
-        let audit = match self.runnable_action(cluster_id, action_id, target) {
-            Ok((action, cluster))
-                if action.mutating && action.mode == CustomActionMode::Terminal =>
-            {
-                self.custom_action_audit(&action, &cluster, target, "terminal")
-            }
-            _ => None,
-        };
+        let (action, cluster) = self.runnable_action(cluster_id, action_id, target)?;
+        let audit = (action.mutating && action.mode == CustomActionMode::Terminal)
+            .then(|| self.custom_action_audit(&action, &cluster, target, "terminal"))
+            .flatten();
         let Some(mut audit) = audit else {
-            return self.prepare_custom_action_terminal_unaudited(cluster_id, action_id, target);
+            return self.prepare_custom_action_terminal_unaudited(&action, &cluster, target);
         };
-        let result = self.prepare_custom_action_terminal_unaudited(cluster_id, action_id, target);
+        let result = self.prepare_custom_action_terminal_unaudited(&action, &cluster, target);
         if result.is_ok() {
-            audit.result("started in a terminal");
+            audit.result(TERMINAL_STARTED);
         }
         audit.finish(self, &result);
         result

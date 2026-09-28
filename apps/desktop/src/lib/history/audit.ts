@@ -205,6 +205,22 @@ export function requestSummary(entry: AuditEntry): string | null {
   }
 }
 
+/** Result keyword of a terminal custom action launch (`history/audited.rs`). */
+export const TERMINAL_STARTED = 'terminal-started';
+
+/**
+ * What an entry's result says. Custom action keywords (`terminal-started`,
+ * `exit {code}`) are translated; every other result (Job, container, helper
+ * pod, Helm revision) is Kubernetes data and stays verbatim.
+ */
+export function resultText(entry: AuditEntry): string | null {
+  const result = entry.result;
+  if (!result || entry.action !== 'custom-action') return result;
+  if (result === TERMINAL_STARTED) return i18n.t('Started in a terminal');
+  const exit = /^exit (-?\d+)$/.exec(result);
+  return exit ? i18n.t('Exit code {code}', { code: Number(exit[1]) }) : result;
+}
+
 export type AuditRange = '24h' | '7d' | '30d' | 'all';
 
 export const AUDIT_RANGES: Record<AuditRange, number | null> = {

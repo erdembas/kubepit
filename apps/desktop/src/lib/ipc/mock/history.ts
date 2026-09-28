@@ -1,6 +1,6 @@
 import YAML from 'yaml';
 import { actionApplies } from '@/lib/customActions';
-import { historySettings } from '@/lib/history/audit';
+import { historySettings, TERMINAL_STARTED } from '@/lib/history/audit';
 import { kindKey, resolveRef } from '@/lib/kube/catalog';
 import type {
   AuditAction,
@@ -576,7 +576,7 @@ function customActionPlan(
     targets,
     request: { action: action.name, id: action.id, mode, command, targets: names.length },
     result: (r) => {
-      if (mode === 'terminal') return 'started in a terminal';
+      if (mode === 'terminal') return TERMINAL_STARTED;
       const out = r as CustomActionResult;
       return out.timed_out || out.exit_code === null ? null : `exit ${out.exit_code}`;
     },
@@ -584,7 +584,8 @@ function customActionPlan(
       if (mode === 'terminal') return null;
       const out = r as CustomActionResult;
       if (out.timed_out) return `timed out after ${Math.max(1, action.timeout_secs)}s`;
-      return out.exit_code !== null && out.exit_code !== 0 ? `exit ${out.exit_code}` : null;
+      if (out.exit_code === null) return 'terminated by a signal';
+      return out.exit_code !== 0 ? `exit ${out.exit_code}` : null;
     },
   };
 }

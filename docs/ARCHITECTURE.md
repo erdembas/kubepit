@@ -637,16 +637,20 @@ that never leaves the machine.
   with `dry_run: true`. Validation and API errors are recorded as errors.
 - **Custom actions** (`custom-action`, never revertible): background runs
   and terminal launches of `mutating` actions go through the audited
-  `custom_action_run` / `prepare_custom_action_terminal`. The request keeps
-  the action's name, id, mode, number of targets and the command
-  re-rendered with every `annotations.*` value (and, for Secret-like
-  kinds, every `labels.*` value) replaced by a marker; stdout and stderr
-  are never stored. Background runs record `exit {code}` (a non-zero exit
-  fails the entry; a timeout fails it with `timed out after {s}s`),
-  terminal launches "started in a terminal". Targets are the selected
-  objects (≤ 20) or the cluster. Non-mutating and open-url runs are not
-  audited; refused runs (read-only, disabled, out of scope) are not
-  recorded.
+  `custom_action_run` / `prepare_custom_action_terminal`, which resolve the
+  saved action once and pass it to the `*_unaudited` body, so the entry
+  describes what ran. The request keeps the action's name, id, mode,
+  number of targets and the command re-rendered with every
+  `annotations.*` value (and, for Secret-like kinds, every `labels.*`
+  value) replaced by a marker; stdout and stderr are never stored.
+  Background runs record `exit {code}` (a non-zero exit fails the entry; a
+  timeout fails it with `timed out after {s}s`, a signal with `terminated
+  by a signal`), terminal launches the keyword `terminal-started`. The
+  Activity view translates both results (`resultText` in
+  `lib/history/audit.ts`); other results stay verbatim. Targets are the
+  selected objects (≤ 20) or the cluster. Non-mutating and open-url runs
+  are not audited; refused runs (read-only, disabled, out of scope) are
+  not recorded.
 - **Secrets**: objects go through the change journal's `normalize`
   (Secret `data` / `stringData` become keyed-hash markers, bookkeeping and
   `status` dropped); patch bodies to secret-like kinds (`*Secret`), custom

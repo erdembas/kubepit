@@ -301,22 +301,22 @@ impl Kubepit {
         Ok(render_shell(&action.command, &values)?.text)
     }
 
-    /// `custom_action_run` without the audit log (see `history/audited.rs`):
-    /// run a saved `background` action and capture its output, or resolve an
-    /// `open-url` action's URL for the UI to open.
+    /// `custom_action_run` without the audit log (see `history/audited.rs`),
+    /// for an action [`Kubepit::runnable_action`] resolved: run a
+    /// `background` action and capture its output, or resolve an `open-url`
+    /// action's URL for the UI to open.
     pub(crate) async fn custom_action_run_unaudited(
         &self,
-        cluster_id: &str,
-        action_id: &str,
+        action: &CustomAction,
+        cluster: &ClusterDef,
         target: &CustomActionTarget,
     ) -> Result<CustomActionResult> {
-        let (action, cluster) = self.runnable_action(cluster_id, action_id, target)?;
         match action.mode {
             CustomActionMode::Terminal => {
                 bail!("the custom action \"{}\" runs in a terminal", action.name)
             }
             CustomActionMode::OpenUrl => {
-                let values = self.template_values(Some(&cluster), None, target);
+                let values = self.template_values(Some(cluster), None, target);
                 let url = render_url(&action.command, &values)?;
                 Ok(CustomActionResult {
                     mode: action.mode,
@@ -325,10 +325,10 @@ impl Kubepit {
                 })
             }
             CustomActionMode::Background => {
-                let kubeconfig = self.write_run_kubeconfig(&cluster)?;
-                let values = self.template_values(Some(&cluster), Some(&kubeconfig), target);
+                let kubeconfig = self.write_run_kubeconfig(cluster)?;
+                let values = self.template_values(Some(cluster), Some(&kubeconfig), target);
                 let command = render_shell(&action.command, &values)?.text;
-                let env = Self::action_env(&cluster, &kubeconfig, &action, target);
+                let env = Self::action_env(cluster, &kubeconfig, action, target);
                 let timeout = Duration::from_secs(u64::from(action.timeout_secs.max(1)));
                 let out = runner::run_shell(&command, &env, timeout).await?;
                 Ok(CustomActionResult {
@@ -345,25 +345,25 @@ impl Kubepit {
         }
     }
 
-    /// Launch plan of a `terminal` action (`TerminalSpec::CustomAction`),
-    /// without the audit log (see `history/audited.rs`).
+    /// Launch plan of a `terminal` action (`TerminalSpec::CustomAction`)
+    /// [`Kubepit::runnable_action`] resolved, without the audit log (see
+    /// `history/audited.rs`).
     pub(crate) fn prepare_custom_action_terminal_unaudited(
         &self,
-        cluster_id: &str,
-        action_id: &str,
+        action: &CustomAction,
+        cluster: &ClusterDef,
         target: &CustomActionTarget,
     ) -> Result<TerminalLaunch> {
-        let (action, cluster) = self.runnable_action(cluster_id, action_id, target)?;
         if action.mode != CustomActionMode::Terminal {
             bail!(
                 "the custom action \"{}\" does not run in a terminal",
                 action.name
             );
         }
-        let kubeconfig = self.write_run_kubeconfig(&cluster)?;
-        let values = self.template_values(Some(&cluster), Some(&kubeconfig), target);
+        let kubeconfig = self.write_run_kubeconfig(cluster)?;
+        let values = self.template_values(Some(cluster), Some(&kubeconfig), target);
         let command = render_shell(&action.command, &values)?.text;
-        let mut env = Self::action_env(&cluster, &kubeconfig, &action, target);
+        let mut env = Self::action_env(cluster, &kubeconfig, action, target);
         env.push(("KUBEPIT_ACTION_COMMAND".to_string(), command.clone()));
         let program = if cfg!(windows) {
             LaunchProgram::Exec {

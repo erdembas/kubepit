@@ -24,6 +24,7 @@ import {
   formatDuration,
   isHelmTarget,
   requestSummary,
+  resultText,
   targetKey,
   targetName,
   type ActionTone,
@@ -83,6 +84,7 @@ export function ActivityRow({
   const more = entry.targets.length - 1;
   const failed = entry.outcome === 'error';
   const summary = requestSummary(entry);
+  const result = resultText(entry);
   const label = `${actionLabel(entry.action)} ${first ? `${first.kind} ${targetName(first)}` : ''}`;
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.target !== e.currentTarget) return;
@@ -190,7 +192,7 @@ export function ActivityRow({
               />
             </span>
           </div>
-          {(summary || failed || entry.result) && (
+          {(summary || failed || result) && (
             <p className="mt-0.5 min-w-0 truncate text-[11.5px]">
               {failed ? (
                 <span className="text-status-error" title={entry.error ?? undefined}>
@@ -198,7 +200,7 @@ export function ActivityRow({
                 </span>
               ) : (
                 <span className="text-fg-muted font-mono">
-                  {[summary, entry.result].filter(Boolean).join(' · ')}
+                  {[summary, result].filter(Boolean).join(' · ')}
                 </span>
               )}
             </p>
@@ -236,6 +238,7 @@ function ActivityDetail({
   const [selected, setSelected] = useState(0);
   const object = objects[Math.min(selected, objects.length - 1)];
   const summary = requestSummary(entry);
+  const result = resultText(entry);
   const canOpen = openable(entry);
   return (
     <div className="border-border/60 bg-surface-muted/30 border-y">
@@ -252,9 +255,9 @@ function ActivityDetail({
         </Field>
         <Field label={i18n.t('Duration')}>{formatDuration(entry.duration_ms)}</Field>
         {summary && <Field label={i18n.t('Parameters')}>{summary}</Field>}
-        {entry.result && (
+        {result && (
           <Field label={i18n.t('Result')}>
-            <span className="font-mono text-[11.5px]">{entry.result}</span>
+            <span className="font-mono text-[11.5px]">{result}</span>
           </Field>
         )}
       </dl>
