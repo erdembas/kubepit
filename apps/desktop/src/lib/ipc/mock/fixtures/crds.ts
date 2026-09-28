@@ -3,6 +3,7 @@ import { GATEWAY_CRDS } from './gateway';
 import { gitopsCrds } from './gitops';
 import { buildInstances } from './instances';
 import { netpolCrds } from './netpol';
+import { trivyCrds } from './trivy';
 import { DAY, meta, obj } from './util';
 
 /** A few popular CRDs (cert-manager, Argo CD, Prometheus Operator). */
@@ -154,7 +155,7 @@ export const CRDS: CrdInput[] = [
 
 export function crdsFor(db: ClusterDb) {
   // GitOps: ApplicationSet and the Flux CRDs (./gitops.ts).
-  return [...CRDS, ...gitopsCrds(db), ...netpolCrds(db)].filter(
+  return [...CRDS, ...gitopsCrds(db), ...netpolCrds(db), ...trivyCrds(db)].filter(
     (c) => db.profile.argocd || c.group !== 'argoproj.io',
   );
 }

@@ -48,6 +48,8 @@ mod upgrade;
 mod history;
 // Power user: custom actions (k9s-plugin style).
 mod custom_actions;
+// Security: Pod Security Standards enforce dry run.
+mod security;
 
 pub use access::*;
 pub use alerts::*;
@@ -71,6 +73,7 @@ pub use openapi::*;
 pub use portforward::*;
 pub use prometheus::*;
 pub use resources::*;
+pub use security::*;
 pub use updater::*;
 pub use upgrade::*;
 pub use workloads::*;

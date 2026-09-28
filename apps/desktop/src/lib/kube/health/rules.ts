@@ -1,4 +1,5 @@
 import * as i18n from '@/i18n/core';
+import { SECURITY_RULES } from './securityRules';
 import type { Category, HealthKind, Severity } from './types';
 
 /**
@@ -435,6 +436,8 @@ export const RULES: readonly RuleDef[] = [
     () => i18n.t('cert-manager Certificates that are not ready'),
     () => i18n.t('Read the Ready condition message and the CertificateRequest / Order events.'),
   ),
+  // -- Pod Security Standards & RBAC (./securityRules.ts) ----------------------
+  ...SECURITY_RULES,
 ];
 
 const byId = new Map(RULES.map((r) => [r.id, r]));

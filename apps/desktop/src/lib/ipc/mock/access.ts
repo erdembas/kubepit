@@ -171,6 +171,8 @@ const CLUSTER_READER = rules([
 
 const CRD_READER = rules([
   [['cert-manager.io', 'argoproj.io', 'monitoring.coreos.com'], ['*'], READ],
+  // Trivy Operator reports (Security view).
+  [['aquasecurity.github.io'], ['*'], READ],
 ]);
 
 const CLUSTER_ADMIN = rules([[['*'], ['*'], ['*']]]);

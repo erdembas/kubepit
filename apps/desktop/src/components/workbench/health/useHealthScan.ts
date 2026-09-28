@@ -39,6 +39,12 @@ const KINDS: ReadonlyArray<[HealthKind, KindDef]> = [
   ['pdbs', BUILTIN.PodDisruptionBudget],
   ['hpas', BUILTIN.HorizontalPodAutoscaler],
   ['nodes', BUILTIN.Node],
+  // Security: Pod Security labels and RBAC objects.
+  ['namespaces', BUILTIN.Namespace],
+  ['roles', BUILTIN.Role],
+  ['clusterRoles', BUILTIN.ClusterRole],
+  ['roleBindings', BUILTIN.RoleBinding],
+  ['clusterRoleBindings', BUILTIN.ClusterRoleBinding],
 ];
 
 const THROTTLE_MS = 3_000;
@@ -122,6 +128,11 @@ export function useHealthScan(
     hpas: useWatch(clusterId, gvks.hpas, namespaces, enabled),
     nodes: useWatch(clusterId, gvks.nodes, namespaces, enabled),
     certificates: useWatch(clusterId, gvks.certificates, namespaces, enabled),
+    namespaces: useWatch(clusterId, gvks.namespaces, namespaces, enabled),
+    roles: useWatch(clusterId, gvks.roles, namespaces, enabled),
+    clusterRoles: useWatch(clusterId, gvks.clusterRoles, namespaces, enabled),
+    roleBindings: useWatch(clusterId, gvks.roleBindings, namespaces, enabled),
+    clusterRoleBindings: useWatch(clusterId, gvks.clusterRoleBindings, namespaces, enabled),
   };
   const kinds = Object.keys(snaps) as HealthKind[];
   const watched = kinds.filter((k) => gvks[k]);

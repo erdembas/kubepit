@@ -791,6 +791,98 @@ feed are described in `docs/RELEASING.md`.
   in 12 days" and one "expired 9 days ago"); `mock/fixtures/health.ts`
   adds leftovers that trigger the other rules.
 
+## Security (Trivy Operator, Pod Security Standards, RBAC)
+
+The `@security` view (`VIEW_KEYS.security`, Cluster section,
+`components/workbench/security/`) has two parts: Trivy Operator reports
+and Pod Security Standards per namespace. RBAC "who can" lives in My
+Permissions. Everything except the Pod Security dry run is UI-side on top of
+the generic watches.
+
+- **Trivy Operator** (`lib/kube/trivy/`): detection is discovery-driven
+  (`aquasecurity.github.io`: Vulnerability, ConfigAudit, ExposedSecret,
+  RbacAssessment, InfraAssessment, Sbom reports, their cluster-scoped
+  variants and ClusterComplianceReports). Without the CRDs the view only
+  explains what Trivy Operator is and how to install it. `model.ts` reads
+  reports into rows (the scanned object from the operator's
+  `trivy-operator.resource.kind|name|namespace` and
+  `trivy-operator.container.name` labels; a Deployment's ReplicaSet is shown
+  as its Deployment); `summary.ts` computes severity totals counting each
+  image once (deduplicated by digest), images and workloads ranked worst
+  first, CVE search (id, package, title), failed checks grouped by check id,
+  exposed secrets and compliance summaries, all with a fixable-only switch.
+  Exposed-secret reports are read as metadata only: the `match` field is
+  never read. Reports open in a docked details panel with per-kind sections
+  (`details/sections/TrivySections.tsx`: CVE list with installed → fixed
+  version and advisory links (https only), checks with remediation,
+  compliance controls, SBOM components) and table columns
+  (`lib/kube/columns/trivy.tsx`). Workloads and pods get a "Security"
+  details section with their reports (`reportsFor`) and the Pod Security
+  level their template passes.
+- **Pod Security Standards** (`lib/kube/pss/`, pure): the official baseline
+  and restricted checks, versioned like `k8s.io/pod-security-admission`
+  (checks apply from the version that introduced them; AppArmor fields from
+  1.30, `container_engine_t` from 1.31, new safe sysctls, Windows pods exempt
+  from Linux-only restricted checks from 1.25; restricted seccomp and
+  capabilities override their baseline variants). Reasons and details use
+  the API server's wording. `namespacePss` reads the
+  `pod-security.kubernetes.io/{enforce,audit,warn}[-version]` labels
+  (missing = privileged, unparseable = restricted / latest, like the
+  plugin); `evaluateNamespace` evaluates the pod-spec owners of a namespace
+  (templates plus bare pods, `owners.ts`) at baseline, restricted and each
+  mode's policy. The view lists namespaces with their labels and violation
+  counts; the expanded row (and the Pod Security section in namespace
+  details, `PodSecurityPanel.tsx`) shows the local evaluation next to
+  "what would break if I enforce X".
+- **Enforce dry run** (`pod_security.rs`, `pod_security_dry_run`): the enforce
+  label change as a merge patch with `dryRun=All`; the `Warning` headers of
+  the PodSecurity admission plugin are parsed into violating pods (`pod (and
+  N other pods): checks`) and notes. A dry run never persists, so it is
+  allowed on read-only clusters (the user still needs `patch` on the
+  namespace). Asking for the policy a namespace already enforces sends
+  nothing (`unchanged`): the API server only evaluates changes. The server
+  checks existing pods; the local evaluation also covers templates whose
+  pods were already rejected.
+- **Health rules** (`health/podSecurity.ts`, `health/rbac.ts`, catalog
+  entries in `health/securityRules.ts`, category security): workloads
+  violating their namespace's enforce level (critical; running bare pods
+  warning) or its audit / warn level (warning) — only in namespaces that set
+  a level, so the generic security-context rules are not repeated — and
+  risky RBAC grants, one finding per binding and risk: full admin and
+  wildcards, `escalate` / `bind` / `impersonate`, reading Secrets,
+  `pods/exec|attach`, `nodes/proxy`, pod creation in kube-system (or
+  cluster-wide), and bindings to missing roles (hygiene). Bootstrap and
+  platform bindings (`rbac-defaults`, `system:` / `eks:` / `gke:` names,
+  add-on manager) and built-in identities are skipped; grants limited to one
+  namespace are one severity softer (except kube-system). The scan now also
+  reads Namespaces, Roles, ClusterRoles and both binding kinds; forbidden
+  lists skip their rules.
+- **RBAC who can** (`lib/kube/rbac/`, pure, matching through
+  `lib/kube/access.ts`): `buildRbacIndex` normalises subjects
+  (`User system:serviceaccount:ns:name` is that ServiceAccount; a
+  RoleBinding's ServiceAccount defaults to its namespace); `whoCan` returns
+  every subject with the binding → role → rule path of each grant
+  (RoleBindings only grant namespaced resources in their namespace;
+  name-restricted rules and grants in some namespaces are marked partial;
+  non-resource URLs through ClusterRoleBindings); `subjectPermissions`
+  summarises what a subject can do per scope and resource, including the
+  implicit `system:authenticated` / `system:serviceaccounts[:ns]` groups;
+  `risk.ts` classifies grants. UI: "Who can…?" and "What can a subject
+  do?" in My Permissions (`access/RbacExplorer.tsx`), a Permissions section
+  on ServiceAccounts and Bound subjects on Roles / ClusterRoles.
+  `access/useRbacData.ts` watches the RBAC lists cluster-wide (RoleBindings
+  fall back to the asked namespace) and reports lists it cannot read instead
+  of guessing. Only RBAC is evaluated: webhook and cloud IAM authorizers are
+  not visible to it, which the UI says.
+- **Demo**: `mock/fixtures/trivy.ts` writes reports for prod-eu, staging and
+  dev (not prod-us or the local clusters) from the demo workloads and a
+  catalog of real CVEs chosen per image; `mock/fixtures/security.ts` labels
+  namespaces, adds a Deployment the enforced baseline blocks, a running bare
+  pod that violates it, a hardened workload and risky RBAC grants;
+  `mock/podSecurity.ts` plays the admission plugin for the dry run with the
+  same checks. Viewer identities can read reports but not RBAC or patch
+  namespaces, which shows the degraded paths.
+
 ## Schema-aware YAML & API explorer
 
 Editors and the explorer are driven by the connected cluster's own OpenAPI

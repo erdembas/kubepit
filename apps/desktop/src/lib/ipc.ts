@@ -77,6 +77,7 @@ import type {
   PodFileContent,
   PodFsTransfer,
   PodMetric,
+  PodSecurityDryRun,
   PortForward,
   PortForwardRequest,
   PrometheusMetric,
@@ -86,6 +87,7 @@ import type {
   PrometheusTarget,
   PromQueryResult,
   ResolvedCustomAction,
+  PssLevel,
   ResourceList,
   RolloutRevision,
   SavedPortForward,
@@ -450,6 +452,10 @@ export const ipc = {
     call<AccessRules>('access_rules', { clusterId, namespace }),
   /** SelfSubjectReview; rejects with "not supported by this cluster" before 1.27. */
   accessWhoami: (clusterId: ClusterId) => call<WhoAmI>('access_whoami', { clusterId }),
+  // -- Security (Pod Security Standards; a dry run, allowed on read-only clusters) --
+  /** What enforcing `level` at `version` on `namespace` would report about its existing pods. */
+  podSecurityDryRun: (clusterId: ClusterId, namespace: string, level: PssLevel, version: string) =>
+    call<PodSecurityDryRun>('pod_security_dry_run', { clusterId, namespace, level, version }),
   // -- Fleet: metrics history & fleet search -------------------------------
   /** Last 60 minutes sampled in the background while the cluster is connected. */
   metricsHistory: (clusterId: ClusterId, query: MetricsHistoryQuery) =>

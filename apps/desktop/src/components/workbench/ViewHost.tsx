@@ -19,6 +19,7 @@ import { ResourcePage } from './table/ResourcePage';
 import { ResourceMapPage } from './topology/ResourceMapPage';
 import { NetpolPage } from './netpol/NetpolPage';
 import { UpgradeReadinessPage } from './upgrade/UpgradeReadinessPage';
+import { SecurityPage } from './security/SecurityPage';
 
 /**
  * Renders the page of one view tab. Hidden tabs stay mounted with
@@ -116,6 +117,15 @@ export const ViewHost = memo(function ViewHost({
   if (activeKind === VIEW.gitops)
     return (
       <GitOpsPage
+        clusterId={clusterId}
+        namespaces={namespaces}
+        isActive={isActive}
+        apiResources={apiResources}
+      />
+    );
+  if (activeKind === VIEW.security)
+    return (
+      <SecurityPage
         clusterId={clusterId}
         namespaces={namespaces}
         isActive={isActive}

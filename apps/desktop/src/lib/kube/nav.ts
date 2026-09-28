@@ -30,6 +30,7 @@ export const VIEW_KEYS = {
   changes: '@changes',
   netpolSimulator: '@netpol',
   upgradeReadiness: '@upgrade',
+  security: '@security',
 } as const;
 
 export interface NavItem {
@@ -107,6 +108,7 @@ export function viewLabel(key: string, apiResources?: readonly ApiResourceInfo[]
   if (key === VIEW_KEYS.changes) return i18n.t('Changes');
   if (key === VIEW_KEYS.netpolSimulator) return i18n.t('Network Policy Simulator');
   if (key === VIEW_KEYS.upgradeReadiness) return i18n.t('Upgrade Readiness');
+  if (key === VIEW_KEYS.security) return i18n.t('Security');
   const builtin = Object.values(BUILTIN).find((k) => k.key === key);
   if (builtin)
     return builtin.key === BUILTIN.CustomResourceDefinition.key
@@ -177,6 +179,11 @@ export function buildNav(apiResources: readonly ApiResourceInfo[] | null): NavGr
           VIEW_KEYS.clusterHealth,
           i18n.t('Health'),
           'health checks popeye lint score findings certificates tls expiry',
+        ),
+        viewItem(
+          VIEW_KEYS.security,
+          i18n.t('Security'),
+          'security trivy vulnerabilities cve images compliance exposed secrets pod security standards pss',
         ),
         viewItem(
           VIEW_KEYS.changes,

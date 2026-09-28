@@ -61,6 +61,17 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { NavSectionId } from './catalog';
+// Security view and Trivy Operator reports.
+import {
+  BadgeCheck,
+  Bug,
+  ClipboardCheck,
+  FileKey2,
+  PackageSearch,
+  ServerCog,
+  ShieldAlert,
+  UserCheck,
+} from 'lucide-react';
 
 /** Lucide icon per kind key / navigator section (pure mapping, no JSX). */
 
@@ -91,6 +102,7 @@ const KIND_ICONS: Record<string, LucideIcon> = {
   '@changes': History,
   '@netpol': Radar,
   '@upgrade': CircleArrowUp,
+  '@security': ShieldAlert,
   nodes: Server,
   namespaces: FolderTree,
   events: Bell,
@@ -145,6 +157,19 @@ const KIND_ICONS: Record<string, LucideIcon> = {
   'imagerepositories.image.toolkit.fluxcd.io': Images,
   'imagepolicies.image.toolkit.fluxcd.io': Images,
   'imageupdateautomations.image.toolkit.fluxcd.io': Images,
+  // Security: Trivy Operator reports.
+  'vulnerabilityreports.aquasecurity.github.io': Bug,
+  'clustervulnerabilityreports.aquasecurity.github.io': Bug,
+  'configauditreports.aquasecurity.github.io': ClipboardCheck,
+  'clusterconfigauditreports.aquasecurity.github.io': ClipboardCheck,
+  'exposedsecretreports.aquasecurity.github.io': FileKey2,
+  'rbacassessmentreports.aquasecurity.github.io': UserCheck,
+  'clusterrbacassessmentreports.aquasecurity.github.io': UserCheck,
+  'infraassessmentreports.aquasecurity.github.io': ServerCog,
+  'clusterinfraassessmentreports.aquasecurity.github.io': ServerCog,
+  'clustercompliancereports.aquasecurity.github.io': BadgeCheck,
+  'sbomreports.aquasecurity.github.io': PackageSearch,
+  'clustersbomreports.aquasecurity.github.io': PackageSearch,
 };
 
 export function kindIcon(key: string): LucideIcon {

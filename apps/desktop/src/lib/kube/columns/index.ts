@@ -4,6 +4,7 @@ import { BUILTIN } from '../catalog';
 import { eventColumns, namespaceColumns, nodeColumns } from './cluster';
 import { customColumns, crdDefinitionColumns } from './custom';
 import { GITOPS_COLUMNS } from './gitops';
+import { TRIVY_COLUMNS } from './trivy';
 import {
   configMapColumns,
   hpaColumns,
@@ -86,6 +87,8 @@ const REGISTRY: Record<string, KindColumns> = {
   [BUILTIN.CustomResourceDefinition.key]: crdDefinitionColumns,
   // GitOps (Argo CD, Flux) kinds.
   ...GITOPS_COLUMNS,
+  // Security: Trivy Operator reports.
+  ...TRIVY_COLUMNS,
 };
 
 export interface PrinterColumn {
