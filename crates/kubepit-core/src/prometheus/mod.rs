@@ -184,6 +184,10 @@ pub(crate) struct Link<'a> {
     pub tunnels: &'a TunnelCache,
     pub cluster_id: &'a str,
     pub connected_at: Option<i64>,
+    /// The cluster's tunnel epoch when the source was resolved
+    /// ([`TunnelCache::epoch`]): requests of a command that outlived a
+    /// disconnect or an access change do not cache Secret values.
+    pub tunnel_epoch: u64,
 }
 
 impl Link<'_> {
@@ -207,7 +211,13 @@ impl Link<'_> {
             // tunnel is not (see `tunnel`).
             let secrets = self
                 .tunnels
-                .secrets(self.cluster_id, self.connected_at, self.client, self.access)
+                .secrets(
+                    self.cluster_id,
+                    self.connected_at,
+                    self.client,
+                    self.access,
+                    self.tunnel_epoch,
+                )
                 .await
                 .map_err(tunnel::tunnel_failure)?;
             let path = with_query(&format!("{}{endpoint}", self.service.path_prefix), params);
@@ -243,6 +253,8 @@ pub(crate) struct Source<'a> {
     pub tunnels: &'a TunnelCache,
     /// See [`Link::credentials_allowed`].
     pub credentials_allowed: bool,
+    /// See [`Link::tunnel_epoch`].
+    pub tunnel_epoch: u64,
 }
 
 impl Source<'_> {
@@ -255,6 +267,7 @@ impl Source<'_> {
             tunnels: self.tunnels,
             cluster_id: &self.cluster_id,
             connected_at: self.connected_at,
+            tunnel_epoch: self.tunnel_epoch,
         }
     }
 
@@ -286,6 +299,7 @@ async fn detect_status(
     tunnels: &TunnelCache,
     connected_at: Option<i64>,
 ) -> PrometheusStatus {
+    let tunnel_epoch = tunnels.epoch(&cluster.id);
     let link = |service| Link {
         client,
         service,
@@ -295,6 +309,7 @@ async fn detect_status(
         tunnels,
         cluster_id: &cluster.id,
         connected_at,
+        tunnel_epoch,
     };
     match &cluster.prometheus {
         PrometheusConfig::Off => status(PrometheusState::Off),
@@ -419,6 +434,9 @@ impl Kubepit {
     /// The service to query, a client for it and the access settings, or
     /// why there is none.
     pub(crate) async fn prometheus_source(&self, cluster_id: &str) -> Result<Source<'_>> {
+        // Before anything else: a forget while this command runs (even
+        // during detection) keeps its Secret reads out of the cache.
+        let tunnel_epoch = self.prometheus_tunnels.epoch(cluster_id);
         let status = self.prometheus_status(cluster_id, false).await?;
         match (status.state, status.service) {
             (PrometheusState::Available, Some(service)) => {
@@ -432,6 +450,7 @@ impl Kubepit {
                     service,
                     access: cluster.prometheus_access,
                     tunnels: &self.prometheus_tunnels,
+                    tunnel_epoch,
                 })
             }
             (PrometheusState::Off, _) => bail!("Prometheus is turned off for this cluster"),

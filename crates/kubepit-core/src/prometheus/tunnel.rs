@@ -300,8 +300,9 @@ impl TunnelCache {
             .clone()
     }
 
-    /// The current epoch of `cluster_id` (see [`Self::forget`]).
-    fn epoch(&self, cluster_id: &str) -> u64 {
+    /// The current epoch of `cluster_id` (see [`Self::forget`]), recorded
+    /// when a command resolves its Prometheus source.
+    pub(crate) fn epoch(&self, cluster_id: &str) -> u64 {
         self.epochs.lock().get(cluster_id).copied().unwrap_or(0)
     }
 
@@ -353,24 +354,30 @@ impl TunnelCache {
 
     /// The Secret values of `access`, read when not cached, within
     /// [`SETUP_TIMEOUT`] (waiting for another read of the same cluster
-    /// included).
+    /// included). `epoch` is the cluster's epoch when the caller resolved
+    /// its source: a caller from before a [`Self::forget`] (disconnect,
+    /// removal, access change) still gets values for its own request, but
+    /// never reads or writes the cache.
     pub(crate) async fn secrets(
         &self,
         cluster_id: &str,
         connected_at: Option<i64>,
         client: &Client,
         access: &PrometheusAccess,
+        epoch: u64,
     ) -> Result<Arc<TunnelSecrets>> {
-        self.secrets_with(
+        self.secrets_in(
             cluster_id,
             connected_at,
             access,
+            epoch,
             read_secrets(client, access),
         )
         .await
     }
 
-    /// [`Self::secrets`] with the read as a future.
+    /// [`Self::secrets`] with the read as a future, in the current epoch.
+    #[cfg(test)]
     async fn secrets_with<F>(
         &self,
         cluster_id: &str,
@@ -381,15 +388,38 @@ impl TunnelCache {
     where
         F: Future<Output = Result<TunnelSecrets>>,
     {
-        if let Some(hit) = self.get_at(cluster_id, connected_at, access, Instant::now()) {
-            return Ok(hit);
-        }
         let epoch = self.epoch(cluster_id);
+        self.secrets_in(cluster_id, connected_at, access, epoch, read)
+            .await
+    }
+
+    /// [`Self::secrets`] with the read as a future.
+    async fn secrets_in<F>(
+        &self,
+        cluster_id: &str,
+        connected_at: Option<i64>,
+        access: &PrometheusAccess,
+        epoch: u64,
+        read: F,
+    ) -> Result<Arc<TunnelSecrets>>
+    where
+        F: Future<Output = Result<TunnelSecrets>>,
+    {
+        // A stale caller must not even look: a mismatching lookup drops
+        // the entry, which belongs to the current settings.
+        let current = || epoch == self.epoch(cluster_id);
+        if current() {
+            if let Some(hit) = self.get_at(cluster_id, connected_at, access, Instant::now()) {
+                return Ok(hit);
+            }
+        }
         let fill = self.fill_lock(cluster_id);
         let work = async {
             let _filling = fill.lock().await;
-            if let Some(hit) = self.get_at(cluster_id, connected_at, access, Instant::now()) {
-                return Ok(hit);
+            if current() {
+                if let Some(hit) = self.get_at(cluster_id, connected_at, access, Instant::now()) {
+                    return Ok(hit);
+                }
             }
             let secrets = Arc::new(read.await?);
             self.insert(cluster_id, connected_at, access, secrets.clone(), epoch);
@@ -1185,6 +1215,49 @@ j6EzTBQKCIK44Ht1hGckQEbsh5M4xlh8CvAbHO7lGMeusAjsKyS4dyiR
         }
         assert_eq!(reads.load(Ordering::SeqCst), 1);
         assert!(cache.holds("c1"));
+    }
+
+    #[tokio::test]
+    async fn a_source_from_before_forget_never_caches() {
+        // A command resolved its source (and the epoch), then the cluster
+        // was disconnected; the command's later requests still read the
+        // Secret for themselves, but neither cache it nor drop what the
+        // next connection cached.
+        let cache = TunnelCache::default();
+        let access = secured("");
+        let resolved = cache.epoch("c1");
+        cache.forget("c1");
+        let reads = std::sync::atomic::AtomicUsize::new(0);
+        let counted = || async {
+            reads.fetch_add(1, Ordering::SeqCst);
+            read_ok().await
+        };
+        cache
+            .secrets_in("c1", None, &access, resolved, counted())
+            .await
+            .unwrap();
+        assert!(!cache.holds("c1"), "not cached after forget");
+
+        let fresh = cache.epoch("c1");
+        cache
+            .secrets_in("c1", Some(2), &secured("new"), fresh, counted())
+            .await
+            .unwrap();
+        cache
+            .secrets_in("c1", None, &access, resolved, counted())
+            .await
+            .unwrap();
+        assert_eq!(
+            reads.load(Ordering::SeqCst),
+            3,
+            "the stale caller reads itself"
+        );
+        assert!(
+            cache
+                .get_at("c1", Some(2), &secured("new"), Instant::now())
+                .is_some(),
+            "the current entry stays"
+        );
     }
 
     #[tokio::test]
