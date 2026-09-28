@@ -220,6 +220,8 @@ pub fn stats_from_samples(cpu: &[f64], memory: &[f64], interval_secs: f64) -> Op
         cpu_max,
         memory_max,
         hours: cpu.len() as f64 * interval_secs / 3600.0,
+        cpu_avg: None,
+        memory_avg: None,
     })
 }
 
@@ -233,6 +235,7 @@ pub fn combine(stats: &[UsageStats]) -> Option<UsageStats> {
         cpu_max: acc.cpu_max.max(s.cpu_max),
         memory_max: acc.memory_max.max(s.memory_max),
         hours: acc.hours + s.hours,
+        ..acc
     }))
 }
 
@@ -253,6 +256,8 @@ mod tests {
             cpu_max: cpu_p95 * 1.5,
             memory_max,
             hours: 168.0,
+            cpu_avg: None,
+            memory_avg: None,
         }
     }
 
@@ -403,6 +408,8 @@ mod tests {
                 cpu_max: 900.0,
                 memory_max: 1.0,
                 hours: 0.5,
+                cpu_avg: None,
+                memory_avg: None,
             },
         ])
         .unwrap();

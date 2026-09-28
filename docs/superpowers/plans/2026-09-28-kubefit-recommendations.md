@@ -533,7 +533,7 @@ git commit -m "feat(prometheus): server-side workload statistics queries"
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn rollout_pods_fold_into_one_deployment() {
@@ -571,21 +571,21 @@ Steps:
 #[test] fn hpa_attaches_by_scale_target() { assert_eq!(f.extras[0].hpa.as_ref().unwrap().name, "api"); }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core rightsizing::evidence`
 
 Expected: FAIL to compile.
 
-- [ ] **Step 3: Implement `fold` and `union_hours`, and update the `mod.rs` call sites**
+- [x] **Step 3: Implement `fold` and `union_hours`, and update the `mod.rs` call sites**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core rightsizing`
 
 Expected: PASS, with the existing `mod.rs` tests adapted to `ContainerUsage`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/src/rightsizing

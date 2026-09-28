@@ -885,7 +885,20 @@ applying a recommendation only reads, so read-only clusters get it all.
   batch partial. CPU p95 and memory max are required: a failed answer or
   one above 50,000 series makes the batch splittable, a service-proxy
   failure aborts (and re-detects Prometheus), other failures are listed as
-  failed queries. The math sits behind `rightsizing::strategy::RecommendationStrategy`
+  failed queries. `rightsizing/evidence.rs` folds a batch into
+  per-(workload, container) usage (`ContainerUsage`: `UsageStats` plus
+  `UsageEvidence`): pods resolve through the owner index (or, without
+  owner series, by name with identity `name-match`), only containers of
+  the live pod template count (sidecars and renamed containers are
+  skipped), the maxima are over pods that have both a CPU p95 and a memory
+  max, averages are sample-weighted, observed hours are the union of the
+  pods' running spans (without them, memory samples per replica, capped at
+  the window), coverage is samples ÷ running samples, duty the average
+  running pods, the throttling ratio needs 600 CFS periods, and an
+  ambiguous pod name adds nothing but flags every live candidate. Rows keep
+  at most 50 sorted pod names and the HPA whose `scaleTargetRef` names the
+  workload. The metrics-server and legacy Prometheus paths produce
+  `ContainerUsage` without evidence. The math sits behind `rightsizing::strategy::RecommendationStrategy`
   (`fn info() -> RightsizingStrategyInfo`, `fn recommend(&ContainerInput) ->
   StrategyOutput`; input = name, current requests/limits, `UsageStats`,
   source, settings; output = recommended values, confidence, warnings).

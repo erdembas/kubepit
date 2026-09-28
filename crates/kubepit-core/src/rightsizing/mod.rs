@@ -19,6 +19,7 @@
 //!   container resources, dry-run first (allowed on read-only clusters),
 //!   then applied (refused on read-only clusters).
 
+pub mod evidence;
 pub mod math;
 pub mod ownership;
 pub mod patch;
@@ -51,6 +52,7 @@ use crate::prometheus::usage::ContainerStatsMap;
 use crate::quantity::{parse_cpu_millicores, parse_memory_bytes};
 use crate::resources::object_api;
 use crate::types::{DryRunResult, Gvk, MetricsHistoryQuery, PodMetric, PrometheusState};
+use evidence::{ContainerUsage, WorkloadUsage};
 
 /// A workload with the resources of its pod template.
 #[derive(Debug, Clone, PartialEq)]
@@ -137,9 +139,6 @@ impl PodMatcher {
     }
 }
 
-/// Usage per `(workload index, container)`.
-pub type WorkloadUsage = HashMap<(usize, String), UsageStats>;
-
 /// Per-container Prometheus statistics folded into workloads: worst
 /// replica wins, hours are per replica (at most the window).
 pub fn usage_from_prometheus(
@@ -172,6 +171,8 @@ pub fn usage_from_prometheus(
                 cpu_max: s.cpu_max_millicores.unwrap_or(p95).max(p95),
                 memory_max: memory,
                 hours: s.hours,
+                cpu_avg: None,
+                memory_avg: None,
             });
     }
     let max_hours = f64::from(days) * 24.0;
@@ -181,7 +182,13 @@ pub fn usage_from_prometheus(
             let mut merged = math::combine(&list)?;
             let replicas = f64::from(workloads[i].replicas.max(1));
             merged.hours = (merged.hours / replicas).min(max_hours);
-            Some(((i, container), merged))
+            Some((
+                (i, container),
+                ContainerUsage {
+                    stats: merged,
+                    evidence: None,
+                },
+            ))
         })
         .collect()
 }
@@ -226,7 +233,7 @@ pub fn recommend_workload(
             let input = strategy::ContainerInput {
                 name,
                 current: *current,
-                usage: usage.get(&(index, name.clone())).copied(),
+                usage: usage.get(&(index, name.clone())).map(|u| u.stats),
                 source,
                 settings,
             };
@@ -531,7 +538,13 @@ impl Kubepit {
                     let mut merged = math::combine(&list)?;
                     merged.hours =
                         (merged.hours / f64::from(workloads[i].replicas.max(1))).min(1.0);
-                    Some(((i, container), merged))
+                    Some((
+                        (i, container),
+                        ContainerUsage {
+                            stats: merged,
+                            evidence: None,
+                        },
+                    ))
                 })
                 .collect(),
         ))
@@ -688,7 +701,7 @@ mod tests {
         put("unrelated-x", "app", 999.0, 1.0, 1.0);
         let usage = usage_from_prometheus(&workloads, &stats, 7);
         assert_eq!(usage.len(), 1, "sidecars outside the template are skipped");
-        let app = usage[&(0, "app".to_string())];
+        let app = usage[&(0, "app".to_string())].stats;
         assert_eq!(app.cpu_p95, 150.0, "worst replica");
         assert_eq!(app.memory_max, 200.0 * MIB);
         assert_eq!(app.hours, 168.0, "per replica, capped at the window");

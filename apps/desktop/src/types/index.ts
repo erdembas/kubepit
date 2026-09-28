@@ -2245,6 +2245,10 @@ export interface UsageStats {
   cpu_max: number;
   memory_max: number;
   hours: number;
+  /** Sample-weighted average CPU over the pods (null = unknown). */
+  cpu_avg: number | null;
+  /** Sample-weighted average working set over the pods. */
+  memory_avg: number | null;
 }
 
 export interface ContainerRecommendation {
