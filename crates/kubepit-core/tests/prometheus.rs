@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use kubepit_core::cost::{CostConfig, CostSourceConfig};
 use kubepit_core::prometheus::access::{PrometheusAccess, PrometheusAuth};
+use kubepit_core::prometheus::workload_stats::{BatchFailure, StatScope};
 use kubepit_core::rightsizing::{RightsizingNoteKind, RightsizingRequest, RightsizingSource};
 use kubepit_core::types::{
     ClusterInput, LokiConfig, PromScheme, PrometheusConfig, PrometheusKind, PrometheusMetric,
@@ -920,4 +921,95 @@ async fn credentials_never_reach_a_detected_service() {
     assert!(log
         .iter()
         .all(|r| r.headers.iter().all(|(_, v)| !v.contains("s3cret"))));
+}
+
+/// Statistics answers of a shared Prometheus: every series of the cluster
+/// `production`, except the pod owners (Q11) with `mismatch`, which come
+/// back for `staging` (a source that ignored the selector).
+fn stats_router(mismatch: Arc<AtomicBool>) -> Router {
+    let detection = stack_router(Arc::default());
+    Arc::new(move |req: &Request, log: &Log| {
+        if req.path_only() != format!("{OPERATED}/api/v1/query") {
+            return detection(req, log);
+        }
+        let q = param(&req.path, "query").unwrap_or_default();
+        if q == "1" {
+            return scalar_one();
+        }
+        if q.contains("kube_pod_owner") {
+            let cluster = if mismatch.load(Ordering::SeqCst) {
+                "staging"
+            } else {
+                "production"
+            };
+            return instant(
+                json!({"namespace": "shop", "pod": "web-6d4b75cb6d-x2x9z",
+                       "owner_kind": "ReplicaSet", "owner_name": "web-6d4b75cb6d",
+                       "cluster": cluster}),
+                "1",
+            );
+        }
+        instant(
+            json!({"namespace": "shop", "pod": "web-6d4b75cb6d-x2x9z",
+                   "container": "app", "cluster": "production"}),
+            "1",
+        )
+    })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn statistics_batches_carry_the_selector_and_fail_closed() {
+    let mismatch = Arc::new(AtomicBool::new(false));
+    let server = start(stats_router(mismatch.clone())).await;
+    let (_dir, app, _recorder, id) = setup(&server.url, true);
+    let mut def = app.cluster_def(&id).unwrap();
+    def.prometheus_access = shared_access();
+    app.cluster_update(def).unwrap();
+    let scope = StatScope {
+        namespaces: vec!["shop".into()],
+        pod_regex: None,
+        days: 7,
+        end_secs: 1_700_000_100,
+        cluster_labels: Vec::new(),
+    };
+
+    let answers = std::sync::atomic::AtomicUsize::new(0);
+    let on_answer = || {
+        answers.fetch_add(1, Ordering::SeqCst);
+    };
+    let batch = app
+        .prometheus_stats_batch(&id, &scope, &on_answer)
+        .await
+        .unwrap();
+    assert_eq!(answers.load(Ordering::SeqCst), 16);
+    assert!(!batch.owners.is_empty(), "{batch:?}");
+    let log = server.log.lock().clone();
+    let stats: Vec<&Request> = log
+        .iter()
+        .filter(|r| r.path_only() == format!("{OPERATED}/api/v1/query"))
+        .filter(|r| param(&r.path, "query").is_some_and(|q| q != "1"))
+        .collect();
+    assert_eq!(stats.len(), 16);
+    for request in &stats {
+        let q = param(&request.path, "query").unwrap();
+        assert!(q.contains(r#"cluster="production""#), "{q}");
+        assert_eq!(param(&request.path, "time").as_deref(), Some("1700000100"));
+        assert_eq!(request.header("x-scope-orgid"), Some("team-a"));
+    }
+    // Q11 keeps the label, so its answer can be checked.
+    assert!(stats
+        .iter()
+        .any(|r| {
+            param(&r.path, "query").unwrap().starts_with(
+        "max by (namespace, pod, owner_kind, owner_name, cluster) (max_over_time(kube_pod_owner{"
+    )
+        }));
+
+    mismatch.store(true, Ordering::SeqCst);
+    let err = app
+        .prometheus_stats_batch(&id, &scope, &|| {})
+        .await
+        .unwrap_err();
+    assert_eq!(err, BatchFailure::Proxy("cluster-label-mismatch".into()));
+    assert_eq!(err.to_string(), "cluster-label-mismatch");
 }

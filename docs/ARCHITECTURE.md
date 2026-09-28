@@ -514,12 +514,13 @@ An optional, richer metrics source next to the metrics-server history
   / `without` / `ignoring` / `group_left` / `group_right`, `[…]` ranges and
   numbers. It is never applied to the probe (`query=1`) or to PromQL typed
   in the PromQL tab (`Origin::User`). Charts report the query they sent,
-  so a PromQL tab opened from one gets the same data. It fails closed:
-  right-sizing keeps the configured label keys in its memory answer
-  (`by (namespace, pod, container, cluster)`), and a series without them
-  or with another value fails the Prometheus part with
-  `cluster-label-mismatch` (a source that ignored the selector); the report
-  then falls back to metrics-server with that note.
+  so a PromQL tab opened from one gets the same data. It fails closed: the
+  live right-sizing report keeps the configured label keys in its memory
+  answer (`by (namespace, pod, container, cluster)`) and the statistics
+  batches in Q11 (pod owners); a series without them or with another value
+  fails with `cluster-label-mismatch` (a source that ignored the selector)
+  — the live report then falls back to metrics-server with that note, a
+  batch aborts with `BatchFailure::Proxy`.
 - **States**: `available` when any probed candidate answers; `forbidden`
   when the API server denied every probed candidate
   (`service_proxy::is_proxy_forbidden`: its own 403 `Status` with reason
@@ -963,9 +964,13 @@ applying a recommendation only reads, so read-only clusters get it all.
   flight. Answers merge per `(namespace, pod, container)`: duplicates keep
   the maximum, negative counts clamp at 0, Prometheus warnings mark the
   batch partial. CPU p95 and memory max are required: a failed answer or
-  one above 50,000 series makes the batch splittable, a service-proxy
-  failure aborts (and re-detects Prometheus), other failures are listed as
-  failed queries. `rightsizing/evidence.rs` folds a batch into
+  one above 50,000 series makes the batch splittable, a service-proxy or
+  tunnel failure aborts (and re-detects Prometheus), other failures are
+  listed as failed queries. Every query goes through the one Prometheus
+  transport as a preset (tenant, tunnel, cluster-label selector); on a
+  shared Prometheus Q11 keeps the configured label names in its `by (…)`,
+  and an owner series without them (or with another value) fails the batch
+  with `cluster-label-mismatch`. `rightsizing/evidence.rs` folds a batch into
   per-(workload, container) usage (`ContainerUsage`: `UsageStats` plus
   `UsageEvidence`): pods resolve through the owner index (or, without
   owner series, by name with identity `name-match`), only containers of
