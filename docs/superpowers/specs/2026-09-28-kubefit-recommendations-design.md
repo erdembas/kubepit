@@ -1023,7 +1023,8 @@ idle ─(due or Scan now)─► queued ─(global semaphore 2 acquired)─► ru
   - Only the Secret *reference* is stored in `clusters.json`.
   - The tunnel is an in-process port-forward stream with no local listener, so other
     local processes cannot use it.
-  - The tenant must have no CR / LF and at most 200 characters.
+  - The tenant is a header value: at most 200 visible ASCII characters (no spaces,
+    CR / LF or non-ASCII).
   - Label names must match `^[a-zA-Z_][a-zA-Z0-9_]*$` and must not be reserved.
 
 ## 14. Optional phase 7: authenticated and shared Prometheus
@@ -1050,7 +1051,7 @@ pub enum PrometheusAuth {                      // serde tag "type"
 - reserved keys: `__name__`, `namespace`, `pod`, `container`, `resource`, `uid`,
   `owner_name`, `owner_kind`, `job`, `instance`, `replicaset`, `job_name`, `reason`;
 - values: non-empty;
-- tenant: at most 200 characters, no CR / LF;
+- tenant: at most 200 visible ASCII characters (a header value);
 - Secret and key names: DNS-1123;
 - two clusters that resolve to the same configured service and tenant must have
   **provably disjoint** selectors, i.e. some shared key with different values (KubeFit's

@@ -40,7 +40,7 @@ pub const RESERVED_LABELS: [&str; 13] = [
     "job_name",
     "reason",
 ];
-/// Longest accepted tenant (`X-Scope-OrgID`).
+/// Longest accepted tenant (`X-Scope-OrgID`, visible ASCII).
 pub const MAX_TENANT_LEN: usize = 200;
 
 /// `ClusterDef.prometheus_access`. The default (no tenant, no labels, no
@@ -149,9 +149,14 @@ fn data_key(value: String, what: &str) -> Result<String> {
 impl PrometheusAccess {
     /// Trimmed and validated, as stored in `clusters.json`.
     pub fn normalized(self) -> Result<Self> {
+        // A header value (`X-Scope-OrgID`): visible ASCII, so every request
+        // can carry it.
         let tenant = self.tenant.trim().to_string();
-        if tenant.chars().count() > MAX_TENANT_LEN || tenant.chars().any(char::is_control) {
-            bail!("Prometheus: the tenant must be one line of at most {MAX_TENANT_LEN} characters");
+        if tenant.len() > MAX_TENANT_LEN || !tenant.chars().all(|c| c.is_ascii_graphic()) {
+            bail!(
+                "Prometheus: the tenant must be at most {MAX_TENANT_LEN} visible ASCII characters \
+                 (no spaces)"
+            );
         }
         let mut cluster_labels = BTreeMap::new();
         for (name, value) in self.cluster_labels {
@@ -344,6 +349,21 @@ mod tests {
         }
         .normalized()
         .is_err());
+        // `X-Scope-OrgID` is a header value: visible ASCII only, or every
+        // request would fail to build.
+        for tenant in ["tenánt", "team a", "team\u{a0}a", "チーム"] {
+            let access = PrometheusAccess {
+                tenant: tenant.into(),
+                ..Default::default()
+            };
+            assert!(access.normalized().is_err(), "{tenant:?}");
+        }
+        let visible = PrometheusAccess {
+            tenant: "team-a|b_1.{x}".into(),
+            ..Default::default()
+        };
+        let normalized = visible.normalized().unwrap();
+        assert!(http::HeaderValue::from_str(&normalized.tenant).is_ok());
 
         // Trimmed; values are quoted like every other PromQL string.
         let ok = PrometheusAccess {

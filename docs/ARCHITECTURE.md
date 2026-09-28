@@ -448,7 +448,8 @@ An optional, richer metrics source next to the metrics-server history
   status lookup runs before the cluster exists.
 - **Access** (`access.rs`, `ClusterDef.prometheus_access`, both `auto` and
   `service` modes) for shared or secured sources: a `tenant`
-  (`X-Scope-OrgID`, one line, ≤ 200 characters), `cluster_labels` (a
+  (`X-Scope-OrgID`, ≤ 200 visible ASCII characters — a header value, so
+  no spaces or non-ASCII), `cluster_labels` (a
   selector such as `cluster="prod-eu"`; names match
   `^[a-zA-Z_][a-zA-Z0-9_]*$` and are none of the labels the presets use —
   `__name__`, `namespace`, `pod`, `container`, `resource`, `uid`,

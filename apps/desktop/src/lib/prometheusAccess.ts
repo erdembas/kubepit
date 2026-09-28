@@ -94,6 +94,7 @@ export function tlsApplies(draft: AccessDraft, config: PrometheusConfig): boolea
 const LABEL_NAME = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+const VISIBLE_ASCII = /^[\x21-\x7e]*$/;
 
 /** A DNS-1123 style namespace or object name (`valid_name` in the backend). */
 export function validName(value: string): boolean {
@@ -138,9 +139,10 @@ export function accessFromDraft(
   config: PrometheusConfig,
 ): { access: PrometheusAccess } | { error: string } {
   const tenant = draft.tenant.trim();
-  if ([...tenant].length > MAX_TENANT_LEN || CONTROL.test(tenant))
+  // A header value (`X-Scope-OrgID`): visible ASCII, like the backend requires.
+  if (tenant.length > MAX_TENANT_LEN || !VISIBLE_ASCII.test(tenant))
     return {
-      error: i18n.t('The tenant must be one line of at most {count} characters.', {
+      error: i18n.t('The tenant must be at most {count} visible ASCII characters (no spaces).', {
         count: MAX_TENANT_LEN,
       }),
     };

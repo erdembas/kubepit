@@ -60,6 +60,12 @@ describe('prometheus access drafts', () => {
     const base = accessDraft(undefined);
     expect(accessFromDraft({ ...base, tenant: 'a\nb' }, auto)).toHaveProperty('error');
     expect(accessFromDraft({ ...base, tenant: 't'.repeat(201) }, auto)).toHaveProperty('error');
+    // A header value: visible ASCII only (the backend refuses the rest too).
+    for (const tenant of ['tenánt', 'team a', 'team\u00a0a', 'チーム'])
+      expect(accessFromDraft({ ...base, tenant }, auto)).toHaveProperty('error');
+    expect(accessFromDraft({ ...base, tenant: ' team-a|b_1.{x} ' }, auto)).toEqual({
+      access: { tenant: 'team-a|b_1.{x}', cluster_labels: {}, auth: null, tls: null },
+    });
     const bearer = { ...base, auth: 'bearer' as const, secretName: 'prom-auth' };
     expect(accessFromDraft(bearer, http)).toEqual({
       access: {
