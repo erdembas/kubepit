@@ -257,7 +257,10 @@ export function RightsizingDialog({
 
   const runReview = useCallback(() => {
     const id = ++seq.current;
-    if (!changes.length) return;
+    if (!changes.length) {
+      setReview({ status: 'error', message: i18n.t('Nothing to change') });
+      return;
+    }
     setReview({ status: 'loading' });
     ipc
       .rightsizingApply(clusterId, target, changes, true)
