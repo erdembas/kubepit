@@ -30,6 +30,8 @@ pub enum Reply {
     Text(String),
     /// Newline-delimited watch events, then the stream is held open.
     Stream(Vec<Value>),
+    /// JSON with extra response headers (e.g. `Warning` from admission).
+    JsonWithHeaders(u16, Value, Vec<(String, String)>),
 }
 
 pub type Router = Arc<dyn Fn(&Request, &Log) -> Reply + Send + Sync>;
@@ -113,6 +115,9 @@ async fn handle(mut socket: TcpStream, router: Router, log: Log) -> std::io::Res
             );
             socket.write_all(response.as_bytes()).await?;
         }
+        Reply::JsonWithHeaders(code, value, headers) => {
+            write_json(&mut socket, code, &value, &headers).await?;
+        }
         Reply::Text(text) => {
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{text}",
@@ -137,6 +142,30 @@ async fn handle(mut socket: TcpStream, router: Router, log: Log) -> std::io::Res
         }
     }
     Ok(())
+}
+
+async fn write_json(
+    socket: &mut TcpStream,
+    code: u16,
+    value: &Value,
+    headers: &[(String, String)],
+) -> std::io::Result<()> {
+    let text = value.to_string();
+    let reason = match code {
+        200 | 201 => "OK",
+        403 => "Forbidden",
+        404 => "Not Found",
+        _ => "Error",
+    };
+    let extra: String = headers
+        .iter()
+        .map(|(name, value)| format!("{name}: {value}\r\n"))
+        .collect();
+    let response = format!(
+        "HTTP/1.1 {code} {reason}\r\nContent-Type: application/json\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{text}",
+        text.len()
+    );
+    socket.write_all(response.as_bytes()).await
 }
 
 pub fn status(code: u16, reason: &str, message: &str) -> Value {

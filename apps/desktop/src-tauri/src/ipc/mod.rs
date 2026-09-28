@@ -39,6 +39,8 @@ mod connectivity;
 mod manifests;
 // Change timeline: in-memory change journal.
 mod changes;
+// Security: Pod Security Standards enforce dry run.
+mod security;
 
 pub use access::*;
 pub use alerts::*;
@@ -58,6 +60,7 @@ pub use openapi::*;
 pub use portforward::*;
 pub use prometheus::*;
 pub use resources::*;
+pub use security::*;
 pub use updater::*;
 pub use workloads::*;
 

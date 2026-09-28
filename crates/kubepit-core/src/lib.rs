@@ -45,6 +45,7 @@
 //! | [`credentials`] | managed kubeconfig storage, keychain migration         |
 //! | [`manifests`]   | local manifests: render folders, diff / apply to clusters |
 //! | [`change_journal`] | in-memory change timeline (per-cluster watchers)    |
+//! | [`pod_security`] | Pod Security enforce dry run ("what would break")     |
 //!
 //! Push notifications to the UI go through [`EventSink`]; streams take plain
 //! `Fn(T) -> bool` callbacks (return `false` to stop) that the desktop shell
@@ -109,6 +110,8 @@ pub mod secrets;
 pub mod manifests;
 // Change timeline: in-memory journal of cluster changes.
 pub mod change_journal;
+// Security: Pod Security Standards enforce dry run.
+pub mod pod_security;
 
 pub use app::Kubepit;
 pub use events::{EventSink, NullSink};

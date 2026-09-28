@@ -144,6 +144,8 @@ pub fn run() {
             ipc::access_review,
             ipc::access_rules,
             ipc::access_whoami,
+            // Security: Pod Security enforce dry run
+            ipc::pod_security_dry_run,
             // Fleet: metrics history, fleet search
             ipc::metrics_history,
             ipc::metrics_history_fleet,

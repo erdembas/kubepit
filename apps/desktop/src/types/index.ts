@@ -1402,3 +1402,36 @@ export interface FleetSearchEvent {
   forbidden_kinds: string[];
   error: string | null;
 }
+
+// -- Security: Pod Security Standards ----------------------------------------
+
+/** Pod Security Standards level (value of a `pod-security.kubernetes.io/*` label). */
+export type PssLevel = 'privileged' | 'baseline' | 'restricted';
+
+/** Pods that fail the same Pod Security checks (grouped like the API server does). */
+export interface PodSecurityViolation {
+  /** First pod (alphabetically) with exactly these failures. */
+  pod: string;
+  /** How many other pods fail the same way. */
+  others: number;
+  /** One entry per failed check, verbatim from the API server. */
+  checks: string[];
+}
+
+/**
+ * Server-side dry run (`dryRun=All`) of a namespace's enforce level: the
+ * warnings the PodSecurity admission plugin returns for existing pods.
+ */
+export interface PodSecurityDryRun {
+  namespace: string;
+  level: PssLevel;
+  /** `latest` or `v1.<minor>`. */
+  version: string;
+  /** Already enforced at this level and version: the API server evaluates nothing. */
+  unchanged: boolean;
+  /** Every warning, verbatim. */
+  warnings: string[];
+  violations: PodSecurityViolation[];
+  /** Warnings that are not violations (pods not checked in time, list failures). */
+  notes: string[];
+}
