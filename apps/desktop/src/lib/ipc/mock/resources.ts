@@ -17,12 +17,15 @@ import {
   helmDetail,
   helmKey,
   inScope,
+  isWatching,
   list,
+  releaseWatcher,
   removeWatcher,
 } from './fixtures/db';
 import { apiResources, nodeMetrics, podMetrics } from './fixtures/discovery';
 import { warningEvents } from './fixtures/events';
 import { ensureLiveness } from './fixtures/live';
+import { chunkBatches, WATCH_BATCH_INTERVAL_MS } from './fixtures/scale';
 import {
   applyYaml,
   cordonNode,
@@ -121,7 +124,7 @@ register({
   resource_watch: ({ clusterId, gvk, namespaces, onEvent }: MockArgs) => {
     const emit = onEvent as (b: WatchBatch) => void;
     const nss = (namespaces as string[]) ?? [];
-    const id = addWatcher(clusterId, kindKey(gvk), nss, emit);
+    const id = addWatcher(clusterId, kindKey(gvk), nss, emit, 'resource_watch');
     ensureLiveness();
     window.setTimeout(
       () => {
@@ -139,15 +142,18 @@ register({
           removeWatcher(id);
           return;
         }
-        emit({
-          watch_id: id,
-          reset: true,
-          upserts: structuredClone(listFor(clusterId, gvk, nss)),
-          deletes: [],
-          synced: true,
-          error: null,
-          recovered: false,
-        });
+        // The backend's batch contract: at most 500 objects per batch, one
+        // batch per flush interval, `synced` on the last. Changes made
+        // meanwhile follow once the list is delivered.
+        const batches = chunkBatches(id, listFor(clusterId, gvk, nss));
+        const send = (i: number) => {
+          if (!isWatching(id)) return;
+          const batch = batches[i]!;
+          emit({ ...batch, upserts: structuredClone(batch.upserts) });
+          if (i + 1 < batches.length) window.setTimeout(() => send(i + 1), WATCH_BATCH_INTERVAL_MS);
+          else releaseWatcher(id);
+        };
+        send(0);
       },
       150 + Math.random() * 200,
     );

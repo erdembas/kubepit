@@ -1,5 +1,5 @@
 import { BUILTIN_KINDS, apiVersionOf } from '@/lib/kube/catalog';
-import type { ApiResourceInfo, MetricsResult, NodeMetric, PodMetric } from '@/types';
+import type { ApiResourceInfo, KubeObject, MetricsResult, NodeMetric, PodMetric } from '@/types';
 import { list, type ClusterDb } from './db';
 import { crdsFor } from './crds';
 import { hashString } from './util';
@@ -168,6 +168,13 @@ export function nodeMetrics(db: ClusterDb): MetricsResult<NodeMetric> {
   if (!db.profile.metrics) return { available: false, items: [] };
   const pods = podMetrics(db, null).items;
   const byPod = new Map(pods.map((p) => [`${p.namespace}/${p.name}`, p]));
+  // Pods per node in one pass (a 20 000-pod scale cluster has 1 000 nodes).
+  const byNode = new Map<unknown, KubeObject[]>();
+  for (const pod of list(db, 'pods')) {
+    const onNode = byNode.get(pod.spec?.nodeName);
+    if (onNode) onNode.push(pod);
+    else byNode.set(pod.spec?.nodeName, [pod]);
+  }
   const items: NodeMetric[] = [];
   for (const node of list(db, 'nodes')) {
     const ready = (
@@ -176,8 +183,7 @@ export function nodeMetrics(db: ClusterDb): MetricsResult<NodeMetric> {
     if (!ready) continue;
     let c = 180;
     let m = 900 * 1024 ** 2;
-    for (const pod of list(db, 'pods')) {
-      if (pod.spec?.nodeName !== node.metadata.name) continue;
+    for (const pod of byNode.get(node.metadata.name) ?? []) {
       const pm = byPod.get(`${pod.metadata.namespace}/${pod.metadata.name}`);
       if (pm) {
         c += pm.cpu_millicores;

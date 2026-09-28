@@ -425,7 +425,7 @@ git commit -m "perf(bench): fleet search, proxy parsing and end-to-end benches w
   - `chunkBatches(watchId: string, items: readonly KubeObject[], max?: number): WatchBatch[]` (`max` defaults to 500).
   - `mockWatchStats(): Array<{ clusterId: string; key: string; namespaces: string[] }>`, exported from `db.ts` for the probe and for H2.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // apps/desktop/src/lib/ipc/mock/fixtures/scale.test.ts
@@ -462,23 +462,23 @@ describe('scale demo', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm --filter @kubepit/desktop test -- src/lib/ipc/mock/fixtures/scale.test.ts`
 Expected: FAIL (module missing).
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
   - The generator mirrors Task 1's naming and shapes, seeded from the preset's `seed`. `c-scale-<preset>` uses platform `kind` and version `v1.31.0` and is not read-only.
   - `window_open` builds its URL with `withScaleParams` (it keeps `perf` too).
   - With `churn > 0`, the liveness timer ticks every 100 ms and applies `churn / 10` pod changes per tick round-robin: 90% status/label updates, 10% delete + recreate.
   - `db.ts` keeps `byName: Map<kindKey, Map<"ns/name", uid>>` and `byOwner: Map<ownerUid, Set<uid>>` in sync in `put`/`drop`.
 
-- [ ] **Step 4: Run the tests and check the build time**
+- [ ] **Step 4: Run the tests and check the build time** _(Partly verified on 2026-09-28: the tests and typecheck pass; the browser check below was not run, no browser was available. Headless (Vitest, fake timers): `c-scale-l` builds in ~0.25 s, the first pods batch arrives 150–350 ms after the watch, and the list is synced after 40 batches × 150 ms ≈ 6 s.)_
 
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck`
 Expected: PASS. Then open `pnpm dev:ui` at `http://localhost:1430/?scale=l`: the `c-scale-l` cluster connects and the pods table fills within 3 s.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/src
