@@ -6,6 +6,11 @@ edition = "2021"
 rust-version = "1.89"
 license = "MIT"
 
+[lib]
+# `cargo bench -p kubepit-core -- <criterion flags>` would hand the flags to
+# the unit tests' libtest harness too, which rejects them.
+bench = false
+
 [dependencies]
 kube = { version = "4.2", default-features = false, features = ["client", "config", "runtime", "ws", "rustls-tls", "ring", "gzip", "oidc", "http-proxy", "socks5", "jsonpatch"] }
 k8s-openapi = { version = "0.28", features = ["latest"] }
@@ -47,3 +52,29 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 
 [dev-dependencies]
 tempfile = "3"
+# Benchmarks (`benches/`, large-cluster performance harness); dev-only.
+criterion = { version = "0.7", features = ["async_tokio"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+# Peak RSS of the e2e bench (`getrusage`); already in the tree through tokio.
+libc = "0.2"
+
+[[bench]]
+name = "watch"
+harness = false
+
+[[bench]]
+name = "metrics_history"
+harness = false
+
+[[bench]]
+name = "watchers"
+harness = false
+
+[[bench]]
+name = "search_proxies"
+harness = false
+
+[[bench]]
+name = "e2e"
+harness = false
