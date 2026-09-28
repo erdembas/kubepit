@@ -406,7 +406,7 @@ async fn configured_service_off_and_not_found() {
     let mut def = app.cluster_def(&id).unwrap();
     def.prometheus = PrometheusConfig::Off;
     app.cluster_update(def).unwrap();
-    // (The metrics-server sampler keeps polling `/apis/metrics.k8s.io`.)
+    // (Counted under `/api/`, where the service proxy lives.)
     let before = count(&server.log, "/api/");
     assert_eq!(
         app.prometheus_status(&id, false).await.unwrap().state,

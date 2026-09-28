@@ -314,7 +314,14 @@ typed confirmations, `read_only` in the backend, RBAC all unchanged).
 
 - `metrics_history.rs` samples metrics-server every 15 s while a cluster is
   connected and keeps 60 minutes of f32 ring buffers for the cluster, each
-  node and up to 5 000 pods; it stops with the connection.
+  node and up to 5 000 pods; it stops with the connection. Sampling is
+  opt-in per process (`Kubepit::set_metrics_sampling`): the desktop shell
+  enables it next to the other switches; tests and headless tools do not.
+  Turning it off stops every sampler and drops the histories.
+- `tests/background.rs` guards the rule for every switch: a connect with
+  the defaults sends only `GET /version` and `GET /apis`, and each switch
+  (metrics sampling, alerts, change journal, persistent history) shows its
+  own traffic once turned on.
 - `fleet_search.rs` searches every connected cluster concurrently with
   metadata-only lists (substring, glob or `/regex/` names, server-side label
   selectors) and streams results per cluster.

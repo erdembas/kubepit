@@ -1499,7 +1499,7 @@ git commit -m "test(harness): record request headers; test the Loki tenant heade
   - Off: every sampler stops and histories are dropped.
   - Default: off.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 // tests/background.rs
@@ -1549,22 +1549,22 @@ async fn each_opt_in_starts_its_own_traffic() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core --test background`
 Expected: FAIL. `set_metrics_sampling` is not found; without it the first test also sees the metrics lists.
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
   - `MetricsHistory` gains `active: AtomicBool`. `start_metrics_sampler` returns early while it is false, and `set_metrics_sampling(false)` calls `stop_all`.
   - `setup.rs` calls `core.set_metrics_sampling(true)` next to the other switches.
   - `tests/fleet.rs::metrics_history_is_sampled_while_connected` calls `app.set_metrics_sampling(true)` before connecting.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test --workspace`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates apps/desktop/src-tauri docs/ARCHITECTURE.md
