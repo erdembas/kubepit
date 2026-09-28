@@ -2775,9 +2775,9 @@ labels are configured.
 
 Steps:
 
-- [ ] **Step 1: Implement the section, the hint and the demo echo; update the docs**
+- [x] **Step 1: Implement the section, the hint and the demo echo; update the docs**
 
-- [ ] **Step 2: Translate, run the checks**
+- [x] **Step 2: Translate, run the checks**
 
 Run: `pnpm i18n:check -- --fix`, add the Turkish, then `pnpm typecheck && pnpm i18n:check`.
 
@@ -2790,7 +2790,12 @@ Run: `pnpm dev:ui`, edit a cluster → Prometheus.
 - A saved bearer reference round-trips.
 - The PromQL tab shows the hint.
 
-- [ ] **Step 4: Commit**
+  Still needs the browser walkthrough (the implementer had no browser). Covered
+  meanwhile by `PrometheusAccessFields.test.tsx` (reserved key error, Secret
+  reference, skip-verify badge) and `prometheusAccess.test.ts` (round trip, the
+  selector text of the hint).
+
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/desktop/src docs/ARCHITECTURE.md

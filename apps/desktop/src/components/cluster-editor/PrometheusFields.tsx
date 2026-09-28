@@ -2,10 +2,12 @@ import * as i18n from '@/i18n';
 import { Flame } from 'lucide-react';
 import { usePrometheusStatus } from '@/components/workbench/metrics/usePrometheus';
 import { Input } from '@/components/ui/Input';
-import { cn } from '@/lib/cn';
 import { serviceLabel } from '@/lib/prometheus';
+import type { AccessDraft } from '@/lib/prometheusAccess';
 import type { ClusterId, PromScheme, PrometheusConfig } from '@/types';
+import { Chip } from './Chip';
 import { Field } from './Field';
+import { PrometheusAccessFields } from './PrometheusAccessFields';
 
 /** Form state of `ClusterDef.prometheus` (the port stays text while typing). */
 export interface PrometheusDraft {
@@ -37,6 +39,20 @@ export function prometheusDraft(config: PrometheusConfig | undefined): Prometheu
   };
 }
 
+/** The draft as a setting, for checks that only need its mode and scheme. */
+export function draftConfig(draft: PrometheusDraft): PrometheusConfig {
+  return draft.mode === 'service'
+    ? {
+        mode: 'service',
+        namespace: draft.namespace.trim(),
+        service: draft.service.trim(),
+        port: Number(draft.port) || 0,
+        scheme: draft.scheme,
+        path_prefix: draft.path_prefix.trim(),
+      }
+    : { mode: draft.mode };
+}
+
 /** The setting to save, or a message explaining what is missing. */
 export function prometheusConfig(
   draft: PrometheusDraft,
@@ -60,42 +76,23 @@ export function prometheusConfig(
   };
 }
 
-export function Chip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        'rounded-app-sm inline-flex h-7 items-center gap-1.5 border px-2 text-[11.5px] transition',
-        active
-          ? 'border-accent/40 bg-accent/12 text-fg font-medium'
-          : 'border-border text-fg-muted hover:text-fg hover:border-border-strong',
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
-/** "Metrics source" of the cluster editor: auto-detect, a specific service, or off. */
+/**
+ * "Metrics source" of the cluster editor: auto-detect, a specific service, or
+ * off, plus the access settings of a shared or secured Prometheus.
+ */
 export function PrometheusFields({
   clusterId,
   value,
   onChange,
+  access,
+  onAccessChange,
 }: {
   /** `null` while adding: no status lookup runs before the cluster exists. */
   clusterId: ClusterId | null;
   value: PrometheusDraft;
   onChange: (next: PrometheusDraft) => void;
+  access: AccessDraft;
+  onAccessChange: (next: AccessDraft) => void;
 }) {
   i18n.useLocale();
   const status = usePrometheusStatus(clusterId).data;
@@ -218,6 +215,13 @@ export function PrometheusFields({
             </div>
           )}
         </>
+      )}
+      {value.mode !== 'off' && (
+        <PrometheusAccessFields
+          config={draftConfig(value)}
+          value={access}
+          onChange={onAccessChange}
+        />
       )}
     </div>
   );

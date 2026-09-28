@@ -106,6 +106,7 @@
   "Close tab": "Sekmeyi kapat",
   "Cluster": "Cluster",
   "cluster default": "cluster varsayılanı",
+  "Cluster selector {matchers} is not added to your own queries.": "Cluster seçicisi {matchers} kendi sorgularınıza eklenmez.",
   "Cluster shell": "Cluster shell'i",
   "Cluster shell ({cluster})": "Cluster shell'i ({cluster})",
   "Clusters": "Cluster'lar",

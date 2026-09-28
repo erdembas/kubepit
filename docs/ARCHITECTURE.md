@@ -538,10 +538,22 @@ An optional, richer metrics source next to the metrics-server history
   namespace, the API server's message verbatim and a copyable
   `kubectl auth can-i get services/proxy -n <ns>`.
   `dock/promql/PromqlView.tsx` draws results with `MultiSeriesChart`
-  (SVG, like `TimeSeriesChart`). The demo backend
+  (SVG, like `TimeSeriesChart`); with cluster labels configured its status
+  line says "Cluster selector {…} is not added to your own queries." The
+  cluster editor's Prometheus block has a collapsible "Shared or secured
+  Prometheus" section (`cluster-editor/PrometheusAccessFields.tsx`,
+  container queries): the tenant, label pair rows, auth (none / bearer
+  token / basic auth with the Secret namespace, name and keys) and, where
+  the service may speak https, the CA reference and "Skip TLS
+  verification" with a warning badge. Inline checks
+  (`lib/prometheusAccess.ts`) mirror `PrometheusAccess::normalized`; the
+  backend stays the final check. The status cache key of the UI includes
+  the access settings, so a change re-reads the status. The demo backend
   (`lib/ipc/mock/prometheus.ts`) fakes kube-prometheus-stack on
   prod-eu-west-1, the prometheus chart on the other cloud clusters and no
-  Prometheus on the local ones.
+  Prometheus on the local ones; it keeps `prometheus_access` with the
+  cluster, keys the status on it and reports a missing credentials Secret
+  or key like the backend (the tunnel itself is not simulated).
 
 ## Structured logs
 
