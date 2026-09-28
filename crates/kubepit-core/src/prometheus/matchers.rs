@@ -22,6 +22,10 @@ use crate::types::PromQuerySeries;
 /// source ignored or rewrote the selector, so its data cannot be trusted to
 /// belong to this cluster (fail closed).
 pub const CLUSTER_LABEL_MISMATCH: &str = "cluster-label-mismatch";
+/// Error of a statistics batch whose checked answers (memory max and pod
+/// owners) hold no series at all, so nothing proves the rest belongs to
+/// this cluster.
+pub const CLUSTER_LABEL_UNVERIFIED: &str = "cluster-label-unverified";
 
 /// Binary operators, modifiers and keywords (case-insensitive in PromQL).
 const KEYWORDS: [&str; 12] = [
@@ -236,10 +240,11 @@ pub fn with_matchers(query: &str, matchers: &str) -> String {
     out
 }
 
-/// `, k1, k2` for a `by (…)` list, so an aggregated answer keeps the
-/// cluster labels [`series_carry_labels`] checks (`""` without labels).
-pub fn by_labels(labels: &BTreeMap<String, String>) -> String {
-    labels.keys().map(|name| format!(", {name}")).collect()
+/// `, k1, k2` for a `by (…)` list of the cluster label `names`, so an
+/// aggregated answer keeps the labels [`series_carry_labels`] checks (`""`
+/// without labels).
+pub fn by_labels<'a>(names: impl IntoIterator<Item = &'a String>) -> String {
+    names.into_iter().map(|name| format!(", {name}")).collect()
 }
 
 /// Does every series carry each configured label with its value?
@@ -507,8 +512,8 @@ mod tests {
         let labels: BTreeMap<String, String> = [("cluster".to_string(), "prod".to_string())]
             .into_iter()
             .collect();
-        assert_eq!(by_labels(&labels), ", cluster");
-        assert_eq!(by_labels(&BTreeMap::new()), "");
+        assert_eq!(by_labels(labels.keys()), ", cluster");
+        assert_eq!(by_labels(&Vec::<String>::new()), "");
         let series = |pairs: &[(&str, &str)]| PromQuerySeries {
             labels: pairs
                 .iter()

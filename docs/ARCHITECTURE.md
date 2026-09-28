@@ -516,12 +516,15 @@ An optional, richer metrics source next to the metrics-server history
   numbers. It is never applied to the probe (`query=1`) or to PromQL typed
   in the PromQL tab (`Origin::User`). Charts report the query they sent,
   so a PromQL tab opened from one gets the same data. It fails closed: the
-  live right-sizing report keeps the configured label keys in its memory
-  answer (`by (namespace, pod, container, cluster)`) and the statistics
-  batches in Q11 (pod owners); a series without them or with another value
-  fails with `cluster-label-mismatch` (a source that ignored the selector)
-  — the live report then falls back to metrics-server with that note, a
-  batch aborts with `BatchFailure::Proxy`.
+  right-sizing statistics batches keep the configured label keys in the
+  `by (…)` of Q5 (memory max) and Q11 (pod owners) and check both answers
+  (`workload_stats::check_labels`): a series without them or with another
+  value fails the batch with `cluster-label-mismatch`
+  (`BatchFailure::LabelMismatch`, a source that ignored the selector), no
+  series in either leaves it unverified and unused
+  (`cluster-label-unverified`), and Q11 is required. A mismatch aborts
+  the collection; the live report then falls back to metrics-server with
+  that note.
 - **States**: `available` when any probed candidate answers; `forbidden`
   when the API server denied every probed candidate
   (`service_proxy::is_proxy_forbidden`: its own 403 `Status` with reason
@@ -1027,11 +1030,12 @@ applying a recommendation only reads, so read-only clusters get it all.
   tunnel failure aborts (and re-detects Prometheus), other failures are
   listed as failed queries. Every query goes through the one Prometheus
   transport as a preset (tenant, tunnel, cluster-label selector); on a
-  shared Prometheus Q11 keeps the configured label names in its `by (…)`,
-  an owner series without them (or with another value) fails the batch
-  with `cluster-label-mismatch`, and Q11 itself is required there (no
-  owners answer, no batch: nothing would prove the data is this
-  cluster's). `rightsizing/evidence.rs` folds a batch into
+  shared Prometheus Q5 and Q11 keep the configured label names in their
+  `by (…)`: a checked series without them (or with another value) fails
+  the batch with `cluster-label-mismatch`, no series in either leaves it
+  unverified (unused, its namespaces listed as failed), and Q11 itself is
+  required there (no owners answer, no batch: nothing would prove the
+  data is this cluster's). `rightsizing/evidence.rs` folds a batch into
   per-(workload, container) usage (`ContainerUsage`: `UsageStats` plus
   `UsageEvidence`): pods resolve through the owner index (or, without
   owner series, by name with identity `name-match`), only containers of

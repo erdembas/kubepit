@@ -1018,7 +1018,7 @@ async fn statistics_batches_carry_the_selector_and_fail_closed() {
         .prometheus_stats_batch(&id, &scope, &|| {})
         .await
         .unwrap_err();
-    assert_eq!(err, BatchFailure::Proxy("cluster-label-mismatch".into()));
+    assert_eq!(err, BatchFailure::LabelMismatch);
     assert_eq!(err.to_string(), "cluster-label-mismatch");
 
     // Without an owners answer nothing proves the batch is this cluster's:

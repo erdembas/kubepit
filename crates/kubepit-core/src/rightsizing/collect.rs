@@ -330,6 +330,13 @@ impl Kubepit {
                     absorb(&mut merged, batch);
                 }
                 Err(BatchFailure::Proxy(message)) => return Err(Abort::Source(message)),
+                Err(e @ BatchFailure::LabelMismatch) => return Err(Abort::Source(e.to_string())),
+                Err(e @ BatchFailure::Unverified) => {
+                    // Not this cluster's for sure: unused, and smaller
+                    // scopes would not prove more.
+                    first_error.get_or_insert_with(|| e.to_string());
+                    failed.extend(scope_namespaces);
+                }
                 Err(e @ BatchFailure::Splittable { .. }) => {
                     first_error.get_or_insert_with(|| e.to_string());
                     if scope_namespaces.len() <= 1 {
