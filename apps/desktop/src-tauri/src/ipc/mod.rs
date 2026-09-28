@@ -52,6 +52,8 @@ mod history;
 mod custom_actions;
 // Security: Pod Security Standards enforce dry run.
 mod security;
+// Cost insight and right-sizing.
+mod cost;
 
 pub use access::*;
 pub use alerts::*;
@@ -59,6 +61,7 @@ pub use app::*;
 pub use changes::*;
 pub use clusters::*;
 pub use connectivity::*;
+pub use cost::*;
 pub use custom_actions::*;
 pub use files::*;
 pub use fleet::*;

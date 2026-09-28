@@ -54,6 +54,7 @@ export const AUDIT_ACTIONS: readonly AuditAction[] = [
   'pod-debug',
   'file-upload',
   'node-shell',
+  'rightsize',
 ];
 
 export function actionLabel(action: AuditAction): string {
@@ -100,6 +101,8 @@ export function actionLabel(action: AuditAction): string {
       return i18n.t('Upload file');
     case 'node-shell':
       return i18n.t('Node shell');
+    case 'rightsize':
+      return i18n.t('Right-size');
   }
 }
 
@@ -187,6 +190,10 @@ export function requestSummary(entry: AuditEntry): string | null {
     }
     case 'patch':
       return typeof r.patch_type === 'string' ? r.patch_type : null;
+    case 'rightsize': {
+      const changes = Array.isArray(r.changes) ? (r.changes as Record<string, unknown>[]) : [];
+      return changes.map((c) => String(c.container)).join(', ') || null;
+    }
     default:
       return null;
   }

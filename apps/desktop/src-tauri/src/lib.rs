@@ -170,6 +170,12 @@ pub fn run() {
             ipc::history_changes_list,
             ipc::history_changes_get,
             ipc::history_clear,
+            // Cost insight and right-sizing
+            ipc::cost_status,
+            ipc::cost_report,
+            ipc::cost_summary,
+            ipc::rightsizing_report,
+            ipc::rightsizing_apply,
             // Logs & debug
             ipc::workload_logs_stream,
             ipc::workload_logs_stop,

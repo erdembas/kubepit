@@ -1,4 +1,4 @@
-import type { HealthIgnore, KubeObject } from '@/types';
+import type { HealthIgnore, KubeObject, RightsizingReport } from '@/types';
 
 export type { HealthIgnore };
 
@@ -45,6 +45,8 @@ export interface HealthInput extends HealthLists {
   /** Lists that loaded completely; rules that need a missing list are skipped. */
   loaded: ReadonlySet<HealthKind>;
   now: number;
+  /** Cost insight: the last right-sizing report, when one was loaded. */
+  rightsizing?: RightsizingReport | null;
 }
 
 export interface FindingRef {

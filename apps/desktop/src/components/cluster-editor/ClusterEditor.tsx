@@ -15,6 +15,7 @@ import { ClusterFields, type ClusterFieldValues } from './ClusterFields';
 import { Field } from './Field';
 import { PrometheusFields, prometheusConfig, prometheusDraft } from './PrometheusFields';
 import { LokiFields, lokiConfig, lokiDraft } from './LokiFields';
+import { CostFields, costConfig, costDraft } from './CostFields';
 import { ProxyField } from './ProxyField';
 import { proxyUrlProblem } from '@/lib/proxy';
 
@@ -73,6 +74,7 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
   const [busy, setBusy] = useState(false);
   const [prometheus, setPrometheus] = useState(() => prometheusDraft(editing?.prometheus));
   const [loki, setLoki] = useState(() => lokiDraft(editing?.loki));
+  const [cost, setCost] = useState(() => costDraft(editing?.cost));
   // Connectivity: per-cluster proxy override.
   const [proxy, setProxy] = useState(editing?.proxy_url ?? '');
 
@@ -144,6 +146,8 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
         if ('error' in metrics) return setError(metrics.error);
         const logs = lokiConfig(loki);
         if ('error' in logs) return setError(logs.error);
+        const costing = costConfig(cost);
+        if ('error' in costing) return setError(costing.error);
         const saved = await saveCluster({
           ...editing,
           name,
@@ -156,6 +160,7 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
           notes: fields.notes,
           prometheus: metrics.config,
           loki: logs.config,
+          cost: costing.config,
           proxy_url: proxy.trim() || null,
         });
         store.assignClusterToSection(saved.id, fields.sectionId);
@@ -363,6 +368,7 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
         {editing && (
           <div className="border-border/60 border-t pt-4">
             <LokiFields clusterId={editing.id} value={loki} onChange={setLoki} />
+            <CostFields clusterId={editing.id} value={cost} onChange={setCost} />
           </div>
         )}
       </div>

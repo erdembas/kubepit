@@ -174,7 +174,7 @@ function parseDocs(text: string): (KubeObject | null)[] {
   }
 }
 
-const REVERTIBLE: AuditAction[] = ['apply', 'replace', 'patch', 'scale', 'set-image'];
+const REVERTIBLE: AuditAction[] = ['apply', 'replace', 'patch', 'scale', 'set-image', 'rightsize'];
 
 function objectOf(
   action: AuditAction,
@@ -354,6 +354,20 @@ wrap('resource_set_image', (args) =>
     after: (result) => [result as KubeObject],
   }),
 );
+wrap('rightsizing_apply', (args) => {
+  const target = args.target as { kind: string; namespace: string; name: string };
+  const plural = `${target.kind.toLowerCase()}s`;
+  return objectPlan(
+    'rightsize',
+    {
+      clusterId: args.clusterId,
+      gvk: { group: 'apps', version: 'v1', kind: target.kind, plural, namespaced: true },
+      namespace: target.namespace,
+      name: target.name,
+    },
+    { dryRun: Boolean(args.dryRun), request: { changes: args.changes } },
+  );
+});
 wrap('rollout_undo', (args) =>
   objectPlan('rollout-undo', args, { request: { revision: Number(args.revision) } }, false),
 );

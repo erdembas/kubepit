@@ -82,6 +82,8 @@ export const ACTION_ACCESS: Record<string, Requirement> = {
   delete: onObject('delete'),
   // Workload operations: patches on the object itself (template, spec.paused).
   'set-image': onObject('patch'),
+  // Cost insight: apply a right-sizing recommendation (pod template resources).
+  rightsize: onObject('patch'),
   'pause-rollout': onObject('patch'),
   rollback: onObject('patch'),
   // GitOps: every Argo CD / Flux action is a patch of the object itself.

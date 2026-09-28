@@ -13,6 +13,7 @@ import { podStatusFindings } from './pods';
 import { hpaFindings, pdbCoverageFindings, pdbFindings } from './policy';
 import { RULES, ruleDef } from './rules';
 import { pvcFindings, unusedClaimFindings } from './storage';
+import { rightsizingFindings } from './rightsizing';
 import {
   CATEGORIES,
   SEVERITIES,
@@ -54,6 +55,7 @@ const PASSES: Pass[] = [
   (input, emit) => {
     if (needsMet(input, 'workload-single-replica')) singleReplicaFindings(input, emit);
     if (needsMet(input, 'cronjob-last-failed')) cronJobFindings(input, emit);
+    rightsizingFindings(input, emit);
   },
   (input, emit) => {
     if (input.loaded.has('pods')) serviceFindings(input, emit);

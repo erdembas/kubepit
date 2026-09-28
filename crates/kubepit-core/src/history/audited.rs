@@ -20,9 +20,11 @@ use crate::manifests::apply::parse_single;
 use crate::node_shell::NodeShellPod;
 use crate::objects::to_kube_object;
 use crate::resources::parse_documents;
+use crate::rightsizing::{apps_gvk, ContainerResourceChange, WorkloadRef};
 use crate::types::{
-    ApplyMode, ContainerImage, DeleteOptions, Gvk, HelmInstallRequest, HelmInstallResult,
-    HelmUpgradeRequest, KubeObject, ManifestApplyResult, PatchType, PodDebugRequest, PodFsTransfer,
+    ApplyMode, ContainerImage, DeleteOptions, DryRunResult, Gvk, HelmInstallRequest,
+    HelmInstallResult, HelmUpgradeRequest, KubeObject, ManifestApplyResult, PatchType,
+    PodDebugRequest, PodFsTransfer,
 };
 
 fn str_at<'a>(doc: &'a Value, pointer: &str) -> Option<&'a str> {
@@ -386,6 +388,49 @@ impl Kubepit {
             .await;
         if let Ok(after) = &result {
             audit.object(0, before.as_ref(), Some(after), &self.history.redactor);
+        }
+        audit.finish(self, &result);
+        result
+    }
+
+    /// `rightsizing_apply`, audited: the before/after of the workload are
+    /// kept (so it can be reverted); dry-run reviews are flagged like others.
+    pub async fn rightsizing_apply(
+        &self,
+        cluster_id: &str,
+        target: &WorkloadRef,
+        changes: &[ContainerResourceChange],
+        dry_run: bool,
+    ) -> Result<DryRunResult> {
+        let gvk = apps_gvk(&target.kind);
+        let audit_target = AuditTarget::object(&gvk, Some(&target.namespace), &target.name);
+        let Some(mut audit) = self.audit(
+            cluster_id,
+            AuditAction::Rightsize,
+            dry_run,
+            vec![audit_target],
+        ) else {
+            return self
+                .rightsizing_apply_unaudited(cluster_id, target, changes, dry_run)
+                .await;
+        };
+        audit.request(json!({ "changes": changes }));
+        let before = if dry_run {
+            None
+        } else {
+            self.audit_fetch(cluster_id, &gvk, Some(&target.namespace), &target.name)
+                .await
+        };
+        let result = self
+            .rightsizing_apply_unaudited(cluster_id, target, changes, dry_run)
+            .await;
+        if let (false, Ok(done)) = (dry_run, &result) {
+            audit.object(
+                0,
+                before.as_ref(),
+                done.result.as_ref(),
+                &self.history.redactor,
+            );
         }
         audit.finish(self, &result);
         result

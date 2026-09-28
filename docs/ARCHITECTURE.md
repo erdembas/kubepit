@@ -679,6 +679,105 @@ that never leaves the machine.
   `pnpm dev:ui`, seeds a few older entries, and ships persisted events and
   changes for `staging-gke`.
 
+## Cost insight & right-sizing
+
+What a cluster costs per month, where the money goes and which requests to
+change (`crates/kubepit-core/src/cost/`, `rightsizing/`,
+`prometheus/usage.rs`; UI in `components/workbench/cost/`). Everything but
+applying a recommendation only reads, so read-only clusters get it all.
+
+- **Sources** (`ClusterDef.cost.source`: `auto`, an `opencost` or
+  `kubecost` service, or `estimate`). `cost/detect.rs` ranks the services
+  Prometheus detection lists (plus `opencost`, `kubecost` namespaces when
+  RBAC forbids the cluster-wide list): OpenCost (`opencost`, API port 9003,
+  `/allocation/compute`) before Kubecost (`*-cost-analyzer`, frontend port
+  9090, `/model/allocation`), and probes the best three with a one-hour
+  query. Requests go through the service proxy with the Prometheus
+  transport's `proxy_path` and a retry-free client of the connection
+  (`cost/proxy.rs`, plain JSON instead of the Prometheus envelope).
+  Detection is cached per connection and setting; "no cost API" is
+  rechecked after five minutes, a proxy 404/502/503 re-detects, disconnect
+  drops everything. A cost API that fails a query falls back to an
+  estimate with an `api-failed` note.
+- **Allocations** (`cost/allocation.rs`): an accumulated breakdown
+  (`aggregate=namespace`, `namespace,controllerKind,controller` or
+  `label:<prometheus-style key>`, idle included) and daily totals
+  (`step=1d`). Every row becomes a monthly run rate (730 h) with its own
+  `minutes`, `__idle__` / `__unallocated__` become special rows, controller
+  kinds get their Kubernetes spelling.
+- **Estimates** (`cost/estimate.rs`, pure): each running or pending pod
+  costs its effective requests (containers' sum vs. the largest init
+  container, plus overhead) — or its usage when higher and known — at the
+  price model's hourly prices; nodes cost their capacity and the rest is
+  idle (unknown without node access); claims cost their capacity per
+  GiB-month and belong to the first pod mounting them. Workloads come from
+  owner references (ReplicaSet → Deployment via `pod-template-hash`, Job →
+  CronJob via the scheduled-time suffix). Usage is the Prometheus average
+  over the window (`rate` / `avg_over_time` presets per pod) or the current
+  metrics-server snapshot; with Prometheus the trend is requests × prices
+  per day (`prometheus_metrics` cluster requests, hourly steps).
+- **Price model** (`cost/pricing.rs`): the cluster's own (currency, vCPU-
+  and GiB-hour, optional GPU-hour and volume GiB-month, discount %) or the
+  defaults of the detected platform — rounded on-demand list prices for
+  EKS, GKE, AKS and a cheaper generic / on-prem model, always labelled as
+  estimates. No per-instance-type price list is shipped.
+- **Commands**: `cost_status`, `cost_report` (window 7d/30d, aggregate,
+  label; cached five minutes, `refresh` bypasses), `cost_summary` (the
+  7-day namespace totals for the dashboard).
+- **Right-sizing**: usage fetching and math are separate.
+  `prometheus/usage.rs` presets return, per container over `days` (default
+  7), the p95 and max of 5-minute CPU rates, the max working set and the
+  hours with samples; pods map to Deployments / StatefulSets / DaemonSets
+  by the pod names their kind generates (longest name wins), worst replica
+  wins, hours are per replica. Without Prometheus the last metrics-server
+  hour is used, split per container by the current snapshot (always low
+  confidence). The math sits behind `rightsizing::strategy::RecommendationStrategy`
+  (`fn info() -> RightsizingStrategyInfo`, `fn recommend(&ContainerInput) ->
+  StrategyOutput`; input = name, current requests/limits, `UsageStats`,
+  source, settings; output = recommended values, confidence, warnings).
+  `STRATEGIES` lists them, requests pick one by id and reports list them
+  all, so a new strategy needs no UI, apply or preset changes. The default
+  `percentile-headroom` (`rightsizing/percentile.rs`): CPU request = p95 +
+  15 %, memory request = max + 20 %, existing memory limits raised to max +
+  40 % when tighter (never lowered, never invented), minimums, rounding up
+  to sane steps, never below the observed peak, no churn under 10 % /
+  10 m / 16 MiB; confidence high from 3 days, medium from 12 hours.
+  `strategy::finalize` is shared by all strategies: values a strategy left
+  alone stay, and a limit a new request would exceed rises proportionally
+  (current limit ÷ request ratio kept, flagged `*_limit_raised` with a
+  warning). Workloads get a verdict (over / under / balanced / no data),
+  the monthly cost delta of their requests and the weakest container's
+  confidence.
+- **Apply** (`rightsizing_apply`): a strategic merge patch of the named
+  containers' resources at the pod template plus a
+  `kubernetes.io/change-cause`; `dryRun: true` returns live vs. result like
+  `resource_dry_run_yaml` (allowed on read-only clusters), the real apply
+  is refused on read-only clusters. The dialog shows every value that
+  changes (raised limits called out with their ratio), the strategy's
+  warnings and the dry-run diff, gates on RBAC (`rightsize` in
+  `actions/access.ts`) and asks production clusters for a typed
+  confirmation. Optional memory limit changes can be left out; limits a
+  request would exceed are always sent.
+- **UI**: the `@cost` view (Cluster section) with monthly total, idle,
+  efficiency (usage ÷ requests, cost-weighted), allocated vs. idle and cost
+  by resource, the source and price model, the daily trend
+  (`MultiSeriesChart`), a breakdown by namespace / workload / label (key
+  configurable, suggestions such as `team`, `app.kubernetes.io/part-of`)
+  filtered by the workbench namespaces with CSV export (`lib/tableExport`),
+  and the right-sizing list (filters, headroom settings, strategy picker
+  when there are several). A cost card on the cluster overview, a fleet
+  total per currency in the dashboard's status bar, a right-sizing section
+  in Deployment / StatefulSet / DaemonSet details and two Health rules
+  (`workload-overprovisioned`, `workload-underprovisioned`, category
+  efficiency) that only fire on large, confident deltas
+  (`lib/kube/rightsizing/model.ts#healthVerdict`). Per-viewer preferences
+  live in localStorage (`kubepit.cost.v1`).
+- **Demo**: OpenCost on prod-eu-west-1 (`mock/fixtures/cost.ts` derives
+  allocations with usage, network and idle plus a daily trend), estimates
+  elsewhere (Prometheus usage and a requests trend where the demo runs
+  Prometheus, the metrics-server snapshot on kind), and synthetic usage
+  histories that make some workloads over- and others under-provisioned.
+
 ## Access (RBAC)
 
 `access.rs` wraps SelfSubjectAccessReview, SelfSubjectRulesReview and

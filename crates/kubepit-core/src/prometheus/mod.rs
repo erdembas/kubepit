@@ -21,6 +21,8 @@ pub mod parse;
 pub mod promql;
 pub mod proxy;
 pub mod range;
+// Usage statistics for cost estimates and right-sizing.
+pub mod usage;
 
 use std::time::Instant;
 

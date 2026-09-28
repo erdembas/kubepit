@@ -87,6 +87,8 @@ pub enum AuditAction {
     PodDebug,
     FileUpload,
     NodeShell,
+    /// `rightsizing_apply`: container requests/limits from a recommendation.
+    Rightsize,
 }
 
 impl AuditAction {
@@ -112,6 +114,7 @@ impl AuditAction {
         Self::PodDebug,
         Self::FileUpload,
         Self::NodeShell,
+        Self::Rightsize,
     ];
 
     /// The wire name (`set-image`), also stored in the database.
@@ -138,6 +141,7 @@ impl AuditAction {
             Self::PodDebug => "pod-debug",
             Self::FileUpload => "file-upload",
             Self::NodeShell => "node-shell",
+            Self::Rightsize => "rightsize",
         }
     }
 
@@ -149,7 +153,12 @@ impl AuditAction {
     pub fn revertible(self) -> bool {
         matches!(
             self,
-            Self::Apply | Self::Replace | Self::Patch | Self::Scale | Self::SetImage
+            Self::Apply
+                | Self::Replace
+                | Self::Patch
+                | Self::Scale
+                | Self::SetImage
+                | Self::Rightsize
         )
     }
 }

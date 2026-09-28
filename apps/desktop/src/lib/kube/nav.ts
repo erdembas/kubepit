@@ -31,6 +31,7 @@ export const VIEW_KEYS = {
   netpolSimulator: '@netpol',
   upgradeReadiness: '@upgrade',
   security: '@security',
+  cost: '@cost',
 } as const;
 
 export interface NavItem {
@@ -109,6 +110,7 @@ export function viewLabel(key: string, apiResources?: readonly ApiResourceInfo[]
   if (key === VIEW_KEYS.netpolSimulator) return i18n.t('Network Policy Simulator');
   if (key === VIEW_KEYS.upgradeReadiness) return i18n.t('Upgrade Readiness');
   if (key === VIEW_KEYS.security) return i18n.t('Security');
+  if (key === VIEW_KEYS.cost) return i18n.t('Cost');
   const builtin = Object.values(BUILTIN).find((k) => k.key === key);
   if (builtin)
     return builtin.key === BUILTIN.CustomResourceDefinition.key
@@ -194,6 +196,11 @@ export function buildNav(apiResources: readonly ApiResourceInfo[] | null): NavGr
           VIEW_KEYS.upgradeReadiness,
           i18n.t('Upgrade readiness'),
           'upgrade readiness deprecated removed api versions kubernetes kubent pluto',
+        ),
+        viewItem(
+          VIEW_KEYS.cost,
+          i18n.t('Cost'),
+          'cost money spend opencost kubecost finops budget right-sizing rightsizing requests efficiency idle',
         ),
         ...items('cluster'),
         viewItem(

@@ -30,6 +30,7 @@ import { useVisibleStore } from '@/lib/useVisibleStore';
 import { useAppStore } from '@/store/useAppStore';
 import { openFleetSearch } from '@/store/useFleetSearchStore';
 import { ClusterCard } from './ClusterCard';
+import { FleetCost } from './FleetCost';
 import { HeaderAction, SectionHeader } from './SectionHeader';
 import { UpgradeFleetCard } from './UpgradeFleetCard';
 import {
@@ -294,6 +295,7 @@ export function Dashboard({ visible }: { visible: boolean }) {
                 })}
               </span>
             )}
+            <FleetCost clusters={clusters} statuses={statuses} visible={visible} />
           </div>
 
           {stats.connected > 0 && <UpgradeFleetCard visible={visible} />}

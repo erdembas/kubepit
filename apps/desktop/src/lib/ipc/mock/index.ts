@@ -30,6 +30,8 @@ import './helmPreview';
 import './customActions';
 // Security: Pod Security enforce dry run.
 import './podSecurity';
+// Cost insight and right-sizing (reads prometheus_status, wraps nothing).
+import './cost';
 // Registered last: it wraps every mutating command to derive the demo audit log.
 import './history';
 

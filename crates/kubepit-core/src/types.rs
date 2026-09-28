@@ -55,6 +55,9 @@ pub struct ClusterDef {
     pub created_at: i64,
     #[serde(default)]
     pub last_connected_at: Option<i64>,
+    /// Cost insight: cost source and price model (auto-detect, platform prices).
+    #[serde(default)]
+    pub cost: crate::cost::CostConfig,
     /// Where charts read Prometheus metrics from (auto-detect by default).
     #[serde(default)]
     pub prometheus: PrometheusConfig,

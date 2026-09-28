@@ -13,6 +13,8 @@ import {
 import { useHealthIgnores, useHealthStore } from '@/store/useHealthStore';
 import type { ApiResourceInfo, Gvk } from '@/types';
 import { restartWatch, useWatch, type WatchSnapshot } from '../data/watchCache';
+import { useCostPrefs } from '../cost/prefs';
+import { useRightsizing } from '../cost/useCost';
 import { useNow } from '../util';
 
 /**
@@ -134,6 +136,15 @@ export function useHealthScan(
     roleBindings: useWatch(clusterId, gvks.roleBindings, namespaces, enabled),
     clusterRoleBindings: useWatch(clusterId, gvks.clusterRoleBindings, namespaces, enabled),
   };
+  // Cost insight: right-sizing findings (efficiency) when a report is available.
+  const rightsizing = useRightsizing(
+    clusterId,
+    namespaces,
+    null,
+    useCostPrefs((s) => s.settings),
+    useCostPrefs((s) => s.strategy),
+    enabled,
+  ).data;
   const kinds = Object.keys(snaps) as HealthKind[];
   const watched = kinds.filter((k) => gvks[k]);
   const settled = watched.filter((k) => snaps[k].synced || snaps[k].status === 'error');
@@ -152,11 +163,14 @@ export function useHealthScan(
     locale,
     nonce,
     Math.floor(clock / 60_000),
+    rightsizing?.computed_at ?? 0,
     ...kinds.map((k) => `${gvks[k] ? 1 : 0}:${snaps[k].version}:${snaps[k].synced ? 1 : 0}`),
   ].join('|');
 
   const snapsRef = useRef(snaps);
   snapsRef.current = snaps;
+  const rightsizingRef = useRef(rightsizing);
+  rightsizingRef.current = rightsizing;
   const [result, setResult] = useState<Cached | null>(() => scans.get(key) ?? null);
   const [scanning, setScanning] = useState(false);
 
@@ -202,7 +216,12 @@ export function useHealthScan(
         if (!gvks[k] || (s.synced && s.status !== 'error')) loaded.add(k);
         lists[k] = gvks[k] && s.status !== 'error' ? s.items : [];
       }
-      const input: HealthInput = { ...lists, loaded, now: Date.now() };
+      const input: HealthInput = {
+        ...lists,
+        loaded,
+        now: Date.now(),
+        rightsizing: rightsizingRef.current ?? null,
+      };
       setScanning(true);
       scanHealthAsync(input, signal)
         .then((scan) => {

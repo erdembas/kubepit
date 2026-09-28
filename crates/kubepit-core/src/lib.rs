@@ -53,6 +53,8 @@
 //! | [`history`]     | SQLite audit log, persisted events and changes         |
 //! | [`custom_actions`] | user-defined actions (k9s-plugin style), `actions.json` |
 //! | [`pod_security`] | Pod Security enforce dry run ("what would break")     |
+//! | [`cost`]        | cost insight: OpenCost / Kubecost / estimates           |
+//! | [`rightsizing`] | request recommendations and their patches              |
 //!
 //! Push notifications to the UI go through [`EventSink`]; streams take plain
 //! `Fn(T) -> bool` callbacks (return `false` to stop) that the desktop shell
@@ -131,6 +133,9 @@ pub mod history;
 pub mod custom_actions;
 // Security: Pod Security Standards enforce dry run.
 pub mod pod_security;
+// Cost insight and right-sizing recommendations.
+pub mod cost;
+pub mod rightsizing;
 
 pub use app::Kubepit;
 pub use events::{EventSink, NullSink};

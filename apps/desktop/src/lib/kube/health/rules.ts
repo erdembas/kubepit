@@ -228,6 +228,31 @@ export const RULES: readonly RuleDef[] = [
     () => i18n.t('CronJobs whose last run failed'),
     () => i18n.t('Open the failed Job and read its pod logs; fix the job or its schedule.'),
   ),
+  // Cost insight: right-sizing report (only large, confident deltas).
+  rule(
+    'workload-overprovisioned',
+    'efficiency',
+    'info',
+    [],
+    false,
+    () => i18n.t('Workloads requesting far more than they use'),
+    () =>
+      i18n.t(
+        'Lower the requests to the right-sizing recommendation (Cost view) so nodes can be packed tighter.',
+      ),
+  ),
+  rule(
+    'workload-underprovisioned',
+    'efficiency',
+    'warning',
+    [],
+    false,
+    () => i18n.t('Workloads using more than they request'),
+    () =>
+      i18n.t(
+        'Raise the requests (and memory limits) to the right-sizing recommendation so pods are not throttled, evicted or OOM-killed.',
+      ),
+  ),
   // -- Network ----------------------------------------------------------------
   rule(
     'service-no-pods',

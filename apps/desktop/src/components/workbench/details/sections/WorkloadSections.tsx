@@ -5,6 +5,7 @@ import { replicaCounts } from '@/lib/kube/workloads';
 import { hasRollout } from '@/lib/kube/rollout';
 import { ChipList, MiniTable, MonoText, Row, Rows, Section } from '../primitives';
 import { WorkloadMetricsHistory } from '../MetricsHistoryCard';
+import { RightsizingSection } from '../../cost/RightsizingSection';
 import { PodsMiniTable } from '../PodsMiniTable';
 import { ConditionsTable } from './PodSections';
 import type { SectionProps } from './types';
@@ -48,7 +49,7 @@ export function TemplateContainers({ template }: { template: unknown }) {
   );
 }
 
-export function WorkloadSections({ obj, ctx, isActive }: SectionProps) {
+export function WorkloadSections({ obj, gvk, ctx, isActive, readOnly }: SectionProps) {
   i18n.useLocale();
   const s = spec(obj);
   const c = replicaCounts(obj);
@@ -127,6 +128,7 @@ export function WorkloadSections({ obj, ctx, isActive }: SectionProps) {
         <TemplateContainers template={s.template} />
       </Section>
       <WorkloadMetricsHistory obj={obj} ctx={ctx} isActive={isActive} />
+      <RightsizingSection obj={obj} gvk={gvk} ctx={ctx} isActive={isActive} readOnly={readOnly} />
       <Section title={i18n.t('Pods')}>
         <PodsMiniTable
           ctx={ctx}

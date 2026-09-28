@@ -387,6 +387,7 @@ impl Kubepit {
         self.prometheus.forget(id);
         self.loki.forget(id);
         self.proxy_clients.forget(id);
+        self.cost.forget(id);
         self.change_journals.stop_cluster(id);
         self.history.stop_cluster(id);
         self.forwards.stop_cluster(id, self.sink.as_ref());
