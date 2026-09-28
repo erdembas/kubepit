@@ -8,10 +8,17 @@
 //!   share one transaction; control operations (clear, prune, flush and the
 //!   recommendation scan writes) act as barriers after everything queued
 //!   before them.
-//! - Scan writes are never dropped: [`Writer::scan_begin`] and
-//!   [`Writer::scan_finish`] wait for room (blocking pool only), and
-//!   [`Writer::send_detached`] hands a full queue's operation to a
-//!   short-lived thread instead of dropping it (drop guards).
+//! - Scan writes are never dropped silently. [`Writer::scan_begin`] and
+//!   [`Writer::scan_finish`] wait for room and for the answer (blocking pool
+//!   only), bounded as a whole (30 s / 60 s, queueing included):
+//!   - a begin that could not be queued in time fails without inserting a
+//!     run; one whose answer came too late (nobody took the id) is
+//!     finished as interrupted (`stopped`) by the writer right away, so it
+//!     never stays `running`;
+//!   - a finish that could not be queued in time is handed to
+//!     [`Writer::send_detached`], which gives a full queue's operation to a
+//!     short-lived thread instead of dropping it (also used by drop
+//!     guards).
 //! - [`Writer::start`] marks runs a previous process left `running` as
 //!   interrupted (`app-restarted`) before the thread takes any operation.
 //! - Dropping the last handle closes the channel; the thread drains what is
@@ -21,7 +28,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use rusqlite::Connection;
@@ -35,6 +42,20 @@ use crate::objects::now_millis;
 pub const QUEUE_CAPACITY: usize = 1024;
 /// Data operations committed together.
 const BATCH: usize = 256;
+/// Most time [`Writer::scan_begin`] takes, queueing included.
+const SCAN_BEGIN_TIMEOUT: Duration = Duration::from_secs(30);
+/// Most time [`Writer::scan_finish`] waits, queueing included.
+const SCAN_FINISH_TIMEOUT: Duration = Duration::from_secs(60);
+/// How often a bounded send retries a full queue.
+const QUEUE_POLL: Duration = Duration::from_millis(10);
+
+/// What a bounded send did with its operation.
+enum Queued {
+    Yes,
+    /// The queue stayed full until the deadline: the operation, unsent.
+    Full(WriteOp),
+    Gone,
+}
 
 pub enum WriteOp {
     Audit(Box<AuditRecord>),
@@ -134,26 +155,79 @@ impl Writer {
         }
     }
 
+    /// Queue `op`, waiting for room until `deadline` at most.
+    fn queue_until(&self, mut op: WriteOp, deadline: Instant) -> Queued {
+        loop {
+            match self.tx.try_send(op) {
+                Ok(()) => return Queued::Yes,
+                Err(TrySendError::Disconnected(_)) => return Queued::Gone,
+                Err(TrySendError::Full(back)) if Instant::now() >= deadline => {
+                    return Queued::Full(back)
+                }
+                Err(TrySendError::Full(back)) => {
+                    op = back;
+                    std::thread::sleep(QUEUE_POLL);
+                }
+            }
+        }
+    }
+
     /// Insert a `running` recommendation run after everything queued
-    /// before; waits for room and for the id (blocking pool only).
+    /// before and return its id (blocking pool only; 30 s at most,
+    /// queueing included). On a timeout no run is left `running`: either
+    /// none was queued, or the writer finishes it as `stopped` when nobody
+    /// takes its id.
     pub fn scan_begin(&self, scan: ScanBegin) -> Result<i64> {
+        self.scan_begin_within(scan, SCAN_BEGIN_TIMEOUT)
+    }
+
+    fn scan_begin_within(&self, scan: ScanBegin, timeout: Duration) -> Result<i64> {
+        let deadline = Instant::now() + timeout;
         let (done, wait) = mpsc::channel();
-        self.send_blocking(WriteOp::ScanBegin(scan, done))?;
-        wait.recv_timeout(Duration::from_secs(30))
+        match self.queue_until(WriteOp::ScanBegin(scan, done), deadline) {
+            Queued::Yes => {}
+            Queued::Full(_) => {
+                return Err(anyhow!(
+                    "the history writer is busy; the recommendation scan did not start"
+                ))
+            }
+            Queued::Gone => return Err(anyhow!("the history writer stopped")),
+        }
+        wait.recv_timeout(deadline.saturating_duration_since(Instant::now()))
             .map_err(|_| anyhow!("timed out starting a recommendation scan"))?
     }
 
     /// Record how run `run_id` ended at `finished` (epoch ms), after
-    /// everything queued before; waits (blocking pool only).
+    /// everything queued before (blocking pool only; 60 s at most,
+    /// queueing included). A finish that cannot be queued in time is
+    /// handed to [`Self::send_detached`] (never dropped) and reported as a
+    /// timeout; one queued in time is applied even when its answer comes
+    /// too late.
     pub fn scan_finish(&self, run_id: i64, finished: i64, outcome: ScanOutcome) -> Result<()> {
+        self.scan_finish_within(run_id, finished, outcome, SCAN_FINISH_TIMEOUT)
+    }
+
+    fn scan_finish_within(
+        &self,
+        run_id: i64,
+        finished: i64,
+        outcome: ScanOutcome,
+        timeout: Duration,
+    ) -> Result<()> {
+        let deadline = Instant::now() + timeout;
         let (done, wait) = mpsc::channel();
-        self.send_blocking(WriteOp::ScanFinish(
-            run_id,
-            finished,
-            Box::new(outcome),
-            Some(done),
-        ))?;
-        wait.recv_timeout(Duration::from_secs(60))
+        let op = WriteOp::ScanFinish(run_id, finished, Box::new(outcome), Some(done));
+        match self.queue_until(op, deadline) {
+            Queued::Yes => {}
+            Queued::Full(op) => {
+                self.send_detached(op);
+                return Err(anyhow!(
+                    "timed out storing a recommendation scan (it is still queued)"
+                ));
+            }
+            Queued::Gone => return Err(anyhow!("the history writer stopped")),
+        }
+        wait.recv_timeout(deadline.saturating_duration_since(Instant::now()))
             .map_err(|_| anyhow!("timed out storing a recommendation scan"))?
     }
 
@@ -260,7 +334,16 @@ fn control(conn: &mut Connection, op: WriteOp) {
             let _ = reply.send(());
         }
         WriteOp::ScanBegin(scan, reply) => {
-            let _ = reply.send(rec::begin(conn, &scan));
+            if let Err(unsent) = reply.send(rec::begin(conn, &scan)) {
+                // Nobody took the id (the caller timed out): the run would
+                // stay `running` until the next start.
+                if let Ok(run_id) = unsent.0 {
+                    let stopped = ScanOutcome::Interrupted(rec::ERROR_STOPPED.into());
+                    if let Err(e) = rec::finish(conn, run_id, now_millis(), &stopped) {
+                        tracing::warn!("failed to stop recommendation run {run_id}: {e:#}");
+                    }
+                }
+            }
         }
         WriteOp::ScanFinish(run_id, finished, outcome, reply) => {
             let result = rec::finish(conn, run_id, finished, &outcome);
@@ -454,6 +537,74 @@ mod tests {
             let run = &rec::runs(&conn, "c1", 1).unwrap()[0];
             if run.status == RunStatus::Interrupted {
                 assert_eq!(run.error.as_deref(), Some("stopped"));
+                break;
+            }
+            assert!(Instant::now() < deadline, "the finish never landed");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn a_begin_nobody_waits_for_is_stopped_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.db");
+        let writer = Writer::start(path.clone(), 8).unwrap();
+        let (done, wait) = mpsc::channel();
+        drop(wait);
+        writer
+            .send_blocking(WriteOp::ScanBegin(scan(1_000), done))
+            .unwrap();
+        assert!(writer.flush(Duration::from_secs(10)));
+        let conn = db::open(&path).unwrap();
+        let run = &rec::runs(&conn, "c1", 5).unwrap()[0];
+        assert_eq!(run.status, RunStatus::Interrupted);
+        assert_eq!(run.error.as_deref(), Some(rec::ERROR_STOPPED));
+        assert!(run.finished_at.is_some());
+    }
+
+    #[test]
+    fn scan_writes_are_bounded_and_leave_nothing_running() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.db");
+        let writer = Writer::start(path.clone(), 2).unwrap();
+        let id = writer.scan_begin(scan(500)).unwrap();
+        let (release, gate) = mpsc::channel();
+        writer.send_blocking(WriteOp::Block(gate)).unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+
+        // Queued, but the answer comes too late (a clear's VACUUM, say).
+        let started = Instant::now();
+        let late = writer.scan_begin_within(scan(1_000), Duration::from_millis(200));
+        assert!(late.unwrap_err().to_string().contains("timed out"));
+        assert!(started.elapsed() < Duration::from_secs(2));
+
+        // The queue stays full: nothing is queued, the begin fails.
+        while writer.submit(data_op()) {}
+        let busy = writer.scan_begin_within(scan(2_000), Duration::from_millis(200));
+        assert!(busy.unwrap_err().to_string().contains("busy"));
+        // A finish that cannot be queued in time is still stored.
+        let finish = writer.scan_finish_within(
+            id,
+            3_000,
+            ScanOutcome::Failed("boom".into()),
+            Duration::from_millis(200),
+        );
+        assert!(finish.unwrap_err().to_string().contains("still queued"));
+
+        release.send(()).unwrap();
+        let conn = db::open(&path).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            assert!(writer.flush(Duration::from_secs(10)));
+            let runs = rec::runs(&conn, "c1", 10).unwrap();
+            let failed = runs
+                .iter()
+                .any(|r| r.id == id && r.status == RunStatus::Failed);
+            if failed {
+                assert_eq!(runs.len(), 2, "the busy begin inserted nothing");
+                let late = runs.iter().find(|r| r.id != id).unwrap();
+                assert_eq!(late.status, RunStatus::Interrupted);
+                assert_eq!(late.error.as_deref(), Some(rec::ERROR_STOPPED));
                 break;
             }
             assert!(Instant::now() < deadline, "the finish never landed");

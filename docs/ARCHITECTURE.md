@@ -801,9 +801,12 @@ that never leaves the machine.
   waits for the disk and recording never fails the user's action.
   Operations apply in queue order; consecutive data writes share one
   transaction; clear, prune, flush and the recommendation scan writes
-  (`ScanBegin`, `ScanFinish`) are barriers. Scan writes are never
-  dropped: they wait for room on the blocking pool, and a drop guard's
-  detached finish hands a full queue's operation to a short-lived thread.
+  (`ScanBegin`, `ScanFinish`) are barriers. Scan writes wait for room and
+  their answer on the blocking pool, bounded as a whole (30 s / 60 s): a
+  begin nobody takes the id of (its caller timed out) is finished as
+  interrupted (`stopped`) at once, and a finish that cannot be queued in
+  time — like a drop guard's detached finish — is handed to a short-lived
+  thread instead of being dropped.
   `Writer::start` sweeps runs a previous process left `running` before
   the thread takes its first operation. Queries use their own read
   connection on the blocking pool at the IPC edge.

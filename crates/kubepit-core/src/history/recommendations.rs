@@ -85,6 +85,9 @@ CREATE TABLE rec_latest (
 
 /// Error of runs still `running` when the writer starts.
 pub const ERROR_APP_RESTARTED: &str = "app-restarted";
+/// Error of runs stopped before they finished (abort, or a begin nobody
+/// took the id of).
+pub const ERROR_STOPPED: &str = "stopped";
 /// Most runs [`runs`] returns.
 pub const MAX_RUNS: u32 = 500;
 
