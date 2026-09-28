@@ -94,6 +94,7 @@ export function ResourceMapPage({
           selectedId={selectedId}
           showNamespace={namespaces.length !== 1}
           persistKey="namespace"
+          active={isActive}
           synced={data.synced}
           errors={data.errors}
           fitKey={`${clusterId}|${namespaces.join(',')}`}

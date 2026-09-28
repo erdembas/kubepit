@@ -171,6 +171,13 @@ function remap(edges: readonly TopoEdge[], map: ReadonlyMap<string, string>): To
 /**
  * Hide kinds. Ownership chains through hidden nodes are bridged, so hiding
  * ReplicaSets still links Deployments to their pods.
+ *
+ * Linear in nodes + edges (+ the bridged edges): the live edges sit in one
+ * insertion-ordered map keyed `from>to` with per-node incoming / outgoing
+ * key sets, so removing a hidden node only touches its own edges. Hidden
+ * nodes are bridged one at a time in `compareNodes` order and the first edge
+ * of a pair wins, exactly like the list-rebuilding version this replaced
+ * (same edges, order and ids).
  */
 export function hideKinds(
   nodes: readonly TopoNode[],
@@ -181,17 +188,44 @@ export function hideKinds(
   if (!hidden.size) return { nodes: [...nodes], edges: [...edges] };
   const drop = nodes.filter((n) => hidden.has(n.kind) && n.id !== keepId).sort(compareNodes);
   if (!drop.length) return { nodes: [...nodes], edges: [...edges] };
-  let current = [...edges];
+  const live = new Map<string, TopoEdge>();
+  const incoming = new Map<string, Set<string>>();
+  const outgoing = new Map<string, Set<string>>();
+  const keysOf = (index: Map<string, Set<string>>, id: string) => {
+    let set = index.get(id);
+    if (!set) index.set(id, (set = new Set()));
+    return set;
+  };
+  const add = (from: string, to: string, kind: EdgeKind) => {
+    if (from === to) return;
+    const key = `${from}>${to}`;
+    if (live.has(key)) return;
+    live.set(key, { id: `${key}:${kind}`, from, to, kind });
+    keysOf(outgoing, from).add(key);
+    keysOf(incoming, to).add(key);
+  };
+  for (const e of edges) add(e.from, e.to, e.kind);
   for (const h of drop) {
-    const ins = current.filter((e) => e.to === h.id && e.kind === 'owns');
-    const outs = current.filter((e) => e.from === h.id && e.kind === 'owns');
-    const bridged: TopoEdge[] = [];
-    for (const a of ins)
-      for (const b of outs) bridged.push({ id: '', from: a.from, to: b.to, kind: 'owns' });
-    current = dedupe([...current.filter((e) => e.from !== h.id && e.to !== h.id), ...bridged]);
+    const ins: TopoEdge[] = [];
+    const outs: TopoEdge[] = [];
+    for (const key of incoming.get(h.id) ?? []) {
+      const e = live.get(key)!;
+      if (e.kind === 'owns') ins.push(e);
+      live.delete(key);
+      outgoing.get(e.from)?.delete(key);
+    }
+    for (const key of outgoing.get(h.id) ?? []) {
+      const e = live.get(key)!;
+      if (e.kind === 'owns') outs.push(e);
+      live.delete(key);
+      incoming.get(e.to)?.delete(key);
+    }
+    incoming.delete(h.id);
+    outgoing.delete(h.id);
+    for (const a of ins) for (const b of outs) add(a.from, b.to, 'owns');
   }
   const dropped = new Set(drop.map((n) => n.id));
-  return { nodes: nodes.filter((n) => !dropped.has(n.id)), edges: current };
+  return { nodes: nodes.filter((n) => !dropped.has(n.id)), edges: [...live.values()] };
 }
 
 /** Collapse the pods of each controller into one group node (2+ pods, not expanded). */

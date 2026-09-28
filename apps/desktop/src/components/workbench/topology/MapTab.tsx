@@ -116,6 +116,7 @@ export function MapTab({
       selectedId={null}
       showNamespace={!gvk.namespaced && !isNamespace}
       persistKey="details"
+      active={isActive}
       synced={data.synced}
       errors={data.errors}
       fitKey={`${clusterId}|${rootId ?? scopeKey}|${hops}`}

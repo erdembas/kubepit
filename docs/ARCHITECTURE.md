@@ -825,8 +825,9 @@ deterministic:
   hops where ownership links are free and hubs such as nodes, service
   accounts, classes and cluster roles only expand from the root), drop old
   ReplicaSets and bookkeeping objects, hide kinds (bridging ownership
-  chains), collapse pods per controller into group nodes, and cap the map at
-  400 nodes with one "+N more" node per kind.
+  chains in linear time through an adjacency index), collapse pods per
+  controller into group nodes, and cap the map at 400 nodes with one
+  "+N more" node per kind.
 - `layout.ts` — tier columns (entry → route → service → workload →
   controller → pods → config/storage/identity → bindings → cluster → node),
   barycenter sweeps against crossings, isotonic (PAV) coordinate passes and
@@ -839,6 +840,13 @@ keyboard focus), `TopologyMap` (search, kind chips, legend, notices),
 `ResourceMapPage` (the `@resource-map` view scoped by the namespace picker,
 with the details panel docked beside the map) and `MapTab` (the details
 panel tab; clicking a node opens that object on its own Map tab).
+
+Views stay mounted, so leaving one only turns it inactive, and that must cost
+nothing. `useTopologyData` rebuilds the graph on `topologyDataKey`
+(`dataKey.ts`: each slot's `version`, `synced`, `forbidden` and `error`, never
+the `status` that stopping the watches flips), and returns its previous model
+while disabled. `TopologyMap` likewise keeps its derived view, and so its
+layout, while `active` is false (`pausedMemo`).
 
 ## NetworkPolicy simulator
 

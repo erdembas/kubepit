@@ -11,8 +11,10 @@ import {
   matchNodes,
   type EdgeFamily,
   type TopoGraph,
+  type TopologyView,
   type TopoNode,
 } from '@/lib/kube/topology';
+import { pausedMemo, type PausedMemo } from './dataKey';
 import { TopologyCanvas, type FocusRequest } from './TopologyCanvas';
 import { TopologyLegend } from './TopologyLegend';
 import { isStringArray, usePersistentJson } from './persist';
@@ -32,6 +34,7 @@ export function TopologyMap({
   selectedId,
   showNamespace,
   persistKey,
+  active,
   synced,
   errors,
   fitKey,
@@ -52,6 +55,8 @@ export function TopologyMap({
   showNamespace: boolean;
   /** Separate filter preferences per surface. */
   persistKey: string;
+  /** False while the surface is hidden: the view and layout are not recomputed. */
+  active: boolean;
   synced: boolean;
   errors: readonly TopologyWatchError[];
   /** Changing it (scope, root) refits the map and collapses groups. */
@@ -95,7 +100,12 @@ export function TopologyMap({
     if (focusRequest && synced) setFocus({ ...focusRequest, rev: Date.now() });
   }, [focusRequest, synced]);
 
-  const view = useMemo(
+  // Paused while hidden, so leaving the view never re-derives or re-lays out.
+  const viewMemo = useRef<PausedMemo<TopologyView> | null>(null);
+  viewMemo.current = pausedMemo(
+    viewMemo.current,
+    [graph, rootId, hops, expanded, hidden],
+    active,
     () =>
       deriveView(graph, {
         rootId,
@@ -104,8 +114,8 @@ export function TopologyMap({
         hiddenKinds: hidden,
         maxNodes: DEFAULT_MAX_NODES,
       }),
-    [graph, rootId, hops, expanded, hidden],
   );
+  const view = viewMemo.current.value;
 
   // Layout only depends on structure, so status changes never move nodes.
   const structure = useMemo(
