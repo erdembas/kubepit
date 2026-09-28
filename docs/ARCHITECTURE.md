@@ -874,7 +874,18 @@ applying a recommendation only reads, so read-only clusters get it all.
   Job → CronJob, StatefulSet / DaemonSet directly) and reports bare pods,
   orphan ReplicaSets and standalone Jobs as unowned, other parents
   (`Node`, `Rollout`) as unsupported, and a pod name with several owners
-  as ambiguous with its sorted candidates. The math sits behind `rightsizing::strategy::RecommendationStrategy`
+  as ambiguous with its sorted candidates. `prometheus/workload_stats.rs`
+  builds the 16 instant queries of one batch (Q1–Q16: CPU p95 / max /
+  average / samples, memory max / average / samples, running samples,
+  first / last running step, pod / ReplicaSet / Job owners, OOM kills, CFS
+  throttled and total periods), all `max by (…)` and evaluated at
+  `time=` the window end floored to 5 minutes (`window_end`), four in
+  flight. Answers merge per `(namespace, pod, container)`: duplicates keep
+  the maximum, negative counts clamp at 0, Prometheus warnings mark the
+  batch partial. CPU p95 and memory max are required: a failed answer or
+  one above 50,000 series makes the batch splittable, a service-proxy
+  failure aborts (and re-detects Prometheus), other failures are listed as
+  failed queries. The math sits behind `rightsizing::strategy::RecommendationStrategy`
   (`fn info() -> RightsizingStrategyInfo`, `fn recommend(&ContainerInput) ->
   StrategyOutput`; input = name, current requests/limits, `UsageStats`,
   source, settings; output = recommended values, confidence, warnings).

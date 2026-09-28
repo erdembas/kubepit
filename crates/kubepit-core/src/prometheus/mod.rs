@@ -11,6 +11,9 @@
 //!   workload, pod, container, PVC × CPU, memory, network, filesystem,
 //!   volumes, restarts), so the UI never builds PromQL; [`range`] picks the
 //!   step and rate window; [`parse`] reads the API's JSON.
+//! - [`usage`] and [`workload_stats`] hold the instant queries of cost
+//!   estimates and right-sizing (16 per-pod-container statistics per batch,
+//!   evaluated at an aligned window end).
 //!
 //! Everything here only reads (GETs through the proxy), so it is allowed on
 //! read-only clusters. Charts fall back to the metrics-server history when
@@ -23,6 +26,8 @@ pub mod proxy;
 pub mod range;
 // Usage statistics for cost estimates and right-sizing.
 pub mod usage;
+// Server-side workload statistics (right-sizing collection).
+pub mod workload_stats;
 
 use std::time::Instant;
 

@@ -435,7 +435,7 @@ git commit -m "feat(rightsizing): resolve pods to workloads through kube-state-m
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn stat_queries_follow_the_spec() {
@@ -467,24 +467,24 @@ Steps:
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core prometheus::workload_stats`
 
 Expected: FAIL to compile.
 
-- [ ] **Step 3: Implement the builders, `merge` and `prometheus_stats_batch`**
+- [x] **Step 3: Implement the builders, `merge` and `prometheus_stats_batch`**
 
 Ownership comes from `OwnerIndex::from_data`, with the answers of Q11–Q13 (an empty
 `PromData` for failed ones).
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core prometheus`
 
 Expected: PASS, and the existing Prometheus tests are still green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/src/prometheus
