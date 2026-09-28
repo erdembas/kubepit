@@ -449,7 +449,10 @@ export interface ManifestApplyResult {
   error: string | null;
 }
 
-/** `manifestsWatch`: the files of a watched source changed (debounced). */
+/**
+ * `manifestsWatch`: the files of a watched source changed (debounced), or
+ * already differed from `since` when the watch started.
+ */
 export interface ManifestsWatchEvent {
   watch_id: string;
   /** Re-render when it differs from `ManifestRender.fingerprint`. */

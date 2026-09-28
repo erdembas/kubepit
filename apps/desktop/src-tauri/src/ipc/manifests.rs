@@ -22,16 +22,23 @@ pub async fn manifests_render(
 }
 
 /// Local only: watches the source's files and streams a
-/// [`ManifestsWatchEvent`] on `on_event` when their fingerprint changes.
+/// [`ManifestsWatchEvent`] on `on_event` when their fingerprint changes, or
+/// right away when it already differs from `since` (the rendered one).
 /// Resolves to the watch id once the watcher is in place.
 #[tauri::command]
 pub async fn manifests_watch(
     source: ManifestSource,
+    since: Option<String>,
     on_event: Channel<ManifestsWatchEvent>,
     state: State<'_, AppState>,
 ) -> IpcResult<String> {
     let core = state.core.clone();
-    blocking(move || core.manifests_watch(&source, move |event| on_event.send(event).is_ok())).await
+    blocking(move || {
+        core.manifests_watch(&source, since.as_deref(), move |event| {
+            on_event.send(event).is_ok()
+        })
+    })
+    .await
 }
 
 #[tauri::command]

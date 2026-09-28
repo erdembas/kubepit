@@ -407,8 +407,9 @@ pub struct ManifestApplyResult {
     pub error: Option<String>,
 }
 
-/// `manifests_watch`: the files of a watched source changed; compare
-/// `fingerprint` with [`ManifestRender::fingerprint`] to decide on a re-render.
+/// `manifests_watch`: the files of a watched source changed (or already
+/// differed from `since` when it started); compare `fingerprint` with
+/// [`ManifestRender::fingerprint`] to decide on a re-render.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ManifestsWatchEvent {
     pub watch_id: String,

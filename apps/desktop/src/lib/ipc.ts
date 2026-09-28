@@ -292,11 +292,21 @@ export const ipc = {
   manifestsRender: (source: ManifestSource) => call<ManifestRender>('manifests_render', { source }),
   /**
    * Watches the source's files (`notify`, debounced); `onEvent` fires when
-   * their fingerprint changes. Resolves to the watch id; stop it with
-   * `manifestsUnwatch`.
+   * their fingerprint changes, and right away when it already differs from
+   * `since` (the rendered fingerprint). Resolves to the watch id; stop it
+   * with `manifestsUnwatch`.
    */
-  manifestsWatch: (source: ManifestSource, onEvent: (event: ManifestsWatchEvent) => void) =>
-    callWithChannel<string, ManifestsWatchEvent>('manifests_watch', { source }, 'onEvent', onEvent),
+  manifestsWatch: (
+    source: ManifestSource,
+    since: string | null,
+    onEvent: (event: ManifestsWatchEvent) => void,
+  ) =>
+    callWithChannel<string, ManifestsWatchEvent>(
+      'manifests_watch',
+      { source, since },
+      'onEvent',
+      onEvent,
+    ),
   manifestsUnwatch: (watchId: string) => call<void>('manifests_unwatch', { watchId }),
   manifestsRecentList: () => call<ManifestRecent[]>('manifests_recent_list'),
   manifestsRecentRemove: (paths: string[]) =>

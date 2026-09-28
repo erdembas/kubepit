@@ -10,14 +10,18 @@
 //! [`WATCH_DEBOUNCE`], the source's fingerprint ([`fingerprint`]) is
 //! recomputed, and an event is sent only when it changed, so edits of
 //! skipped files (hidden folders, `node_modules`) and repeated events for
-//! the same edit stay silent.
+//! the same edit stay silent. The baseline is the caller's `since`
+//! fingerprint (the render it shows) when given: edits made while no watch
+//! ran (a hidden tab, Watch still off) are reported as soon as it starts.
 //!
 //! Each watch is a task in `Kubepit::manifest_watches` under cluster id `""`
 //! (it belongs to no cluster). The task owns the watcher: stopping it
 //! (`manifests_unwatch`, shutdown) drops the watcher and its OS resources.
 //! Nothing runs unless the UI starts a watch.
 //!
-//! Limitation: Kustomize bases outside the root folder are not watched.
+//! Limitations: Kustomize bases outside the root folder are not watched,
+//! and a symlinked manifest whose target lies outside the watched folders
+//! counts in the fingerprint, but edits of the target send no event.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -82,12 +86,19 @@ fn watch_targets(resolved: &Resolved, extra: &[PathBuf]) -> Vec<(PathBuf, Recurs
 
 impl Kubepit {
     /// `manifests_watch`: watch the files of `source` and call `on_event`
-    /// whenever their fingerprint changes (see the module docs). Returns the
-    /// watch id; the watch ends on [`Self::manifests_unwatch`], at shutdown,
-    /// or when `on_event` returns false. The watcher and the baseline
-    /// fingerprint are set up before this returns, so no later edit is
-    /// missed. Must be called inside a Tokio runtime.
-    pub fn manifests_watch<F>(&self, source: &ManifestSource, on_event: F) -> Result<String>
+    /// whenever their fingerprint changes (see the module docs). `since` is
+    /// the fingerprint the caller last rendered; when the files already
+    /// differ from it, an event is sent right away. Returns the watch id;
+    /// the watch ends on [`Self::manifests_unwatch`], at shutdown, or when
+    /// `on_event` returns false. The watcher and the baseline fingerprint are
+    /// set up before this returns, so no later edit is missed. Must be called
+    /// inside a Tokio runtime.
+    pub fn manifests_watch<F>(
+        &self,
+        source: &ManifestSource,
+        since: Option<&str>,
+        on_event: F,
+    ) -> Result<String>
     where
         F: Fn(ManifestsWatchEvent) -> bool + Send + Sync + 'static,
     {
@@ -109,11 +120,22 @@ impl Kubepit {
                 .with_context(|| format!("could not watch {}", path.display()))?;
         }
         let mut last = fingerprint(&resolved, &extra);
+        // The caller shows an older state: report the difference at once.
+        let changed_since = since.is_some_and(|since| since != last);
         let watch_id = uuid::Uuid::new_v4().to_string();
         let id = watch_id.clone();
         self.manifest_watches.spawn(&watch_id, "", async move {
             // Owned by the task: aborting it drops the watcher.
             let _watcher = watcher;
+            if changed_since {
+                let event = ManifestsWatchEvent {
+                    watch_id: id.clone(),
+                    fingerprint: last.clone(),
+                };
+                if !on_event(event) {
+                    return;
+                }
+            }
             while rx.recv().await.is_some() {
                 // Wait until the burst has been quiet for the debounce time.
                 loop {

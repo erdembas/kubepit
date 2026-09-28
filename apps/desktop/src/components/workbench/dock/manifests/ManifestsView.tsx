@@ -122,6 +122,7 @@ export const ManifestsView = memo(function ManifestsView({
 
   // "Watch": a backend file watch (`manifests_watch`) runs while the tab is
   // visible; re-render when the files' fingerprint differs from the render's.
+  // `since` makes a (re)started watch report edits made while none ran.
   const fingerprint = render.status === 'ready' ? render.data.fingerprint : null;
   const fingerprintRef = useRef(fingerprint);
   fingerprintRef.current = fingerprint;
@@ -133,7 +134,7 @@ export const ManifestsView = memo(function ManifestsView({
     let alive = true;
     let watchId: string | null = null;
     ipc
-      .manifestsWatch(watched, (event) => {
+      .manifestsWatch(watched, fingerprintRef.current, (event) => {
         if (alive && event.fingerprint !== fingerprintRef.current) void load(watched);
       })
       .then((id) => {

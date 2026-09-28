@@ -505,10 +505,15 @@ async fn manifests_watch_reports_edits_after_debounce() {
     let source = folder_source(dir.path());
     let initial = app.manifests_render(&source).await.unwrap().fingerprint;
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    // `since` equals the files' fingerprint: nothing to report up front.
     let id = app
-        .manifests_watch(&source, move |e| tx.send(e).is_ok())
+        .manifests_watch(&source, Some(initial.as_str()), move |e| tx.send(e).is_ok())
         .unwrap();
-    std::fs::write(dir.path().join("b.yaml"), CONFIGMAP_B).unwrap();
+    // A burst: several files, each within the debounce of the previous one.
+    for name in ["b.yaml", "c.yaml", "d.yaml", "e.yaml"] {
+        std::fs::write(dir.path().join(name), CONFIGMAP_B).unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     let event = next_event(&mut rx, Duration::from_secs(3))
         .await
         .expect("an event");
@@ -523,11 +528,39 @@ async fn manifests_watch_reports_edits_after_debounce() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn manifests_watch_reports_edits_made_before_it_started() {
+    let (dir, app) = app_with_folder(&[("a.yaml", CONFIGMAP_A)]);
+    let source = folder_source(dir.path());
+    let rendered = app.manifests_render(&source).await.unwrap().fingerprint;
+    // Edited while no watch ran (tab hidden, Watch still off).
+    std::fs::write(dir.path().join("b.yaml"), CONFIGMAP_B).unwrap();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let id = app
+        .manifests_watch(&source, Some(rendered.as_str()), move |e| {
+            tx.send(e).is_ok()
+        })
+        .unwrap();
+    let event = next_event(&mut rx, Duration::from_secs(3))
+        .await
+        .expect("an event for the earlier edit");
+    assert_eq!(event.watch_id, id);
+    assert_ne!(event.fingerprint, rendered);
+    assert!(
+        next_event(&mut rx, Duration::from_millis(800))
+            .await
+            .is_none(),
+        "exactly one event"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn manifests_watch_sees_atomic_rename_saves() {
     let (dir, app) = app_with_folder(&[("a.yaml", CONFIGMAP_A)]);
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    app.manifests_watch(&folder_source(dir.path()), move |e| tx.send(e).is_ok())
-        .unwrap();
+    app.manifests_watch(&folder_source(dir.path()), None, move |e| {
+        tx.send(e).is_ok()
+    })
+    .unwrap();
     std::fs::write(dir.path().join(".a.yaml.swp"), CONFIGMAP_B).unwrap();
     std::fs::rename(dir.path().join(".a.yaml.swp"), dir.path().join("a.yaml")).unwrap();
     assert!(next_event(&mut rx, Duration::from_secs(3)).await.is_some());
@@ -539,11 +572,29 @@ async fn manifests_watch_ignores_skipped_files_and_stops_on_unwatch() {
     std::fs::create_dir(dir.path().join("node_modules")).unwrap();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let id = app
-        .manifests_watch(&folder_source(dir.path()), move |e| tx.send(e).is_ok())
+        .manifests_watch(&folder_source(dir.path()), None, move |e| {
+            tx.send(e).is_ok()
+        })
         .unwrap();
     std::fs::write(dir.path().join("node_modules/x.yaml"), CONFIGMAP_B).unwrap();
     assert!(next_event(&mut rx, Duration::from_secs(1)).await.is_none());
     app.manifests_unwatch(&id);
     std::fs::write(dir.path().join("c.yaml"), CONFIGMAP_B).unwrap();
     assert!(next_event(&mut rx, Duration::from_secs(1)).await.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_stops_manifest_watches() {
+    let (dir, app) = app_with_folder(&[("a.yaml", CONFIGMAP_A)]);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    app.manifests_watch(&folder_source(dir.path()), None, move |e| {
+        tx.send(e).is_ok()
+    })
+    .unwrap();
+    app.shutdown().await;
+    std::fs::write(dir.path().join("b.yaml"), CONFIGMAP_B).unwrap();
+    // The task (and with it the callback's sender) is gone: the channel closes
+    // without an event.
+    let closed = tokio::time::timeout(Duration::from_secs(1), rx.recv()).await;
+    assert!(matches!(closed, Ok(None)), "{closed:?}");
 }

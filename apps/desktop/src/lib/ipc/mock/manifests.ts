@@ -345,7 +345,8 @@ register({
     remember(source as ManifestSource);
     return structuredClone(out);
   },
-  // Demo files never change: a watch gets an id and never fires.
+  // Demo files never change (renders keep their fingerprint, so `since`
+  // always matches): a watch gets an id and never fires.
   manifests_watch: async () => `manifests-watch-${crypto.randomUUID().slice(0, 8)}`,
   manifests_unwatch: async () => undefined,
   manifests_recent_list: async () => structuredClone(recent),
