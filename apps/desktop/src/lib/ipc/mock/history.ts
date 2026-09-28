@@ -2,6 +2,7 @@ import YAML from 'yaml';
 import { actionApplies } from '@/lib/customActions';
 import { historySettings, TERMINAL_STARTED } from '@/lib/history/audit';
 import { kindKey, resolveRef } from '@/lib/kube/catalog';
+import { workloadGvk } from '@/lib/kube/rightsizing/model';
 import type {
   AuditAction,
   AuditDetail,
@@ -362,12 +363,11 @@ wrap('resource_set_image', (args) =>
 );
 wrap('rightsizing_apply', (args) => {
   const target = args.target as { kind: string; namespace: string; name: string };
-  const plural = `${target.kind.toLowerCase()}s`;
   return objectPlan(
     'rightsize',
     {
       clusterId: args.clusterId,
-      gvk: { group: 'apps', version: 'v1', kind: target.kind, plural, namespaced: true },
+      gvk: workloadGvk(target.kind),
       namespace: target.namespace,
       name: target.name,
     },

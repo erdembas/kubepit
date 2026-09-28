@@ -863,8 +863,11 @@ applying a recommendation only reads, so read-only clusters get it all.
   `prometheus/usage.rs` presets return, per container over `days` (default
   7), the p95 and max of 5-minute CPU rates, the max working set and the
   hours with samples; pods map to Deployments / StatefulSets / DaemonSets
-  by the pod names their kind generates (longest name wins), worst replica
-  wins, hours are per replica. Without Prometheus the last metrics-server
+  / CronJobs by the pod names their kind generates (longest name wins),
+  worst replica wins, hours are per replica. A CronJob is read at its job
+  template and counts one replica; its `cost_replicas` (and so its
+  monthly amounts) is the largest duty cycle of its containers' evidence
+  (average running pods), one without evidence (`math::cost_replicas`). Without Prometheus the last metrics-server
   hour is used, split per container by the current snapshot (always low
   confidence). Ownership-aware collection is built from
   `rightsizing/ownership.rs`: kube-state-metrics owner series
@@ -983,8 +986,10 @@ applying a recommendation only reads, so read-only clusters get it all.
   settings, else `effective_settings` (the strategy's override, else its
   `info().defaults`).
 - **Apply** (`rightsizing_apply`): a strategic merge patch of the named
-  containers' resources at the pod template plus a
-  `kubernetes.io/change-cause`; `dryRun: true` returns live vs. result like
+  containers' resources at the pod template (`patch::template_path`:
+  `spec.template.spec`, a CronJob's `spec.jobTemplate.spec.template.spec`,
+  so only Jobs it starts afterwards change; `workload_gvk` gives `apps/v1`
+  or `batch/v1 cronjobs`) plus a `kubernetes.io/change-cause`; `dryRun: true` returns live vs. result like
   `resource_dry_run_yaml` (allowed on read-only clusters), the real apply
   is refused on read-only clusters. The dialog shows every value that
   changes (raised limits called out with their ratio), the strategy's
@@ -1001,7 +1006,7 @@ applying a recommendation only reads, so read-only clusters get it all.
   and the right-sizing list (filters, headroom settings, strategy picker
   when there are several). A cost card on the cluster overview, a fleet
   total per currency in the dashboard's status bar, a right-sizing section
-  in Deployment / StatefulSet / DaemonSet details and two Health rules
+  in Deployment / StatefulSet / DaemonSet / CronJob details and two Health rules
   (`workload-overprovisioned`, `workload-underprovisioned`, category
   efficiency) that only fire on large, confident deltas
   (`lib/kube/rightsizing/model.ts#healthVerdict`). Per-viewer preferences
