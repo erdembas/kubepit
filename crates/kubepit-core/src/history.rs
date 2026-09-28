@@ -13,8 +13,11 @@
 //!   objects. Read-only rejections are not recorded; dry runs are, flagged.
 //! - **Persistence** ([`persist`]): Events and journal entries of clusters
 //!   listed in `Settings.history.persist_clusters`, while connected.
-//! - **Retention**: audit and data retention in days plus a size cap,
-//!   applied every ten minutes (and after a settings change).
+//! - **Recommendation scans** ([`recommendations`]): stored scan runs and
+//!   their rows (migration 2).
+//! - **Retention**: audit and data retention in days, recommendation scans
+//!   by `Settings.recommendations.retention_days` and thinning, plus a size
+//!   cap, applied every ten minutes (and after a settings change).
 //!
 //! Like alerts and the change journal, recording is opt-in per process
 //! ([`Kubepit::set_history_recording`]): the desktop shell enables it; tests
@@ -72,8 +75,34 @@ pub struct History {
     recorders: TaskRegistry,
     persisting: Arc<Mutex<HashSet<String>>>,
     maintenance: TaskRegistry,
-    /// Copy of `Settings.history` for the retention task.
-    settings: Arc<Mutex<HistorySettings>>,
+    /// Copy of the retention settings for the retention task.
+    settings: Arc<Mutex<Retention>>,
+}
+
+/// What retention reads: `Settings.history` and the days recommendation
+/// scans are kept (`Settings.recommendations.retention_days`).
+#[derive(Debug, Clone, PartialEq)]
+struct Retention {
+    history: HistorySettings,
+    recommendation_days: u32,
+}
+
+impl Default for Retention {
+    fn default() -> Self {
+        Self {
+            history: HistorySettings::default(),
+            recommendation_days: crate::recommendations::DEFAULT_RETENTION_DAYS,
+        }
+    }
+}
+
+impl Retention {
+    fn of(settings: &crate::types::Settings) -> Self {
+        Self {
+            history: settings.history.clone(),
+            recommendation_days: settings.recommendations.retention_days,
+        }
+    }
 }
 
 fn recorder_id(cluster_id: &str) -> String {
@@ -199,11 +228,19 @@ impl History {
     }
 }
 
-fn policy(settings: &HistorySettings, now: i64) -> PrunePolicy {
+/// Recommendation runs stay this long regardless of the retention days.
+const REC_ROWS_KEPT_MS: i64 = 48 * 60 * 60 * 1000;
+
+fn policy(retention: &Retention, now: i64) -> PrunePolicy {
+    let settings = &retention.history;
+    // Settings files are not normalized on load: clamp like `normalized`.
+    let rec_days = retention.recommendation_days.clamp(1, 90);
     PrunePolicy {
         audit_before: now - i64::from(settings.audit_retention_days) * DAY_MS,
         data_before: now - i64::from(settings.retention_days) * DAY_MS,
         max_bytes: u64::from(settings.max_size_mb) * 1024 * 1024,
+        rec_before: now - i64::from(rec_days) * DAY_MS,
+        rec_rows_before: now - REC_ROWS_KEPT_MS,
     }
 }
 
@@ -222,7 +259,7 @@ impl Kubepit {
         let Some(writer) = self.history.writer() else {
             return;
         };
-        *self.history.settings.lock() = self.settings().history;
+        *self.history.settings.lock() = Retention::of(&self.settings());
         if tokio::runtime::Handle::try_current().is_ok() {
             let settings = self.history.settings.clone();
             self.history
@@ -273,8 +310,10 @@ impl Kubepit {
     /// Start or stop persistence after a settings change and apply the new
     /// retention right away.
     pub(crate) fn sync_history(&self) {
-        let settings = self.settings().history;
-        *self.history.settings.lock() = settings.clone();
+        let all = self.settings();
+        let retention = Retention::of(&all);
+        let settings = all.history;
+        *self.history.settings.lock() = retention.clone();
         let active = self.history.is_active();
         let has_runtime = tokio::runtime::Handle::try_current().is_ok();
         for cluster in self.store.clusters() {
@@ -290,7 +329,7 @@ impl Kubepit {
         }
         if active {
             if let Some(writer) = self.history.writer.lock().clone() {
-                writer.submit(WriteOp::Prune(policy(&settings, now_millis()), None));
+                writer.submit(WriteOp::Prune(policy(&retention, now_millis()), None));
             }
         }
     }
@@ -306,6 +345,7 @@ impl Kubepit {
             audit: HistoryTableStatus::default(),
             events: HistoryTableStatus::default(),
             changes: HistoryTableStatus::default(),
+            recommendations: HistoryTableStatus::default(),
             dropped: self
                 .history
                 .writer
@@ -323,14 +363,16 @@ impl Kubepit {
                 db::table_status(conn, "audit", "ts")?,
                 db::table_status(conn, "events", "last_ts")?,
                 db::table_status(conn, "changes", "ts")?,
+                recommendations::status(conn)?,
             ))
         });
         match tables {
-            Ok((audit, events, changes)) => {
+            Ok((audit, events, changes, recommendations)) => {
                 status.available = true;
                 status.audit = audit;
                 status.events = events;
                 status.changes = changes;
+                status.recommendations = recommendations;
                 // Opening the reader may have created the file.
                 status.size_bytes = db::size_on_disk(&self.history.path);
             }
@@ -398,10 +440,10 @@ impl Kubepit {
 
     /// Apply retention and the size cap now (also runs periodically).
     pub fn history_prune(&self) -> Result<PruneReport> {
-        let settings = self.settings().history;
+        let retention = Retention::of(&self.settings());
         self.history
             .require_writer()?
-            .prune(policy(&settings, now_millis()))
+            .prune(policy(&retention, now_millis()))
     }
 
     /// Wait (bounded) until every queued write reached the database.
@@ -440,18 +482,36 @@ mod tests {
 
     #[test]
     fn retention_policy_uses_days_and_megabytes() {
-        let p = policy(
-            &HistorySettings {
+        let mut retention = Retention {
+            history: HistorySettings {
                 audit_retention_days: 2,
                 retention_days: 1,
                 max_size_mb: 16,
                 ..HistorySettings::default()
             },
-            10 * DAY_MS,
-        );
-        assert_eq!(p.audit_before, 8 * DAY_MS);
-        assert_eq!(p.data_before, 9 * DAY_MS);
+            recommendation_days: 3,
+        };
+        let p = policy(&retention, 100 * DAY_MS);
+        assert_eq!(p.audit_before, 98 * DAY_MS);
+        assert_eq!(p.data_before, 99 * DAY_MS);
         assert_eq!(p.max_bytes, 16 * 1024 * 1024);
+        assert_eq!(p.rec_before, 97 * DAY_MS);
+        assert_eq!(
+            p.rec_rows_before,
+            98 * DAY_MS,
+            "rows of the last 48 hours stay"
+        );
+        retention.recommendation_days = 999;
+        assert_eq!(policy(&retention, 100 * DAY_MS).rec_before, 10 * DAY_MS);
+        assert_eq!(Retention::default().recommendation_days, 30);
+        let settings = crate::types::Settings {
+            recommendations: crate::recommendations::RecommendationSettings {
+                retention_days: 7,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(Retention::of(&settings).recommendation_days, 7);
     }
 
     #[test]

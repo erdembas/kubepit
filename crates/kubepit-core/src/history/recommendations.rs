@@ -23,6 +23,8 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 
+use super::db::PrunePolicy;
+use super::types::HistoryTableStatus;
 use crate::cost::CostPlatform;
 use crate::recommendations::{
     RecommendationRun, RecommendationTrendContainer, RecommendationTrendPoint, RunStatus,
@@ -531,11 +533,124 @@ pub fn fleet(conn: &Connection) -> Result<Vec<(String, RecommendationRun, String
     Ok(fleet)
 }
 
+// -- Retention and clear -----------------------------------------------------------
+
+const DAY_MS: i64 = 24 * 60 * 60 * 1000;
+
+/// Drop the rows of runs `ids` and mark them thinned.
+fn drop_rows(conn: &Connection, ids: &[i64]) -> Result<()> {
+    let mut rows = conn.prepare_cached("DELETE FROM rec_rows WHERE run_id = ?1")?;
+    let mut run = conn.prepare_cached("UPDATE rec_runs SET rows_kept = 0 WHERE id = ?1")?;
+    for id in ids {
+        rows.execute([id])?;
+        run.execute([id])?;
+    }
+    Ok(())
+}
+
+fn ids(conn: &Connection, sql: &str, params: impl rusqlite::Params) -> Result<Vec<i64>> {
+    let mut stmt = conn.prepare(sql)?;
+    let ids = stmt
+        .query_map(params, |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(ids)
+}
+
+/// Retention (spec §11, steps 1–2), in one transaction:
+/// 1. runs started before `rec_before` are deleted, except each cluster's
+///    latest (rows cascade);
+/// 2. successful runs finished before `rec_rows_before` lose their rows
+///    unless they are the latest or the last successful run of their UTC
+///    day (per cluster); the run and its summary stay.
+///
+/// Returns the runs deleted plus the runs thinned.
+pub fn prune(conn: &Connection, policy: &PrunePolicy) -> Result<u64> {
+    let tx = conn.unchecked_transaction()?;
+    let deleted = tx.execute(
+        "DELETE FROM rec_runs WHERE started < ?1
+             AND id NOT IN (SELECT run_id FROM rec_latest)",
+        [policy.rec_before],
+    )?;
+    // Rows of runs deleted without foreign keys (older connections).
+    tx.execute(
+        "DELETE FROM rec_rows WHERE run_id NOT IN (SELECT id FROM rec_runs)",
+        [],
+    )?;
+    let thin = ids(
+        &tx,
+        "SELECT id FROM rec_runs
+         WHERE status = 'success' AND rows_kept = 1 AND finished < ?1
+           AND id NOT IN (SELECT run_id FROM rec_latest)
+           AND id NOT IN (
+               SELECT id FROM (
+                   SELECT id, ROW_NUMBER() OVER (
+                       PARTITION BY cluster_id, started / ?2
+                       ORDER BY started DESC, id DESC
+                   ) AS n
+                   FROM rec_runs WHERE status = 'success'
+               ) WHERE n = 1
+           )",
+        params![policy.rec_rows_before, DAY_MS],
+    )?;
+    drop_rows(&tx, &thin)?;
+    tx.commit()?;
+    Ok(deleted as u64 + thin.len() as u64)
+}
+
+/// Size cap: drop the rows of the oldest runs that still have them (never a
+/// cluster's latest), `fraction` of them at a time (at least one). Returns
+/// how many runs were thinned.
+pub fn delete_oldest_rows(conn: &Connection, fraction: f64) -> Result<u64> {
+    let kept = ids(
+        conn,
+        "SELECT id FROM rec_runs
+         WHERE rows_kept = 1 AND id NOT IN (SELECT run_id FROM rec_latest)
+         ORDER BY started ASC, id ASC",
+        [],
+    )?;
+    if kept.is_empty() {
+        return Ok(0);
+    }
+    let n = ((kept.len() as f64 * fraction).ceil() as usize).clamp(1, kept.len());
+    let tx = conn.unchecked_transaction()?;
+    drop_rows(&tx, &kept[..n])?;
+    tx.commit()?;
+    Ok(n as u64)
+}
+
+/// Delete the stored scans of `cluster_id` (every cluster with `None`):
+/// the latest pointer first, then the runs and their rows.
+pub fn clear(conn: &Connection, cluster_id: Option<&str>) -> Result<()> {
+    for table in ["rec_latest", "rec_rows", "rec_runs"] {
+        match cluster_id {
+            Some(id) => {
+                conn.execute(&format!("DELETE FROM {table} WHERE cluster_id = ?1"), [id])?
+            }
+            None => conn.execute(&format!("DELETE FROM {table}"), [])?,
+        };
+    }
+    Ok(())
+}
+
+/// Stored rows, and the start of the oldest run.
+pub fn status(conn: &Connection) -> Result<HistoryTableStatus> {
+    let (rows, oldest): (i64, Option<i64>) = conn.query_row(
+        "SELECT (SELECT COUNT(*) FROM rec_rows), (SELECT MIN(started) FROM rec_runs)",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    Ok(HistoryTableStatus {
+        rows: rows as u64,
+        oldest_ts: oldest,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::cost::CostPricing;
     use crate::history::db;
+    use crate::history::types::HistoryKind;
     use crate::recommendations::{RunStatus, ScanTrigger};
     use crate::rightsizing::math::{change_of, GIB, MIB};
     use crate::rightsizing::strategy;
@@ -968,5 +1083,216 @@ mod tests {
             trend(&conn, "c1", "Deployment/shop/legacy").unwrap().len(),
             2
         );
+    }
+
+    const HOUR: i64 = 60 * 60 * 1000;
+    const DAY: i64 = 24 * HOUR;
+
+    /// Retention as of `now` with the default 30 days.
+    fn policy(now: i64) -> PrunePolicy {
+        PrunePolicy {
+            audit_before: 0,
+            data_before: 0,
+            max_bytes: u64::MAX,
+            rec_before: now - 30 * DAY,
+            rec_rows_before: now - 48 * HOUR,
+        }
+    }
+
+    fn rows_of(conn: &Connection, run_id: i64) -> i64 {
+        conn.query_row(
+            "SELECT COUNT(*) FROM rec_rows WHERE run_id = ?1",
+            [run_id],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    fn kept_runs(conn: &Connection) -> Vec<i64> {
+        let mut stmt = conn
+            .prepare("SELECT id FROM rec_runs WHERE rows_kept = 1 ORDER BY id")
+            .unwrap();
+        stmt.query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn retention_deletes_old_runs_but_keeps_the_latest() {
+        let (_dir, mut conn) = temp_db();
+        let d0 = 20_000 * DAY;
+        let old = run(&mut conn, "c1", d0, &success(report_of(vec![web()])));
+        let latest_c1 = run(
+            &mut conn,
+            "c1",
+            d0 + 5 * DAY,
+            &success(report_of(vec![web()])),
+        );
+        let failed = run(
+            &mut conn,
+            "c1",
+            d0 + 6 * DAY,
+            &ScanOutcome::Failed("x".into()),
+        );
+        let recent = run(
+            &mut conn,
+            "c1",
+            d0 + 35 * DAY,
+            &ScanOutcome::Failed("y".into()),
+        );
+        // Another cluster's only run: its latest, older than the retention.
+        let latest_c2 = run(&mut conn, "c2", d0, &success(report_of(vec![web()])));
+
+        let removed = prune(&conn, &policy(d0 + 40 * DAY)).unwrap();
+        assert_eq!(removed, 2, "the old success and the old failure");
+        let ids: Vec<i64> = runs(&conn, "c1", 10)
+            .unwrap()
+            .iter()
+            .map(|r| r.id)
+            .collect();
+        assert_eq!(ids, vec![recent, latest_c1]);
+        assert!(!ids.contains(&old) && !ids.contains(&failed));
+        assert_eq!(rows_of(&conn, old), 0, "rows cascade");
+        assert_eq!(rows_of(&conn, latest_c1), 1);
+        assert_eq!(
+            latest(&conn, "c2", CONFIG).unwrap().scan.unwrap().run.id,
+            latest_c2
+        );
+    }
+
+    #[test]
+    fn thinning_keeps_48_hours_then_one_run_per_day() {
+        let (_dir, mut conn) = temp_db();
+        // Hourly runs over 4 UTC days, each 30 minutes past the hour.
+        let d0 = 20_000 * DAY;
+        let ids: Vec<i64> = (0..96)
+            .map(|h| {
+                run(
+                    &mut conn,
+                    "c1",
+                    d0 + h * HOUR + 30 * 60 * 1000,
+                    &success(report_of(vec![web()])),
+                )
+            })
+            .collect();
+        let thinned = prune(&conn, &policy(d0 + 96 * HOUR)).unwrap();
+        assert_eq!(thinned, 48 - 2, "the older days keep one run each");
+        let kept = kept_runs(&conn);
+        assert_eq!(kept.len(), 48 + 2);
+        assert!(
+            kept.contains(&ids[23]) && kept.contains(&ids[47]),
+            "last run of each older day"
+        );
+        assert!(!kept.contains(&ids[22]) && !kept.contains(&ids[0]));
+        assert!(kept.contains(&ids[95]), "the latest run");
+        assert_eq!(count(&conn, "rec_rows"), 50);
+        assert_eq!(count(&conn, "rec_runs"), 96, "runs and summaries stay");
+        let thin = runs(&conn, "c1", 500).unwrap();
+        let first = thin.iter().find(|r| r.id == ids[0]).unwrap();
+        assert!(!first.rows_kept && first.summary.is_some());
+        let stored = scan(&conn, "c1", ids[0]).unwrap().unwrap();
+        assert!(
+            stored.report.workloads.is_empty(),
+            "a thinned run has no rows"
+        );
+        assert_eq!(trend(&conn, "c1", "Deployment/shop/web").unwrap().len(), 50);
+        assert_eq!(
+            prune(&conn, &policy(d0 + 96 * HOUR)).unwrap(),
+            0,
+            "idempotent"
+        );
+    }
+
+    #[test]
+    fn the_latest_run_keeps_its_rows_however_old() {
+        let (_dir, mut conn) = temp_db();
+        let d0 = 20_000 * DAY;
+        let a = run(&mut conn, "c1", d0, &success(report_of(vec![web()])));
+        let b = run(&mut conn, "c1", d0 + HOUR, &success(report_of(vec![web()])));
+        prune(&conn, &policy(d0 + 10 * DAY)).unwrap();
+        assert_eq!(kept_runs(&conn), vec![b], "same day: only the last one");
+        assert_eq!(rows_of(&conn, a), 0);
+        assert_eq!(
+            delete_oldest_rows(&conn, 0.1).unwrap(),
+            0,
+            "never the latest"
+        );
+        assert_eq!(rows_of(&conn, b), 1);
+    }
+
+    #[test]
+    fn size_cap_drops_recommendation_rows_before_the_audit_log() {
+        let (_dir, mut conn) = temp_db();
+        conn.execute_batch(
+            &"INSERT INTO audit (ts, cluster_id, cluster_name, context, action, dry_run,
+                 outcome, duration_ms, targets, has_diff, revertible, search)
+             VALUES (1, 'c1', 'one', 'ctx', 'scale', 0, 'ok', 1, '[]', 0, 0, '');"
+                .repeat(5),
+        )
+        .unwrap();
+        // Bulky rows: 30 workloads × 50 long pod names per run.
+        let bulky = || {
+            let workloads = (0..30)
+                .map(|i| WorkloadRecommendation {
+                    pods: (0..50)
+                        .map(|p| format!("{i}-{p}-{}", "x".repeat(80)))
+                        .collect(),
+                    ..deployment(&format!("w{i}"), 200.0, -1.0)
+                })
+                .collect();
+            success(report_of(workloads))
+        };
+        let ids: Vec<i64> = (0..10)
+            .map(|i| run(&mut conn, "c1", 1_000 + i, &bulky()))
+            .collect();
+        let before = count(&conn, "rec_rows");
+        assert_eq!(before, 300);
+        assert!(db::used_bytes(&conn).unwrap() > 1_000_000);
+
+        let report = db::prune(
+            &conn,
+            &PrunePolicy {
+                max_bytes: 400_000,
+                rec_before: 0,
+                rec_rows_before: 0,
+                ..policy(0)
+            },
+        )
+        .unwrap();
+        assert!(db::used_bytes(&conn).unwrap() <= 400_000);
+        assert!(count(&conn, "audit") > 0 && count(&conn, "rec_rows") < before);
+        assert_eq!(count(&conn, "audit"), 5, "the audit log is untouched");
+        assert!(report.recommendations > 0 && report.audit == 0);
+        assert_eq!(rows_of(&conn, ids[9]), 30, "the latest run keeps its rows");
+        assert_eq!(rows_of(&conn, ids[0]), 0, "the oldest go first");
+        assert_eq!(count(&conn, "rec_runs"), 10);
+    }
+
+    #[test]
+    fn clearing_recommendations_per_cluster() {
+        let (_dir, mut conn) = temp_db();
+        run(&mut conn, "c1", 1_000, &success(report_of(vec![web()])));
+        run(&mut conn, "c1", 2_000, &ScanOutcome::Failed("x".into()));
+        run(&mut conn, "c2", 1_500, &success(report_of(vec![web()])));
+        let status = status(&conn).unwrap();
+        assert_eq!((status.rows, status.oldest_ts), (2, Some(1_000)));
+
+        clear(&conn, Some("c1")).unwrap();
+        assert!(latest(&conn, "c1", CONFIG).unwrap().scan.is_none());
+        assert!(runs(&conn, "c1", 10).unwrap().is_empty());
+        assert!(latest(&conn, "c2", CONFIG).unwrap().scan.is_some());
+        let status = self::status(&conn).unwrap();
+        assert_eq!((status.rows, status.oldest_ts), (1, Some(1_500)));
+
+        // Through history_clear's kinds: `recommendations` and `all`.
+        db::clear(&conn, HistoryKind::Recommendations, Some("c2")).unwrap();
+        assert!(fleet(&conn).unwrap().is_empty());
+        run(&mut conn, "c3", 3_000, &success(report_of(vec![web()])));
+        db::clear(&conn, HistoryKind::All, None).unwrap();
+        for table in ["rec_runs", "rec_rows", "rec_latest"] {
+            assert_eq!(count(&conn, table), 0, "{table}");
+        }
+        assert_eq!(self::status(&conn).unwrap(), HistoryTableStatus::default());
     }
 }

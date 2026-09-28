@@ -1289,7 +1289,7 @@ git commit -m "feat(history): store recommendation scans (migration 2)"
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn retention_deletes_old_runs_but_keeps_the_latest() { /* latest older than 30 d stays; others go */ }
@@ -1304,21 +1304,21 @@ Steps:
 #[test] fn clearing_recommendations_per_cluster() { clear(&conn, Some("c1")).unwrap(); assert!(latest(&conn, "c1", CONFIG).unwrap().scan.is_none()); assert!(latest(&conn, "c2", CONFIG).unwrap().scan.is_some()); }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core history`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement prune, clear and status, plus the `HistoryKind` and `HistoryStatus` changes on both sides**
+- [x] **Step 3: Implement prune, clear and status, plus the `HistoryKind` and `HistoryStatus` changes on both sides**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core history && pnpm typecheck`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/src/history crates/kubepit-core/src/history.rs apps/desktop/src/types/index.ts apps/desktop/src/lib/ipc/mock/history.ts

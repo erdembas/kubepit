@@ -65,7 +65,7 @@ that created them (`src-tauri/src/windows.rs`).
 | `kubeconfigs/<id>.yaml` | backend  | pasted kubeconfigs (`managed: true`), mode 0600     |
 | `run/<id>.kubeconfig`   | backend  | single-context kubeconfig for kubectl/helm/terminal |
 | `port_forwards.json`    | backend  | `SavedPortForward[]` (saved port forwards)          |
-| `history.db`            | backend  | audit log, persisted events / changes (SQLite)      |
+| `history.db`            | backend  | audit log, events / changes, scans (SQLite)         |
 | `actions.json`          | backend  | `CustomActionsFile` (custom actions, see below)     |
 
 With `settings.keychain_kubeconfigs` the pasted kubeconfigs live in the OS
@@ -705,7 +705,14 @@ that never leaves the machine.
   `schema_version` (a database from a newer Kubepit is refused, never
   migrated backwards), file mode 0600. Tables: `audit` + `audit_objects`
   (before/after per target, cascade-deleted), `events` (upserted by
-  cluster + uid) and `changes` (idempotent per journal start + entry id).
+  cluster + uid) and `changes` (idempotent per journal start + entry id);
+  migration 2 adds the recommendation scans (`history/recommendations.rs`):
+  `rec_runs` (one per scan attempt), `rec_rows` (one
+  `WorkloadRecommendation` per workload of a successful run,
+  cascade-deleted) and `rec_latest` (each cluster's latest successful run
+  and the Prometheus configuration it used). Only a success writes rows
+  and moves the latest pointer; runs still `running` when the writer
+  starts become `interrupted` (`app-restarted`).
 - **One writer** (`history/writer.rs`): a dedicated thread behind a bounded
   queue (1 024 operations). Producers only `try_send`; a full queue drops
   the write and counts it (`HistoryStatus.dropped`), so a command never
@@ -779,8 +786,14 @@ that never leaves the machine.
 - **Retention**: every ten minutes (first after one minute) and after a
   settings change: audit entries older than `audit_retention_days`
   (default 90), events and changes older than `retention_days` (default
-  7), then the size cap `max_size_mb` (default 512: the oldest events and
-  changes go first, the audit log only when nothing else is left), then
+  7), recommendation runs older than
+  `Settings.recommendations.retention_days` (default 30; never a
+  cluster's latest), and the rows of successful runs older than 48 hours
+  unless they are the latest or the last successful run of their UTC day
+  (the run and its summary stay), then the size cap `max_size_mb`
+  (default 512: the oldest events and changes go first, then the rows of
+  the oldest recommendation runs, the audit log only when nothing else is
+  left), then
   incremental vacuum (full `VACUUM` after a clear or when most of the file
   is free) and a WAL checkpoint.
 - **Opt-in per process** (`Kubepit::set_history_recording`, enabled in
@@ -793,7 +806,7 @@ that never leaves the machine.
   `history_audit_get`, `history_audit_export` (JSON lines),
   `history_events_list`, `history_changes_list` (a `ChangeFilter`; ids are
   the database's), `history_changes_get`, `history_clear` (audit / events /
-  changes / all, optionally one cluster).
+  changes / recommendations / all, optionally one cluster).
 - **UI**: the global Activity main tab (`components/activity/`, sidebar
   utility row and palette): filters, day groups, expandable entries with
   targets, the redacted request and a DiffView of before/after, links to

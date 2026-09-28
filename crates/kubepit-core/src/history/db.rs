@@ -16,6 +16,7 @@ use rusqlite::types::Value as Sql;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transaction};
 use serde_json::Value;
 
+use super::recommendations;
 use super::types::{
     AuditAction, AuditDetail, AuditEntry, AuditFilter, AuditObject, AuditOutcome, AuditPage,
     AuditTarget, HistoryChangePage, HistoryEventFilter, HistoryEventPage, HistoryKind,
@@ -105,7 +106,7 @@ CREATE INDEX changes_cluster_id ON changes (cluster_id, id DESC);
 CREATE INDEX changes_ts ON changes (ts);
 "#,
     ),
-    (2, super::recommendations::MIGRATION),
+    (2, recommendations::MIGRATION),
 ];
 
 /// Newest schema this build knows.
@@ -463,8 +464,12 @@ pub fn clear(conn: &Connection, kind: HistoryKind, cluster_id: Option<&str>) -> 
         HistoryKind::Audit => &["audit"],
         HistoryKind::Events => &["events"],
         HistoryKind::Changes => &["changes"],
+        HistoryKind::Recommendations => &[],
         HistoryKind::All => &["audit", "events", "changes"],
     };
+    if matches!(kind, HistoryKind::Recommendations | HistoryKind::All) {
+        recommendations::clear(conn, cluster_id)?;
+    }
     for table in tables {
         match cluster_id {
             Some(id) => {
@@ -492,6 +497,12 @@ pub struct PrunePolicy {
     pub data_before: i64,
     /// Upper bound of the live pages (database without free pages).
     pub max_bytes: u64,
+    /// Recommendation runs started before this are deleted (except the
+    /// latest of each cluster).
+    pub rec_before: i64,
+    /// Successful runs finished before this keep their rows only when they
+    /// are the latest or the last successful run of their UTC day.
+    pub rec_rows_before: i64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -499,6 +510,8 @@ pub struct PruneReport {
     pub audit: u64,
     pub events: u64,
     pub changes: u64,
+    /// Recommendation runs deleted or stripped of their rows.
+    pub recommendations: u64,
     pub vacuumed: bool,
 }
 
@@ -529,8 +542,10 @@ fn delete_oldest(conn: &Connection, table: &str, ts: &str, fraction: f64) -> Res
     Ok(deleted as u64)
 }
 
-/// Apply retention, then the size cap (oldest events and changes first,
-/// the audit log only when nothing else is left), then reclaim space.
+/// Apply retention (and the thinning of recommendation scans), then the
+/// size cap (oldest events and changes first, then the rows of the oldest
+/// recommendation scans, the audit log only when nothing else is left),
+/// then reclaim space.
 pub fn prune(conn: &Connection, policy: &PrunePolicy) -> Result<PruneReport> {
     let mut report = PruneReport {
         audit: conn.execute("DELETE FROM audit WHERE ts < ?1", [policy.audit_before])? as u64,
@@ -539,6 +554,7 @@ pub fn prune(conn: &Connection, policy: &PrunePolicy) -> Result<PruneReport> {
             [policy.data_before],
         )? as u64,
         changes: conn.execute("DELETE FROM changes WHERE ts < ?1", [policy.data_before])? as u64,
+        recommendations: recommendations::prune(conn, policy)?,
         vacuumed: false,
     };
     let mut rounds = 0;
@@ -551,6 +567,11 @@ pub fn prune(conn: &Connection, policy: &PrunePolicy) -> Result<PruneReport> {
         if events + changes > 0 {
             continue;
         }
+        let scans = recommendations::delete_oldest_rows(conn, 0.1)?;
+        report.recommendations += scans;
+        if scans > 0 {
+            continue;
+        }
         let audit = delete_oldest(conn, "audit", "ts", 0.1)?;
         if audit == 0 {
             break;
@@ -561,7 +582,7 @@ pub fn prune(conn: &Connection, policy: &PrunePolicy) -> Result<PruneReport> {
         "DELETE FROM audit_objects WHERE audit_id NOT IN (SELECT id FROM audit)",
         [],
     )?;
-    if report.audit + report.events + report.changes > 0 {
+    if report.audit + report.events + report.changes + report.recommendations > 0 {
         report.vacuumed = reclaim(conn)?;
     }
     Ok(report)
@@ -1394,6 +1415,8 @@ mod tests {
                 audit_before: 100,
                 data_before: 100,
                 max_bytes: u64::MAX,
+                rec_before: 0,
+                rec_rows_before: 0,
             },
         )
         .unwrap();
@@ -1430,6 +1453,8 @@ mod tests {
                 audit_before: 0,
                 data_before: 0,
                 max_bytes: 400_000,
+                rec_before: 0,
+                rec_rows_before: 0,
             },
         )
         .unwrap();
