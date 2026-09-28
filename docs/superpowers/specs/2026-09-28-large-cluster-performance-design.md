@@ -113,7 +113,7 @@ The macOS WKWebView number comes from the same probe in `pnpm tauri:dev`, opened
 **D5. Scaled demo cluster.**
 - `?scale=s|m|l` adds a `c-scale-<preset>` cluster to the demo backend. `&churn=<events/s>` adds pod churn: status and label changes, plus 10% create/delete.
 - `window_open` keeps both parameters.
-- Every demo watch now follows the backend's batch contract: a first batch with `reset: true` and at most 500 objects, further batches of at most 500 every 150 ms, and `synced: true` only on the last.
+- Every demo watch now follows the backend's flush rule (`watch.rs` `run_watch`): a 150 ms ticker anchored at the watch start flushes whatever is pending, and 500 pending objects flush at once, so no batch carries more than 500. When the initial list arrives, every full chunk of 500 goes out at once (the first with `reset: true`); the remainder follows with `synced: true` at the next tick, and is the only batch of a shorter or empty list. Changes made meanwhile follow after that batch.
 - Mock DB lookups (`find`, `ownedBy`, node scheduling) get indexes, so a 20 000-pod cluster builds in under 3 s.
 
 **D6. Budgets** live in `perf/budgets.json`:

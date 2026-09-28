@@ -3,7 +3,7 @@ import { buildCheckout, buildWeb } from './apps';
 import { buildConfig } from './config';
 import { buildCrds } from './crds';
 import { buildData, buildLegacy, buildTeams } from './data';
-import { setBuilder, type ClusterDb } from './db';
+import { put, setBuilder, type ClusterDb } from './db';
 import { buildEvents } from './events';
 import { buildGatewayApi } from './gateway';
 import { buildHealthDemo } from './health';
@@ -19,6 +19,7 @@ import { buildPrometheusServices } from './prometheus';
 import { buildCostServices } from './cost';
 import { buildPolicies } from './policies';
 import { buildRbac } from './rbac';
+import { generateScaleObjects, scalePresetOf, type ScalePresetName } from './scale';
 import { buildStorage } from './storage';
 import { buildRolloutHistory } from './rollouts';
 import { buildKubeSystem } from './system';
@@ -81,4 +82,13 @@ function buildCluster(db: ClusterDb) {
   buildSecurityDemo(db);
 }
 
-setBuilder(buildCluster);
+/** A scaled demo cluster (`?scale=`): the generated objects only, no demo scenarios. */
+function buildScaleCluster(db: ClusterDb, preset: ScalePresetName) {
+  for (const o of generateScaleObjects(preset, db.id)) put(db, o);
+}
+
+setBuilder((db) => {
+  const preset = scalePresetOf(db.id);
+  if (preset) buildScaleCluster(db, preset);
+  else buildCluster(db);
+});

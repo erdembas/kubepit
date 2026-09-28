@@ -116,7 +116,7 @@
     Empty kinds (statefulsets, daemonsets, jobs, cronjobs, RBAC, networking) answer empty lists, so alerts and journal watchers sync.
   - Discovery: `/version` (v1.31.0), `/api`, `/api/v1`, `/apis`, `/apis/{group}/{version}`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 // crates/kubepit-core/tests/scale_fixture.rs
@@ -193,12 +193,12 @@ async fn metadata_only_lists_and_selectors() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core --test scale_fixture`
 Expected: FAIL (`support::scale` not found).
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
   - Generation uses a seeded xorshift and names objects `ns-0001`, `node-0001`, `app-0001-api` and so on. Pods get owner refs to their current ReplicaSet, `spec.nodeName` round-robin over nodes, labels `app`/`team`, and `status.phase: Running` with container statuses. Secrets are `Opaque` with two data keys.
   - Items are kept sorted by (namespace, name).
   - The continue token is base64 of `"{offset}:{rv}"`. An unknown or undecodable token answers `Reply::Json(410, status(410, "Expired", "…"))`.
@@ -206,12 +206,12 @@ Expected: FAIL (`support::scale` not found).
   - Metadata-only responses apply when `req.header("accept")` contains `as=PartialObjectMetadataList`.
   - `fieldSelector` supports `spec.nodeName=` and `metadata.namespace=`; `labelSelector` supports `k=v[,k=v]`. Decode query values with `%3D`/`%2C` handling.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core --test scale_fixture`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add perf crates/kubepit-core/tests
@@ -411,7 +411,7 @@ git commit -m "perf(bench): fleet search, proxy parsing and end-to-end benches w
 - Modify: `apps/desktop/src/lib/ipc/mock/app.ts:44-103,298-301` (cluster definition when `scaleParams().scale`; `window_open` keeps the params)
 - Modify: `apps/desktop/src/lib/ipc/mock/fixtures/db.ts:92-160` (name and owner indexes for `find` / `ownedBy`)
 - Modify: `apps/desktop/src/lib/ipc/mock/fixtures/build.ts:29` (scale clusters use `generateScaleObjects` instead of `buildCluster`)
-- Modify: `apps/desktop/src/lib/ipc/mock/resources.ts:121-146` (emit `chunkBatches`, one batch per 150 ms)
+- Modify: `apps/desktop/src/lib/ipc/mock/resources.ts:121-146` (emit `chunkBatches` with the backend's flush rule: full chunks of 500 at once, the remainder with `synced` at the next 150 ms tick)
 - Modify: `apps/desktop/src/lib/ipc/mock/fixtures/live.ts:64-76` (churn)
 - Test: `apps/desktop/src/lib/ipc/mock/fixtures/scale.test.ts`
 
@@ -425,7 +425,7 @@ git commit -m "perf(bench): fleet search, proxy parsing and end-to-end benches w
   - `chunkBatches(watchId: string, items: readonly KubeObject[], max?: number): WatchBatch[]` (`max` defaults to 500).
   - `mockWatchStats(): Array<{ clusterId: string; key: string; namespaces: string[] }>`, exported from `db.ts` for the probe and for H2.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // apps/desktop/src/lib/ipc/mock/fixtures/scale.test.ts
@@ -462,23 +462,23 @@ describe('scale demo', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm --filter @kubepit/desktop test -- src/lib/ipc/mock/fixtures/scale.test.ts`
 Expected: FAIL (module missing).
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
   - The generator mirrors Task 1's naming and shapes, seeded from the preset's `seed`. `c-scale-<preset>` uses platform `kind` and version `v1.31.0` and is not read-only.
   - `window_open` builds its URL with `withScaleParams` (it keeps `perf` too).
   - With `churn > 0`, the liveness timer ticks every 100 ms and applies `churn / 10` pod changes per tick round-robin: 90% status/label updates, 10% delete + recreate.
   - `db.ts` keeps `byName: Map<kindKey, Map<"ns/name", uid>>` and `byOwner: Map<ownerUid, Set<uid>>` in sync in `put`/`drop`.
 
-- [ ] **Step 4: Run the tests and check the build time**
+- [ ] **Step 4: Run the tests and check the build time** _(Partly verified on 2026-09-28: the tests and typecheck pass; the browser check below was not run, no browser was available. Headless (Vitest, fake timers): `c-scale-l` builds in ~0.25 s; the list arrives 150–350 ms after the watch, its 40 full batches go out at once (one macrotask each), and `synced` follows at the first 150 ms tick after them: at 450 ms under fake timers.)_
 
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck`
 Expected: PASS. Then open `pnpm dev:ui` at `http://localhost:1430/?scale=l`: the `c-scale-l` cluster connects and the pods table fills within 3 s.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/src
