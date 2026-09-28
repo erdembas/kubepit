@@ -16,8 +16,9 @@
 //! Q1 and Q5 are required: when either fails (or answers more than
 //! [`MAX_SCAN_SERIES`] series) the batch is [`BatchFailure::Splittable`]
 //! and the caller retries smaller scopes. The others only refine: their
-//! failures are recorded in [`StatsBatch::failed`]. A proxy failure means
-//! Prometheus is gone ([`BatchFailure::Proxy`]). Read-only like the rest.
+//! failures are recorded in [`StatsBatch::failed`]. A proxy or tunnel
+//! failure means Prometheus is gone ([`BatchFailure::Proxy`]). Read-only
+//! like the rest.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -25,6 +26,7 @@ use futures::stream::{self, StreamExt};
 
 use super::parse::PromData;
 use super::promql::{quote, regex_escape};
+use super::tunnel::is_tunnel_failure;
 use super::usage::{instant_params, MAX_NAMESPACE_MATCHERS, USAGE_TIMEOUT};
 use super::Origin;
 use crate::app::Kubepit;
@@ -272,7 +274,8 @@ pub struct StatsBatch {
 /// Why a batch produced nothing.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum BatchFailure {
-    /// Prometheus is gone (service proxy 404 / 502 / 503) or not available:
+    /// Prometheus is gone (service proxy 404 / 502 / 503, a tunnel failure)
+    /// or not available:
     /// smaller batches would fail the same way.
     #[error("{0}")]
     Proxy(String),
@@ -365,16 +368,16 @@ fn timestamps(data: Option<&PromData>, earliest: bool) -> HashMap<(String, Strin
     out
 }
 
-/// Merge the answers of one batch. A proxy failure aborts; a failed or
-/// oversized required answer makes the batch splittable; other failures
-/// are recorded in `failed`.
+/// Merge the answers of one batch. A proxy or tunnel failure aborts; a
+/// failed or oversized required answer makes the batch splittable; other
+/// failures are recorded in `failed`.
 pub fn merge(
     mut answers: Vec<(StatQuery, anyhow::Result<PromData>)>,
 ) -> Result<StatsBatch, BatchFailure> {
     if let Some(e) = answers
         .iter()
         .filter_map(|(_, answer)| answer.as_ref().err())
-        .find(|e| is_proxy_failure(e))
+        .find(|e| is_proxy_failure(e) || is_tunnel_failure(e))
     {
         return Err(BatchFailure::Proxy(format!("{e:#}")));
     }
@@ -869,5 +872,19 @@ mod tests {
             ]),
             Err(BatchFailure::Proxy(_))
         ));
+        // So did the tunnel (no ready pod, unreadable credentials): smaller
+        // batches would fail the same way.
+        let tunnel = super::super::tunnel::tunnel_failure(anyhow!(
+            "no running and ready pod backs service prometheus-operated"
+        ));
+        assert_eq!(
+            merge(vec![
+                (StatQuery::CpuP95, Err(tunnel)),
+                (StatQuery::MemoryMax, Ok(data(vec![series(&WEB, 1.0)]))),
+            ]),
+            Err(BatchFailure::Proxy(
+                "no running and ready pod backs service prometheus-operated".into()
+            ))
+        );
     }
 }
