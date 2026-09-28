@@ -3,6 +3,8 @@ import { type ReactNode } from 'react';
 import {
   Bell,
   FileCode2,
+  Keyboard,
+  Puzzle,
   Info,
   Settings as SettingsIcon,
   SquareTerminal,
@@ -19,6 +21,9 @@ import {
   ToolsCategory,
 } from './categories';
 import { NotificationsCategory } from './NotificationsCategory';
+// Power user: custom actions and keyboard mode.
+import { CustomActionsCategory } from './CustomActionsCategory';
+import { KeyboardCategory } from './KeyboardCategory';
 
 interface CategoryDef {
   id: SettingsCategory;
@@ -71,6 +76,28 @@ const CATEGORIES: ReadonlyArray<CategoryDef> = [
       return i18n.t('Alerts from connected clusters, desktop notifications and filters.');
     },
     icon: Bell,
+    group: 'workspace',
+  },
+  {
+    id: 'custom-actions',
+    get label() {
+      return i18n.t('Custom actions');
+    },
+    get description() {
+      return i18n.t('Your own commands for objects and clusters, k9s plugin import.');
+    },
+    icon: Puzzle,
+    group: 'workspace',
+  },
+  {
+    id: 'keyboard',
+    get label() {
+      return i18n.t('Keyboard');
+    },
+    get description() {
+      return i18n.t('Vim / k9s-style keyboard mode and every shortcut.');
+    },
+    icon: Keyboard,
     group: 'workspace',
   },
   {
@@ -171,6 +198,10 @@ export function SettingsView() {
           {active === 'notifications' && (
             <NotificationsCategory description={current.description} />
           )}
+          {active === 'custom-actions' && (
+            <CustomActionsCategory description={current.description} />
+          )}
+          {active === 'keyboard' && <KeyboardCategory description={current.description} />}
           {active === 'tools' && <ToolsCategory description={current.description} />}
           {active === 'about' && <AboutCategory description={current.description} />}
         </section>

@@ -20,6 +20,8 @@ import './openapi';
 // Registered after './app': it wraps `port_forward_start` and `cluster_connect`.
 import './connectivity';
 import './changes';
+// Registered last: it wraps `terminal_create` for custom actions (after logsDebug's wrap).
+import './customActions';
 
 export { mockListen } from './bus';
 

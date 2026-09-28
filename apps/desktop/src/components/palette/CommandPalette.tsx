@@ -19,6 +19,8 @@ import {
 import { explainKindItems } from './explainItems';
 import { fleetSearchItem } from './fleetSearchItem';
 import { updateActions, workbenchItems } from './workbenchItems';
+// Power user: custom actions for the selected object / cluster.
+import { customActionItems } from './customActionItems';
 
 const FILTERS: Array<{ key: PaletteFilter; label: () => string }> = [
   { key: 'all', label: () => i18n.t('All') },
@@ -111,6 +113,7 @@ export function CommandPalette() {
     }
     // Bookmarks, saved views and exports of the focused table.
     out.push(...workbenchItems(q, filter));
+    out.push(...customActionItems(q, filter));
     if (filter === 'all' || filter === 'actions') {
       const acts = [...appActions(), ...updateActions()].filter(
         (item) => item.type === 'action' && matches(q, item.label, item.keywords),

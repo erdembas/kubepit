@@ -16,6 +16,7 @@ export function tabTitle(tab: DockTab, clusterName: string | null): string {
         return spec.container ? `${spec.pod} · ${spec.container}` : spec.pod;
       if (spec.kind === 'pod-attach') return i18n.t('Attach · {pod}', { pod: spec.pod });
       if (spec.kind === 'node-shell') return `node/${spec.node}`;
+      if (spec.kind === 'custom-action') return tab.title;
       if (!spec.cluster_id) return i18n.t('Local shell');
       const name = clusterName ?? tab.title;
       return spec.namespace ? `${name} · ${spec.namespace}` : name;
@@ -70,6 +71,10 @@ export function tabTooltip(tab: DockTab, clusterName: string | null): string {
           : i18n.t('Attached to {target}', { target });
       }
       if (spec.kind === 'node-shell') return i18n.t('Shell on node {node}', { node: spec.node });
+      if (spec.kind === 'custom-action')
+        return i18n.t('Custom action with KUBECONFIG for {cluster}', {
+          cluster: clusterName ?? spec.cluster_id,
+        });
       if (!spec.cluster_id) return i18n.t('Local shell without a cluster context');
       return i18n.t('Local shell with KUBECONFIG for {cluster}', {
         cluster: clusterName ?? spec.cluster_id,

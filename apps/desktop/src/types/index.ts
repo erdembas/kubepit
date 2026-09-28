@@ -961,7 +961,14 @@ export type TerminalSpec =
       container: string | null;
     }
   /** Privileged helper pod + nsenter on the node; deleted when the terminal closes. */
-  | { kind: 'node-shell'; cluster_id: ClusterId; node: string };
+  | { kind: 'node-shell'; cluster_id: ClusterId; node: string }
+  /** A saved custom action in terminal mode; the backend resolves and checks it. */
+  | {
+      kind: 'custom-action';
+      cluster_id: ClusterId;
+      action_id: string;
+      target: CustomActionTarget;
+    };
 
 export interface TerminalOutput {
   /** Base64-encoded raw PTY bytes. */
@@ -1013,6 +1020,8 @@ export interface Settings {
   change_journal: boolean;
   /** Cluster ids that opted out of the change timeline. */
   change_journal_disabled: ClusterId[];
+  /** Power user: vim / k9s-style keys in the workbench. */
+  keyboard_mode: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -1401,4 +1410,127 @@ export interface FleetSearchEvent {
   /** `cluster-done` / `cluster-error`: kinds RBAC did not allow listing. */
   forbidden_kinds: string[];
   error: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Custom actions (k9s-plugin style, `~/.kubepit/actions.json`)
+// ---------------------------------------------------------------------------
+
+export type CustomActionMode = 'terminal' | 'background' | 'open-url';
+
+/** Lucide icon names a custom action may use (`custom_actions/model.rs` ICONS). */
+export type CustomActionIcon =
+  | 'terminal'
+  | 'play'
+  | 'file-text'
+  | 'search'
+  | 'external-link'
+  | 'bug'
+  | 'zap'
+  | 'wrench'
+  | 'eye'
+  | 'list'
+  | 'activity'
+  | 'git-branch'
+  | 'cloud'
+  | 'database'
+  | 'shield'
+  | 'trash'
+  | 'refresh'
+  | 'tag'
+  | 'gauge'
+  | 'rocket';
+
+export interface CustomAction {
+  id: string;
+  name: string;
+  description: string;
+  icon: CustomActionIcon | string;
+  enabled: boolean;
+  /** `Kind`, `group/Kind`, `group/*`, `core/Kind`, `*` (any object) or `cluster`. */
+  scopes: string[];
+  /** Namespace globs; empty = every namespace. */
+  namespaces: string[];
+  /** Any of these cluster tags; empty = every cluster. */
+  cluster_tags: string[];
+  /** `sh` command line (or URL for `open-url`) with `{placeholder}`s. */
+  command: string;
+  mode: CustomActionMode;
+  /** Show the resolved command and ask before running. */
+  confirm: boolean;
+  /** Blocked on read-only clusters, typed confirmation on production. */
+  mutating: boolean;
+  /** Canonical chord (`ctrl+shift+l`, `x`), see `lib/keymap.ts`. */
+  shortcut: string | null;
+  /** Background runs are killed after this many seconds (≤ 600). */
+  timeout_secs: number;
+}
+
+/** The object (or cluster-level scope) an action runs on. */
+export interface CustomActionTarget {
+  namespace: string | null;
+  /** Null for cluster-level runs. */
+  name: string | null;
+  kind: string | null;
+  group: string | null;
+  version: string | null;
+  /** Plural resource name. */
+  resource: string | null;
+  container: string | null;
+  labels: Record<string, string>;
+  annotations: Record<string, string>;
+  /** Every selected object's name (multi-select); empty = just `name`. */
+  selection: string[];
+}
+
+export interface CustomActionsState {
+  actions: CustomAction[];
+  /** False until `actions.json` was first written (the UI seeds the examples). */
+  initialized: boolean;
+}
+
+export interface ResolvedCustomAction {
+  /** The command line, or the URL for `open-url`. */
+  command: string;
+  /** Placeholders without a value (substituted empty). */
+  missing: string[];
+  /** Tokens that look like misspelled placeholders (kept literal). */
+  unknown: string[];
+}
+
+export interface CustomActionResult {
+  mode: CustomActionMode;
+  /** Resolved command, or the URL to open. */
+  command: string;
+  exit_code: number | null;
+  stdout: string;
+  stderr: string;
+  timed_out: boolean;
+  truncated: boolean;
+  duration_ms: number;
+}
+
+export type CustomActionImportNoteCode =
+  | 'invalid-action'
+  | 'invalid-plugin'
+  | 'unsupported-field'
+  | 'unsupported-scope'
+  | 'guessed-scope'
+  | 'no-scope'
+  | 'unsupported-variable'
+  | 'invalid-shortcut'
+  | 'extra-args';
+
+export interface CustomActionImportNote {
+  /** Plugin / action it concerns. */
+  action: string;
+  code: CustomActionImportNoteCode;
+  /** The offending value (kept verbatim). */
+  detail: string;
+}
+
+export interface CustomActionImport {
+  format: 'kubepit' | 'k9s';
+  actions: CustomAction[];
+  notes: CustomActionImportNote[];
 }

@@ -20,6 +20,11 @@ import type {
   ClusterProxyInfo,
   ClusterStatus,
   ContainerImage,
+  CustomAction,
+  CustomActionImport,
+  CustomActionResult,
+  CustomActionsState,
+  CustomActionTarget,
   DeleteOptions,
   DryRunResult,
   FleetSearchEvent,
@@ -69,6 +74,7 @@ import type {
   PrometheusStatus,
   PrometheusTarget,
   PromQueryResult,
+  ResolvedCustomAction,
   ResourceList,
   RolloutRevision,
   SavedPortForward,
@@ -477,6 +483,27 @@ export const ipc = {
   helmReleaseRevision: (clusterId: ClusterId, namespace: string, name: string, revision: number) =>
     call<HelmRevisionDetail>('helm_release_revision', { clusterId, namespace, name, revision }),
 
+  // -- Custom actions (k9s-plugin style, `actions.json`) ----------------------
+  customActionsList: () => call<CustomActionsState>('custom_actions_list'),
+  /** Replaces the whole list; broadcasts `customactions://changed`. */
+  customActionsSave: (actions: CustomAction[]) =>
+    call<CustomAction[]>('custom_actions_save', { actions }),
+  /** Reads a Kubepit export or a k9s `plugins.yaml` (path in the desktop app, text in previews); saves nothing. */
+  customActionsImport: (source: { path: string } | { text: string }) =>
+    call<CustomActionImport>('custom_actions_import', {
+      path: 'path' in source ? source.path : null,
+      text: 'text' in source ? source.text : null,
+    }),
+  /** Preview of a (possibly unsaved) definition; `clusterId: null` uses sample cluster values. */
+  customActionResolve: (
+    action: CustomAction,
+    clusterId: ClusterId | null,
+    target: CustomActionTarget,
+  ) => call<ResolvedCustomAction>('custom_action_resolve', { action, clusterId, target }),
+  /** Runs a saved background action, or returns an open-url action's URL. */
+  customActionRun: (clusterId: ClusterId, actionId: string, target: CustomActionTarget) =>
+    call<CustomActionResult>('custom_action_run', { clusterId, actionId, target }),
+
   // -- Alerts (read-only observations; allowed on read-only clusters) -------
   /** Every alert of this session, newest activity first. */
   alertsList: () => call<Alert[]>('alerts_list'),
@@ -509,4 +536,7 @@ export const events = {
     listenEvent<AlertNotice>('alerts://new', handler),
   /** Alerts were marked read or cleared: refetch `alertsList`. */
   onAlertsChanged: (handler: () => void) => listenEvent<null>('alerts://changed', () => handler()),
+  /** The saved custom actions after any save (every window hears it). */
+  onCustomActionsChanged: (handler: (actions: CustomAction[]) => void) =>
+    listenEvent<CustomAction[]>('customactions://changed', handler),
 };

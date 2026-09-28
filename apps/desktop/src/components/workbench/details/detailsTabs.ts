@@ -8,7 +8,8 @@ import type { ClusterId, Gvk, KubeObject } from '@/types';
  * names the object it shows; the tab consumes `focus` and clears it.
  */
 
-export type DetailsTabId = 'history' | 'map' | 'changes';
+// Keyboard mode: `y` / `d` open the YAML and details tabs.
+export type DetailsTabId = 'history' | 'map' | 'changes' | 'details' | 'yaml' | 'events';
 
 export interface DetailsTabRequest {
   clusterId: ClusterId;

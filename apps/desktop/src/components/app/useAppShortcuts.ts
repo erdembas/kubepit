@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { IS_MAC } from '@/lib/platform';
 import { duplicateWindow } from '@/lib/windowing';
 import { focusedGroup } from '@/store/splitLayout';
 import { DASHBOARD_TAB_KEY, useAppStore } from '@/store/useAppStore';
@@ -20,7 +21,8 @@ function isEditable(target: EventTarget | null) {
 export function useAppShortcuts() {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      const mod = event.metaKey || event.ctrlKey;
+      // ⌘ on macOS only, so ⌃K / ⌃D stay free for terminals and keyboard mode.
+      const mod = IS_MAC ? event.metaKey : event.ctrlKey;
       if (!mod || event.altKey) return;
       const store = useAppStore.getState();
       const key = event.key.toLowerCase();

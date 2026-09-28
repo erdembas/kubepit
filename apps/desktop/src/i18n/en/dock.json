@@ -127,6 +127,7 @@
   "Created {count} resource": "Created {count} resource",
   "Created {count} resources": "Created {count} resources",
   "Creating…": "Creating…",
+  "Custom action with KUBECONFIG for {cluster}": "Custom action with KUBECONFIG for {cluster}",
   "Debug…": "Debug…",
   "Default namespace": "Default namespace",
   "Deselect or fix {count} rejected object first": "Deselect or fix {count} rejected object first",

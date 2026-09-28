@@ -20,6 +20,8 @@ interface RowProps {
   ctx: ColumnContext;
   checked: boolean;
   active: boolean;
+  /** Keyboard mode cursor (when it is not also the active row). */
+  cursor?: boolean;
   selectable: boolean;
   onOpen: (obj: KubeObject) => void;
   onToggle: (uid: string, index: number, shift: boolean) => void;
@@ -34,6 +36,7 @@ const Row = memo(function Row({
   ctx,
   checked,
   active,
+  cursor,
   selectable,
   onOpen,
   onToggle,
@@ -55,9 +58,11 @@ const Row = memo(function Row({
         'border-border/40 grid cursor-default items-center gap-x-2.5 border-b px-3 text-[12px] transition-colors select-none',
         active
           ? 'bg-fg/7 shadow-[inset_2px_0_0_rgb(var(--accent))]'
-          : checked
-            ? 'bg-accent/[0.06] hover:bg-accent/[0.09]'
-            : 'hover:bg-fg/4',
+          : cursor
+            ? 'bg-fg/4 shadow-[inset_2px_0_0_rgb(var(--accent)/0.45)]'
+            : checked
+              ? 'bg-accent/[0.06] hover:bg-accent/[0.09]'
+              : 'hover:bg-fg/4',
         obj.metadata.deletionTimestamp && 'opacity-60',
       )}
     >
@@ -99,6 +104,8 @@ export interface ResourceTableProps {
   onToggle: (uid: string, index: number, shift: boolean) => void;
   onToggleAll: () => void;
   activeUid: string | null;
+  /** Keyboard mode cursor row (see `keyboard/tableKeyboard.ts`). */
+  cursorUid?: string | null;
   onOpen: (obj: KubeObject) => void;
   onContextMenu: (e: React.MouseEvent, obj: KubeObject) => void;
   selectable: boolean;
@@ -142,6 +149,15 @@ export function ResourceTable(p: ResourceTableProps) {
   );
 
   const activeIndex = p.activeUid ? p.items.findIndex((o) => o.metadata.uid === p.activeUid) : -1;
+  const cursorIndex = p.cursorUid ? p.items.findIndex((o) => o.metadata.uid === p.cursorUid) : -1;
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || cursorIndex < 0) return;
+    const top = cursorIndex * ROW_HEIGHT;
+    const bottom = top + ROW_HEIGHT + ROW_HEIGHT; // header row
+    if (top < el.scrollTop) el.scrollTop = top;
+    else if (bottom > el.scrollTop + el.clientHeight) el.scrollTop = bottom - el.clientHeight;
+  }, [cursorIndex]);
   useEffect(() => {
     const el = scroller.current;
     if (!el || activeIndex < 0) return;
@@ -268,6 +284,7 @@ export function ResourceTable(p: ResourceTableProps) {
                 ctx={p.ctx}
                 checked={p.checked.has(obj.metadata.uid)}
                 active={obj.metadata.uid === p.activeUid}
+                cursor={!!p.cursorUid && obj.metadata.uid === p.cursorUid}
                 selectable={p.selectable}
                 onOpen={p.onOpen}
                 onToggle={p.onToggle}

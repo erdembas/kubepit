@@ -171,6 +171,7 @@ let settings: Settings = {
   keychain_kubeconfigs: false,
   change_journal: true,
   change_journal_disabled: [],
+  keyboard_mode: false,
 };
 
 const WORKSPACE_KEY = 'kubepit.demo.workspace';

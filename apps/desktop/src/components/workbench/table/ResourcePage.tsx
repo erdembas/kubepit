@@ -44,6 +44,8 @@ import { ResourceTable } from './ResourceTable';
 import { SELECTION_BAR_INSET, SelectionBar } from './SelectionBar';
 import { TableEmpty, TableError, TableSkeleton } from './TableStates';
 import { useKindTable } from './useKindTable';
+// Power user: keyboard mode cursor and the focused-table controller.
+import { useTableKeys } from '../keyboard/tableKeyboard';
 
 /** A kind's list page: toolbar, virtualized table, bulk actions and the details panel. */
 export function ResourcePage({
@@ -221,6 +223,16 @@ export function ResourcePage({
       }),
     [clusterId, cluster, gvk, label, targets, onClearChecked, onExportSelected],
   );
+  const keys = useTableKeys({
+    clusterId,
+    kindKey,
+    gvk,
+    items: t.items,
+    selectedObj,
+    checked: targets,
+    onOpen,
+    isActive,
+  });
   const exportRequest = useTableExport((s) =>
     s.request?.clusterId === clusterId && s.request.kindKey === kindKey ? s.request : null,
   );
@@ -270,6 +282,7 @@ export function ResourcePage({
             <div className="bg-surface border-border focus-within:border-accent/50 flex h-8 w-56 min-w-24 shrink items-center gap-2 rounded-lg border px-2.5 transition-colors">
               <Search className="text-fg-dim h-3.5 w-3.5 shrink-0" />
               <input
+                ref={keys.filterRef}
                 value={t.filter}
                 onChange={(e) => store().setFilter(clusterId, kindKey, e.target.value)}
                 onKeyDown={(e) => e.key === 'Escape' && store().setFilter(clusterId, kindKey, '')}
@@ -348,6 +361,7 @@ export function ResourcePage({
             onToggle={onToggle}
             onToggleAll={onToggleAll}
             activeUid={selectedObj?.metadata.uid ?? null}
+            cursorUid={keys.cursorUid}
             onOpen={onOpen}
             onContextMenu={onContextMenu}
             selectable
