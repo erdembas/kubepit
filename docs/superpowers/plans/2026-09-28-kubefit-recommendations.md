@@ -2560,7 +2560,7 @@ git commit -m "feat(alerts): optional alert for new high-confidence savings"
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn access_is_validated() {
@@ -2575,21 +2575,21 @@ Steps:
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core prometheus::access`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement it, and mirror it in TS**
+- [x] **Step 3: Implement it, and mirror it in TS**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core && pnpm typecheck`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core apps/desktop/src/types/index.ts

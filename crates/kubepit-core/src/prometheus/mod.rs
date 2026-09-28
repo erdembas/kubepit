@@ -16,6 +16,7 @@
 //! read-only clusters. Charts fall back to the metrics-server history when
 //! the status is anything but `available`.
 
+pub mod access;
 pub mod detect;
 pub mod parse;
 pub mod promql;
@@ -39,6 +40,7 @@ use crate::types::{
     PrometheusMetricsResult, PrometheusRange, PrometheusSeries, PrometheusService,
     PrometheusSource, PrometheusState, PrometheusStatus, PrometheusTarget,
 };
+use access::PrometheusAccess;
 use detect::MAX_PROBES;
 use parse::PromData;
 use range::Window;
@@ -117,8 +119,10 @@ impl PrometheusConfig {
 // Detection cache
 // ---------------------------------------------------------------------------
 
-/// Detection results per cluster (see [`DetectCache`]).
-pub type PrometheusCache = DetectCache<PrometheusConfig, PrometheusStatus>;
+/// Detection results per cluster (see [`DetectCache`]), keyed by the
+/// source setting and its access settings (a new tenant or credentials
+/// probe again).
+pub type PrometheusCache = DetectCache<(PrometheusConfig, PrometheusAccess), PrometheusStatus>;
 
 impl DetectedStatus for PrometheusStatus {
     fn is_available(&self) -> bool {
@@ -254,13 +258,15 @@ impl Kubepit {
         let (client, connected_at) = self.prometheus_client(&cluster).await?;
         let lock = self.prometheus.detect_lock(cluster_id);
         let _serialised = lock.lock().await;
+        let key = (
+            cluster.prometheus.clone(),
+            cluster.prometheus_access.clone(),
+        );
         if !refresh {
-            if let Some(cached) = self.prometheus.get_at(
-                cluster_id,
-                connected_at,
-                &cluster.prometheus,
-                Instant::now(),
-            ) {
+            if let Some(cached) =
+                self.prometheus
+                    .get_at(cluster_id, connected_at, &key, Instant::now())
+            {
                 return Ok(cached);
             }
         }
@@ -274,12 +280,8 @@ impl Kubepit {
                 service.port
             );
         }
-        self.prometheus.put(
-            cluster_id,
-            connected_at,
-            cluster.prometheus.clone(),
-            result.clone(),
-        );
+        self.prometheus
+            .put(cluster_id, connected_at, key, result.clone());
         Ok(result)
     }
 
@@ -524,7 +526,7 @@ mod tests {
     fn cache_is_per_connection_and_config_and_negative_answers_expire() {
         let cache = PrometheusCache::default();
         let now = Instant::now();
-        let auto = PrometheusConfig::Auto;
+        let auto = (PrometheusConfig::Auto, PrometheusAccess::default());
         assert!(cache.get_at("c", Some(1), &auto, now).is_none());
 
         cache.put(
@@ -540,9 +542,24 @@ mod tests {
         );
         assert!(
             cache
-                .get_at("c", Some(1), &PrometheusConfig::Off, now)
+                .get_at(
+                    "c",
+                    Some(1),
+                    &(PrometheusConfig::Off, PrometheusAccess::default()),
+                    now
+                )
                 .is_none(),
             "setting changed"
+        );
+        let tenant = PrometheusAccess {
+            tenant: "team-a".into(),
+            ..Default::default()
+        };
+        assert!(
+            cache
+                .get_at("c", Some(1), &(PrometheusConfig::Auto, tenant), now)
+                .is_none(),
+            "access settings changed"
         );
         let later = now + RECHECK_AFTER * 3;
         assert!(

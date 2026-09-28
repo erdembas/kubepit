@@ -446,6 +446,24 @@ An optional, richer metrics source next to the metrics-server history
   and `cluster_add` normalizes them like `cluster_update` before anything is
   saved. The field groups take a `null` cluster id while adding, so no
   status lookup runs before the cluster exists.
+- **Access** (`access.rs`, `ClusterDef.prometheus_access`, both `auto` and
+  `service` modes) for shared or secured sources: a `tenant`
+  (`X-Scope-OrgID`, one line, ≤ 200 characters), `cluster_labels` (a
+  selector such as `cluster="prod-eu"`; names match
+  `^[a-zA-Z_][a-zA-Z0-9_]*$` and are none of the labels the presets use —
+  `__name__`, `namespace`, `pod`, `container`, `resource`, `uid`,
+  `owner_name`, `owner_kind`, `job`, `instance`, `replicaset`, `job_name`,
+  `reason` — and values are non-empty), an optional `auth` that *references*
+  a Secret (bearer token key, or username and password keys; names DNS-1123,
+  keys Kubernetes key names) and `tls` for an `https` service behind the
+  tunnel (a CA from a ConfigMap or Secret key, else the system roots, or an
+  explicit `insecure_skip_verify`). `cluster_add` and `cluster_update`
+  normalize it like `prometheus`. Two clusters that name the same
+  hand-configured service with the same tenant and both declare cluster
+  labels must have provably disjoint selectors (a shared label with
+  different values); clusters without labels are not compared, since every
+  cluster has its own `monitoring/prometheus-operated` behind its own API
+  server.
 - **Transport** (`proxy.rs`): every request goes through the API server's
   service proxy
   (`/api/v1/namespaces/{ns}/services/{scheme}:{name}:{port}/proxy{prefix}/api/v1/…`)
@@ -463,7 +481,7 @@ An optional, richer metrics source next to the metrics-server history
   auth proxy in front of it, with its message). `not-found` and `off` as
   before.
 - **Cache**: the status (`prometheus_status`) is kept per connection
-  (`connected_at`) and setting; negative answers (`forbidden` included) are
+  (`connected_at`), setting and access settings; negative answers (`forbidden` included) are
   rechecked after five minutes, a vanished service (proxy 404/502/503) is
   re-detected, and disconnect drops it.
 - **Queries**: `prometheus_metrics` runs backend presets (`promql.rs`) for

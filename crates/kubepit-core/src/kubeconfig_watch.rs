@@ -470,6 +470,7 @@ mod tests {
             last_connected_at: None,
             cost: Default::default(),
             prometheus: Default::default(),
+            prometheus_access: Default::default(),
             loki: Default::default(),
             proxy_url: None,
         }

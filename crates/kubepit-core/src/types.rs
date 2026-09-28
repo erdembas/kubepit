@@ -61,6 +61,10 @@ pub struct ClusterDef {
     /// Where charts read Prometheus metrics from (auto-detect by default).
     #[serde(default)]
     pub prometheus: PrometheusConfig,
+    /// Tenant, cluster-label selector and Secret-backed credentials of that
+    /// Prometheus (shared or secured sources; empty by default).
+    #[serde(default)]
+    pub prometheus_access: crate::prometheus::access::PrometheusAccess,
     /// Where historical logs are read from (Loki; auto-detect by default).
     #[serde(default)]
     pub loki: LokiConfig,
@@ -104,6 +108,9 @@ pub struct ClusterInput {
     /// Prometheus source (see [`ClusterDef::prometheus`]).
     #[serde(default)]
     pub prometheus: PrometheusConfig,
+    /// Prometheus access settings (see [`ClusterDef::prometheus_access`]).
+    #[serde(default)]
+    pub prometheus_access: crate::prometheus::access::PrometheusAccess,
     /// Loki source (see [`ClusterDef::loki`]).
     #[serde(default)]
     pub loki: LokiConfig,
