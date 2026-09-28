@@ -9,6 +9,7 @@
 
 pub mod perf;
 pub mod scale;
+pub mod stats;
 
 use std::sync::Arc;
 use std::time::Duration;

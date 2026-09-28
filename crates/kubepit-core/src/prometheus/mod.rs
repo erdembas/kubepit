@@ -10,17 +10,18 @@
 //! - [`access`] holds the settings of a shared or secured source (tenant,
 //!   cluster labels, Secret-backed credentials); [`matchers`] injects the
 //!   cluster-label selector into every preset. `Kubepit::prometheus_send`
-//!   (after `prometheus_source`) is the one transport every caller uses,
-//!   `prometheus_get` its single-request form; with credentials it goes
-//!   through an in-process port-forward tunnel (`tunnel`) instead of the
-//!   service proxy, which does not forward `Authorization`.
+//!   (after `prometheus_source`) is the one transport every caller uses;
+//!   with credentials it goes through an in-process port-forward tunnel
+//!   (`tunnel`) instead of the service proxy, which does not forward
+//!   `Authorization`.
 //! - [`promql`] holds the preset queries (cluster, node, namespace,
 //!   workload, pod, container, PVC × CPU, memory, network, filesystem,
 //!   volumes, restarts), so the UI never builds PromQL; [`range`] picks the
 //!   step and rate window; [`parse`] reads the API's JSON.
 //! - [`usage`] and [`workload_stats`] hold the instant queries of cost
 //!   estimates and right-sizing (16 per-pod-container statistics per batch,
-//!   evaluated at an aligned window end).
+//!   evaluated at an aligned window end); [`usage_history`] the range
+//!   queries of one container's usage for the recommendation charts.
 //!
 //! Everything here only reads (GETs through the proxy), so it is allowed on
 //! read-only clusters. Charts fall back to the metrics-server history when
@@ -36,6 +37,8 @@ pub mod range;
 pub(crate) mod tunnel;
 // Usage statistics for cost estimates and right-sizing.
 pub mod usage;
+// Per-container usage history (recommendation charts).
+pub mod usage_history;
 // Server-side workload statistics (right-sizing collection).
 pub mod workload_stats;
 
@@ -181,6 +184,10 @@ pub(crate) struct Link<'a> {
     pub tunnels: &'a TunnelCache,
     pub cluster_id: &'a str,
     pub connected_at: Option<i64>,
+    /// The cluster's tunnel epoch when the source was resolved
+    /// ([`TunnelCache::epoch`]): requests of a command that outlived a
+    /// disconnect or an access change do not cache Secret values.
+    pub tunnel_epoch: u64,
 }
 
 impl Link<'_> {
@@ -199,24 +206,30 @@ impl Link<'_> {
             if !self.credentials_allowed {
                 bail!(access::CREDENTIALS_NEED_A_SERVICE);
             }
-            let response = async {
-                let secrets = self
-                    .tunnels
-                    .secrets(self.cluster_id, self.connected_at, self.client, self.access)
-                    .await?;
-                let path = with_query(&format!("{}{endpoint}", self.service.path_prefix), params);
-                tunnel::tunnel_get(
+            // Setup failures (the Secret, the pod, the port-forward, TLS)
+            // are tunnel failures; a query timing out over an established
+            // tunnel is not (see `tunnel`).
+            let secrets = self
+                .tunnels
+                .secrets(
+                    self.cluster_id,
+                    self.connected_at,
                     self.client,
-                    self.service,
                     self.access,
-                    &secrets,
-                    &path,
-                    timeout,
+                    self.tunnel_epoch,
                 )
                 .await
-            }
-            .await
-            .map_err(tunnel::tunnel_failure)?;
+                .map_err(tunnel::tunnel_failure)?;
+            let path = with_query(&format!("{}{endpoint}", self.service.path_prefix), params);
+            let response = tunnel::tunnel_get(
+                self.client,
+                self.service,
+                self.access,
+                &secrets,
+                &path,
+                timeout,
+            )
+            .await?;
             return proxy::answer(response);
         }
         let tenant = self.access.tenant.trim();
@@ -240,6 +253,8 @@ pub(crate) struct Source<'a> {
     pub tunnels: &'a TunnelCache,
     /// See [`Link::credentials_allowed`].
     pub credentials_allowed: bool,
+    /// See [`Link::tunnel_epoch`].
+    pub tunnel_epoch: u64,
 }
 
 impl Source<'_> {
@@ -252,6 +267,7 @@ impl Source<'_> {
             tunnels: self.tunnels,
             cluster_id: &self.cluster_id,
             connected_at: self.connected_at,
+            tunnel_epoch: self.tunnel_epoch,
         }
     }
 
@@ -283,6 +299,7 @@ async fn detect_status(
     tunnels: &TunnelCache,
     connected_at: Option<i64>,
 ) -> PrometheusStatus {
+    let tunnel_epoch = tunnels.epoch(&cluster.id);
     let link = |service| Link {
         client,
         service,
@@ -292,6 +309,7 @@ async fn detect_status(
         tunnels,
         cluster_id: &cluster.id,
         connected_at,
+        tunnel_epoch,
     };
     match &cluster.prometheus {
         PrometheusConfig::Off => status(PrometheusState::Off),
@@ -416,6 +434,9 @@ impl Kubepit {
     /// The service to query, a client for it and the access settings, or
     /// why there is none.
     pub(crate) async fn prometheus_source(&self, cluster_id: &str) -> Result<Source<'_>> {
+        // Before anything else: a forget while this command runs (even
+        // during detection) keeps its Secret reads out of the cache.
+        let tunnel_epoch = self.prometheus_tunnels.epoch(cluster_id);
         let status = self.prometheus_status(cluster_id, false).await?;
         match (status.state, status.service) {
             (PrometheusState::Available, Some(service)) => {
@@ -429,6 +450,7 @@ impl Kubepit {
                     service,
                     access: cluster.prometheus_access,
                     tunnels: &self.prometheus_tunnels,
+                    tunnel_epoch,
                 })
             }
             (PrometheusState::Off, _) => bail!("Prometheus is turned off for this cluster"),
@@ -479,21 +501,6 @@ impl Kubepit {
                     self.prometheus.invalidate(&source.cluster_id);
                 }
             })
-    }
-
-    /// One request without a resolved source: `prometheus_source`, then
-    /// `prometheus_send`.
-    pub(crate) async fn prometheus_get(
-        &self,
-        cluster_id: &str,
-        endpoint: &str,
-        params: Vec<(&str, String)>,
-        origin: Origin,
-        timeout: Duration,
-    ) -> Result<PromData> {
-        let source = self.prometheus_source(cluster_id).await?;
-        self.prometheus_send(&source, endpoint, params, origin, timeout)
-            .await
     }
 
     /// `prometheus_metrics`: preset series of `target` over `range`.

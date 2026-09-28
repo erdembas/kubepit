@@ -10,11 +10,11 @@
 //!   value, so recommendations do not churn — unless the current value is
 //!   below the observed peak.
 
-use super::strategy::WARN_OOM_KILLED;
+use super::strategy::{WARN_IDENTITY_UNCLEAR, WARN_OOM_KILLED};
 use super::summary::lenses_of;
 use super::types::{
-    Change, Confidence, ContainerRecommendation, HpaInfo, RightsizingSettings, UsageStats, Verdict,
-    WorkloadRecommendation,
+    Change, Confidence, ContainerRecommendation, EvidenceIdentity, HpaInfo, RecommendationWarning,
+    RightsizingSettings, UsageStats, Verdict, WorkloadRecommendation,
 };
 use crate::cost::CostPricing;
 
@@ -265,6 +265,11 @@ pub struct WorkloadFacts {
     pub pods: Vec<String>,
     pub pods_truncated: bool,
     pub hpa: Option<HpaInfo>,
+    /// How the workload's pods were attributed. `Ambiguous` flags every
+    /// container `identity-unclear` (low confidence), also those left
+    /// without usage and so without evidence; the other values change
+    /// nothing here.
+    pub identity: EvidenceIdentity,
 }
 
 /// The recommendation of a workload from its container recommendations
@@ -273,9 +278,18 @@ pub struct WorkloadFacts {
 /// the containers with usage, the history behind it and the lenses.
 pub fn workload_recommendation(
     facts: WorkloadFacts,
-    containers: Vec<ContainerRecommendation>,
+    mut containers: Vec<ContainerRecommendation>,
     pricing: &CostPricing,
 ) -> WorkloadRecommendation {
+    if facts.identity == EvidenceIdentity::Ambiguous {
+        for c in &mut containers {
+            if !c.warnings.iter().any(|w| w.code == WARN_IDENTITY_UNCLEAR) {
+                c.warnings
+                    .push(RecommendationWarning::new(WARN_IDENTITY_UNCLEAR));
+            }
+            c.confidence = Confidence::Low;
+        }
+    }
     let cost_replicas = cost_replicas(&facts.kind, facts.replicas, &containers);
     let monthly_current = monthly_requests(&containers, cost_replicas, pricing, false);
     let monthly_recommended = monthly_requests(&containers, cost_replicas, pricing, true);

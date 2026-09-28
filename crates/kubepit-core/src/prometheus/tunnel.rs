@@ -19,6 +19,12 @@
 //!    key, else the system roots, or nothing (`insecure_skip_verify`);
 //! 4. one HTTP/1.1 GET with `Authorization` and the tenant goes over it
 //!    ([`request_over`]).
+//!
+//! Steps 1–3 failing is a [`TunnelFailure`]: the tunnel cannot be set up,
+//! so like a service-proxy failure it aborts a scan and re-detects
+//! Prometheus. The exchange of step 4 failing (the query timeout, a
+//! closed connection) is a plain error, like the same failure behind the
+//! service proxy: a heavy statistics query stays splittable.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
@@ -211,12 +217,17 @@ type Entries = Arc<Mutex<HashMap<String, Cached>>>;
 /// Secret values of each cluster's tunnel, per connection and access
 /// settings, for at most [`SECRETS_TTL`]: an entry is dropped when it expires
 /// (a timer, even if nothing asks again), when it no longer matches, and on
-/// disconnect, removal and access changes ([`TunnelCache::forget`]).
+/// disconnect, removal and access changes ([`TunnelCache::forget`]). A read
+/// still in flight when the cluster is forgotten answers its own request but
+/// is not kept (the cluster's epoch moved on).
 pub struct TunnelCache {
     entries: Entries,
     /// Serialise reads per cluster, so parallel queries read the Secret once
     /// and one hung cluster does not hold up the others.
     fills: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Per cluster, bumped by [`TunnelCache::forget`]: a read that started
+    /// in an older epoch is not cached. Locked after `entries`, never before.
+    epochs: Mutex<HashMap<String, u64>>,
     generation: AtomicU64,
     ttl: Duration,
     setup_timeout: Duration,
@@ -253,6 +264,7 @@ impl TunnelCache {
         Self {
             entries: Entries::default(),
             fills: Mutex::default(),
+            epochs: Mutex::default(),
             generation: AtomicU64::new(0),
             ttl,
             setup_timeout,
@@ -288,24 +300,39 @@ impl TunnelCache {
             .clone()
     }
 
+    /// The current epoch of `cluster_id` (see [`Self::forget`]), recorded
+    /// when a command resolves its Prometheus source.
+    pub(crate) fn epoch(&self, cluster_id: &str) -> u64 {
+        self.epochs.lock().get(cluster_id).copied().unwrap_or(0)
+    }
+
+    /// Cache values read in `epoch`; values of an older epoch (the cluster
+    /// was forgotten while they were read) are discarded.
     fn insert(
         &self,
         cluster_id: &str,
         connected_at: Option<i64>,
         access: &PrometheusAccess,
         secrets: Arc<TunnelSecrets>,
+        epoch: u64,
     ) {
         let generation = self.generation.fetch_add(1, Ordering::Relaxed);
-        self.entries.lock().insert(
-            cluster_id.to_string(),
-            Cached {
-                connected_at,
-                access: access.clone(),
-                secrets,
-                at: Instant::now(),
-                generation,
-            },
-        );
+        {
+            let mut entries = self.entries.lock();
+            if self.epoch(cluster_id) != epoch {
+                return;
+            }
+            entries.insert(
+                cluster_id.to_string(),
+                Cached {
+                    connected_at,
+                    access: access.clone(),
+                    secrets,
+                    at: Instant::now(),
+                    generation,
+                },
+            );
+        }
         // Values never outlive the TTL, even when nothing asks again.
         let (entries, ttl, id) = (
             Arc::downgrade(&self.entries),
@@ -327,24 +354,30 @@ impl TunnelCache {
 
     /// The Secret values of `access`, read when not cached, within
     /// [`SETUP_TIMEOUT`] (waiting for another read of the same cluster
-    /// included).
+    /// included). `epoch` is the cluster's epoch when the caller resolved
+    /// its source: a caller from before a [`Self::forget`] (disconnect,
+    /// removal, access change) still gets values for its own request, but
+    /// never reads or writes the cache.
     pub(crate) async fn secrets(
         &self,
         cluster_id: &str,
         connected_at: Option<i64>,
         client: &Client,
         access: &PrometheusAccess,
+        epoch: u64,
     ) -> Result<Arc<TunnelSecrets>> {
-        self.secrets_with(
+        self.secrets_in(
             cluster_id,
             connected_at,
             access,
+            epoch,
             read_secrets(client, access),
         )
         .await
     }
 
-    /// [`Self::secrets`] with the read as a future.
+    /// [`Self::secrets`] with the read as a future, in the current epoch.
+    #[cfg(test)]
     async fn secrets_with<F>(
         &self,
         cluster_id: &str,
@@ -355,17 +388,41 @@ impl TunnelCache {
     where
         F: Future<Output = Result<TunnelSecrets>>,
     {
-        if let Some(hit) = self.get_at(cluster_id, connected_at, access, Instant::now()) {
-            return Ok(hit);
+        let epoch = self.epoch(cluster_id);
+        self.secrets_in(cluster_id, connected_at, access, epoch, read)
+            .await
+    }
+
+    /// [`Self::secrets`] with the read as a future.
+    async fn secrets_in<F>(
+        &self,
+        cluster_id: &str,
+        connected_at: Option<i64>,
+        access: &PrometheusAccess,
+        epoch: u64,
+        read: F,
+    ) -> Result<Arc<TunnelSecrets>>
+    where
+        F: Future<Output = Result<TunnelSecrets>>,
+    {
+        // A stale caller must not even look: a mismatching lookup drops
+        // the entry, which belongs to the current settings.
+        let current = || epoch == self.epoch(cluster_id);
+        if current() {
+            if let Some(hit) = self.get_at(cluster_id, connected_at, access, Instant::now()) {
+                return Ok(hit);
+            }
         }
         let fill = self.fill_lock(cluster_id);
         let work = async {
             let _filling = fill.lock().await;
-            if let Some(hit) = self.get_at(cluster_id, connected_at, access, Instant::now()) {
-                return Ok(hit);
+            if current() {
+                if let Some(hit) = self.get_at(cluster_id, connected_at, access, Instant::now()) {
+                    return Ok(hit);
+                }
             }
             let secrets = Arc::new(read.await?);
-            self.insert(cluster_id, connected_at, access, secrets.clone());
+            self.insert(cluster_id, connected_at, access, secrets.clone(), epoch);
             Ok(secrets)
         };
         tokio::time::timeout(self.setup_timeout, work)
@@ -387,9 +444,18 @@ impl TunnelCache {
             })?
     }
 
-    /// Drop the values of a cluster (disconnect, removal, access changes).
+    /// Drop the values of a cluster (disconnect, removal, access changes),
+    /// and start a new epoch so a read still in flight is not kept.
     pub fn forget(&self, cluster_id: &str) {
-        self.entries.lock().remove(cluster_id);
+        {
+            let mut entries = self.entries.lock();
+            entries.remove(cluster_id);
+            *self
+                .epochs
+                .lock()
+                .entry(cluster_id.to_string())
+                .or_default() += 1;
+        }
         self.fills.lock().remove(cluster_id);
     }
 
@@ -406,7 +472,7 @@ impl TunnelCache {
             credentials: Credentials("Bearer t0k".into()),
             ca: None,
         });
-        self.insert(cluster_id, None, access, secrets);
+        self.insert(cluster_id, None, access, secrets, self.epoch(cluster_id));
     }
 }
 
@@ -580,9 +646,10 @@ where
         .map_err(|_| anyhow!("Prometheus did not answer within {}s", timeout.as_secs()))?
 }
 
-/// A failure of the tunnel itself (credentials, pod, port-forward, TLS,
-/// transport), as opposed to an answer of Prometheus. Like a proxy failure,
-/// it makes the next status request detect again.
+/// A failure to set the tunnel up (credentials, pod, port-forward, TLS
+/// handshake, or the pod refusing the forwarded connection), as opposed to
+/// a query over an established tunnel. Like a proxy failure, it makes the
+/// next status request detect again.
 #[derive(Debug)]
 pub(crate) struct TunnelFailure(String);
 
@@ -602,8 +669,48 @@ pub(crate) fn is_tunnel_failure(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| cause.is::<TunnelFailure>())
 }
 
+/// One authenticated GET of `path` over `stream` (the port-forward): TLS
+/// for an `https` service (a handshake failure or timeout is a
+/// [`TunnelFailure`]), then the exchange, whose failures and timeout stay
+/// plain errors.
+async fn query_over<S>(
+    stream: S,
+    service: &PrometheusService,
+    access: &PrometheusAccess,
+    secrets: &TunnelSecrets,
+    path: &str,
+    timeout: Duration,
+) -> Result<RawResponse>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    let (namespace, name) = (service.namespace.as_str(), service.service.as_str());
+    let server_name = format!("{name}.{namespace}.svc");
+    let host = format!("{server_name}:{}", service.port);
+    let mut headers = vec![("authorization", secrets.credentials.0.as_str())];
+    let tenant = access.tenant.trim();
+    if !tenant.is_empty() {
+        headers.push(("x-scope-orgid", tenant));
+    }
+    match service.scheme {
+        PromScheme::Http => request_over(stream, &host, path, &headers, timeout).await,
+        PromScheme::Https => {
+            let skip = access.tls.as_ref().is_some_and(|t| t.insecure_skip_verify);
+            let tls = tokio::time::timeout(
+                SETUP_TIMEOUT,
+                tls_connect(stream, &server_name, skip, secrets.ca.as_deref()),
+            )
+            .await
+            .map_err(|_| tunnel_failure(anyhow!("TLS handshake with {server_name} timed out")))?
+            .map_err(tunnel_failure)?;
+            request_over(tls, &host, path, &headers, timeout).await
+        }
+    }
+}
+
 /// GET `path` (prefix, endpoint and query) of `service` through a
 /// port-forward to a ready pod behind it, authenticated with `secrets`.
+/// Setup failures are [`TunnelFailure`]s; see the module docs.
 pub(crate) async fn tunnel_get(
     client: &Client,
     service: &PrometheusService,
@@ -624,47 +731,33 @@ pub(crate) async fn tunnel_get(
     let setup_timeout = || anyhow!("Prometheus port-forward to {namespace}/{name} timed out");
     let (pod, port) = tokio::time::timeout(SETUP_TIMEOUT, resolve_target(client, &target))
         .await
-        .map_err(|_| setup_timeout())?
-        .with_context(|| format!("Prometheus port-forward to service {namespace}/{name}"))?;
+        .map_err(|_| setup_timeout())
+        .and_then(|resolved| {
+            resolved
+                .with_context(|| format!("Prometheus port-forward to service {namespace}/{name}"))
+        })
+        .map_err(tunnel_failure)?;
     let pods: Api<Pod> = Api::namespaced(client.clone(), namespace);
     let mut forwarder = tokio::time::timeout(SETUP_TIMEOUT, pods.portforward(&pod, &[port]))
         .await
-        .map_err(|_| setup_timeout())?
-        .map_err(kube_error)
-        .with_context(|| {
-            format!("Prometheus port-forward to pod {namespace}/{pod}:{port} failed")
-        })?;
-    let stream = forwarder.take_stream(port).ok_or_else(|| {
-        anyhow!("Prometheus port-forward stream to pod {namespace}/{pod} is unavailable")
-    })?;
-    let pod_error = forwarder.take_error(port);
-
-    let server_name = format!("{name}.{namespace}.svc");
-    let host = format!("{server_name}:{}", service.port);
-    let mut headers = vec![("authorization", secrets.credentials.0.as_str())];
-    let tenant = access.tenant.trim();
-    if !tenant.is_empty() {
-        headers.push(("x-scope-orgid", tenant));
-    }
-    let result = match service.scheme {
-        PromScheme::Http => request_over(stream, &host, path, &headers, timeout).await,
-        PromScheme::Https => {
-            let skip = access.tls.as_ref().is_some_and(|t| t.insecure_skip_verify);
-            match tokio::time::timeout(
-                SETUP_TIMEOUT,
-                tls_connect(stream, &server_name, skip, secrets.ca.as_deref()),
-            )
-            .await
-            {
-                Ok(Ok(tls)) => request_over(tls, &host, path, &headers, timeout).await,
-                Ok(Err(e)) => Err(e),
-                Err(_) => Err(anyhow!("TLS handshake with {server_name} timed out")),
-            }
-        }
+        .map_err(|_| setup_timeout())
+        .and_then(|opened| {
+            opened.map_err(kube_error).with_context(|| {
+                format!("Prometheus port-forward to pod {namespace}/{pod}:{port} failed")
+            })
+        })
+        .map_err(tunnel_failure)?;
+    let Some(stream) = forwarder.take_stream(port) else {
+        forwarder.abort();
+        return Err(tunnel_failure(anyhow!(
+            "Prometheus port-forward stream to pod {namespace}/{pod} is unavailable"
+        )));
     };
-    let result = match result {
-        Err(e) => {
-            // The pod side may know better ("connection refused").
+    let pod_error = forwarder.take_error(port);
+    let result = match query_over(stream, service, access, secrets, path, timeout).await {
+        Err(e) if !is_tunnel_failure(&e) => {
+            // The pod side may know better ("connection refused"): then the
+            // forward itself failed, which is a setup failure.
             let detail = match pod_error {
                 Some(rx) => tokio::time::timeout(Duration::from_millis(200), rx)
                     .await
@@ -673,15 +766,15 @@ pub(crate) async fn tunnel_get(
                 None => None,
             };
             Err(match detail {
-                Some(detail) => e.context(format!(
+                Some(detail) => tunnel_failure(e.context(format!(
                     "port-forward to pod {namespace}/{pod}:{port}: {detail}"
-                )),
+                ))),
                 None => e.context(format!(
                     "over the port-forward to pod {namespace}/{pod}:{port}"
                 )),
             })
         }
-        ok => ok,
+        other => other,
     };
     forwarder.abort();
     result
@@ -791,6 +884,67 @@ j6EzTBQKCIK44Ht1hGckQEbsh5M4xlh8CvAbHO7lGMeusAjsKyS4dyiR
             .await
             .unwrap_err();
         assert!(err.to_string().contains("did not answer"), "{err}");
+    }
+
+    fn service(scheme: PromScheme) -> PrometheusService {
+        PrometheusService {
+            kind: crate::types::PrometheusKind::Custom,
+            namespace: "monitoring".into(),
+            service: "prometheus".into(),
+            port: 9090,
+            scheme,
+            path_prefix: String::new(),
+        }
+    }
+
+    fn secrets() -> TunnelSecrets {
+        TunnelSecrets {
+            credentials: Credentials("Bearer t0k".into()),
+            ca: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_query_timeout_splits_and_a_setup_failure_aborts() {
+        use crate::prometheus::workload_stats::{merge, BatchFailure, StatQuery};
+        // The exchange over an established tunnel times out: a plain error,
+        // so a required query of a batch makes it splittable, like behind
+        // the service proxy.
+        let (client, _server) = tokio::io::duplex(1024);
+        let slow = query_over(
+            client,
+            &service(PromScheme::Http),
+            &secured(""),
+            &secrets(),
+            "/api/v1/query",
+            Duration::from_millis(100),
+        )
+        .await
+        .unwrap_err();
+        assert!(!is_tunnel_failure(&slow), "{slow:#}");
+        assert!(matches!(
+            merge(vec![(StatQuery::CpuP95, Err(slow))]),
+            Err(BatchFailure::Splittable { .. })
+        ));
+        // The TLS handshake fails (the peer hangs up): the tunnel cannot be
+        // set up, so the batch aborts.
+        let (client, server) = tokio::io::duplex(1024);
+        drop(server);
+        let setup = query_over(
+            client,
+            &service(PromScheme::Https),
+            &secured(""),
+            &secrets(),
+            "/api/v1/query",
+            Duration::from_millis(100),
+        )
+        .await
+        .unwrap_err();
+        assert!(is_tunnel_failure(&setup), "{setup:#}");
+        assert!(matches!(
+            merge(vec![(StatQuery::CpuP95, Err(setup))]),
+            Err(BatchFailure::Tunnel(_))
+        ));
     }
 
     #[test]
@@ -1016,6 +1170,94 @@ j6EzTBQKCIK44Ht1hGckQEbsh5M4xlh8CvAbHO7lGMeusAjsKyS4dyiR
             .await
             .unwrap();
         assert_eq!(reads.load(Ordering::SeqCst), 1, "cached after the read");
+    }
+
+    #[tokio::test]
+    async fn a_read_in_flight_during_forget_is_not_kept() {
+        // Disconnect or an access change forgets the cluster while its Secret
+        // is being read: the read still answers its own request, but its
+        // values must not be cached for the next one.
+        let cache = Arc::new(TunnelCache::default());
+        let access = secured("");
+        let (release, released) = tokio::sync::oneshot::channel::<()>();
+        let (started, reading) = tokio::sync::oneshot::channel::<()>();
+        let in_flight = {
+            let (cache, access) = (cache.clone(), access.clone());
+            tokio::spawn(async move {
+                let read = async {
+                    let _ = started.send(());
+                    let _ = released.await;
+                    read_ok().await
+                };
+                cache.secrets_with("c1", None, &access, read).await
+            })
+        };
+        reading.await.unwrap();
+        cache.forget("c1");
+        release.send(()).unwrap();
+        assert!(
+            in_flight.await.unwrap().is_ok(),
+            "its own request is answered"
+        );
+        assert!(!cache.holds("c1"), "a stale fill is discarded");
+
+        // The next request reads again, and that read is kept.
+        let reads = std::sync::atomic::AtomicUsize::new(0);
+        let counted = || async {
+            reads.fetch_add(1, Ordering::SeqCst);
+            read_ok().await
+        };
+        for _ in 0..2 {
+            cache
+                .secrets_with("c1", None, &access, counted())
+                .await
+                .unwrap();
+        }
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+        assert!(cache.holds("c1"));
+    }
+
+    #[tokio::test]
+    async fn a_source_from_before_forget_never_caches() {
+        // A command resolved its source (and the epoch), then the cluster
+        // was disconnected; the command's later requests still read the
+        // Secret for themselves, but neither cache it nor drop what the
+        // next connection cached.
+        let cache = TunnelCache::default();
+        let access = secured("");
+        let resolved = cache.epoch("c1");
+        cache.forget("c1");
+        let reads = std::sync::atomic::AtomicUsize::new(0);
+        let counted = || async {
+            reads.fetch_add(1, Ordering::SeqCst);
+            read_ok().await
+        };
+        cache
+            .secrets_in("c1", None, &access, resolved, counted())
+            .await
+            .unwrap();
+        assert!(!cache.holds("c1"), "not cached after forget");
+
+        let fresh = cache.epoch("c1");
+        cache
+            .secrets_in("c1", Some(2), &secured("new"), fresh, counted())
+            .await
+            .unwrap();
+        cache
+            .secrets_in("c1", None, &access, resolved, counted())
+            .await
+            .unwrap();
+        assert_eq!(
+            reads.load(Ordering::SeqCst),
+            3,
+            "the stale caller reads itself"
+        );
+        assert!(
+            cache
+                .get_at("c1", Some(2), &secured("new"), Instant::now())
+                .is_some(),
+            "the current entry stays"
+        );
     }
 
     #[tokio::test]

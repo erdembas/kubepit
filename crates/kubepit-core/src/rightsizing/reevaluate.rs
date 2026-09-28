@@ -13,10 +13,29 @@ use super::math;
 use super::sort_recommendations;
 use super::strategy::{self, ContainerInput, RecommendationStrategy};
 use super::types::{
-    ContainerRecommendation, RightsizingReport, RightsizingSettings, RightsizingSource,
-    WorkloadRecommendation,
+    ContainerRecommendation, EvidenceIdentity, RightsizingReport, RightsizingSettings,
+    RightsizingSource, WorkloadRecommendation,
 };
 use crate::cost::CostPricing;
+
+/// The workload identity of a stored row: `Ambiguous` when any container
+/// was flagged `identity-unclear` (a container without usage keeps only
+/// that flag) or has ambiguous evidence.
+fn stored_identity(stored: &WorkloadRecommendation) -> EvidenceIdentity {
+    let ambiguous = stored.containers.iter().any(|c| {
+        c.warnings
+            .iter()
+            .any(|w| w.code == strategy::WARN_IDENTITY_UNCLEAR)
+            || c.evidence
+                .as_ref()
+                .is_some_and(|e| e.identity == EvidenceIdentity::Ambiguous)
+    });
+    if ambiguous {
+        EvidenceIdentity::Ambiguous
+    } else {
+        EvidenceIdentity::default()
+    }
+}
 
 fn reevaluate_workload(
     stored: &WorkloadRecommendation,
@@ -50,6 +69,7 @@ fn reevaluate_workload(
         pods: stored.pods.clone(),
         pods_truncated: stored.pods_truncated,
         hpa: stored.hpa.clone(),
+        identity: stored_identity(stored),
     };
     math::workload_recommendation(facts, containers, pricing)
 }
@@ -90,7 +110,7 @@ pub fn reevaluate(
 mod tests {
     use super::*;
     use crate::cost::CostPricing;
-    use crate::rightsizing::evidence::{ContainerUsage, WorkloadUsage};
+    use crate::rightsizing::evidence::{ContainerUsage, WorkloadExtras, WorkloadUsage};
     use crate::rightsizing::math::{GIB, MIB};
     use crate::rightsizing::percentile::PercentileHeadroom;
     use crate::rightsizing::strategy::{
@@ -174,6 +194,7 @@ mod tests {
             &w,
             &usage,
             0,
+            &WorkloadExtras::default(),
             RightsizingSource::Prometheus,
             &WorkloadHistory::defaults(),
             &pricing(),
@@ -309,5 +330,78 @@ mod tests {
         let per_replica =
             crate::rightsizing::math::monthly_requests(&nightly.containers, 1.0, &pricing(), false);
         assert!((nightly.monthly_current - per_replica * 0.25).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_collections_workload_facts_survive_reevaluation() {
+        // A fresh row with the fold's extras: pods, the HPA and an ambiguous
+        // identity, which flags its container even without usage.
+        let w = Workload {
+            kind: "StatefulSet".into(),
+            namespace: "shop".into(),
+            name: "db".into(),
+            uid: "uid-db".into(),
+            replicas: 1,
+            containers: vec![("db".into(), ResourceValues::default())],
+        };
+        let hpa = HpaInfo {
+            name: "db".into(),
+            min_replicas: None,
+            max_replicas: 3,
+            metrics: vec![],
+        };
+        let extras = WorkloadExtras {
+            pods: vec!["db-0".into()],
+            pods_truncated: false,
+            hpa: Some(hpa.clone()),
+            identity: EvidenceIdentity::Ambiguous,
+        };
+        let fresh = recommend_workload(
+            &w,
+            &WorkloadUsage::new(),
+            0,
+            &extras,
+            RightsizingSource::Prometheus,
+            &WorkloadHistory::defaults(),
+            &pricing(),
+            &WorkloadHistory,
+        );
+        let flagged = |rec: &WorkloadRecommendation| {
+            rec.containers[0]
+                .warnings
+                .iter()
+                .any(|w| w.code == strategy::WARN_IDENTITY_UNCLEAR)
+        };
+        assert!(flagged(&fresh) && fresh.containers[0].usage.is_none());
+        let report = RightsizingReport {
+            workloads: vec![fresh],
+            ..stored()
+        };
+
+        // Re-evaluated from the stored report alone, with another strategy.
+        let again = reevaluate(
+            &report,
+            &PercentileHeadroom,
+            false,
+            &RightsizingSettings::default(),
+            &pricing(),
+        );
+        let db = find(&again, "db");
+        assert_eq!(
+            (db.pods.clone(), db.hpa.clone()),
+            (vec!["db-0".into()], Some(hpa))
+        );
+        assert!(flagged(db), "{:?}", db.containers[0].warnings);
+        assert_eq!(db.containers[0].confidence, Confidence::Low);
+        assert!(!flagged(find(
+            &reevaluate(
+                &stored(),
+                &PercentileHeadroom,
+                false,
+                &RightsizingSettings::default(),
+                &pricing(),
+            ),
+            "web"
+        )));
     }
 }

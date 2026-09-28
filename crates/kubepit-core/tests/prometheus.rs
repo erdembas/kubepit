@@ -9,6 +9,7 @@ use std::sync::Arc;
 use kubepit_core::cost::{CostConfig, CostSourceConfig};
 use kubepit_core::prometheus::access::{PrometheusAccess, PrometheusAuth};
 use kubepit_core::prometheus::workload_stats::{BatchFailure, StatScope};
+use kubepit_core::rightsizing::collect::{SourceAbort, SourceAbortKind};
 use kubepit_core::rightsizing::{RightsizingNoteKind, RightsizingRequest, RightsizingSource};
 use kubepit_core::types::{
     ClusterInput, LokiConfig, PromScheme, PrometheusConfig, PrometheusKind, PrometheusMetric,
@@ -637,8 +638,11 @@ fn shared_router(mismatch: Arc<AtomicBool>) -> Router {
             } else if q.starts_with("count_over_time") {
                 instant(key, "168")
             } else {
+                // Q2–Q4 and Q6–Q16, including the pod owners (Q11), whose
+                // cluster label is checked.
                 instant(
-                    json!({"namespace": "shop", "pod": "web-6d4b75cb6d-x2x9z"}),
+                    json!({"namespace": "shop", "pod": "web-6d4b75cb6d-x2x9z",
+                           "cluster": cluster}),
                     "1",
                 )
             }
@@ -749,6 +753,18 @@ async fn every_preset_query_carries_the_cluster_label_and_mismatches_fail() {
         .find(|n| n.kind == RightsizingNoteKind::PrometheusFailed)
         .expect("Prometheus refused");
     assert_eq!(note.detail.as_deref(), Some("cluster-label-mismatch"));
+    // Typed for scans, which must fail instead of keeping the fallback.
+    let outcome = app
+        .compute_rightsizing(&id, &RightsizingRequest::default(), &|_| {})
+        .await
+        .unwrap();
+    assert_eq!(
+        outcome.source_abort,
+        Some(SourceAbort {
+            kind: SourceAbortKind::LabelMismatch,
+            detail: "cluster-label-mismatch".into(),
+        })
+    );
 }
 
 /// A Prometheus that needs a bearer token: the Secret, the service and its
@@ -925,8 +941,9 @@ async fn credentials_never_reach_a_detected_service() {
 
 /// Statistics answers of a shared Prometheus: every series of the cluster
 /// `production`, except the pod owners (Q11) with `mismatch`, which come
-/// back for `staging` (a source that ignored the selector).
-fn stats_router(mismatch: Arc<AtomicBool>) -> Router {
+/// back for `staging` (a source that ignored the selector), and with
+/// `fail_owners`, which fail.
+fn stats_router(mismatch: Arc<AtomicBool>, fail_owners: Arc<AtomicBool>) -> Router {
     let detection = stack_router(Arc::default());
     Arc::new(move |req: &Request, log: &Log| {
         if req.path_only() != format!("{OPERATED}/api/v1/query") {
@@ -935,6 +952,12 @@ fn stats_router(mismatch: Arc<AtomicBool>) -> Router {
         let q = param(&req.path, "query").unwrap_or_default();
         if q == "1" {
             return scalar_one();
+        }
+        if q.contains("kube_pod_owner") && fail_owners.load(Ordering::SeqCst) {
+            return Reply::Json(
+                422,
+                json!({"status": "error", "errorType": "execution", "error": "query timed out"}),
+            );
         }
         if q.contains("kube_pod_owner") {
             let cluster = if mismatch.load(Ordering::SeqCst) {
@@ -960,7 +983,8 @@ fn stats_router(mismatch: Arc<AtomicBool>) -> Router {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn statistics_batches_carry_the_selector_and_fail_closed() {
     let mismatch = Arc::new(AtomicBool::new(false));
-    let server = start(stats_router(mismatch.clone())).await;
+    let fail_owners = Arc::new(AtomicBool::new(false));
+    let server = start(stats_router(mismatch.clone(), fail_owners.clone())).await;
     let (_dir, app, _recorder, id) = setup(&server.url, true);
     let mut def = app.cluster_def(&id).unwrap();
     def.prometheus_access = shared_access();
@@ -1007,6 +1031,25 @@ async fn statistics_batches_carry_the_selector_and_fail_closed() {
         .prometheus_stats_batch(&id, &scope, &|| {})
         .await
         .unwrap_err();
-    assert_eq!(err, BatchFailure::Proxy("cluster-label-mismatch".into()));
+    assert_eq!(err, BatchFailure::LabelMismatch);
     assert_eq!(err.to_string(), "cluster-label-mismatch");
+
+    // Without an owners answer nothing proves the batch is this cluster's:
+    // it fails too (and would be split), instead of being used unchecked.
+    mismatch.store(false, Ordering::SeqCst);
+    fail_owners.store(true, Ordering::SeqCst);
+    let err = app
+        .prometheus_stats_batch(&id, &scope, &|| {})
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            BatchFailure::Splittable {
+                query: "pod_owners",
+                ..
+            }
+        ),
+        "{err:?}"
+    );
 }

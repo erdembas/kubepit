@@ -5,23 +5,27 @@
 //!   scope, with the resources of their pod template (a CronJob's job
 //!   template). A CronJob counts one replica; its cost follows the
 //!   observed duty cycle ([`math::cost_replicas`]).
-//! - **Usage**: Prometheus when available — p95 CPU, max CPU and max memory
-//!   per container over `settings.days` (presets in
-//!   [`crate::prometheus::usage`]); pods map to workloads by the names
-//!   their kind generates (the longest matching workload name wins). Without
+//! - **Usage**: Prometheus when available, through the collection pipeline
+//!   ([`collect`]): 16 statistics queries per batch
+//!   ([`crate::prometheus::workload_stats`]), pods resolved to workloads by
+//!   kube-state-metrics owners ([`ownership`]) or by the names their kind
+//!   generates, folded into usage and evidence ([`evidence`]). Without
 //!   Prometheus, the last hour of metrics-server samples
 //!   ([`crate::metrics_history`]), split per container by the current
 //!   snapshot — always low confidence.
 //! - **Strategies** ([`strategy`]): the recommendation math sits behind
 //!   [`strategy::RecommendationStrategy`] (usage stats + current values in,
-//!   values + confidence + warnings out); [`percentile`] (p95 / max +
-//!   headroom) is the default. Limits a new request would exceed are raised
-//!   proportionally for every strategy ([`strategy::finalize`]).
+//!   values + confidence + warnings out): [`workload_history`] when owner
+//!   metrics resolved the pods, else [`percentile`] (p95 / max + headroom).
+//!   Evidence flags cap the confidence ([`strategy::apply_evidence`]);
+//!   limits a new request would exceed are raised proportionally for every
+//!   strategy ([`strategy::finalize`]).
 //! - **Apply** ([`patch`]): a strategic merge patch of the pod template's
 //!   container resources (`spec.jobTemplate.spec.template` for CronJobs),
 //!   dry-run first (allowed on read-only clusters), then applied (refused
 //!   on read-only clusters).
 
+pub mod collect;
 pub mod evidence;
 pub mod export;
 pub mod math;
@@ -51,17 +55,15 @@ use serde_json::Value;
 use crate::app::Kubepit;
 use crate::cost::estimate::{is_active, workload_of};
 use crate::cost::lists;
-use crate::cost::CostPlatform;
 use crate::dry_run::dry_run_operation;
 use crate::error::kube_error;
 use crate::metrics_history::SAMPLE_INTERVAL;
-use crate::objects::{now_millis, to_kube_object};
+use crate::objects::to_kube_object;
 use crate::prometheus::promql::workload_pod_regex;
-use crate::prometheus::usage::ContainerStatsMap;
 use crate::quantity::{parse_cpu_millicores, parse_memory_bytes};
 use crate::resources::object_api;
-use crate::types::{DryRunResult, Gvk, MetricsHistoryQuery, PodMetric, PrometheusState};
-use evidence::{ContainerUsage, WorkloadUsage};
+use crate::types::{DryRunResult, Gvk, MetricsHistoryQuery, PodMetric};
+use evidence::{ContainerUsage, WorkloadExtras, WorkloadUsage};
 
 /// A workload with the resources of its pod template.
 #[derive(Debug, Clone, PartialEq)]
@@ -165,60 +167,6 @@ impl PodMatcher {
     }
 }
 
-/// Per-container Prometheus statistics folded into workloads: worst
-/// replica wins, hours are per replica (at most the window).
-pub fn usage_from_prometheus(
-    workloads: &[Workload],
-    stats: &ContainerStatsMap,
-    days: u32,
-) -> WorkloadUsage {
-    let matcher = PodMatcher::new(workloads);
-    let mut grouped: HashMap<(usize, String), Vec<UsageStats>> = HashMap::new();
-    for ((ns, pod, container), s) in stats {
-        let (Some(p95), Some(memory)) = (s.cpu_p95_millicores, s.memory_max_bytes) else {
-            continue;
-        };
-        let Some(i) = matcher.find(ns, pod) else {
-            continue;
-        };
-        // Injected sidecars are not part of the template; they cannot be patched.
-        if !workloads[i]
-            .containers
-            .iter()
-            .any(|(name, _)| name == container)
-        {
-            continue;
-        }
-        grouped
-            .entry((i, container.clone()))
-            .or_default()
-            .push(UsageStats {
-                cpu_p95: p95,
-                cpu_max: s.cpu_max_millicores.unwrap_or(p95).max(p95),
-                memory_max: memory,
-                hours: s.hours,
-                cpu_avg: None,
-                memory_avg: None,
-            });
-    }
-    let max_hours = f64::from(days) * 24.0;
-    grouped
-        .into_iter()
-        .filter_map(|((i, container), list)| {
-            let mut merged = math::combine(&list)?;
-            let replicas = f64::from(workloads[i].replicas.max(1));
-            merged.hours = (merged.hours / replicas).min(max_hours);
-            Some((
-                (i, container),
-                ContainerUsage {
-                    stats: merged,
-                    evidence: None,
-                },
-            ))
-        })
-        .collect()
-}
-
 /// Share of each container in a pod's usage `(cpu, memory)`, from the
 /// current snapshot; an even split when unknown.
 pub fn container_shares(metric: Option<&PodMetric>, containers: &[String]) -> Vec<(f64, f64)> {
@@ -242,11 +190,17 @@ pub fn container_shares(metric: Option<&PodMetric>, containers: &[String]) -> Ve
         .collect()
 }
 
-/// The recommendation of one workload.
+/// The recommendation of one workload: its containers through `strategy`
+/// (with their evidence and the HPA of `extras`), then the shared builder
+/// [`math::workload_recommendation`] with the pods, HPA and identity of
+/// `extras` (money at [`math::cost_replicas`]; an ambiguous identity flags
+/// every container, also those left without usage).
+#[allow(clippy::too_many_arguments)]
 pub fn recommend_workload(
     w: &Workload,
     usage: &WorkloadUsage,
     index: usize,
+    extras: &WorkloadExtras,
     source: RightsizingSource,
     settings: &RightsizingSettings,
     pricing: &crate::cost::CostPricing,
@@ -264,7 +218,7 @@ pub fn recommend_workload(
                 source,
                 settings,
                 evidence: u.and_then(|u| u.evidence.as_ref()),
-                hpa: None,
+                hpa: extras.hpa.as_ref(),
             };
             strategy::recommend(strategy, &input)
         })
@@ -275,7 +229,10 @@ pub fn recommend_workload(
         name: w.name.clone(),
         uid: w.uid.clone(),
         replicas: w.replicas,
-        ..Default::default()
+        pods: extras.pods.clone(),
+        pods_truncated: extras.pods_truncated,
+        hpa: extras.hpa.clone(),
+        identity: extras.identity,
     };
     math::workload_recommendation(facts, containers, pricing)
 }
@@ -333,6 +290,9 @@ fn to_values<T: serde::Serialize>(items: Option<Vec<T>>) -> Vec<Value> {
         .collect()
 }
 
+/// Deployments, StatefulSets, DaemonSets and CronJobs of `namespaces` (all
+/// when empty, falling back to `accessible` when listing cluster-wide is
+/// forbidden).
 async fn workloads_in_scope(
     client: &Client,
     namespaces: &[String],
@@ -361,133 +321,17 @@ async fn workloads_in_scope(
 }
 
 impl Kubepit {
-    /// `rightsizing_report`: recommendations for the workloads in scope.
+    /// `rightsizing_report`: recommendations for the workloads in scope,
+    /// through the collection pipeline ([`collect`]).
     pub async fn rightsizing_report(
         &self,
         cluster_id: &str,
         request: &RightsizingRequest,
     ) -> Result<RightsizingReport> {
-        let cluster = self.cluster_def(cluster_id)?;
-        let client = self.client(cluster_id).await?;
-        // The request's strategy (an unknown one is an error), else the saved
-        // one (an unknown one is ignored), else automatic. Owner metrics come
-        // with the collection pipeline; name-matched presets never resolve
-        // pods through them.
-        let recommendations = self.settings().recommendations;
-        let requested = request
-            .strategy
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .or(recommendations.saved_strategy());
-        let (strategy, strategy_auto) = strategy::resolve(requested, false)?;
-        // The request's own settings, else the strategy's effective ones.
-        let settings = match &request.settings {
-            Some(s) => s.clone().normalized(),
-            None => crate::recommendations::effective_settings(&recommendations, strategy),
-        };
-        let workloads = match &request.workload {
-            Some(target) => {
-                let (gvk, _) = supported(&target.kind)?;
-                let (api, _) = object_api(client.clone(), &gvk, Some(&target.namespace))?;
-                let obj = api
-                    .get(&target.name)
-                    .await
-                    .map_err(kube_error)
-                    .with_context(|| format!("failed to get {} {}", target.kind, target.name))?;
-                let value = serde_json::to_value(obj)?;
-                vec![workload_from_value(&target.kind, &value).ok_or_else(|| {
-                    anyhow!("{} {} has no pod template", target.kind, target.name)
-                })?]
-            }
-            None => {
-                workloads_in_scope(&client, &request.namespaces, &cluster.accessible_namespaces)
-                    .await?
-            }
-        };
-        let platform =
-            CostPlatform::from_label(self.cluster_status(cluster_id).platform.as_deref());
-        let (pricing, _) = cluster.cost.effective_pricing(platform);
-        let mut namespaces: Vec<String> = workloads.iter().map(|w| w.namespace.clone()).collect();
-        namespaces.sort();
-        namespaces.dedup();
-
-        let mut notes = Vec::new();
-        let prometheus = self
-            .prometheus_status(cluster_id, false)
+        // The live report keeps its fallback; scans read `source_abort`.
+        self.compute_rightsizing(cluster_id, request, &|_| {})
             .await
-            .is_ok_and(|s| s.state == PrometheusState::Available);
-        let mut result: Option<(RightsizingSource, u64, WorkloadUsage)> = None;
-        if prometheus && !workloads.is_empty() {
-            let scope = if request.namespaces.is_empty() && request.workload.is_none() {
-                Vec::new()
-            } else {
-                namespaces.clone()
-            };
-            match self
-                .prometheus_container_stats(cluster_id, &scope, settings.days)
-                .await
-            {
-                Ok(stats) => {
-                    result = Some((
-                        RightsizingSource::Prometheus,
-                        u64::from(settings.days) * 86_400,
-                        usage_from_prometheus(&workloads, &stats, settings.days),
-                    ))
-                }
-                Err(e) => notes.push(RightsizingNote {
-                    kind: RightsizingNoteKind::PrometheusFailed,
-                    detail: Some(format!("{e:#}")),
-                }),
-            }
-        }
-        if result.is_none() && !workloads.is_empty() {
-            match self
-                .metrics_server_usage(
-                    cluster_id,
-                    &client,
-                    &workloads,
-                    &namespaces,
-                    &cluster.accessible_namespaces,
-                )
-                .await
-            {
-                Ok(Some(usage)) => {
-                    result = Some((RightsizingSource::MetricsServer, 3_600, usage));
-                }
-                Ok(None) => notes.push(RightsizingNote {
-                    kind: RightsizingNoteKind::NoUsage,
-                    detail: None,
-                }),
-                Err(e) => notes.push(RightsizingNote {
-                    kind: RightsizingNoteKind::PodsUnavailable,
-                    detail: Some(format!("{e:#}")),
-                }),
-            }
-        }
-        let (source, window_secs, usage) =
-            result.unwrap_or((RightsizingSource::None, 0, WorkloadUsage::new()));
-        let mut list: Vec<WorkloadRecommendation> = workloads
-            .iter()
-            .enumerate()
-            .map(|(i, w)| recommend_workload(w, &usage, i, source, &settings, &pricing, strategy))
-            .collect();
-        sort_recommendations(&mut list);
-        let now = now_millis();
-        Ok(RightsizingReport {
-            strategy: strategy.info().id,
-            strategies: strategy::strategies(),
-            source,
-            window_secs,
-            settings,
-            currency: pricing.currency.clone(),
-            pricing,
-            workloads: list,
-            notes,
-            computed_at: now,
-            strategy_auto,
-            window_end: now,
-        })
+            .map(|outcome| outcome.report)
     }
 
     /// Container usage from the last hour of metrics-server samples.
@@ -655,8 +499,8 @@ impl Kubepit {
 mod tests {
     use super::*;
     use crate::cost::CostPricing;
-    use crate::prometheus::usage::ContainerStats;
     use crate::types::ContainerMetric;
+    use evidence::WorkloadExtras;
     use serde_json::json;
 
     const MIB: f64 = 1024.0 * 1024.0;
@@ -783,6 +627,7 @@ mod tests {
                 w,
                 usage,
                 0,
+                &WorkloadExtras::default(),
                 RightsizingSource::Prometheus,
                 &RightsizingSettings::default(),
                 &pricing,
@@ -827,48 +672,52 @@ mod tests {
         assert_eq!(m.find("other", "web-7d9f8c6b5-x2x9z"), None);
     }
 
-    #[test]
-    fn prometheus_stats_fold_into_workloads() {
-        let workloads =
-            vec![workload_from_value("Deployment", &deployment("shop", "web", 2)).unwrap()];
-        let mut stats = ContainerStatsMap::new();
-        let mut put = |pod: &str, container: &str, p95: f64, mem: f64, hours: f64| {
-            stats.insert(
-                ("shop".into(), pod.into(), container.into()),
-                ContainerStats {
-                    cpu_p95_millicores: Some(p95),
-                    cpu_max_millicores: Some(p95 * 2.0),
-                    memory_max_bytes: Some(mem),
-                    hours,
-                },
-            );
-        };
-        put("web-a1b2c3-aaaaa", "app", 100.0, 200.0 * MIB, 168.0);
-        put("web-a1b2c3-bbbbb", "app", 150.0, 180.0 * MIB, 168.0);
-        put("web-a1b2c3-bbbbb", "istio-proxy", 50.0, 64.0 * MIB, 168.0);
-        put("unrelated-x", "app", 999.0, 1.0, 1.0);
-        let usage = usage_from_prometheus(&workloads, &stats, 7);
-        assert_eq!(usage.len(), 1, "sidecars outside the template are skipped");
-        let app = usage[&(0, "app".to_string())].stats;
-        assert_eq!(app.cpu_p95, 150.0, "worst replica");
-        assert_eq!(app.memory_max, 200.0 * MIB);
-        assert_eq!(app.hours, 168.0, "per replica, capped at the window");
-
-        let pricing = CostPricing {
+    fn pricing() -> CostPricing {
+        CostPricing {
             currency: "USD".into(),
             cpu_hour: 0.04,
             memory_gib_hour: 0.005,
             gpu_hour: None,
             storage_gib_month: None,
             discount_percent: 0.0,
-        };
+        }
+    }
+
+    fn app_usage(
+        p95: f64,
+        memory: f64,
+        hours: f64,
+        evidence: Option<UsageEvidence>,
+    ) -> WorkloadUsage {
+        [(
+            (0, "app".to_string()),
+            ContainerUsage {
+                stats: UsageStats {
+                    cpu_p95: p95,
+                    cpu_max: p95 * 2.0,
+                    memory_max: memory,
+                    hours,
+                    cpu_avg: None,
+                    memory_avg: None,
+                },
+                evidence,
+            },
+        )]
+        .into()
+    }
+
+    #[test]
+    fn workloads_are_recommended_and_sorted() {
+        let web = workload_from_value("Deployment", &deployment("shop", "web", 2)).unwrap();
+        let usage = app_usage(150.0, 200.0 * MIB, 168.0, None);
         let rec = recommend_workload(
-            &workloads[0],
+            &web,
             &usage,
             0,
+            &WorkloadExtras::default(),
             RightsizingSource::Prometheus,
             &RightsizingSettings::default(),
-            &pricing,
+            &pricing(),
             strategy::strategy(None).unwrap(),
         );
         assert_eq!(rec.confidence, Confidence::High);
@@ -880,6 +729,7 @@ mod tests {
         assert_eq!(rec.containers[1].usage, None);
         assert!(!rec.containers[1].changed());
         assert_eq!(rec.verdict, Verdict::Over);
+        assert_eq!(rec.cost_replicas, 2.0);
         let mut list = vec![
             WorkloadRecommendation {
                 changed: false,
@@ -890,6 +740,107 @@ mod tests {
         ];
         sort_recommendations(&mut list);
         assert!(list[0].changed);
+    }
+
+    #[test]
+    fn folded_evidence_reaches_the_strategy() {
+        // An OOM kill and 10 observed hours, run through workload-history:
+        // the flags cap the confidence and the OOM floor lifts the memory
+        // base to the current 1 GiB limit (200 MiB + 20 % without it).
+        let web = workload_from_value("Deployment", &deployment("shop", "web", 2)).unwrap();
+        let evidence = UsageEvidence {
+            oom_killed: true,
+            observed_hours: 10.0,
+            cpu_coverage: Some(1.0),
+            memory_coverage: Some(1.0),
+            identity: EvidenceIdentity::OwnerMetrics,
+            ..UsageEvidence::default()
+        };
+        let recommend = |evidence: Option<UsageEvidence>| {
+            recommend_workload(
+                &web,
+                &app_usage(100.0, 200.0 * MIB, 10.0, evidence),
+                0,
+                &WorkloadExtras::default(),
+                RightsizingSource::Prometheus,
+                &workload_history::WorkloadHistory::defaults(),
+                &pricing(),
+                strategy::strategy(Some("workload-history")).unwrap(),
+            )
+        };
+        let rec = recommend(Some(evidence.clone()));
+        let app = &rec.containers[0];
+        let codes: Vec<&str> = app.warnings.iter().map(|w| w.code.as_str()).collect();
+        assert!(codes.contains(&"oom-killed"), "{codes:?}");
+        assert!(codes.contains(&"insufficient-history"), "{codes:?}");
+        assert_eq!(app.evidence.as_ref(), Some(&evidence));
+        assert_eq!(
+            (app.confidence, rec.confidence),
+            (Confidence::Low, Confidence::Low)
+        );
+        assert_eq!(
+            app.recommended.memory_request,
+            Some(1229.0 * MIB),
+            "the OOM floor"
+        );
+        assert!(app.memory_limit_raised);
+        assert_eq!(rec.verdict, Verdict::Under);
+
+        // Without the evidence none of it happens.
+        let plain = recommend(None);
+        assert_eq!(
+            plain.containers[0].recommended.memory_request,
+            Some(240.0 * MIB)
+        );
+        assert!(plain.containers[0]
+            .warnings
+            .iter()
+            .all(|w| w.code != "oom-killed"));
+        assert_ne!(plain.verdict, Verdict::Under);
+    }
+
+    #[test]
+    fn workload_extras_reach_the_row() {
+        let web = workload_from_value("Deployment", &deployment("shop", "web", 2)).unwrap();
+        let hpa = HpaInfo {
+            name: "web".into(),
+            min_replicas: Some(2),
+            max_replicas: 6,
+            metrics: vec![],
+        };
+        let extras = WorkloadExtras {
+            pods: vec!["web-1".into(), "web-2".into()],
+            pods_truncated: true,
+            hpa: Some(hpa.clone()),
+            identity: EvidenceIdentity::Ambiguous,
+        };
+        let rec = recommend_workload(
+            &web,
+            &app_usage(150.0, 200.0 * MIB, 168.0, None),
+            0,
+            &extras,
+            RightsizingSource::Prometheus,
+            &RightsizingSettings::default(),
+            &pricing(),
+            strategy::strategy(None).unwrap(),
+        );
+        assert_eq!(rec.pods, extras.pods);
+        assert!(rec.pods_truncated);
+        assert_eq!(rec.hpa, Some(hpa));
+        assert!(rec.containers[0]
+            .warnings
+            .iter()
+            .any(|w| w.code == "hpa-target"));
+        // An ambiguous identity flags every container, with usage or not.
+        for c in &rec.containers {
+            assert!(
+                c.warnings.iter().any(|w| w.code == "identity-unclear"),
+                "{}: {:?}",
+                c.name,
+                c.warnings
+            );
+            assert_eq!(c.confidence, Confidence::Low);
+        }
     }
 
     #[test]
