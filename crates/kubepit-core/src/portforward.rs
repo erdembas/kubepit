@@ -762,7 +762,8 @@ mod tests {
         let err = bind_local(port).await.unwrap_err().to_string();
         assert!(err.contains("already in use"), "{err}");
         assert!(err.contains("is free"), "{err}");
+        // Not asserting the port is free again after `drop(busy)`: tests run in
+        // parallel and another one binding port 0 can be handed it right away.
         drop(busy);
-        assert!(local_port_status(port).await.available);
     }
 }
