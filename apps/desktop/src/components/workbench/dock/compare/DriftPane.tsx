@@ -218,8 +218,8 @@ export function DriftPane({
             <span>{i18n.t('{count} missing', { count: counts.missing })}</span>
           </>
         )}
-        <div className="ml-auto flex items-center gap-3">
-          <span>
+        <div className="ml-auto flex max-w-full min-w-0 items-center gap-3">
+          <span className="min-w-0 truncate" title={baselineName}>
             {i18n.rich('Baseline: {cluster}', {
               cluster: <span className="text-fg font-medium">{baselineName}</span>,
             })}

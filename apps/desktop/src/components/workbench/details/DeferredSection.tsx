@@ -4,6 +4,31 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 const PRELOAD_PX = 160;
 
 /**
+ * Calls `onVisible` once, when `el` comes within `PRELOAD_PX` of the visible
+ * part of its details scroller (right away without IntersectionObserver).
+ * Returns the cleanup; the observer also disconnects itself once it fired.
+ */
+export function whenNearlyVisible(el: Element, onVisible: () => void): () => void {
+  if (typeof IntersectionObserver === 'undefined') {
+    onVisible();
+    return () => {};
+  }
+  const observer = new IntersectionObserver(
+    (entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      observer.disconnect();
+      onVisible();
+    },
+    {
+      root: el.closest('[data-details-scroll]'),
+      rootMargin: `0px 0px ${PRELOAD_PX}px 0px`,
+    },
+  );
+  observer.observe(el);
+  return () => observer.disconnect();
+}
+
+/**
  * Mounts `children` only once this spot comes within `PRELOAD_PX` of the
  * visible part of the details scroller (`[data-details-scroll]`), then keeps
  * them mounted. Below-the-fold sections (usage charts, right-sizing, pods,
@@ -25,21 +50,7 @@ export function DeferredSection({
   useEffect(() => {
     const el = ref.current;
     if (shown || !el) return;
-    if (typeof IntersectionObserver === 'undefined') {
-      setShown(true);
-      return;
-    }
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) setShown(true);
-      },
-      {
-        root: el.closest('[data-details-scroll]'),
-        rootMargin: `0px 0px ${PRELOAD_PX}px 0px`,
-      },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
+    return whenNearlyVisible(el, () => setShown(true));
   }, [shown]);
   if (shown) return <>{children}</>;
   return <div ref={ref} aria-hidden data-deferred-section style={{ height: placeholderHeight }} />;

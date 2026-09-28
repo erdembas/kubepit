@@ -14,7 +14,7 @@ export function EditorBar({ children, wrap = false }: { children: ReactNode; wra
       className={cn(
         'border-border/60 bg-surface flex shrink-0 items-center gap-1.5 border-b px-2',
         wrap
-          ? '@container min-h-9 flex-wrap gap-y-1.5 py-1.5'
+          ? '@container min-h-9 flex-wrap gap-y-1.5 py-1'
           : 'main-tabbar-scroll h-9 overflow-x-auto',
       )}
     >

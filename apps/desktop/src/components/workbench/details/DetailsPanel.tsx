@@ -239,7 +239,7 @@ export function DetailsPanel({
           </p>
           {obj && <GitOpsBadge clusterId={clusterId} obj={obj} isActive={isActive} />}
         </div>
-        <div className="order-last flex basis-full flex-wrap items-center gap-0.5 pl-8 @lg:order-none @lg:basis-auto @lg:pl-0">
+        <div className="order-last flex basis-full flex-wrap items-center gap-0.5 pl-9.5 @lg:order-none @lg:basis-auto @lg:pl-0">
           <BookmarkButton
             clusterId={clusterId}
             gvk={gvk}
