@@ -308,19 +308,20 @@ git commit -m "test(perf): pin watch fan-out and unpaged lists at scale"
 | `metrics_history/series_cluster` | full ring | `series(&MetricsHistoryQuery::Cluster, 0)` |
 | `metrics_history/series_100_pods` | full ring | `series(&Pods { namespace, names: 100 }, 0)` |
 
-- [ ] **Step 1: Write the benches.** Use `criterion_group!{ name = benches; config = Criterion::default().sample_size(20); targets = … }` and build inputs outside `b.iter`. For benches that consume their input, use `iter_batched` with `BatchSize::LargeInput`.
+- [x] **Step 1: Write the benches.** Use `criterion_group!{ name = benches; config = Criterion::default().sample_size(20); targets = … }` and build inputs outside `b.iter`. For benches that consume their input, use `iter_batched` with `BatchSize::LargeInput`.
+  _(Done. `watch/aggregator_initial_20k` flushes every `FLUSH_MAX_OBJECTS` like `run_watch`; `watch/reset_batch_20k` times only `take_batch` (`iter_custom`, the re-list is untimed); `metrics_history` uses synthetic metrics with 100 pods per namespace, so one namespace holds the 100 queried pods. `[lib] bench = false` keeps `cargo bench -p kubepit-core -- <criterion flags>` from handing the flags to libtest.)_
 
-- [ ] **Step 2: Run them**
+- [x] **Step 2: Run them**
 
 Run: `cargo bench -p kubepit-core --bench watch --bench metrics_history -- --quick --noplot`
 Expected: each id above prints a time, and `target/criterion/watch/aggregator_initial_20k/new/estimates.json` exists.
 
-- [ ] **Step 3: Lint**
+- [x] **Step 3: Lint**
 
 Run: `cargo clippy --workspace --all-targets -- -D warnings`
 Expected: no warnings.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add Cargo.toml Cargo.lock crates/kubepit-core
