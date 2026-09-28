@@ -65,6 +65,42 @@ describe('secret-unused', () => {
       }),
     ).toEqual([]);
   });
+  it('skips DNS01 solver, external account binding and Vault token secrets', () => {
+    const cluster = obj('cert-manager.io/v1', 'ClusterIssuer', 'le-dns', null, {
+      acme: {
+        privateKeySecretRef: { name: 'le-account' },
+        externalAccountBinding: { keyID: 'kid', keySecretRef: { name: 'eab', key: 'secret' } },
+        solvers: [
+          { dns01: { cloudflare: { apiTokenSecretRef: { name: 'cf-token', key: 'api-token' } } } },
+          {
+            dns01: {
+              route53: {
+                region: 'eu-west-1',
+                accessKeyIDSecretRef: { name: 'aws-creds', key: 'id' },
+                secretAccessKeySecretRef: { name: 'aws-creds', key: 'secret' },
+              },
+            },
+          },
+        ],
+      },
+    });
+    const vault = obj('cert-manager.io/v1', 'Issuer', 'vault', 'app', {
+      vault: { auth: { tokenSecretRef: { name: 'vault-token', key: 'token' } } },
+    });
+    expect(
+      unused({
+        secrets: [
+          secret('le-account', 'cert-manager'),
+          secret('eab', 'cert-manager'),
+          secret('cf-token', 'cert-manager'),
+          secret('aws-creds', 'cert-manager'),
+          secret('vault-token'),
+        ],
+        clusterIssuers: [cluster],
+        issuers: [vault],
+      }),
+    ).toEqual([]);
+  });
   it('skips the secret named by inject-ca-from-secret on a webhook configuration', () => {
     const hook = obj(
       'admissionregistration.k8s.io/v1',

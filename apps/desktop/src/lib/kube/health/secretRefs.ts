@@ -30,8 +30,13 @@ export interface SecretRef {
   name: string;
 }
 
-/** `{ name, namespace? }` objects naming a Secret. */
-const REF_KEYS = new Set(['secretRef', 'certSecretRef', 'privateKeySecretRef']);
+/**
+ * `{ name, namespace? }` objects naming a Secret: `secretRef` and every
+ * `…SecretRef` (Flux `certSecretRef`/`proxySecretRef`, cert-manager
+ * `privateKeySecretRef`, DNS01 `apiTokenSecretRef`/`accessKeyIDSecretRef`,
+ * ACME `externalAccountBinding.keySecretRef`, Vault `tokenSecretRef`…).
+ */
+const isRefKey = (key: string) => key === 'secretRef' || key.endsWith('SecretRef');
 /** Lists of `{ kind, name }` sources; only `kind: Secret` entries count. */
 const FROM_KEYS = new Set(['valuesFrom', 'substituteFrom']);
 const INJECT_CA_FROM_SECRET = 'cert-manager.io/inject-ca-from-secret';
@@ -50,7 +55,7 @@ function walk(value: unknown, own: string | null, out: SecretRef[], depth = 0): 
   }
   if (!isObject(value)) return;
   for (const [key, v] of Object.entries(value)) {
-    if (REF_KEYS.has(key)) push(out, v, own);
+    if (isRefKey(key)) push(out, v, own);
     else if (key === 'secretName' && typeof v === 'string') {
       if (v) out.push({ namespace: own, name: v });
     } else if (key === 'certificateRefs') {

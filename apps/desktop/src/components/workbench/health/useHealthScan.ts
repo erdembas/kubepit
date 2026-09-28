@@ -16,6 +16,7 @@ import { restartWatch, useWatch, type WatchSnapshot } from '../data/watchCache';
 import { useCostPrefs } from '../cost/prefs';
 import { useRightsizing } from '../cost/useCost';
 import { useNow } from '../util';
+import { hasListIssue, scanLists } from './scanLists';
 
 /**
  * Feeds the health engine from the shared watch cache. Lists are watched
@@ -205,7 +206,11 @@ export function useHealthScan(
     nonce,
     Math.floor(clock / 60_000),
     rightsizing?.computed_at ?? 0,
-    ...kinds.map((k) => `${gvks[k] ? 1 : 0}:${snaps[k].version}:${snaps[k].synced ? 1 : 0}`),
+    // Whether a list has an error changes what loaded (a retrying error does not).
+    ...kinds.map(
+      (k) =>
+        `${gvks[k] ? 1 : 0}:${snaps[k].version}:${snaps[k].synced ? 1 : 0}:${snaps[k].error ? 1 : 0}`,
+    ),
   ].join('|');
 
   const snapsRef = useRef(snaps);
@@ -249,14 +254,7 @@ export function useHealthScan(
       }
       inflight.add(key);
       lastRun.set(key, Date.now());
-      const current = snapsRef.current;
-      const loaded = new Set<HealthKind>();
-      const lists = {} as Record<HealthKind, WatchSnapshot['items']>;
-      for (const k of kinds) {
-        const s = current[k];
-        if (!gvks[k] || (s.synced && s.status !== 'error')) loaded.add(k);
-        lists[k] = gvks[k] && s.status !== 'error' ? s.items : [];
-      }
+      const { lists, loaded } = scanLists(kinds, (k) => !!gvks[k], snapsRef.current);
       const input: HealthInput = {
         ...lists,
         loaded,
@@ -301,7 +299,7 @@ export function useHealthScan(
   );
 
   const issues: ListIssue[] = watched
-    .filter((k) => snaps[k].status === 'error')
+    .filter((k) => hasListIssue(true, snaps[k]))
     .map((k) => ({
       kind: k,
       title: gvks[k]!.kind,

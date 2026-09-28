@@ -2,7 +2,7 @@ import { useCallback, useSyncExternalStore } from 'react';
 import { ipc } from '@/lib/ipc';
 import { kindKey } from '@/lib/kube/catalog';
 import type { ClusterId, Gvk, KubeObject, WatchBatch } from '@/types';
-import { applyBatch, batchPatch, isForbidden } from './watchBatch';
+import { applyBatch, batchFlush, isForbidden } from './watchBatch';
 
 /**
  * Shared, ref-counted resource watches. Every table, mini-table and overview
@@ -107,13 +107,13 @@ class WatchEntry {
   }
 
   private apply(batch: WatchBatch) {
-    applyBatch(this.map, batch);
-    this.version++;
-    const synced = this.snapshot.synced || batch.synced;
-    // Errors and the first sync (or the recovery from an error) paint at once.
-    if (batch.error || (synced && this.snapshot.status !== 'ready'))
-      this.flush(batchPatch(this.snapshot, batch, this.map.size));
-    else this.schedule();
+    // Error-only batches (a forbidden watch retrying) change no rows: no new
+    // version, so consumers keyed on it (the health scan) do not recompute.
+    const changed = applyBatch(this.map, batch);
+    if (changed) this.version++;
+    const patch = batchFlush(this.snapshot, batch, this.map.size);
+    if (patch) this.flush(patch);
+    else if (changed) this.schedule();
   }
 
   private schedule() {

@@ -89,7 +89,10 @@ localStorage (`kubepit.workbench.v1`, `kubepit.views.v1`,
   pure logic in `watchBatch.ts`) always applies the objects first. The list
   turns `error` only when nothing is left; otherwise the rows stay and the
   resource table shows a "Some namespaces could not be watched" notice (for
-  example one forbidden namespace of several).
+  example one forbidden namespace of several). A later clean `reset` (the
+  full snapshot after a reconnect or re-list) clears the error; a source
+  that still fails reports it again on its next retry. Error-only batches
+  change no rows and do not bump the snapshot `version`.
 - `read_only` clusters reject every mutating command in the backend (dry runs
   and RBAC self-reviews only read, so they stay available).
 
@@ -970,7 +973,10 @@ feed are described in `docs/RELEASING.md`.
   reference lists when served (see `secret-unused` below). A scan runs
   once every list synced or failed (10 s timeout), at most every 3 s, and is
   never cancelled by newer data; rules whose lists could not be read (RBAC)
-  are skipped instead of guessing. The last scan per cluster is published
+  are skipped instead of guessing. A list counts as loaded only when it
+  synced with no error at all (`health/scanLists.ts`): a partial one (rows
+  kept, one namespace forbidden) is reported with the unreadable lists and
+  skips the rules that need it. The last scan per cluster is published
   to `useHealthStore` for the details panels.
 - UI: the `@health` view (score ring, severity and category counts,
   filters, findings grouped by rule, ignore / restore), a summary card on
@@ -995,7 +1001,9 @@ feed are described in `docs/RELEASING.md`.
   webhook configurations (`cert-manager.io/inject-ca-from-secret`) and Flux
   `GitRepository`, `HelmRepository`, `OCIRepository`, `Kustomization`,
   `HelmRelease` and notification `Provider`. A generic walker reads
-  `secretRef`, `certSecretRef`, `privateKeySecretRef`, `secretName`,
+  `secretRef` and every `…SecretRef` (Flux `certSecretRef`/`proxySecretRef`,
+  cert-manager `privateKeySecretRef`, DNS01 and ACME EAB refs, Vault
+  `tokenSecretRef`), `secretName`,
   `certificateRefs[]` (kind Secret or unset) and `kind: Secret` entries of
   `valuesFrom[]`/`substituteFrom[]`; a cluster-scoped referrer without a
   namespace matches the name in any namespace. Each list is watched only
@@ -1004,7 +1012,10 @@ feed are described in `docs/RELEASING.md`.
   `cert-manager.io/allow-direct-injection`) and Argo CD's own secrets
   (`app.kubernetes.io/part-of=argocd`, `argocd-secret`,
   `argocd-initial-admin-secret`, `argocd-redis`,
-  `argocd-notifications-secret`) are skipped outright.
+  `argocd-notifications-secret`) are skipped outright. `ClusterIssuer` and
+  the webhook configurations are cluster-scoped, so a user limited to
+  namespaces gets a 403 on them and `secret-unused` is skipped (reported as
+  an unreadable list) rather than guessed.
 - Tests: Vitest in the node environment
   (`pnpm --filter @kubepit/desktop test`, `src/**/*.test.ts(x)`;
   benchmarks `src/**/*.bench.ts` with `bench`). `health/testing.ts`
