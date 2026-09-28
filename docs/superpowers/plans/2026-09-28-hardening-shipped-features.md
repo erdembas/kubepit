@@ -1357,7 +1357,7 @@ git commit -m "fix(upgrade): record which minors were checked in the deprecation
   - `HelmPreviewObject.dropped_fields: Vec<String>` (`#[serde(default)]`), filled for `Changed` objects with a live result.
   - TS `dropped_fields: string[]`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test]
@@ -1387,19 +1387,19 @@ fn dropped_paths_skip_fields_already_gone_live() {
   - the live Deployment (the router's `deployment(replicas)`) has it;
   - assert `object.dropped_fields == [r#"metadata.annotations["example.com/legacy"]"#]`.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core dropped_paths && cargo test -p kubepit-core --test helm_preview`
 Expected: FAIL (`dropped_paths` not found).
 
-- [ ] **Step 3: Implement.** `dropped_paths` reuses the keyed-list `Walker`. It emits a path when `before` has the node and `after` does not, but only if a structured lookup of the same segments finds it in `live`. `helm_upgrade_preview` fills the field after the live dry run from `before`, `after` and `live.live`. `UpgradeChanges` lists the paths under "Helm will remove these fields from the live object", adds the count to the object row and removes the old caveat line.
+- [x] **Step 3: Implement.** `dropped_paths` reuses the keyed-list `Walker`. It emits a path when `before` has the node and `after` does not, but only if a structured lookup of the same segments finds it in `live`. `helm_upgrade_preview` fills the field after the live dry run from `before`, `after` and `live.live`. `UpgradeChanges` lists the paths under "Helm will remove these fields from the live object", adds the count to the object row and removes the old caveat line.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core && pnpm typecheck && pnpm i18n:check`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates apps/desktop docs/ARCHITECTURE.md

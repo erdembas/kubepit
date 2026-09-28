@@ -1147,6 +1147,12 @@ export interface HelmPreviewObject {
   after: KubeObject | null;
   /** Server-side dry run against the live object (when requested). */
   live: DryRunResult | null;
+  /**
+   * Paths the running revision sets, the upgrade no longer renders and the
+   * live object still has: what helm's three-way merge removes (the dry run
+   * never does). Filled for changed objects with a live object.
+   */
+  dropped_fields: string[];
 }
 
 export interface HelmUpgradePreview {

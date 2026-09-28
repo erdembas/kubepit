@@ -143,13 +143,20 @@ monaco.ts`, `values.ts`): completion, hovers and markers from the same
   for namespaced kinds without one) and name into added / changed / removed
   / unchanged with before and after documents. With `live`, every rendered
   object also goes through `dry_run.rs` (server-side apply, `dryRun=All`, at
-  most 300) for a live → after diff; fields a chart stops setting are not
-  removed by that dry run (helm's three-way merge removes them). The dialog
-  makes this a review step: "Upgrade" first renders the review
-  (`helm/UpgradeChanges.tsx`: filterable object list, per-object
-  `DiffView` in `edit` normalisation, release / live toggle, deprecated
-  apiVersions flagged), and only a reviewed, unchanged input runs the
-  upgrade (still behind the typed-name confirmation).
+  most 300) for a live → after diff. That dry run never removes fields a
+  chart stops setting; helm's three-way merge does, so each changed object
+  with a live object also gets `dropped_fields`: the paths the old render
+  has, the new render lacks and the live object still carries
+  (`change_journal::diff::dropped_paths`, the change journal's keyed-list
+  walker and path syntax). The dialog makes this a review step: "Upgrade"
+  first renders the review (`helm/UpgradeChanges.tsx`: filterable object
+  list, per-object `DiffView` in `edit` normalisation, release / live
+  toggle, deprecated apiVersions flagged, the dropped fields listed under
+  "Helm will remove these fields from the live object" and counted per row
+  and in the header), and only a reviewed, unchanged input runs the upgrade
+  (still behind the typed-name confirmation). The demo mirrors the walker
+  (`mock/droppedPaths.ts`), and its first changed Deployment drops an
+  annotation.
 
 ## Upgrade readiness (deprecated APIs)
 

@@ -14,6 +14,10 @@
 //! later container as changed. Other lists are compared item by item. A
 //! subtree that exists on one side only is reported once, rendered as
 //! compact JSON.
+//!
+//! [`dropped_paths`] walks the same way to find what a Helm upgrade removes
+//! from a live object: nodes the old render has, the new render lacks and
+//! the live object still carries.
 
 use serde_json::Value;
 
@@ -30,7 +34,8 @@ const ITEM_KEYS: &[&str] = &["name", "mountPath"];
 #[derive(Debug, Clone)]
 enum Segment {
     Key(String),
-    Item(String),
+    /// A keyed list item: the key field (`name`, `mountPath`) and its value.
+    Item(&'static str, String),
     Index(usize),
 }
 
@@ -56,7 +61,7 @@ fn format_path(segments: &[Segment]) -> String {
                 out.push_str(&Value::String(key.clone()).to_string());
                 out.push(']');
             }
-            Segment::Item(name) => {
+            Segment::Item(_, name) => {
                 out.push('[');
                 out.push_str(name);
                 out.push(']');
@@ -154,10 +159,28 @@ struct Walker {
     out: Vec<ChangedPath>,
     /// Paths below these top-level keys are Secret values.
     redacted_roots: &'static [&'static str],
+    /// When set, only nodes `before` has and `after` lacks are recorded
+    /// here (as segments), and `out` stays empty.
+    removals: Option<Vec<Vec<Segment>>>,
 }
 
 impl Walker {
+    fn new(redacted_roots: &'static [&'static str]) -> Self {
+        Self {
+            segments: Vec::new(),
+            out: Vec::new(),
+            redacted_roots,
+            removals: None,
+        }
+    }
+
     fn leaf(&mut self, before: Option<&Value>, after: Option<&Value>) {
+        if let Some(removals) = &mut self.removals {
+            if before.is_some() && after.is_none() {
+                removals.push(self.segments.clone());
+            }
+            return;
+        }
         let redacted = matches!(self.segments.first(), Some(Segment::Key(root))
             if self.redacted_roots.contains(&root.as_str()));
         let (before, after) = match (before, after) {
@@ -201,12 +224,12 @@ impl Walker {
                     for vb in b {
                         let key = key_of(vb).unwrap_or_default();
                         let va = a.iter().find(|va| key_of(va).as_deref() == Some(&key));
-                        self.descend(Segment::Item(key), va, Some(vb));
+                        self.descend(Segment::Item(field, key), va, Some(vb));
                     }
                     for va in a {
                         let key = key_of(va).unwrap_or_default();
                         if !b.iter().any(|vb| key_of(vb).as_deref() == Some(&key)) {
-                            self.descend(Segment::Item(key), Some(va), None);
+                            self.descend(Segment::Item(field, key), Some(va), None);
                         }
                     }
                 }
@@ -226,13 +249,41 @@ impl Walker {
 /// alphabetical order, keyed list items in the order of `after`.
 /// With `secret`, paths under `data` / `stringData` are marked redacted.
 pub fn changed_paths(before: &Value, after: &Value, secret: bool) -> Vec<ChangedPath> {
-    let mut walker = Walker {
-        segments: Vec::new(),
-        out: Vec::new(),
-        redacted_roots: if secret { &["data", "stringData"] } else { &[] },
-    };
+    let mut walker = Walker::new(if secret { &["data", "stringData"] } else { &[] });
     walker.walk(Some(before), Some(after));
     walker.out
+}
+
+/// The node at `segments` in `value`: keyed items are found by their key
+/// field, wherever they sit in the list.
+fn lookup<'a>(value: &'a Value, segments: &[Segment]) -> Option<&'a Value> {
+    segments
+        .iter()
+        .try_fold(value, |node, segment| match segment {
+            Segment::Key(key) => node.as_object()?.get(key),
+            Segment::Item(field, key) => node.as_array()?.iter().find(|item| {
+                item.get(*field).and_then(scalar_key).as_deref() == Some(key.as_str())
+            }),
+            Segment::Index(index) => node.as_array()?.get(*index),
+        })
+}
+
+/// What a Helm upgrade removes from a live object: the paths (leaves or
+/// whole subtrees) present in `before` (the old render), absent from
+/// `after` (the new render) and still present in `live`. Helm's three-way
+/// merge deletes exactly those; a server-side apply dry run never does.
+/// Paths use [`changed_paths`]'s syntax and order.
+pub fn dropped_paths(before: &Value, after: &Value, live: &Value) -> Vec<String> {
+    let mut walker = Walker::new(&[]);
+    walker.removals = Some(Vec::new());
+    walker.walk(Some(before), Some(after));
+    walker
+        .removals
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|segments| lookup(live, segments).is_some_and(|node| !node.is_null()))
+        .map(|segments| format_path(&segments))
+        .collect()
 }
 
 #[cfg(test)]
@@ -380,6 +431,56 @@ mod tests {
         let appended = changed_paths(&json!({"v": "a\nb\n"}), &json!({"v": "a\nb\nc\n"}), false);
         assert_eq!(appended[0].before.as_deref(), Some(""));
         assert_eq!(appended[0].after.as_deref(), Some("c"));
+    }
+
+    #[test]
+    fn dropped_paths_are_old_render_minus_new_render_still_live() {
+        let before = json!({"metadata": {"annotations": {"a": "1", "keep": "x"}},
+            "spec": {"template": {"spec": {"containers": [{"name": "api", "env": [{"name": "DEBUG", "value": "1"}, {"name": "LOG", "value": "i"}]}]}}}});
+        let after = json!({"metadata": {"annotations": {"keep": "x"}},
+            "spec": {"template": {"spec": {"containers": [{"name": "api", "env": [{"name": "LOG", "value": "i"}]}]}}}});
+        let live = json!({"metadata": {"annotations": {"a": "1", "keep": "x", "server": "y"}},
+            "spec": {"replicas": 2, "template": {"spec": {"containers": [{"name": "api", "env": [{"name": "DEBUG", "value": "1"}, {"name": "LOG", "value": "i"}]}]}}}});
+        assert_eq!(
+            dropped_paths(&before, &after, &live),
+            // `changed_paths` syntax: plain keys join with dots, others are quoted.
+            vec![
+                "metadata.annotations.a".to_string(),
+                "spec.template.spec.containers[api].env[DEBUG]".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn dropped_paths_skip_fields_already_gone_live() {
+        let before = json!({"spec": {"paused": true}});
+        assert!(dropped_paths(&before, &json!({"spec": {}}), &json!({"spec": {}})).is_empty());
+    }
+
+    #[test]
+    fn dropped_paths_find_live_items_by_key_and_whole_subtrees() {
+        let mounts = |paths: &[&str]| {
+            json!(paths
+                .iter()
+                .map(|p| json!({"name": "config", "mountPath": p}))
+                .collect::<Vec<_>>())
+        };
+        let before =
+            json!({"volumeMounts": mounts(&["/etc/a", "/etc/b"]), "nodeSelector": {"disk": "ssd"}});
+        let after = json!({"volumeMounts": mounts(&["/etc/a"])});
+        // Live lists the items in another order, next to a server-added one.
+        let live = json!({"volumeMounts": mounts(&["/var/run", "/etc/b", "/etc/a"]), "nodeSelector": {"disk": "ssd"}});
+        assert_eq!(
+            dropped_paths(&before, &after, &live),
+            vec!["nodeSelector", "volumeMounts[/etc/b]"]
+        );
+        // Changed values are not drops, and neither is a null left live.
+        let changed = dropped_paths(
+            &json!({"spec": {"replicas": 2, "paused": true}}),
+            &json!({"spec": {"replicas": 3}}),
+            &json!({"spec": {"replicas": 2, "paused": null}}),
+        );
+        assert!(changed.is_empty(), "{changed:?}");
     }
 
     #[test]

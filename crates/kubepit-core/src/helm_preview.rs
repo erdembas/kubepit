@@ -31,6 +31,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::app::Kubepit;
+use crate::change_journal::diff::dropped_paths;
 use crate::helm::{fetch_release, list_revisions};
 use crate::helm_charts::{
     normalize_version, validate_chart_ref, validate_namespace, validate_release_name,
@@ -359,6 +360,12 @@ pub struct HelmPreviewObject {
     pub after: Option<Value>,
     /// Server-side dry run against the live object (when requested).
     pub live: Option<DryRunResult>,
+    /// Paths the running revision sets, the upgrade no longer renders and
+    /// the live object still has: what helm's three-way merge removes (the
+    /// dry run above never does). Filled for changed objects with a live
+    /// object; `change_journal::diff::dropped_paths` syntax.
+    #[serde(default)]
+    pub dropped_fields: Vec<String>,
 }
 
 /// `helm_upgrade_preview`.
@@ -413,6 +420,7 @@ pub fn diff_manifests(
             before: previous.map(|(_, p)| p.value),
             after: Some(object.value),
             live: None,
+            dropped_fields: Vec::new(),
         });
     }
     for (key, (id, object)) in old {
@@ -427,6 +435,7 @@ pub fn diff_manifests(
             before: Some(object.value),
             after: None,
             live: None,
+            dropped_fields: Vec::new(),
         });
     }
     out.sort_by(|a, b| {
@@ -582,7 +591,15 @@ impl Kubepit {
                 .collect()
                 .await;
             for (i, result) in results {
-                objects[i].live = Some(result);
+                let object = &mut objects[i];
+                if object.change == HelmPreviewChange::Changed {
+                    if let (Some(before), Some(after), Some(live)) =
+                        (&object.before, &object.after, &result.live)
+                    {
+                        object.dropped_fields = dropped_paths(before, after, live);
+                    }
+                }
+                object.live = Some(result);
             }
         }
         Ok(HelmUpgradePreview {
