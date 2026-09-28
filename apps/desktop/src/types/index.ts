@@ -110,6 +110,12 @@ export interface ClusterInput {
   notes: string;
   /** Connectivity: per-cluster proxy override (see `ClusterDef.proxy_url`). */
   proxy_url?: string | null;
+  /** Prometheus source (see `ClusterDef.prometheus`; missing = auto-detect). */
+  prometheus?: PrometheusConfig;
+  /** Loki source (see `ClusterDef.loki`; missing = auto-detect). */
+  loki?: LokiConfig;
+  /** Cost source and price model (see `ClusterDef.cost`; missing = auto, platform prices). */
+  cost?: CostConfig;
 }
 
 export type ConnState = 'disconnected' | 'connecting' | 'connected' | 'error';

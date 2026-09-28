@@ -92,7 +92,8 @@ export function PrometheusFields({
   value,
   onChange,
 }: {
-  clusterId: ClusterId;
+  /** `null` while adding: no status lookup runs before the cluster exists. */
+  clusterId: ClusterId | null;
   value: PrometheusDraft;
   onChange: (next: PrometheusDraft) => void;
 }) {

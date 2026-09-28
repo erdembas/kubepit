@@ -385,7 +385,12 @@ An optional, richer metrics source next to the metrics-server history
   (`/prometheus`), OpenShift `thanos-querier` — and probes the best four
   with `query=1`. In-cluster servers rank above query layers that may hold
   several clusters. `ClusterDef.prometheus` overrides it: `auto`, a
-  `service` (namespace, name, port, scheme, path prefix) or `off`.
+  `service` (namespace, name, port, scheme, path prefix) or `off`. The
+  cluster editor sets it, with Loki and cost, when adding a cluster too:
+  `ClusterInput` carries `prometheus`, `loki` and `cost` (serde defaults),
+  and `cluster_add` normalizes them like `cluster_update` before anything is
+  saved. The field groups take a `null` cluster id while adding, so no
+  status lookup runs before the cluster exists.
 - **Transport** (`proxy.rs`): every request goes through the API server's
   service proxy
   (`/api/v1/namespaces/{ns}/services/{scheme}:{name}:{port}/proxy{prefix}/api/v1/…`)
@@ -476,8 +481,8 @@ read-only, over the same transport as Prometheus.
   are probed with a labels request over the last five minutes.
   `ClusterDef.loki` overrides it: `auto`, a `service` (namespace, name,
   port, scheme, path prefix, optional `X-Scope-OrgID` tenant) or `off`
-  (cluster editor, next to Prometheus). External/Grafana Cloud Loki is out
-  of scope.
+  (cluster editor, next to Prometheus, when adding or editing a cluster).
+  External/Grafana Cloud Loki is out of scope.
 - **Commands**: `loki_status` (cached per connection and setting like
   Prometheus), `loki_query_range` (LogQL, nanosecond `start`/`end` as
   strings, limit ≤ 5 000, direction, `step` for metric queries; streams are

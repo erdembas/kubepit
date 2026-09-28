@@ -98,6 +98,15 @@ pub struct ClusterInput {
     /// Connectivity: per-cluster proxy override (see [`ClusterDef::proxy_url`]).
     #[serde(default)]
     pub proxy_url: Option<String>,
+    /// Cost source and price model (see [`ClusterDef::cost`]).
+    #[serde(default)]
+    pub cost: crate::cost::CostConfig,
+    /// Prometheus source (see [`ClusterDef::prometheus`]).
+    #[serde(default)]
+    pub prometheus: PrometheusConfig,
+    /// Loki source (see [`ClusterDef::loki`]).
+    #[serde(default)]
+    pub loki: LokiConfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

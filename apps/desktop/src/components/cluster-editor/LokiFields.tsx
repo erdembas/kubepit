@@ -67,7 +67,8 @@ export function LokiFields({
   value,
   onChange,
 }: {
-  clusterId: ClusterId;
+  /** `null` while adding: no status lookup runs before the cluster exists. */
+  clusterId: ClusterId | null;
   value: LokiDraft;
   onChange: (next: LokiDraft) => void;
 }) {

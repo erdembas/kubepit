@@ -6,10 +6,12 @@ mod support;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use kubepit_core::cost::{CostConfig, CostSourceConfig};
 use kubepit_core::types::{
-    PromScheme, PrometheusConfig, PrometheusKind, PrometheusMetric, PrometheusRange,
-    PrometheusSource, PrometheusState, PrometheusTarget,
+    ClusterInput, LokiConfig, PromScheme, PrometheusConfig, PrometheusKind, PrometheusMetric,
+    PrometheusRange, PrometheusSource, PrometheusState, PrometheusTarget,
 };
+use kubepit_core::{Kubepit, NullSink, Paths};
 use serde_json::{json, Value};
 use support::{setup, start, status, Log, Reply, Request, Router};
 
@@ -430,4 +432,59 @@ async fn configured_service_off_and_not_found() {
         path_prefix: "/../../api".into(),
     };
     assert!(app.cluster_update(def).is_err());
+}
+
+#[test]
+fn cluster_add_keeps_observability_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = Kubepit::open(Paths::new(dir.path().join("home")), Arc::new(NullSink)).unwrap();
+    let prometheus = PrometheusConfig::Service {
+        namespace: " monitoring ".into(),
+        service: "prometheus-operated".into(),
+        port: 9090,
+        scheme: PromScheme::Http,
+        path_prefix: "/".into(),
+    };
+    let cost = CostConfig {
+        source: CostSourceConfig::Estimate,
+        pricing: None,
+    };
+    let added = app
+        .cluster_add(vec![ClusterInput {
+            name: "Obs".into(),
+            context: "fake".into(),
+            kubeconfig_text: Some(support::kubeconfig_for("http://127.0.0.1:1")),
+            prometheus: prometheus.clone(),
+            loki: LokiConfig::Off,
+            cost: cost.clone(),
+            ..Default::default()
+        }])
+        .unwrap();
+    assert_eq!(added[0].prometheus, prometheus.normalized().unwrap());
+    assert_eq!(added[0].loki, LokiConfig::Off);
+    assert_eq!(added[0].cost, cost);
+    assert_eq!(app.cluster_list()[0].prometheus, added[0].prometheus);
+
+    // An invalid setting refuses the whole batch before anything is saved.
+    let good = ClusterInput {
+        name: "Good".into(),
+        context: "fake".into(),
+        kubeconfig_text: Some(support::kubeconfig_for("http://127.0.0.1:1")),
+        ..Default::default()
+    };
+    let bad = ClusterInput {
+        name: "Bad".into(),
+        context: "fake".into(),
+        kubeconfig_text: Some(support::kubeconfig_for("http://127.0.0.1:1")),
+        prometheus: PrometheusConfig::Service {
+            namespace: "a|b".into(),
+            service: "x".into(),
+            port: 1,
+            scheme: PromScheme::Http,
+            path_prefix: "/".into(),
+        },
+        ..Default::default()
+    };
+    assert!(app.cluster_add(vec![good, bad]).is_err());
+    assert_eq!(app.cluster_list().len(), 1);
 }

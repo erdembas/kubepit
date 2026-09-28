@@ -1005,7 +1005,7 @@ git commit -m "feat(manifests): notify-based Watch replaces 2 s fingerprint poll
   - TS `ClusterInput` gains `prometheus?: PrometheusConfig; loki?: LokiConfig; cost?: CostConfig`.
   - The field components take `clusterId: ClusterId | null`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 #[test]
@@ -1034,23 +1034,23 @@ fn cluster_add_keeps_observability_settings() {
 
 Use the exact variant and field names of `PrometheusConfig::Service` from `types.rs:1283`. The scheme type may have a different name; take it from the struct.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p kubepit-core --test prometheus cluster_add_keeps_observability_settings`
 Expected: FAIL. `ClusterInput` has no field `prometheus`.
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
   - `cluster_add` validates every input's configs with the same `normalized()` calls as `cluster_update`, before anything is saved, and stores them.
   - The editor sends the drafts in add mode and drops the `editing &&` guards; `clusterId` is `editing?.id ?? null`.
   - The status hooks return idle for a `null` id.
   - The mock forwards the fields.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core && pnpm typecheck`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates apps/desktop
