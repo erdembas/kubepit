@@ -22,7 +22,10 @@
     "i18n:check": "node scripts/check-i18n.mjs",
     "test:ui": "pnpm --filter @kubepit/desktop test",
     "perf:bench": "pnpm --filter @kubepit/desktop bench --outputJson ../../perf-results/frontend-bench.json",
-    "perf:ui": "node scripts/perf/ui-perf.mjs"
+    "perf:ui": "node scripts/perf/ui-perf.mjs",
+    "perf:rust": "cargo bench -p kubepit-core -- --noplot",
+    "perf:compare": "node scripts/perf/compare.mjs",
+    "perf:test": "node --test scripts/perf/"
   },
   "devDependencies": {
     "playwright": "^1.55.0",

@@ -731,8 +731,14 @@ git commit -m "perf(ui): Playwright driver for rows, scrolling, map, health, vie
     - `target/perf/backend-e2e.json`.
   - `evaluate(budgets, results, { slack, only }): { rows: Array<{ id; value; budget; limit; ok; missing }>; failed: boolean; warnings: string[] }`.
   - CLI: `node scripts/perf/compare.mjs [--slack N] [--only rust,e2e,engines,ui,structural]`. It prints a table and exits 1 on failure.
+  - As built:
+    - `budgets.json` also allows a free-text `note`, `abs: true` (compare the absolute value: `ui/soak_dom_nodes` is a ±10 % drift) and a top-level `informational` list of `*` patterns. A result id without a budget that matches one prints as informational instead of warning: the driver's ids at other presets, `ui/scroll_*`, `topology/layout_1200`.
+    - The driver's extra ids take the spec's composite budgets: `ui/scroll_p95_frame_l` 25 ms, `ui/scroll_long_task_max_l` 100 ms, `ui/health_long_task_max_m` 200 ms.
+    - `structural/list_requests_without_limit` is 2: the snapshot pinned in Task 2 (the metrics.k8s.io nodes and pods lists), like the watch-stream budget. H4 lowers it to 0. `e2e/max_rss_l_all_watchers` is 700 × 10⁶ bytes and not a timing, so no slack.
+    - `loadResults` reads a directory as a Criterion tree (the id is `full_id` from `benchmark.json`) and a file by its shape. Missing paths are skipped, so their ids fail as missing. Vitest 3 (tinybench 2) writes neither `median` nor `p50`, so engine values are means.
+    - `compare.mjs` defaults to slack 1 and every group, reading `target/criterion` (or `$CARGO_TARGET_DIR`), `target/perf/backend-e2e.json`, `perf-results/frontend-bench.json` and every `perf-results/ui*.json`. `--results a,b` and `--budgets <file>` override them. Informational ids print after the table.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```js
 // scripts/perf/compare.test.mjs
@@ -772,26 +778,37 @@ test('unknown result ids only warn', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `node --test scripts/perf/compare.test.mjs`
 Expected: FAIL (module missing).
 
-- [ ] **Step 3: Implement** `compareLib.mjs`, `compare.mjs` and `budgets.json`.
+- [x] **Step 3: Implement** `compareLib.mjs`, `compare.mjs` and `budgets.json`.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `node --test scripts/perf/`
 Expected: PASS.
 
-- [ ] **Step 5: Record the baseline on the reference machine.**
+- [x] **Step 5: Record the baseline on the reference machine.**
   1. Run: `pnpm perf:rust && pnpm perf:bench && pnpm --filter @kubepit/desktop build && pnpm perf:ui -- --preset l --churn 50 --soak 30 && for p in s m; do pnpm perf:ui -- --preset $p --scenarios ttfr,map,health --out perf-results/ui-$p.json; done && pnpm perf:compare -- --slack 1`
   2. Copy every measured value into the spec's Results table (Baseline column).
   3. Mark each gate H1–H10 and MAP as "fires" or "does not fire", using the gate definitions in the spec (D8).
 
   A budget that the baseline misses stays in `budgets.json` unchanged: it is what its gated task must reach.
 
-- [ ] **Step 6: Commit**
+  _(Done on 2026-09-29 on an Apple M5 Max shared with other agents (load 3–21). The spec's Results table holds the machine, the loads and the method:_
+  - _Rust, engine and UI suites three times each, and the noisy Rust benches (`watch`, `search_proxies`) five times; the medians are recorded._
+  - _The soak ran on its own (`--scenarios= --soak 30`, 30 min)._
+  - _Result: 4 budgets missed: `watch/aggregator_initial_20k`, `watch/reset_batch_20k`, `fleet_search/matcher_substring_50k`, `ui/map_all_m`._
+  - _Gates that fire: H5 (map engine only) and MAP (1 200 fits). H6's window-close condition cannot be measured in Chromium and needs a manual `tauri dev` check._
+  - _No gate covers the three Rust misses._
+  - _The gate checks needed two measurements the driver does not make, with throwaway scripts that are not committed:_
+    - _H2: `mockWatchStats()` after each step of the standard scenario;_
+    - _H5: long tasks matched to the probe samples recorded inside them._
+  - _MAP: pan frames with the cap swapped at build time.)_
+
+- [x] **Step 6: Commit**
 
 ```bash
 git add perf package.json scripts/perf docs/superpowers/specs
@@ -1127,7 +1144,7 @@ git commit -m "perf(ui): run health, netpol or topology engines in a worker"
   - `Kubepit::resource_watch_ack(&self, watch_id: &str, seq: u64)`, a Tauri command `resource_watch_ack(watchId, seq)`, and `ipc.resourceWatchAck`.
   - `WatchEntry` acks after `applyBatch`. The mock acks as a no-op.
 
-- [ ] **Step 1: Check the gate.** It fires if the churn soak at `l` shows `watch:apply` lag > 1 s (backend batch time vs apply time), or a watch still running (`watchStats`/backend log) after its window closed.
+- [ ] **Step 1: Check the gate.** It fires if the churn run at `l` (the `apply` scenario with `--churn 50`) shows a watch lag > 1 s, or a watch still running (`watchStats`/backend log) after its window closed. The lag is `watch:apply`'s `latencyMs` meta (the first batch's arrival → React commit; the driver's `raw.apply.latencyP95`), not the `watch:apply` duration, which only measures apply + flush → commit.
 
 - [ ] **Step 2: Write the failing tests.**
   - `ack_window_blocks_after_four_unacked`: four `on_sent` → `!can_send`; `on_ack(2)` → `can_send`.
