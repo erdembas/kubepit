@@ -1504,6 +1504,7 @@
   "No matching fields": "No matching fields",
   "No matching kinds": "No matching kinds",
   "No matching namespaces": "No matching namespaces",
+  "No memory limit yet; one is proposed at the peak plus headroom so a leak cannot take down the node.": "No memory limit yet; one is proposed at the peak plus headroom so a leak cannot take down the node.",
   "No metrics source": "No metrics source",
   "No namespace matches the filter.": "No namespace matches the filter.",
   "No namespaces.": "No namespaces.",

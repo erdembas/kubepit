@@ -102,7 +102,7 @@ Sources:
 | 7 | HPA, OOMKilled, throttling, partial data and unclear identity become **flags and confidence caps**, never blocks | U2 | A recommendation is always computed. Risk drives confidence, and confidence drives how much confirmation apply needs |
 | 8 | Throttling uses a **ratio**: throttled CFS periods ÷ CFS periods ≥ 5 % (setting, 1–50 %), and only with ≥ 600 periods | U2 | "Any throttled second" flags nearly every container that has a CPU limit |
 | 9 | After an OOM kill, `workload-history` never recommends less memory than the current limit plus headroom | E | The working set peaks at the limit just before the kill, and 5-minute samples miss that peak (krr's `use_oomkill_data` idea). Open question 2 |
-| 10 | Limits: reuse `strategy::finalize`, which raises a limit proportionally (current limit ÷ request kept, rounded up). No limit is voided, lowered or invented | U4 | Already implemented and tested. The UI shows the ratio (`RaisedTag`, `limitRatio`) |
+| 10 | Limits: reuse `strategy::finalize`, which raises a limit proportionally (current limit ÷ request kept, rounded up). No limit is voided or lowered. A container **without a memory limit gets one proposed** at peak + `memory_limit_headroom_percent` (never below the new request), flagged `memory-limit-added` — the same rule `percentile-headroom` follows since the user's decision of 2026-09-28. CPU limits are never invented | U4 | Proportional raises are already implemented and tested; the UI shows the ratio (`RaisedTag`, `limitRatio`). Proposing missing memory limits bounds leaks before they take a node down |
 | 11 | Severity uses Kubepit's `Verdict`: over / under / balanced / no data, labelled "Over-provisioned", "Under-provisioned", "Well sized", "No usage data". Attention means under-provisioned first | U-bugs | Fixes KubeFit's inverted labels (its GOOD meant over-provisioned) and drops its never-produced CRITICAL |
 | 12 | One-click apply requires: high confidence, no raised limit, a non-production and writable cluster, and the RBAC gate. Everything else opens the dry-run review. Medium or low confidence also needs an acknowledgement checkbox that lists the flags | U2, U4 | Limit raises and production clusters always get the review, as the architecture requires |
 | 13 | CronJobs are recommended and patchable at `spec.jobTemplate.spec.template.spec`. Their cost uses the observed duty cycle | O-cronjobs | Workloads resolve Job → CronJob. The duty cycle keeps a nightly job from looking like an always-on replica |
@@ -354,7 +354,7 @@ The same `observed_hours` applies to every container of `w`.
 | `min_coverage` | 0.9 |
 | `throttle_threshold_percent` | 5 |
 
-`memory_limit_headroom_percent` is not used by this strategy.
+`memory_limit_headroom_percent` (default 40) sets the memory limit proposed for containers that have none (decision 10).
 
 **Formulas.** Here `u` is the usage, `e` the evidence, `s` the settings and `cur` the
 current values. CPU is in millicores and memory in bytes.
@@ -369,7 +369,11 @@ mem_raw       = max(s.min_memory, mem_base × (1 + s.memory_headroom/100))
 memory        = ceil(mem_raw / MiB − 1e-9) × MiB                        (whole MiB)
 cpu           = settle(cur.cpu_request,    cpu,    10 m,   u.cpu_p95)   (no churn)
 memory        = settle(cur.memory_request, memory, 16 MiB, mem_base)
-recommended   = {cpu_request: cpu, memory_request: memory}              (limits left to finalize)
+mem_limit     = cur.memory_limit is none
+                ? max(memory, ceil(mem_base × (1 + s.memory_limit_headroom/100) / MiB − 1e-9) × MiB)
+                : none                                                (existing limits left to finalize)
+recommended   = {cpu_request: cpu, memory_request: memory, memory_limit: mem_limit}
+warnings     += memory-limit-added  when cur.memory_limit is none
 confidence    = metrics-server → low (+ metrics-server-only)
                 hours ≥ 72     → high
                 otherwise      → medium (+ short-history)

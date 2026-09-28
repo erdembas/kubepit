@@ -524,20 +524,23 @@ function percentileHeadroom(
     memory,
     roundMem(usage.memory_max),
   );
-  // Raised when too tight, never lowered, never invented (like the backend).
+  // Proposed when missing, raised when too tight, never lowered (like the backend).
   const memoryLimit =
-    current.memory_limit != null && memory <= current.memory_limit
-      ? Math.max(
-          current.memory_limit,
-          settle(current.memory_limit, limit, 16 * MiB, usage.memory_max),
-        )
-      : null;
+    current.memory_limit == null
+      ? limit
+      : memory <= current.memory_limit
+        ? Math.max(
+            current.memory_limit,
+            settle(current.memory_limit, limit, 16 * MiB, usage.memory_max),
+          )
+        : null;
   const confidence = confidenceOf(source, usage.hours);
   const warnings: RecommendationWarning[] = [];
   if (source === 'metrics-server') warnings.push(warn('metrics-server-only'));
   else if (source === 'prometheus' && confidence !== 'high') warnings.push(warn('short-history'));
   if (current.memory_limit != null && usage.memory_max >= 0.9 * current.memory_limit)
     warnings.push(warn('memory-near-limit'));
+  if (current.memory_limit == null) warnings.push(warn('memory-limit-added'));
   if (usage.cpu_max > 2 * cpu && usage.cpu_max > cpu + 250) warnings.push(warn('cpu-bursts'));
   return {
     recommended: {

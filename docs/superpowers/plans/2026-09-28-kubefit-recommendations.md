@@ -696,12 +696,16 @@ git commit -m "feat(rightsizing): flags and confidence caps from usage evidence"
   - round up to whole millicores and whole MiB;
   - OOM floor `max(memory_max, current memory limit)`;
   - `settle` for no churn;
-  - limits are left to `finalize`;
+  - a container without a memory limit gets one: `max(memory, ceil(mem_base × (1 + memory_limit_headroom/100)))` in whole MiB,
+    flagged `memory-limit-added` (spec decision 10); existing limits are left to `finalize`;
   - confidence tiers: metrics-server low; ≥ 72 h high; else medium with `short-history`.
 
 Steps:
 
 - [ ] **Step 1: Write the failing tests**
+
+Test helpers: `current(cpu, mem)` sets both requests and a memory limit of `mem`;
+`requests_only(cpu, mem)` sets the two requests and no limits.
 
 ```rust
 #[test] fn kubefit_fixture_numbers() {
@@ -714,6 +718,13 @@ Steps:
     assert_eq!(run(current(500.0, GIB), usage(1.0, MIB, 168.0)).recommended.cpu_request, Some(10.0));
     assert_eq!(run(current(1000.0, GIB), usage(101.3, 100.0 * MIB + 1.0, 168.0)).recommended.cpu_request, Some(122.0));
     assert_eq!(run(current(1000.0, GIB), usage(101.3, 100.0 * MIB + 1.0, 168.0)).recommended.memory_request, Some(121.0 * MIB));
+}
+#[test] fn containers_without_a_memory_limit_get_one() {
+    let r = run(requests_only(1000.0, 256.0 * MIB), usage(100.0, 100.0 * MIB, 168.0));
+    assert_eq!(r.memory_limit, Change::Set);
+    assert_eq!(r.recommended.memory_limit, Some(140.0 * MIB)); // 100 MiB × 1.4
+    assert!(codes(&r).contains(&"memory-limit-added"));
+    assert_eq!(r.cpu_limit, Change::Unchanged, "CPU limits are never invented");
 }
 #[test] fn oom_floor_uses_the_current_limit() {
     let r = run_oom(limits(256.0 * MIB), usage(100.0, 200.0 * MIB, 168.0));

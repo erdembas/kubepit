@@ -738,8 +738,9 @@ applying a recommendation only reads, so read-only clusters get it all.
   `STRATEGIES` lists them, requests pick one by id and reports list them
   all, so a new strategy needs no UI, apply or preset changes. The default
   `percentile-headroom` (`rightsizing/percentile.rs`): CPU request = p95 +
-  15 %, memory request = max + 20 %, existing memory limits raised to max +
-  40 % when tighter (never lowered, never invented), minimums, rounding up
+  15 %, memory request = max + 20 %, memory limit = max + 40 % — proposed
+  for containers without one (`memory-limit-added`), raised when tighter,
+  never lowered (CPU limits are never invented) —, minimums, rounding up
   to sane steps, never below the observed peak, no churn under 10 % /
   10 m / 16 MiB; confidence high from 3 days, medium from 12 hours.
   `strategy::finalize` is shared by all strategies: values a strategy left

@@ -4,12 +4,13 @@
 //!   is compressible, so the p95 is the peak that matters.
 //! - Memory request = maximum working set + headroom (default 20 %); memory
 //!   is not compressible, so the maximum is the peak.
-//! - Memory limit: an existing limit tighter than the maximum + a larger
-//!   headroom (default 40 %) is raised to it; limits are never lowered (a
-//!   lower limit saves nothing and risks OOM kills) and never invented (a
-//!   new limit could OOM-kill a container that never was). A limit the new
-//!   request exceeds is left to [`super::strategy::finalize`], which raises
-//!   it proportionally.
+//! - Memory limit: the maximum + a larger headroom (default 40 %), never
+//!   below the new request. A container without a limit gets one (flagged
+//!   `memory-limit-added`: it bounds a leak before it takes the node down);
+//!   an existing limit tighter than that is raised to it; limits are never
+//!   lowered (a lower limit saves nothing and risks OOM kills). A limit the
+//!   new request exceeds is left to [`super::strategy::finalize`], which
+//!   raises it proportionally.
 //! - CPU limits are left alone (raised with the request when needed).
 //! - Minimums, rounding up, never below the observed peak, and no churn on
 //!   small differences ([`super::math`]).
@@ -31,6 +32,7 @@ pub const WARN_SHORT_HISTORY: &str = "short-history";
 pub const WARN_METRICS_SERVER_ONLY: &str = "metrics-server-only";
 pub const WARN_MEMORY_NEAR_LIMIT: &str = "memory-near-limit";
 pub const WARN_CPU_BURSTS: &str = "cpu-bursts";
+pub const WARN_MEMORY_LIMIT_ADDED: &str = "memory-limit-added";
 
 /// How much to trust `hours` of history from `source`.
 pub fn confidence(source: RightsizingSource, hours: f64) -> Confidence {
@@ -79,9 +81,10 @@ impl RecommendationStrategy for PercentileHeadroom {
             Some(l) if memory <= l => {
                 Some(settle(Some(l), limit, MIN_MEMORY_CHANGE, u.memory_max).max(l))
             }
-            // The new request exceeds it (raised proportionally by `finalize`),
-            // or there is none (never invented).
-            _ => None,
+            // None yet: propose one (peak + limit headroom, at least the request).
+            None => Some(limit),
+            // The new request exceeds it: raised proportionally by `finalize`.
+            Some(_) => None,
         };
 
         let confidence = confidence(input.source, u.hours);
@@ -100,6 +103,9 @@ impl RecommendationStrategy for PercentileHeadroom {
             .is_some_and(|l| u.memory_max >= 0.9 * l)
         {
             warnings.push(RecommendationWarning::new(WARN_MEMORY_NEAR_LIMIT));
+        }
+        if current.memory_limit.is_none() {
+            warnings.push(RecommendationWarning::new(WARN_MEMORY_LIMIT_ADDED));
         }
         if u.cpu_max > 2.0 * cpu && u.cpu_max > cpu + 250.0 {
             warnings.push(RecommendationWarning::new(WARN_CPU_BURSTS));
@@ -232,9 +238,11 @@ mod tests {
         assert_eq!(r.cpu, Change::Unchanged, "230m vs 240m");
         assert_eq!(r.recommended.cpu_request, Some(240.0));
         assert_eq!(r.memory, Change::Unchanged);
-        assert_eq!(r.memory_limit, Change::Unchanged, "no limit is invented");
-        assert_eq!(r.recommended.memory_limit, None);
-        assert!(!r.changed());
+        // No limit yet: one is proposed at peak + 40 % (260 MiB → 368 MiB).
+        assert_eq!(r.memory_limit, Change::Set);
+        assert_eq!(r.recommended.memory_limit, Some(368.0 * MIB));
+        assert!(codes(&r).contains(&WARN_MEMORY_LIMIT_ADDED));
+        assert!(r.changed(), "adding a limit is a change");
         // A limit tighter than peak + 40 % is raised: 260 MiB → 368 MiB.
         let tight = ResourceValues {
             memory_limit: Some(330.0 * MIB),
@@ -302,10 +310,13 @@ mod tests {
         };
         let r = run(current, Some(short), RightsizingSource::Prometheus);
         assert_eq!(r.confidence, Confidence::Medium);
-        assert_eq!(codes(&r), vec![WARN_SHORT_HISTORY]);
+        assert_eq!(codes(&r), vec![WARN_SHORT_HISTORY, WARN_MEMORY_LIMIT_ADDED]);
         let r = run(current, Some(short), RightsizingSource::MetricsServer);
         assert_eq!(r.confidence, Confidence::Low);
-        assert_eq!(codes(&r), vec![WARN_METRICS_SERVER_ONLY]);
+        assert_eq!(
+            codes(&r),
+            vec![WARN_METRICS_SERVER_ONLY, WARN_MEMORY_LIMIT_ADDED]
+        );
         let bursty = UsageStats {
             cpu_max: 2000.0,
             ..usage(100.0, 200.0 * MIB)

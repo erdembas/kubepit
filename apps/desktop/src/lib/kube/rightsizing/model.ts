@@ -159,6 +159,10 @@ export function warningText(w: RecommendationWarning): string {
       return i18n.t(
         'The memory limit rises with the request, keeping the current limit-to-request ratio.',
       );
+    case 'memory-limit-added':
+      return i18n.t(
+        'No memory limit yet; one is proposed at the peak plus headroom so a leak cannot take down the node.',
+      );
     default:
       return w.detail ?? w.code;
   }

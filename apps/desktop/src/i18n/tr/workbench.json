@@ -1504,6 +1504,7 @@
   "No matching fields": "Eşleşen alan yok",
   "No matching kinds": "Eşleşen tür yok",
   "No matching namespaces": "Eşleşen namespace yok",
+  "No memory limit yet; one is proposed at the peak plus headroom so a leak cannot take down the node.": "Henüz bellek limiti yok; bir sızıntı node'u çökertmesin diye tepe kullanım artı pay kadar bir limit öneriliyor.",
   "No metrics source": "Metrik kaynağı yok",
   "No namespace matches the filter.": "Filtreyle eşleşen namespace yok.",
   "No namespaces.": "Namespace yok.",
