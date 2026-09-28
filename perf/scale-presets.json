@@ -1,0 +1,44 @@
+{
+  "s": {
+    "namespaces": 25,
+    "nodes": 50,
+    "deploymentsPerNamespace": 10,
+    "replicas": 4,
+    "oldReplicaSets": 1,
+    "configMapsPerDeployment": 2,
+    "secretsPerDeployment": 1,
+    "servicesPerDeployment": 1,
+    "crds": 20,
+    "crsPerCrd": 10,
+    "events": 2000,
+    "seed": 20260928
+  },
+  "m": {
+    "namespaces": 200,
+    "nodes": 500,
+    "deploymentsPerNamespace": 12.5,
+    "replicas": 4,
+    "oldReplicaSets": 1,
+    "configMapsPerDeployment": 2,
+    "secretsPerDeployment": 1,
+    "servicesPerDeployment": 1,
+    "crds": 100,
+    "crsPerCrd": 20,
+    "events": 10000,
+    "seed": 20260929
+  },
+  "l": {
+    "namespaces": 400,
+    "nodes": 1000,
+    "deploymentsPerNamespace": 12.5,
+    "replicas": 4,
+    "oldReplicaSets": 1,
+    "configMapsPerDeployment": 2,
+    "secretsPerDeployment": 1,
+    "servicesPerDeployment": 1,
+    "crds": 200,
+    "crsPerCrd": 20,
+    "events": 20000,
+    "seed": 20260930
+  }
+}

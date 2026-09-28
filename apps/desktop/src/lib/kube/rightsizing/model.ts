@@ -31,6 +31,9 @@ export const DEFAULT_RIGHTSIZING: RightsizingSettings = {
   min_cpu_millicores: 10,
   min_memory_bytes: 32 * MiB,
   days: 7,
+  min_hours: 24,
+  min_coverage: 0.9,
+  throttle_threshold_percent: 5,
 };
 
 /** Kinds the recommendations cover (and `rightsizing_apply` patches). */
@@ -169,8 +172,10 @@ export function warningText(w: RecommendationWarning): string {
 }
 
 /** Display name of a strategy (product names stay as they are). */
-export function strategyLabel(info: RightsizingStrategyInfo): string {
-  return info.id === 'percentile-headroom' ? i18n.t('Percentile + headroom') : info.name;
+export function strategyLabel(info: Pick<RightsizingStrategyInfo, 'id' | 'name'>): string {
+  if (info.id === 'percentile-headroom') return i18n.t('Percentile + headroom');
+  if (info.id === 'workload-history') return i18n.t('Workload history');
+  return info.name;
 }
 
 export type RightsizingFilter = 'changed' | 'over' | 'under' | 'all';

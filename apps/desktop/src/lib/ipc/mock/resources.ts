@@ -13,6 +13,7 @@ import { sleep } from './bus';
 import './fixtures/build';
 import {
   addWatcher,
+  deliverList,
   getDb,
   helmDetail,
   helmKey,
@@ -121,7 +122,7 @@ register({
   resource_watch: ({ clusterId, gvk, namespaces, onEvent }: MockArgs) => {
     const emit = onEvent as (b: WatchBatch) => void;
     const nss = (namespaces as string[]) ?? [];
-    const id = addWatcher(clusterId, kindKey(gvk), nss, emit);
+    const id = addWatcher(clusterId, kindKey(gvk), nss, emit, 'resource_watch');
     ensureLiveness();
     window.setTimeout(
       () => {
@@ -139,15 +140,9 @@ register({
           removeWatcher(id);
           return;
         }
-        emit({
-          watch_id: id,
-          reset: true,
-          upserts: structuredClone(listFor(clusterId, gvk, nss)),
-          deletes: [],
-          synced: true,
-          error: null,
-          recovered: false,
-        });
+        // The list arrived: full chunks of 500 at once, the rest with
+        // `synced` at the next tick, then the changes made meanwhile.
+        deliverList(id, listFor(clusterId, gvk, nss));
       },
       150 + Math.random() * 200,
     );

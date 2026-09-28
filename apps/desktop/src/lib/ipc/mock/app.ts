@@ -15,6 +15,7 @@ import { DEFAULT_ALERT_SETTINGS } from '@/lib/alerts/policy';
 import { DEFAULT_HISTORY_SETTINGS } from '@/lib/history/audit';
 import { windowLabel } from '@/lib/windowSeed';
 import { mockEmit, mockEmitAllWindows, mockListen, sleep } from './bus';
+import { scaleClusterId, scaleParams, withScaleParams } from './fixtures/scale';
 import { register, type MockArgs } from './registry';
 import { demoOverview } from './resources';
 
@@ -105,6 +106,24 @@ const PLATFORM: Record<string, [string, string, string]> = {
   'c-minikube': ['minikube', 'v1.32.0', 'https://192.168.49.2:8443'],
 };
 
+// `?scale=s|m|l` adds a scaled demo cluster for performance work (./fixtures/scale.ts).
+const scale = scaleParams(location.search).scale;
+if (scale) {
+  const id = scaleClusterId(scale);
+  clusters.push(
+    def({
+      id,
+      name: `scale-${scale}`,
+      context: `kind-scale-${scale}`,
+      environment: 'local',
+      tags: ['perf'],
+      color: '#64748b',
+      last_connected_at: null,
+    }),
+  );
+  PLATFORM[id] = ['kind', 'v1.31.0', 'https://127.0.0.1:6443'];
+}
+
 const statuses: Record<string, ClusterStatus> = {};
 for (const c of clusters) {
   statuses[c.id] = {
@@ -176,6 +195,14 @@ const defaultSettings: Settings = {
   // staging-gke keeps its events and changes on disk (demo persisted history).
   history: { ...DEFAULT_HISTORY_SETTINGS, persist_clusters: ['c-staging'] },
   keyboard_mode: false,
+  recommendations: {
+    scan_clusters: [],
+    interval_minutes: 60,
+    retention_days: 30,
+    strategy: null,
+    overrides: {},
+    alerts: false,
+  },
 };
 
 // Saved like the demo workspace, so a demo window opened later starts from
@@ -327,9 +354,11 @@ register({
   },
   // Another browser window on the same demo; it reads its seed like a Tauri window.
   window_open: ({ label }: MockArgs) => {
-    const url = new URL(location.href);
-    url.search = '';
-    url.searchParams.set('window', String(label));
+    const base = new URL(location.href);
+    base.search = '';
+    base.searchParams.set('window', String(label));
+    // Keep `?scale=`, `&churn=` and `&perf=`: the new window runs its own demo backend.
+    const url = withScaleParams(base, location.search);
     if (!window.open(url, String(label), 'popup,width=1400,height=900')) {
       throw new Error('The browser blocked the new window.');
     }

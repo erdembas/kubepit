@@ -173,13 +173,52 @@ pub fn merge_pod_usage(cpu: &PromData, memory: &PromData) -> UsageMap {
     out
 }
 
+/// Parameters of an instant query, evaluated at `time` (epoch seconds) when
+/// set, else at the server's "now".
+pub(super) fn instant_params(query: &str, time: Option<i64>) -> Vec<(&'static str, String)> {
+    let mut params = vec![("query", query.to_string())];
+    if let Some(time) = time {
+        params.push(("time", time.to_string()));
+    }
+    params
+}
+
 impl Kubepit {
-    /// One instant preset query against `source`.
-    async fn prometheus_instant(&self, source: &Source<'_>, query: &str) -> Result<PromData> {
+    /// One instant preset query against `source`, evaluated at `time`
+    /// (epoch seconds; `None` = now), through the one transport (tenant,
+    /// tunnel, cluster-label selector, re-detection after proxy failures).
+    async fn prometheus_instant(
+        &self,
+        source: &Source<'_>,
+        query: &str,
+        time: Option<i64>,
+    ) -> Result<PromData> {
         self.prometheus_send(
             source,
             "/api/v1/query",
-            vec![("query", query.to_string())],
+            instant_params(query, time),
+            Origin::Preset,
+            USAGE_TIMEOUT,
+        )
+        .await
+    }
+
+    /// One instant preset query against the cluster's Prometheus, evaluated
+    /// at `time` (epoch seconds; `None` = now): the source is resolved first,
+    /// then the one transport sends it.
+    // For single queries of later tasks (usage history); batches resolve the
+    // source once and use `prometheus_instant`.
+    #[allow(dead_code)]
+    pub(crate) async fn prometheus_instant_at(
+        &self,
+        cluster_id: &str,
+        query: &str,
+        time: Option<i64>,
+    ) -> Result<PromData> {
+        self.prometheus_get(
+            cluster_id,
+            "/api/v1/query",
+            instant_params(query, time),
             Origin::Preset,
             USAGE_TIMEOUT,
         )
@@ -203,11 +242,14 @@ impl Kubepit {
             container_memory_max(namespaces, days, &by_labels(labels)),
             container_hours(namespaces, days),
         ];
-        let [p95, max, mem, hours] =
-            futures::future::join_all(queries.iter().map(|q| self.prometheus_instant(&source, q)))
-                .await
-                .try_into()
-                .map_err(|_| anyhow::anyhow!("unexpected number of Prometheus answers"))?;
+        let [p95, max, mem, hours] = futures::future::join_all(
+            queries
+                .iter()
+                .map(|q| self.prometheus_instant(&source, q, None)),
+        )
+        .await
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("unexpected number of Prometheus answers"))?;
         // Memory and CPU p95 are required; the rest only refine.
         let (p95, mem) = (p95?, mem?);
         if !series_carry_labels(&mem.series, labels) {
@@ -234,8 +276,8 @@ impl Kubepit {
     ) -> Result<UsageMap> {
         let source = self.prometheus_source(cluster_id).await?;
         let (cpu, memory) = futures::future::join(
-            self.prometheus_instant(&source, &pod_cpu_avg(window_secs)),
-            self.prometheus_instant(&source, &pod_memory_avg(window_secs)),
+            self.prometheus_instant(&source, &pod_cpu_avg(window_secs), None),
+            self.prometheus_instant(&source, &pod_memory_avg(window_secs), None),
         )
         .await;
         Ok(merge_pod_usage(&cpu?, &memory?))
@@ -293,6 +335,21 @@ mod tests {
             r#"sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{container!="",container!="POD"}[604800s]))"#
         );
         assert!(pod_memory_avg(3600).contains("avg_over_time(container_memory_working_set_bytes"));
+    }
+
+    #[test]
+    fn instant_queries_send_the_evaluation_time_when_set() {
+        assert_eq!(
+            instant_params("up", None),
+            vec![("query", "up".to_string())]
+        );
+        assert_eq!(
+            instant_params("up", Some(1_700_000_100)),
+            vec![
+                ("query", "up".to_string()),
+                ("time", "1700000100".to_string())
+            ]
+        );
     }
 
     #[test]

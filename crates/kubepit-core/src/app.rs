@@ -203,6 +203,7 @@ impl Kubepit {
         settings.change_journal_disabled.sort();
         settings.change_journal_disabled.dedup();
         settings.history = settings.history.normalized();
+        settings.recommendations = settings.recommendations.normalized();
         let saved = self.store.set_settings(settings)?;
         self.apply_alert_settings(&saved.alerts);
         self.sync_change_journals();

@@ -1,3 +1,5 @@
+import { scalePreset, scalePresetOf, type ScalePresetName } from './scale';
+
 /** Per-cluster shape of the demo data (matches the clusters in `mock/app.ts`). */
 export interface ClusterProfile {
   id: string;
@@ -135,7 +137,33 @@ export const PROFILES: Record<string, ClusterProfile> = {
   },
 };
 
+/** A scaled demo cluster (`c-scale-<preset>`, `./scale.ts`): no demo scenarios. */
+function scaleProfile(clusterId: string, preset: ScalePresetName): ClusterProfile {
+  const p = scalePreset(preset);
+  return {
+    id: clusterId,
+    platform: 'kind',
+    version: 'v1.31.0',
+    nodes: p.nodes,
+    pods: Math.round(p.namespaces * p.deploymentsPerNamespace) * p.replicas,
+    zones: ['zone-a', 'zone-b', 'zone-c'],
+    region: 'local',
+    domain: `scale-${preset}.localtest.me`,
+    metrics: true,
+    argocd: false,
+    gpuNodes: 0,
+    cordoned: null,
+    notReady: null,
+    troubled: false,
+    forbidClusterSecrets: false,
+    teams: [],
+    ipBase: 60,
+  };
+}
+
 export function profileFor(clusterId: string): ClusterProfile {
+  const preset = scalePresetOf(clusterId);
+  if (preset) return scaleProfile(clusterId, preset);
   return (
     PROFILES[clusterId] ?? {
       ...PROFILES['c-kind']!,

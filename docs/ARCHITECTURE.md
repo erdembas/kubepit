@@ -945,24 +945,122 @@ applying a recommendation only reads, so read-only clusters get it all.
   by the pod names their kind generates (longest name wins), worst replica
   wins, hours are per replica. Without Prometheus the last metrics-server
   hour is used, split per container by the current snapshot (always low
-  confidence). The math sits behind `rightsizing::strategy::RecommendationStrategy`
+  confidence). Ownership-aware collection is built from
+  `rightsizing/ownership.rs`: kube-state-metrics owner series
+  (`kube_pod_owner`, `kube_replicaset_owner`, `kube_job_owner`) index pod
+  names per namespace; `<none>`, empty and non-controller owners are
+  dropped; `OwnerIndex::resolve` follows one hop (ReplicaSet → Deployment,
+  Job → CronJob, StatefulSet / DaemonSet directly) and reports bare pods,
+  orphan ReplicaSets and standalone Jobs as unowned, other parents
+  (`Node`, `Rollout`) as unsupported, and a pod name with several owners
+  as ambiguous with its sorted candidates (several owners that resolve to
+  one workload are that workload). `prometheus/workload_stats.rs`
+  builds the 16 instant queries of one batch (Q1–Q16: CPU p95 / max /
+  average / samples, memory max / average / samples, running samples,
+  first / last running step, pod / ReplicaSet / Job owners, OOM kills, CFS
+  throttled and total periods), all `max by (…)` and evaluated at
+  `time=` the window end floored to 5 minutes (`window_end`), four in
+  flight. Answers merge per `(namespace, pod, container)`: duplicates keep
+  the maximum, negative counts clamp at 0, Prometheus warnings mark the
+  batch partial. CPU p95 and memory max are required: a failed answer or
+  one above 50,000 series makes the batch splittable, a service-proxy
+  failure aborts (and re-detects Prometheus), other failures are listed as
+  failed queries. `rightsizing/evidence.rs` folds a batch into
+  per-(workload, container) usage (`ContainerUsage`: `UsageStats` plus
+  `UsageEvidence`): pods resolve through the owner index (or, without
+  owner series, by name with identity `name-match`), only containers of
+  the live pod template count (sidecars and renamed containers are
+  skipped), the maxima are over pods that have both a CPU p95 and a memory
+  max, averages are sample-weighted, observed hours are the union of the
+  pods' running spans (without them, memory samples per replica, capped at
+  the window), coverage is samples ÷ running samples, duty the average
+  running pods, the throttling ratio needs 600 CFS periods, and an
+  ambiguous pod name adds nothing but flags every live candidate
+  (`WorkloadExtras.identity`, even for rows left without usage). When the
+  ReplicaSet or Job owner query failed or answered nothing for a namespace
+  (`OwnerIndex::missing_parent_series`), pods owned by a ReplicaSet / Job
+  there are matched by name among Deployments / CronJobs instead, with
+  identity `name-match` and partial data. Rows keep at most 50 sorted pod names and the HPA whose
+  `scaleTargetRef` names the workload. The metrics-server and legacy Prometheus paths produce
+  `ContainerUsage` without evidence. The math sits behind `rightsizing::strategy::RecommendationStrategy`
   (`fn info() -> RightsizingStrategyInfo`, `fn recommend(&ContainerInput) ->
   StrategyOutput`; input = name, current requests/limits, `UsageStats`,
-  source, settings; output = recommended values, confidence, warnings).
-  `STRATEGIES` lists them, requests pick one by id and reports list them
-  all, so a new strategy needs no UI, apply or preset changes. The default
+  source, settings, optional `UsageEvidence` and `HpaInfo`; output =
+  recommended values, confidence, warnings). `info()` also carries the
+  strategy's own `defaults` and the `settings_keys` it reads, so the UI
+  renders only those fields (every strategy lists `min_hours`,
+  `min_coverage` and `throttle_threshold_percent`, which the shared
+  evidence step reads); a request without settings uses the strategy's
+  defaults. `STRATEGIES` lists them, requests pick one by id and
+  reports list them all, so a new strategy needs no UI, apply or preset
+  changes. Settings clamp to headroom 0–300 %, 1–30 days, `min_hours`
+  1–720 (at most the window), `min_coverage` 0.1–1 and
+  `throttle_threshold_percent` 1–50. New report, workload and container
+  fields (`evidence`, `pods`, `hpa`, `lenses`, `cost_replicas`,
+  `strategy_auto`, `window_end`, `cpu_avg` / `memory_avg`) default when
+  absent, so JSON of older builds still reads. The default
   `percentile-headroom` (`rightsizing/percentile.rs`): CPU request = p95 +
   15 %, memory request = max + 20 %, memory limit = max + 40 % — proposed
   for containers without one (`memory-limit-added`), raised when tighter,
   never lowered (CPU limits are never invented) —, minimums, rounding up
   to sane steps, never below the observed peak, no churn under 10 % /
   10 m / 16 MiB; confidence high from 3 days, medium from 12 hours.
+  `workload-history` (`rightsizing/workload_history.rs`, KubeFit's logic)
+  sits next to it: CPU request = p95 + 20 %, memory request = max + 20 %,
+  both at least the minimums and rounded up to whole millicores / MiB;
+  after an OOM kill the memory base is never below the current limit; the
+  same no-churn band; a container without a memory limit gets one at the
+  peak + `memory_limit_headroom_percent` (never below the request,
+  `memory-limit-added`), existing limits are left to `finalize`, CPU
+  limits are never invented; confidence high from 72 hours, else medium
+  (`short-history`), metrics-server low. `strategy::resolve` picks the
+  requested strategy, or automatically `workload-history` when the
+  collection resolved pods through kube-state-metrics owner metrics and
+  `percentile-headroom` otherwise (`strategy_auto`).
+  Between the strategy and `finalize`, the shared `strategy::apply_evidence`
+  turns the usage evidence and the HPA into flags that only cap the
+  confidence and never change a value (a recommendation is always
+  computed): `identity-unclear`, `insufficient-history` (< `min_hours`,
+  detail whole hours) and `low-coverage` (< `min_coverage`, detail whole
+  %, both rounded down) cap it at low; `partial-data`, `hpa-target` (detail the HPA name),
+  `hpa-utilization` (a Utilization target on a request that changes,
+  detail `cpu 70%`), `oom-killed`, `cpu-throttled` (throttled ÷ CFS
+  periods ≥ the threshold, detail one decimal %) and `identity-by-name`
+  cap it at medium; the final confidence is the lowest cap.
   `strategy::finalize` is shared by all strategies: values a strategy left
   alone stay, and a limit a new request would exceed rises proportionally
   (current limit ÷ request ratio kept, flagged `*_limit_raised` with a
-  warning). Workloads get a verdict (over / under / balanced / no data),
-  the monthly cost delta of their requests and the weakest container's
-  confidence.
+  warning). Workloads get a verdict (over / under / balanced / no data;
+  any `oom-killed` container makes it under), the monthly cost delta of
+  their requests and the weakest container's confidence.
+  `rightsizing/summary.rs` adds what the review needs, in Rust so every
+  view and export agrees: `lenses_of` (KubeFit's quick-focus groups:
+  `cpu-reduction`, `memory-reduction`, `increase` (increase or set),
+  `request-unset`, `missing-data`, `needs-review` (changed, not high
+  confidence), `limit-raised`) sets `WorkloadRecommendation.lenses`;
+  `risk_score` (`+∞` after an OOM kill, else the largest usage ÷ request,
+  a missing request counting as 2); `one_click_eligible` (high
+  confidence, changed, no raised limit — the UI adds the cluster
+  conditions); `summarize` turns a report into a `RecommendationSummary`:
+  counts by verdict, confidence and change, one-click count, CPU and
+  memory totals (requests × `cost_replicas` over containers with a
+  current request and usage, plus the containers without a request),
+  monthly current / savings / increases, and `top` — at most five
+  under-provisioned workloads (confidence ≥ medium) by risk, then at most
+  five high-confidence savings, ties by namespace and name.
+- **Recommendation settings** live in the backend
+  (`Settings.recommendations`, `recommendations/types.rs`) so background
+  scans and the UI agree: `scan_clusters` (opt-in per cluster),
+  `interval_minutes` (60, 15–1440), `retention_days` (30, 1–90),
+  `strategy` (`None` = automatic), `overrides` per strategy id and
+  `alerts` (off). `settings_set` normalizes them (clamps, sorted and
+  deduplicated clusters without blanks, a blank or unknown strategy =
+  automatic, every override normalized). `rightsizing_report` takes the
+  request's strategy (unknown = an error), else the saved one (unknown,
+  e.g. from a newer build or a hand edit, = ignored), else resolves
+  automatically, and the request's
+  settings, else `effective_settings` (the strategy's override, else its
+  `info().defaults`).
 - **Apply** (`rightsizing_apply`): a strategic merge patch of the named
   containers' resources at the pod template plus a
   `kubernetes.io/change-cause`; `dryRun: true` returns live vs. result like
