@@ -1,6 +1,8 @@
 //! Strategy-independent building blocks: percentiles, rounding, headroom,
-//! the no-churn rule, sample statistics, cost of requests and the
-//! over / under verdict. Strategies ([`super::strategy`]) combine them.
+//! the no-churn rule, sample statistics, cost of requests, the
+//! over / under verdict and the workload recommendation built from its
+//! containers ([`workload_recommendation`]). Strategies
+//! ([`super::strategy`]) combine them.
 //!
 //! - Values round *up* to sane steps (5 m / 10 m / 50 m / 100 m, 8 / 16 / 64 /
 //!   256 MiB) and never below the minimums or the observed peak.
@@ -9,7 +11,11 @@
 //!   below the observed peak.
 
 use super::strategy::WARN_OOM_KILLED;
-use super::types::{Change, ContainerRecommendation, RightsizingSettings, UsageStats, Verdict};
+use super::summary::lenses_of;
+use super::types::{
+    Change, Confidence, ContainerRecommendation, HpaInfo, RightsizingSettings, UsageStats, Verdict,
+    WorkloadRecommendation,
+};
 use crate::cost::CostPricing;
 
 pub const MIB: f64 = 1024.0 * 1024.0;
@@ -243,6 +249,67 @@ pub fn verdict(containers: &[ContainerRecommendation], current: f64, recommended
     } else {
         Verdict::Balanced
     }
+}
+
+/// What a workload recommendation holds besides what follows from its
+/// containers: identity, replicas and the workload-level facts of the
+/// collection.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WorkloadFacts {
+    pub kind: String,
+    pub namespace: String,
+    pub name: String,
+    pub uid: String,
+    pub replicas: u32,
+    /// Pod names behind the usage, sorted (at most 50).
+    pub pods: Vec<String>,
+    pub pods_truncated: bool,
+    pub hpa: Option<HpaInfo>,
+}
+
+/// The recommendation of a workload from its container recommendations
+/// (spec §6.9), shared by fresh reports and re-evaluated stored ones:
+/// cost replicas, monthly amounts, the verdict, the weakest confidence of
+/// the containers with usage, the history behind it and the lenses.
+pub fn workload_recommendation(
+    facts: WorkloadFacts,
+    containers: Vec<ContainerRecommendation>,
+    pricing: &CostPricing,
+) -> WorkloadRecommendation {
+    let cost_replicas = cost_replicas(&facts.kind, facts.replicas, &containers);
+    let monthly_current = monthly_requests(&containers, cost_replicas, pricing, false);
+    let monthly_recommended = monthly_requests(&containers, cost_replicas, pricing, true);
+    // The weakest container with data decides.
+    let confidence = containers
+        .iter()
+        .filter(|c| c.usage.is_some())
+        .map(|c| c.confidence)
+        .min()
+        .unwrap_or(Confidence::Low);
+    let mut rec = WorkloadRecommendation {
+        kind: facts.kind,
+        namespace: facts.namespace,
+        name: facts.name,
+        uid: facts.uid,
+        replicas: facts.replicas,
+        confidence,
+        verdict: verdict(&containers, monthly_current, monthly_recommended),
+        coverage_hours: containers
+            .iter()
+            .filter_map(|c| c.usage.map(|u| u.hours))
+            .fold(0.0, f64::max),
+        changed: containers.iter().any(ContainerRecommendation::changed),
+        monthly_delta: monthly_recommended - monthly_current,
+        monthly_current,
+        containers,
+        pods: facts.pods,
+        pods_truncated: facts.pods_truncated,
+        hpa: facts.hpa,
+        lenses: Vec::new(),
+        cost_replicas,
+    };
+    rec.lenses = lenses_of(&rec);
+    rec
 }
 
 /// Statistics of a series of samples (metrics-server history).

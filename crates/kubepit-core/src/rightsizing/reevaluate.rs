@@ -12,9 +12,8 @@
 use super::math;
 use super::sort_recommendations;
 use super::strategy::{self, ContainerInput, RecommendationStrategy};
-use super::summary;
 use super::types::{
-    Confidence, ContainerRecommendation, RightsizingReport, RightsizingSettings, RightsizingSource,
+    ContainerRecommendation, RightsizingReport, RightsizingSettings, RightsizingSource,
     WorkloadRecommendation,
 };
 use crate::cost::CostPricing;
@@ -42,40 +41,17 @@ fn reevaluate_workload(
             strategy::recommend(strategy, &input)
         })
         .collect();
-    let cost_replicas = math::cost_replicas(&stored.kind, stored.replicas, &containers);
-    let monthly_current = math::monthly_requests(&containers, cost_replicas, pricing, false);
-    let monthly_recommended = math::monthly_requests(&containers, cost_replicas, pricing, true);
-    // The weakest container with data decides.
-    let confidence = containers
-        .iter()
-        .filter(|c| c.usage.is_some())
-        .map(|c| c.confidence)
-        .min()
-        .unwrap_or(Confidence::Low);
-    let mut rec = WorkloadRecommendation {
+    let facts = math::WorkloadFacts {
         kind: stored.kind.clone(),
         namespace: stored.namespace.clone(),
         name: stored.name.clone(),
         uid: stored.uid.clone(),
         replicas: stored.replicas,
-        confidence,
-        verdict: math::verdict(&containers, monthly_current, monthly_recommended),
-        coverage_hours: containers
-            .iter()
-            .filter_map(|c| c.usage.map(|u| u.hours))
-            .fold(0.0, f64::max),
-        changed: containers.iter().any(ContainerRecommendation::changed),
-        monthly_delta: monthly_recommended - monthly_current,
-        monthly_current,
-        containers,
         pods: stored.pods.clone(),
         pods_truncated: stored.pods_truncated,
         hpa: stored.hpa.clone(),
-        lenses: Vec::new(),
-        cost_replicas,
     };
-    rec.lenses = summary::lenses_of(&rec);
-    rec
+    math::workload_recommendation(facts, containers, pricing)
 }
 
 /// `stored` recomputed with `strategy` (`auto`: chosen automatically),
