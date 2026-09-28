@@ -31,7 +31,9 @@ use kube::Client;
 
 use crate::app::Kubepit;
 use crate::objects::now_millis;
-use crate::service_proxy::{is_proxy_failure, valid_name, DetectCache, DetectedStatus};
+use crate::service_proxy::{
+    all_forbidden, is_proxy_failure, is_proxy_forbidden, valid_name, DetectCache, DetectedStatus,
+};
 use crate::types::{
     ClusterDef, PromQueryResult, PrometheusConfig, PrometheusKind, PrometheusMetric,
     PrometheusMetricsResult, PrometheusRange, PrometheusSeries, PrometheusService,
@@ -136,7 +138,9 @@ fn status(state: PrometheusState) -> PrometheusStatus {
 }
 
 /// Run detection (or probe the configured service). Never fails: problems
-/// become `not-found` / `unreachable` with an explanation.
+/// become `not-found` / `unreachable` / `forbidden` with an explanation.
+/// Any candidate answering wins; `forbidden` needs every probed candidate
+/// refused by the API server (no `get` on `services/proxy`).
 async fn detect_status(client: &Client, cluster: &ClusterDef) -> PrometheusStatus {
     match &cluster.prometheus {
         PrometheusConfig::Off => status(PrometheusState::Off),
@@ -144,10 +148,10 @@ async fn detect_status(client: &Client, cluster: &ClusterDef) -> PrometheusStatu
             let service = config.service().expect("service mode");
             let result = detect::probe(client, &service).await;
             PrometheusStatus {
-                state: if result.is_ok() {
-                    PrometheusState::Available
-                } else {
-                    PrometheusState::Unreachable
+                state: match &result {
+                    Ok(()) => PrometheusState::Available,
+                    Err(e) if is_proxy_forbidden(e) => PrometheusState::Forbidden,
+                    Err(_) => PrometheusState::Unreachable,
                 },
                 error: result.err().map(|e| format!("{e:#}")),
                 service: Some(service),
@@ -182,6 +186,7 @@ async fn detect_status(client: &Client, cluster: &ClusterDef) -> PrometheusStatu
             )
             .await;
             let winner = probes.iter().position(Result::is_ok);
+            let forbidden = all_forbidden(&probes);
             let error = probes
                 .into_iter()
                 .find_map(Result::err)
@@ -198,7 +203,11 @@ async fn detect_status(client: &Client, cluster: &ClusterDef) -> PrometheusStatu
                     source: Some(PrometheusSource::Detected),
                     error,
                     candidates,
-                    ..status(PrometheusState::Unreachable)
+                    ..status(if forbidden {
+                        PrometheusState::Forbidden
+                    } else {
+                        PrometheusState::Unreachable
+                    })
                 },
             }
         }
@@ -288,6 +297,13 @@ impl Kubepit {
                 "Prometheus at {}/{} is not reachable{}",
                 service.namespace,
                 service.service,
+                status.error.map(|e| format!(": {e}")).unwrap_or_default()
+            ),
+            (PrometheusState::Forbidden, Some(service)) => bail!(
+                "Prometheus at {}/{} needs get on services/proxy in namespace {}{}",
+                service.namespace,
+                service.service,
+                service.namespace,
                 status.error.map(|e| format!(": {e}")).unwrap_or_default()
             ),
             _ => bail!("no Prometheus was found on this cluster"),

@@ -17,7 +17,7 @@ use kubepit_core::rightsizing::{
 };
 use kubepit_core::types::{DryRunOperation, PromScheme};
 use serde_json::{json, Value};
-use support::{setup, start, status, Log, Reply, Request, Router};
+use support::{proxy_forbidden, setup, start, status, Log, Reply, Request, Router};
 
 const OPENCOST: &str = "/api/v1/namespaces/opencost/services/http:opencost:9003/proxy";
 const KUBECOST: &str =
@@ -361,6 +361,81 @@ async fn kubecost_is_found_and_an_unreachable_service_falls_back_to_an_estimate(
     let report = app.cost_report(&id, &CostQuery::default()).await.unwrap();
     assert_eq!(report.status.source, CostSourceKind::Estimate);
     assert!(report.totals.total > 0.0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn forbidden_cost_api_is_flagged() {
+    // OpenCost and Kubecost are listed, but the user may not use the proxy.
+    let router: Router = Arc::new(|req: &Request, log: &Log| {
+        if req.path.contains("/proxy") {
+            return proxy_forbidden(&req.path);
+        }
+        match bare(&req.path) {
+            "/api/v1/services" => list(
+                "ServiceList",
+                vec![
+                    service(
+                        "opencost",
+                        "opencost",
+                        json!({"app.kubernetes.io/name": "opencost"}),
+                        json!([{"name": "http", "port": 9003}]),
+                    ),
+                    service(
+                        "kubecost",
+                        "kubecost-cost-analyzer",
+                        json!({"app": "cost-analyzer"}),
+                        json!([{"name": "tcp-frontend", "port": 9090}]),
+                    ),
+                ],
+            ),
+            _ => estimate_router(false)(req, log),
+        }
+    });
+    let server = start(router).await;
+    let (_dir, app, _recorder, id) = setup(&server.url, false);
+    app.cluster_connect(&id).await.unwrap();
+
+    let st = app.cost_status(&id, false).await.unwrap();
+    assert!(st.forbidden, "{st:?}");
+    assert_eq!(st.source, CostSourceKind::Estimate);
+    assert_eq!(st.service.as_ref().unwrap().service, "opencost");
+    assert!(st.error.as_deref().unwrap().contains("services/proxy"));
+    // Costs are still estimated from requests.
+    let report = app.cost_report(&id, &CostQuery::default()).await.unwrap();
+    assert!(report.status.forbidden);
+    assert!(report.totals.total > 0.0);
+
+    // A configured service that is refused is flagged too.
+    let mut def = app.cluster_def(&id).unwrap();
+    def.cost.source = CostSourceConfig::Kubecost {
+        namespace: "kubecost".into(),
+        service: "kubecost-cost-analyzer".into(),
+        port: 9090,
+        scheme: PromScheme::Http,
+        path_prefix: String::new(),
+    };
+    app.cluster_update(def).unwrap();
+    let st = app.cost_status(&id, false).await.unwrap();
+    assert!(st.forbidden && st.configured, "{st:?}");
+    assert_eq!(st.source, CostSourceKind::Estimate);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unreachable_cost_api_is_not_flagged_forbidden() {
+    let server = start(estimate_router(false)).await;
+    let (_dir, app, _recorder, id) = setup(&server.url, false);
+    let mut def = app.cluster_def(&id).unwrap();
+    def.cost.source = CostSourceConfig::Opencost {
+        namespace: "opencost".into(),
+        service: "opencost".into(),
+        port: 9003,
+        scheme: PromScheme::Http,
+        path_prefix: String::new(),
+    };
+    app.cluster_update(def).unwrap();
+    let st = app.cost_status(&id, false).await.unwrap();
+    assert!(!st.forbidden, "{st:?}");
+    assert!(st.error.unwrap().contains("no endpoints available"));
 }
 
 fn deployment(replicas: u64, cpu: &str, memory: &str) -> Value {

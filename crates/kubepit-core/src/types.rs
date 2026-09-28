@@ -1315,6 +1315,9 @@ pub enum PrometheusState {
     NotFound,
     /// A service was found or configured but did not answer queries.
     Unreachable,
+    /// Every probed service was refused by the API server: the user may not
+    /// `get` `services/proxy` there (`error` quotes the API server).
+    Forbidden,
     /// Disabled in the cluster settings.
     Off,
 }
@@ -1514,6 +1517,9 @@ pub enum LokiState {
     NotFound,
     /// A service was found or configured but did not answer.
     Unreachable,
+    /// Every probed service was refused by the API server: the user may not
+    /// `get` `services/proxy` there (`error` quotes the API server).
+    Forbidden,
     /// Disabled in the cluster settings.
     Off,
 }

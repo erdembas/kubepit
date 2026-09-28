@@ -1084,7 +1084,7 @@ git commit -m "feat(clusters): set Prometheus, Loki and cost sources when adding
   - else, when every probed candidate's error `is_proxy_forbidden` → `Forbidden`, with `service` set to the best candidate and `error` to its message;
   - else `Unreachable`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 // tests/prometheus.rs — the router answers every `/proxy/` path with a 403 Status
@@ -1113,22 +1113,22 @@ async fn mixed_forbidden_and_unreachable_candidates_stay_unreachable() {
 - In `tests/cost.rs` add `forbidden_cost_api_is_flagged`: `status.forbidden == true`, and `source == CostSourceKind::Estimate`.
 - Unit test in `service_proxy.rs`, `is_proxy_forbidden_matches_only_proxy_403`: `proxy_error(403, ..)` → true; `proxy_error(503, ..)` → false; a plain kube 403 `ApiError` with reason `Forbidden` → false.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core forbidden`
 Expected: FAIL (`PrometheusState::Forbidden` not found).
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
   - Add the variants and the field. Apply the state rule. Fix the cost `is_proxy_failure` comment to match the code.
   - `ProxyForbiddenNotice` says "Your account may not use the service proxy for {what}." and "Kubepit reaches it through the API server, which needs get on services/proxy in namespace {namespace}." It shows the API server message verbatim in a `CopyableCodeBlock`, plus a copyable `kubectl auth can-i get services/proxy -n {namespace}`.
   - Each view renders the notice for `forbidden` instead of its "does not answer" state.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core && pnpm typecheck && pnpm i18n:check`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates apps/desktop docs/ARCHITECTURE.md

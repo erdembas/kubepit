@@ -186,6 +186,32 @@ pub fn is_proxy_failure(err: &anyhow::Error) -> bool {
     })
 }
 
+/// The API server refused the proxy request itself: the user may not `get`
+/// `services/proxy` in the service's namespace (a 403 on the proxy path, as
+/// opposed to a plain Kubernetes 403 or the service's own answer).
+pub fn is_proxy_forbidden(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        cause
+            .downcast_ref::<ApiError>()
+            .is_some_and(|api| api.reason == PROXY_REASON && api.code == 403)
+    })
+}
+
+/// Detection outcome of probing several candidates (see the state rule of
+/// Prometheus, Loki and cost): `true` when every probe failed with
+/// [`is_proxy_forbidden`]. Mixed failures (one 403, one unreachable or timed
+/// out) are not "forbidden"; neither is an empty probe list.
+pub fn all_forbidden<'a, T: 'a>(probes: impl IntoIterator<Item = &'a Result<T>>) -> bool {
+    let mut any = false;
+    for probe in probes {
+        match probe {
+            Err(e) if is_proxy_forbidden(e) => any = true,
+            _ => return false,
+        }
+    }
+    any
+}
+
 // ---------------------------------------------------------------------------
 // Detection cache
 // ---------------------------------------------------------------------------
@@ -554,6 +580,37 @@ mod tests {
         assert!(is_proxy_failure(&gone));
         let bad: anyhow::Error = proxy_error(400, "").into();
         assert!(!is_proxy_failure(&bad));
+    }
+
+    #[test]
+    fn is_proxy_forbidden_matches_only_proxy_403() {
+        let forbidden: anyhow::Error = proxy_error(
+            403,
+            r#"{"kind":"Status","message":"services \"http:loki:80\" is forbidden: User \"dev\" cannot get resource \"services/proxy\"","code":403}"#,
+        )
+        .into();
+        assert!(is_proxy_forbidden(&forbidden));
+        assert!(is_proxy_forbidden(&forbidden.context("probe failed")));
+        assert!(!is_proxy_failure(&proxy_error(403, "").into()));
+        let gone: anyhow::Error = proxy_error(503, "").into();
+        assert!(!is_proxy_forbidden(&gone));
+        let kube: anyhow::Error = ApiError {
+            code: 403,
+            reason: "Forbidden".into(),
+            message: "services is forbidden".into(),
+        }
+        .into();
+        assert!(!is_proxy_forbidden(&kube));
+    }
+
+    #[test]
+    fn all_forbidden_needs_every_probe_refused() {
+        let refused = || -> Result<()> { Err(proxy_error(403, "").into()) };
+        let gone = || -> Result<()> { Err(proxy_error(503, "").into()) };
+        assert!(all_forbidden(&[refused(), refused()]));
+        assert!(!all_forbidden(&[refused(), gone()]));
+        assert!(!all_forbidden(&[refused(), Ok(())]));
+        assert!(!all_forbidden(&Vec::<Result<()>>::new()));
     }
 
     #[test]

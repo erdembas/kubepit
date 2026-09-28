@@ -13,7 +13,7 @@ use kubepit_core::types::{
 };
 use kubepit_core::{Kubepit, NullSink, Paths};
 use serde_json::{json, Value};
-use support::{setup, start, status, Log, Reply, Request, Router};
+use support::{proxy_forbidden, setup, start, status, Log, Reply, Request, Router};
 
 const OPERATED: &str = "/api/v1/namespaces/monitoring/services/http:prometheus-operated:9090/proxy";
 
@@ -167,6 +167,65 @@ fn stack_router(gone: Arc<AtomicBool>) -> Router {
             _ => Reply::Json(404, status(404, "NotFound", "not found")),
         }
     })
+}
+
+/// How the service proxy answers in [`router_with`].
+#[derive(Debug, Clone, Copy)]
+enum ProxyAnswer {
+    /// Every proxy request is refused (no `get` on `services/proxy`).
+    Forbidden,
+    /// The first candidate (`prometheus-operated`) is refused, the second
+    /// (`kps-kube-prometheus-prometheus`) has no endpoints.
+    ForbiddenThen503,
+}
+
+/// The kube-prometheus-stack detection router of [`stack_router`], with
+/// every service-proxy request answered by `answer`.
+fn router_with(answer: ProxyAnswer) -> Router {
+    let detection = stack_router(Arc::default());
+    Arc::new(move |req: &Request, log: &Log| {
+        if !req.path.contains("/proxy") {
+            return detection(req, log);
+        }
+        match answer {
+            ProxyAnswer::Forbidden => proxy_forbidden(&req.path),
+            ProxyAnswer::ForbiddenThen503 if req.path.starts_with(OPERATED) => {
+                proxy_forbidden(&req.path)
+            }
+            ProxyAnswer::ForbiddenThen503 => no_endpoints("kps-kube-prometheus-prometheus"),
+        }
+    })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn proxy_403_reports_forbidden_state() {
+    let server = start(router_with(ProxyAnswer::Forbidden)).await;
+    let (_dir, app, _rec, id) = setup(&server.url, false);
+    app.cluster_connect(&id).await.unwrap();
+    let st = app.prometheus_status(&id, false).await.unwrap();
+    assert_eq!(st.state, PrometheusState::Forbidden);
+    assert!(
+        st.error.as_deref().unwrap().contains("services/proxy"),
+        "{st:?}"
+    );
+    assert_eq!(st.service.unwrap().service, "prometheus-operated");
+    let err = app
+        .prometheus_query_range(&id, "up", &last_hour())
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("services/proxy"), "{err}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mixed_forbidden_and_unreachable_candidates_stay_unreachable() {
+    let server = start(router_with(ProxyAnswer::ForbiddenThen503)).await;
+    let (_dir, app, _rec, id) = setup(&server.url, false);
+    app.cluster_connect(&id).await.unwrap();
+    assert_eq!(
+        app.prometheus_status(&id, false).await.unwrap().state,
+        PrometheusState::Unreachable
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

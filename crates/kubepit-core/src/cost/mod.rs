@@ -40,6 +40,7 @@ use crate::app::Kubepit;
 use crate::error::ApiError;
 use crate::objects::now_millis;
 use crate::prometheus::detect::list_services;
+use crate::service_proxy;
 use crate::types::{
     ClusterDef, PrometheusMetric, PrometheusRange, PrometheusState, PrometheusTarget,
 };
@@ -116,7 +117,9 @@ fn status_fresh(
         && (positive || now.duration_since(entry.at) < RECHECK_AFTER)
 }
 
-/// The proxy could not reach the service (gone, no endpoints, forbidden).
+/// The proxy could not reach the service (gone: 404, 502 or 503). A 403
+/// (no `get` on `services/proxy`) is not a failure of the service; detection
+/// reports it as `CostStatus::forbidden`.
 fn is_proxy_failure(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
         cause.downcast_ref::<ApiError>().is_some_and(|api| {
@@ -223,6 +226,7 @@ impl Kubepit {
             service: None,
             configured: false,
             error: None,
+            forbidden: false,
             candidates: Vec::new(),
             platform,
             platform_label: conn.platform.clone(),
@@ -239,7 +243,10 @@ impl Kubepit {
                 let client = self.cost_client(&cluster).await?;
                 match probe(&client, &service).await {
                     Ok(()) => status.source = source_of(service.kind),
-                    Err(e) => status.error = Some(format!("{e:#}")),
+                    Err(e) => {
+                        status.forbidden = service_proxy::is_proxy_forbidden(&e);
+                        status.error = Some(format!("{e:#}"));
+                    }
                 }
                 status.service = Some(service);
             }
@@ -260,6 +267,7 @@ impl Kubepit {
                         }
                         None => {
                             status.service = Some(candidates[0].clone());
+                            status.forbidden = service_proxy::all_forbidden(&probes);
                             status.error = probes
                                 .into_iter()
                                 .find_map(Result::err)
@@ -604,6 +612,7 @@ mod tests {
             service: None,
             configured,
             error: None,
+            forbidden: false,
             candidates: Vec::new(),
             platform: CostPlatform::Generic,
             platform_label: None,

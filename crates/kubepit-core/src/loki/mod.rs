@@ -27,7 +27,10 @@ use kube::Client;
 
 use crate::app::Kubepit;
 use crate::objects::now_millis;
-use crate::service_proxy::{self, is_proxy_failure, valid_name, DetectCache, DetectedStatus};
+use crate::service_proxy::{
+    self, all_forbidden, is_proxy_failure, is_proxy_forbidden, valid_name, DetectCache,
+    DetectedStatus,
+};
 use crate::types::{
     ClusterDef, LokiConfig, LokiKind, LokiQuery, LokiQueryResult, LokiService, LokiSource,
     LokiState, LokiStatus,
@@ -143,7 +146,9 @@ fn status(state: LokiState) -> LokiStatus {
 }
 
 /// Run detection (or probe the configured service). Never fails: problems
-/// become `not-found` / `unreachable` with an explanation.
+/// become `not-found` / `unreachable` / `forbidden` with an explanation.
+/// Any candidate answering wins; `forbidden` needs every probed candidate
+/// refused by the API server (no `get` on `services/proxy`).
 async fn detect_status(client: &Client, cluster: &ClusterDef) -> LokiStatus {
     match &cluster.loki {
         LokiConfig::Off => status(LokiState::Off),
@@ -151,10 +156,10 @@ async fn detect_status(client: &Client, cluster: &ClusterDef) -> LokiStatus {
             let service = config.service().expect("service mode");
             let result = detect::probe(client, &service, config.tenant()).await;
             LokiStatus {
-                state: if result.is_ok() {
-                    LokiState::Available
-                } else {
-                    LokiState::Unreachable
+                state: match &result {
+                    Ok(()) => LokiState::Available,
+                    Err(e) if is_proxy_forbidden(e) => LokiState::Forbidden,
+                    Err(_) => LokiState::Unreachable,
                 },
                 error: result.err().map(|e| format!("{e:#}")),
                 service: Some(service),
@@ -189,6 +194,7 @@ async fn detect_status(client: &Client, cluster: &ClusterDef) -> LokiStatus {
             )
             .await;
             let winner = probes.iter().position(Result::is_ok);
+            let forbidden = all_forbidden(&probes);
             let error = probes
                 .into_iter()
                 .find_map(Result::err)
@@ -205,7 +211,11 @@ async fn detect_status(client: &Client, cluster: &ClusterDef) -> LokiStatus {
                     source: Some(LokiSource::Detected),
                     error,
                     candidates,
-                    ..status(LokiState::Unreachable)
+                    ..status(if forbidden {
+                        LokiState::Forbidden
+                    } else {
+                        LokiState::Unreachable
+                    })
                 },
             }
         }
@@ -265,6 +275,13 @@ impl Kubepit {
                 "Loki at {}/{} is not reachable{}",
                 service.namespace,
                 service.service,
+                status.error.map(|e| format!(": {e}")).unwrap_or_default()
+            ),
+            (LokiState::Forbidden, Some(service)) => bail!(
+                "Loki at {}/{} needs get on services/proxy in namespace {}{}",
+                service.namespace,
+                service.service,
+                service.namespace,
                 status.error.map(|e| format!(": {e}")).unwrap_or_default()
             ),
             _ => bail!("no Loki was found on this cluster"),

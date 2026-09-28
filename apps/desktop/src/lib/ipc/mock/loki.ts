@@ -26,7 +26,8 @@ import { handlers, register, type MockArgs } from './registry';
 /**
  * Demo Loki: the grafana/loki gateway on prod-eu-west-1, the single binary
  * on the other cloud clusters (unreachable on dev, whose Loki pod is still
- * starting), nothing on the local ones. Streams and lines come from
+ * starting; forbidden on staging, where the demo user may not use the
+ * service proxy), nothing on the local ones. Streams and lines come from
  * `fixtures/loki.ts`; errors and limits mirror the backend.
  */
 
@@ -95,6 +96,16 @@ async function detect(cluster: ClusterDef): Promise<LokiStatus> {
       candidates,
       error: `no endpoints available for service "${candidates[0]!.service}"`,
     };
+  if (cluster.id === 'c-staging') {
+    const best = candidates[0]!;
+    return {
+      ...blank('forbidden'),
+      service: best,
+      source: 'detected',
+      candidates,
+      error: `services "${best.scheme}:${best.service}:${best.port}" is forbidden: User "dev@example.com" cannot get resource "services/proxy" in API group "" in the namespace "${best.namespace}"`,
+    };
+  }
   return { ...blank('available'), service: candidates[0]!, source: 'detected', candidates };
 }
 
@@ -123,6 +134,10 @@ async function service(clusterId: string): Promise<LokiService> {
   if (st.state === 'unreachable' && st.service)
     throw new Error(
       `Loki at ${st.service.namespace}/${st.service.service} is not reachable: ${st.error}`,
+    );
+  if (st.state === 'forbidden' && st.service)
+    throw new Error(
+      `Loki at ${st.service.namespace}/${st.service.service} needs get on services/proxy in namespace ${st.service.namespace}: ${st.error}`,
     );
   throw new Error('no Loki was found on this cluster');
 }

@@ -173,6 +173,31 @@ pub fn status(code: u16, reason: &str, message: &str) -> Value {
            "message": message, "reason": reason, "code": code})
 }
 
+/// The API server's 403 for a service-proxy `path`
+/// (`/api/v1/namespaces/{ns}/services/{scheme}:{name}:{port}/proxy…`): the
+/// user may not `get` `services/proxy` in that namespace.
+pub fn proxy_forbidden(path: &str) -> Reply {
+    let segment = |key: &str| {
+        path.split(key)
+            .nth(1)
+            .and_then(|rest| rest.split('/').next())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let (namespace, service) = (segment("/namespaces/"), segment("/services/"));
+    Reply::Json(
+        403,
+        status(
+            403,
+            "Forbidden",
+            &format!(
+                "services \"{service}\" is forbidden: User \"dev\" cannot get resource \
+                 \"services/proxy\" in API group \"\" in the namespace \"{namespace}\""
+            ),
+        ),
+    )
+}
+
 #[derive(Default)]
 pub struct Recorder {
     pub statuses: Mutex<Vec<ClusterStatus>>,
