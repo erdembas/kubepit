@@ -14,6 +14,7 @@ import { useNow } from '../util';
 import { CanIForm } from './CanIForm';
 import { IdentityCard } from './IdentityCard';
 import { PermissionMatrix } from './PermissionMatrix';
+import { RbacExplorer } from './RbacExplorer';
 
 /** Namespace picked on the page per cluster, valid while the workbench scope is unchanged. */
 const picked = new Map<string, { scope: string; namespace: string }>();
@@ -117,6 +118,15 @@ export function PermissionsPage({
             clusterId={clusterId}
             namespace={namespace}
             apiResources={apiResources}
+          />
+          {/* Cluster RBAC: who can…, and what a subject can do. */}
+          <RbacExplorer
+            key={clusterId}
+            clusterId={clusterId}
+            namespaces={available}
+            defaultNamespace={namespace}
+            apiResources={apiResources}
+            isActive={isActive}
           />
         </div>
       </div>
