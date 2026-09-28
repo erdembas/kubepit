@@ -403,6 +403,74 @@ keyboard focus), `TopologyMap` (search, kind chips, legend, notices),
 with the details panel docked beside the map) and `MapTab` (the details
 panel tab; clicking a node opens that object on its own Map tab).
 
+## NetworkPolicy simulator
+
+"Can A talk to B?" runs entirely in the UI on the shared watches; there is
+no backend command. The engine in `lib/kube/netpol/` is pure and
+deterministic (no cluster access, no dependencies):
+
+- `parse.ts` normalises pods (labels, IPs, node, host network, container
+  and sidecar ports, workload from the controller reference), namespaces,
+  Services and `networking.k8s.io/v1` NetworkPolicies, including API
+  defaulting (`policyTypes` omitted: Ingress always, Egress when there are
+  egress rules; protocol TCP) and peers/ports the API server would reject
+  (they match nothing). Namespaces that cannot be listed are synthesised
+  with only `kubernetes.io/metadata.name`.
+- `engine.ts` implements the semantics: a pod is isolated per direction
+  only by policies of its namespace that select it with that type; allowed
+  traffic is the union of their rules; a connection needs the source's
+  egress and the destination's ingress. Within a peer `podSelector` and
+  `namespaceSelector` are ANDed (a lone `podSelector` means the policy's
+  namespace), peers/rules/policies are ORed, empty `from`/`to`/`ports`
+  match everything, `ipBlock` honours `except`, ports support protocols
+  TCP/UDP/SCTP, `endPort` ranges and named ports resolved on the
+  destination pod. Ingress from the pod's own node and a pod reaching itself
+  are always allowed. Host-network pods follow the common plugin behaviour
+  (never isolated, match no selector, traffic from the node IP) and ipBlocks
+  matching pod IPs are flagged, since plugins differ on both. Sides return
+  a structured explanation: isolating policies, the rules whose peer
+  matched (with the ports they allow), rules that did not match and named
+  ports the destination does not declare. Ports are interval sets
+  (`ports.ts`), addresses BigInt ranges for IPv4/IPv6 (`ip.ts`).
+- `query.ts` resolves selections (pod, workload, namespace, Service via its
+  selector and `targetPort`, external address/CIDR split at every ipBlock
+  boundary so each piece evaluates uniformly; node IPs inside a wider
+  range are left out) and groups the evaluated pairs by explanation.
+  Without a port the destination's declared ports are checked (any port
+  when it declares none). `summary.ts` builds per-pod "who can reach me /
+  whom can I reach" (with a DNS check against kube-dns), the namespace
+  matrix (workload × workload plus "outside the cluster") and the
+  isolation list, memoising pairs per equivalence class (namespace, labels,
+  ports, ipBlock matches). `overlay.ts` colours resource-map nodes.
+- `caveats.ts` lists policies of engines that are not evaluated
+  (CiliumNetworkPolicy / ClusterwideNetworkPolicy, Calico NetworkPolicy /
+  GlobalNetworkPolicy in both API groups, AdminNetworkPolicy,
+  BaselineAdminNetworkPolicy, ClusterNetworkPolicy) and guesses from
+  DaemonSets whether the network plugin enforces NetworkPolicy (Cilium,
+  GKE Dataplane V2, Calico/Canal, Antrea, kube-router, Weave, Azure NPM,
+  OVN, Amazon VPC CNI with its policy agent flag, kindnet by release;
+  Flannel alone does not). Verdicts are marked "not certain" when the
+  plugin likely does not enforce, unevaluated policies apply to the
+  namespaces involved, or a host-network pod / pod-IP ipBlock is involved.
+
+UI (`components/workbench/netpol/`): `useNetpolData` watches pods,
+NetworkPolicies and Services cluster-wide (falling back to the selected
+namespaces when forbidden), namespaces, DaemonSets and the extra policy
+kinds, and shares one built model per snapshot. The `@netpol` view
+(Network section, palette "Open network policy simulator") has three
+modes: simulate (source/destination pickers, protocol and port, verdict
+card with the explanation trail; policies and pods open in a docked
+details panel), matrix (SVG grid of one namespace, hover or pin a cell for
+its explanation, filter by port) and isolation (workloads without ingress
+or egress protection, deny-all, isolated). Pods and workloads get a
+Reachability details tab (a workload without pods evaluates its pod
+template), NetworkPolicies a plain-words summary and traffic flow, and the
+resource map a "Reachability" toggle that colours nodes and edges by what
+the selected pod can reach. The demo backend (`mock/fixtures/netpol.ts`)
+adds default-deny namespaces, label/namespace/ipBlock/named-port rules and
+DNS egress allowances, and Cilium with two Cilium policies on the AKS
+cluster.
+
 ## Diffs
 
 Every diff (apply review, rollout revisions, Helm revisions, compare and
