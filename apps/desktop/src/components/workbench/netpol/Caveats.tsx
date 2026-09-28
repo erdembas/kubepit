@@ -11,6 +11,7 @@ import {
 } from '@/lib/kube/netpol';
 import { navigateTo, useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { ClusterId } from '@/types';
+import type { UncertainReason } from './uncertain';
 import type { NetpolData } from './useNetpolData';
 
 /**
@@ -18,27 +19,16 @@ import type { NetpolData } from './useNetpolData';
  * plugin that likely ignores NetworkPolicy, unreadable lists.
  */
 
-export type UncertainReason = 'not-enforced' | 'unevaluated' | 'host-network' | 'ipblock-pod';
-
-export function uncertainReasons(
-  data: Pick<NetpolData, 'cni' | 'unevaluated'>,
-  namespaces: readonly string[],
-  flags: { hostNetwork: boolean; ipBlockOnPod: boolean },
-): UncertainReason[] {
-  const out: UncertainReason[] = [];
-  if (data.cni.enforcement === 'not-enforced') out.push('not-enforced');
-  if (relevantUnevaluated(data.unevaluated, namespaces).length) out.push('unevaluated');
-  if (flags.hostNetwork) out.push('host-network');
-  if (flags.ipBlockOnPod) out.push('ipblock-pod');
-  return out;
-}
-
 export function uncertainText(reason: UncertainReason): string {
   switch (reason) {
     case 'not-enforced':
       return i18n.t('The network plugin likely does not enforce NetworkPolicy.');
     case 'unevaluated':
       return i18n.t('Policies of another engine apply to these namespaces and are not evaluated.');
+    case 'policies-incomplete':
+      return i18n.t(
+        'Some NetworkPolicies could not be read, so policies that apply here may be missing.',
+      );
     case 'host-network':
       return i18n.t('A host-network pod is involved; plugins differ on how policies treat it.');
     default:

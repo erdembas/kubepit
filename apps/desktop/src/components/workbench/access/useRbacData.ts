@@ -3,19 +3,21 @@ import { BUILTIN, isServed, toGvk, type KindDef } from '@/lib/kube/catalog';
 import { buildRbacIndex, type RbacIndex } from '@/lib/kube/rbac';
 import type { ApiResourceInfo, ClusterId, Gvk } from '@/types';
 import { useWatch, type WatchSnapshot } from '../data/watchCache';
+import { rbacListStatus } from './rbacLists';
 
 /**
  * Roles, ClusterRoles and their bindings for "who can" and permission
  * summaries. Namespaced lists are watched cluster-wide, falling back to
- * `fallbackNamespaces` when that is forbidden. Lists that cannot be read at
- * all are reported, never guessed: the index marks them as not loaded.
+ * `fallbackNamespaces` when that is forbidden. Lists that cannot be read, at
+ * all or only partly (one namespace forbidden), are reported, never guessed:
+ * the index marks them as not loaded (`rbacLists.ts`).
  */
 
 export interface RbacData {
   index: RbacIndex;
   /** Every readable list synced (or failed). */
   synced: boolean;
-  /** Kinds that could not be listed (RBAC or errors). */
+  /** Kinds that could not be listed, or only partly (RBAC or errors). */
   unavailable: string[];
   /** Namespaced lists only cover `fallbackNamespaces` (cluster-wide listing is forbidden). */
   partial: boolean;
@@ -37,8 +39,6 @@ function useScopedWatch(
   return useFallback ? { snap: scoped, partial: true } : { snap: all, partial: false };
 }
 
-const loaded = (s: WatchSnapshot) => s.synced && s.status !== 'error';
-
 export function useRbacData(
   clusterId: ClusterId,
   apiResources: readonly ApiResourceInfo[] | null,
@@ -59,6 +59,12 @@ export function useRbacData(
   const clusterRoles = useWatch(clusterId, gvks.clusterRoles, [], enabled);
   const clusterRoleBindings = useWatch(clusterId, gvks.clusterRoleBindings, [], enabled);
 
+  const status = rbacListStatus({
+    roles: roles.snap,
+    clusterRoles,
+    roleBindings: roleBindings.snap,
+    clusterRoleBindings,
+  });
   const index = useMemo(
     () =>
       buildRbacIndex(
@@ -68,26 +74,20 @@ export function useRbacData(
           roleBindings: roleBindings.snap.items,
           clusterRoleBindings: clusterRoleBindings.items,
         },
-        {
-          roles: loaded(roles.snap),
-          clusterRoles: loaded(clusterRoles),
-          roleBindings: loaded(roleBindings.snap),
-          clusterRoleBindings: loaded(clusterRoleBindings),
-        },
+        rbacListStatus({
+          roles: roles.snap,
+          clusterRoles,
+          roleBindings: roleBindings.snap,
+          clusterRoleBindings,
+        }).loaded,
       ),
-    // The snapshots' items identities change with every applied batch.
+    // A new snapshot (items or load state) replaces the object.
     [roles.snap, clusterRoles, roleBindings.snap, clusterRoleBindings],
   );
-  const lists: Array<[string, WatchSnapshot]> = [
-    ['Role', roles.snap],
-    ['ClusterRole', clusterRoles],
-    ['RoleBinding', roleBindings.snap],
-    ['ClusterRoleBinding', clusterRoleBindings],
-  ];
   return {
     index,
-    synced: lists.every(([, s]) => s.synced || s.status === 'error'),
-    unavailable: lists.filter(([, s]) => s.status === 'error').map(([kind]) => kind),
+    synced: status.synced,
+    unavailable: status.unavailable,
     partial: roles.partial || roleBindings.partial,
   };
 }

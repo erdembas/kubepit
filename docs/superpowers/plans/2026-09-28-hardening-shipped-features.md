@@ -232,7 +232,7 @@ git commit -m "fix(health): make the unset allowPrivilegeEscalation rule opt-in;
   - `controllerSecretRefs(obj: KubeObject): Array<{ namespace: string | null; name: string }>`. `namespace: null` means any namespace (cluster-scoped referrer without an explicit namespace).
   - `unusedSecretFindings(input: HealthInput, refs: References, emit: Emit): void`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // apps/desktop/src/lib/kube/health/secretUnused.test.ts
@@ -296,12 +296,12 @@ describe('secret-unused', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm --filter @kubepit/desktop test -- src/lib/kube/health/secretUnused.test.ts`
 Expected: FAIL. The new `HealthKind`s do not compile, and the other cases report secrets.
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
   - `controllerSecretRefs` walks `spec` (depth ≤ 12) and records names under `secretRef`, `certSecretRef`, `privateKeySecretRef` and `secretName`, plus `certificateRefs[]` entries whose `kind` is `Secret` or absent.
   - It also records `valuesFrom[]` / `substituteFrom[]` entries with `kind: 'Secret'`, and the `cert-manager.io/inject-ca-from-secret` annotation (`ns/name`).
   - The namespace is the ref's `namespace`, else the object's, else `null` (cluster-scoped referrers match the name in any namespace).
@@ -316,12 +316,12 @@ Expected: FAIL. The new `HealthKind`s do not compile, and the other cases report
   - New finding message: "Not referenced by any workload, service account, ingress or controller".
   - Update `testing.ts`.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck && pnpm i18n:check`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/src docs/ARCHITECTURE.md
@@ -344,7 +344,7 @@ git commit -m "fix(health): unused-Secrets rule honours its lists and skips cont
   - `applyBatch(map: Map<string, KubeObject>, batch: WatchBatch): void`. It always applies `reset`, then `upserts`, then `deletes`.
   - `batchPatch(prev: Pick<WatchSnapshot, 'synced'>, batch: Pick<WatchBatch, 'error' | 'synced'>, size: number): Partial<WatchSnapshot>`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // apps/desktop/src/components/workbench/data/watchBatch.test.ts
@@ -377,19 +377,19 @@ describe('watch batches', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `pnpm --filter @kubepit/desktop test -- src/components/workbench/data/watchBatch.test.ts`
 Expected: FAIL with "Cannot find module './watchBatch'".
 
-- [ ] **Step 3: Implement.** Move `isForbidden` into `watchBatch.ts`. `WatchEntry.apply` calls `applyBatch`, bumps `version`, then flushes with `batchPatch(...)` when `batch.error` is set or the batch newly makes the entry synced, else schedules. Add `PartialWatchNotice` ("Some namespaces could not be watched: {error}"), shown by `ResourcePage` when `snapshot.status === 'ready' && snapshot.error`.
+- [x] **Step 3: Implement.** Move `isForbidden` into `watchBatch.ts`. `WatchEntry.apply` calls `applyBatch`, bumps `version`, then flushes with `batchPatch(...)` when `batch.error` is set or the batch newly makes the entry synced, else schedules. Add `PartialWatchNotice` ("Some namespaces could not be watched: {error}"), shown by `ResourcePage` when `snapshot.status === 'ready' && snapshot.error`.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck && pnpm i18n:check`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/src

@@ -214,6 +214,7 @@ function notify(clusterId: string, key: string, o: KubeObject, deleted: boolean)
           deletes: [...w.deletes],
           synced: true,
           error: null,
+          recovered: false,
         };
         w.upserts.clear();
         w.deletes.clear();

@@ -87,7 +87,25 @@ localStorage (`kubepit.workbench.v1`, `kubepit.views.v1`,
   built from a `Gvk`; typed k8s-openapi structs are used only where logic
   needs them (pods for logs/exec, nodes for drain, metrics).
 - `managedFields` are stripped from everything sent to the UI.
-- Watches are batched (~150 ms) into `WatchBatch` messages.
+- Watches are batched (~150 ms) into `WatchBatch` messages. A watch error
+  travels in the same batch as the pending `reset`, upserts and deletes, so
+  the UI's shared watch cache (`components/workbench/data/watchCache.ts`,
+  pure logic in `watchBatch.ts`) always applies the objects first. The list
+  turns `error` only when nothing is left; otherwise the rows stay and the
+  resource table shows a "Some namespaces could not be watched" notice (for
+  example one forbidden namespace of several). kube rarely re-lists after
+  an error (only on 410 Gone): a failed watch keeps watching or resumes
+  from its resourceVersion, and a namespace whose first list failed
+  streams its later list without a reset. So the backend (`watch.rs`)
+  counts a source that reported an error as failing until it delivers an
+  event again (`InitDone`, `Apply` or `Delete`); once none is failing, the
+  next batch has `recovered: true` and the UI clears the error. Only that
+  signal clears it: a `reset` or rows of another namespace keep it (with
+  `ready` once rows exist), and a batch's message always names a source
+  that still fails. A quiet namespace keeps the error until its next event
+  or Retry. Error-only batches change no rows and do not bump the snapshot
+  `version`. Views that read several lists use `data/listState.ts`: a list
+  with an error is incomplete.
 - `read_only` clusters reject every mutating command in the backend (dry runs
   and RBAC self-reviews only read, so they stay available).
 
@@ -991,7 +1009,10 @@ deterministic (no cluster access, no dependencies):
   OVN, Amazon VPC CNI with its policy agent flag, kindnet by release;
   Flannel alone does not). Verdicts are marked "not certain" when the
   plugin likely does not enforce, unevaluated policies apply to the
-  namespaces involved, or a host-network pod / pod-IP ipBlock is involved.
+  namespaces involved, the NetworkPolicy list failed or only partly loaded
+  (a forbidden namespace would otherwise look unprotected), or a
+  host-network pod / pod-IP ipBlock is involved
+  (`components/workbench/netpol/uncertain.ts`).
 
 UI (`components/workbench/netpol/`): `useNetpolData` watches pods,
 NetworkPolicies and Services cluster-wide (falling back to the selected
@@ -1076,11 +1097,15 @@ feed are described in `docs/RELEASING.md`.
   the cluster has not turned on. Opt-in findings are still computed, so
   turning a rule on is instant and the engine stays pure.
 - `components/workbench/health/useHealthScan.ts` feeds the engine from the
-  shared watch cache (the tables' keys, so watches are shared) with 15
-  built-in lists plus cert-manager `Certificate`s when served. A scan runs
+  shared watch cache (the tables' keys, so watches are shared) with 20
+  built-in lists plus cert-manager `Certificate`s and 11 controller
+  reference lists when served (see `secret-unused` below). A scan runs
   once every list synced or failed (10 s timeout), at most every 3 s, and is
   never cancelled by newer data; rules whose lists could not be read (RBAC)
-  are skipped instead of guessing. The last scan per cluster is published
+  are skipped instead of guessing. A list counts as loaded only when it
+  synced with no error at all (`data/listState.ts`): a partial one (rows
+  kept, one namespace forbidden) is reported with the unreadable lists and
+  skips the rules that need it. The last scan per cluster is published
   to `useHealthStore` for the details panels.
 - UI: the `@health` view (score ring, severity and category counts,
   filters, findings grouped by rule, ignore / restore), a summary card on
@@ -1097,6 +1122,29 @@ feed are described in `docs/RELEASING.md`.
   `container-privilege-escalation-unset` (info: `allowPrivilegeEscalation`
   not set, the Kubernetes default); an explicit `true` stays the warning
   `container-privilege-escalation`, so its existing ignores keep working.
+- `secret-unused` (`config.ts#unusedSecretFindings`) runs only when all
+  its lists loaded. Besides pod specs, service accounts, Ingress TLS and
+  `Certificate.spec.secretName`, it counts the Secrets that controllers
+  read through the API (`secretRefs.ts#controllerSecretRefs`): cert-manager
+  `Issuer`/`ClusterIssuer`, Gateway API `Gateway`, Validating/Mutating
+  webhook configurations (`cert-manager.io/inject-ca-from-secret`) and Flux
+  `GitRepository`, `HelmRepository`, `OCIRepository`, `Kustomization`,
+  `HelmRelease` and notification `Provider`. A generic walker reads
+  `secretRef` and every `…SecretRef` (Flux `certSecretRef`/`proxySecretRef`,
+  cert-manager `privateKeySecretRef`, DNS01 and ACME EAB refs, Vault
+  `tokenSecretRef`), `secretName`,
+  `certificateRefs[]` (kind Secret or unset) and `kind: Secret` entries of
+  `valuesFrom[]`/`substituteFrom[]`; a cluster-scoped referrer without a
+  namespace matches the name in any namespace. Each list is watched only
+  when its kind is served; an unserved kind counts as loaded and empty.
+  cert-manager output (`cert-manager.io/certificate-name`,
+  `cert-manager.io/allow-direct-injection`) and Argo CD's own secrets
+  (`app.kubernetes.io/part-of=argocd`, `argocd-secret`,
+  `argocd-initial-admin-secret`, `argocd-redis`,
+  `argocd-notifications-secret`) are skipped outright. `ClusterIssuer` and
+  the webhook configurations are cluster-scoped, so a user limited to
+  namespaces gets a 403 on them and `secret-unused` is skipped (reported as
+  an unreadable list) rather than guessed.
 - Tests: Vitest in the node environment
   (`pnpm --filter @kubepit/desktop test`, `src/**/*.test.ts(x)`;
   benchmarks `src/**/*.bench.ts` with `bench`). `health/testing.ts`
@@ -1198,8 +1246,12 @@ the generic watches.
   on ServiceAccounts and Bound subjects on Roles / ClusterRoles.
   `access/useRbacData.ts` watches the RBAC lists cluster-wide (RoleBindings
   fall back to the asked namespace) and reports lists it cannot read instead
-  of guessing. Only RBAC is evaluated: webhook and cloud IAM authorizers are
-  not visible to it, which the UI says.
+  of guessing. A list counts as loaded only when it is complete
+  (`data/listState.ts`, shared with the health scan): one that kept the
+  rows of the readable namespaces but reports an error is listed with the
+  unreadable ones ("answers may be incomplete"). Only RBAC is evaluated:
+  webhook and cloud IAM authorizers are not visible to it, which the UI
+  says.
 - **Demo**: `mock/fixtures/trivy.ts` writes reports for prod-eu, staging and
   dev (not prod-us or the local clusters) from the demo workloads and a
   catalog of real CVEs chosen per image; `mock/fixtures/security.ts` labels

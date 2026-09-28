@@ -1,6 +1,6 @@
 import type { KubeObject } from '@/types';
 import { podSpecFindings } from './containers';
-import { collectReferences, unusedConfigFindings } from './config';
+import { collectReferences, unusedConfigFindings, unusedSecretFindings } from './config';
 import {
   certManagerFindings,
   isCertManagerCertificate,
@@ -30,6 +30,7 @@ import {
 import { cronJobFindings, singleReplicaFindings } from './workloads';
 import { podSecurityFindings } from './podSecurity';
 import { rbacFindings } from './rbac';
+import { SECRET_REFERRERS } from './secretRefs';
 
 /**
  * Runs every rule family over a `HealthInput`. The scan is split into
@@ -64,6 +65,7 @@ const PASSES: Pass[] = [
   (input, emit) => {
     const refs = collectReferences(input);
     if (needsMet(input, 'configmap-unused')) unusedConfigFindings(input, refs, emit);
+    if (needsMet(input, 'secret-unused')) unusedSecretFindings(input, refs, emit);
     if (needsMet(input, 'pvc-unused')) unusedClaimFindings(input, refs, emit);
   },
   (input, emit) => {
@@ -111,7 +113,13 @@ const KIND_LISTS: HealthKind[] = [
 ];
 
 /** Lists rules read for context only (their objects get no findings of their own). */
-const CONTEXT_LISTS: HealthKind[] = ['serviceAccounts', 'namespaces', 'roles', 'clusterRoles'];
+const CONTEXT_LISTS: HealthKind[] = [
+  'serviceAccounts',
+  'namespaces',
+  'roles',
+  'clusterRoles',
+  ...SECRET_REFERRERS,
+];
 
 function capped(input: HealthInput): { input: HealthInput; truncated: HealthKind[] } {
   const truncated: HealthKind[] = [];

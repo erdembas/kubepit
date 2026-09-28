@@ -27,6 +27,17 @@ const EMPTY_LISTS: Record<HealthKind, readonly never[]> = {
   clusterRoles: [],
   roleBindings: [],
   clusterRoleBindings: [],
+  issuers: [],
+  clusterIssuers: [],
+  gateways: [],
+  validatingWebhooks: [],
+  mutatingWebhooks: [],
+  gitRepositories: [],
+  helmRepositories: [],
+  ociRepositories: [],
+  kustomizations: [],
+  helmReleases: [],
+  fluxProviders: [],
 };
 
 export function emptyHealthInput(overrides: Partial<HealthInput> = {}): HealthInput {

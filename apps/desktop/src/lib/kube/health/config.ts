@@ -2,9 +2,14 @@ import * as i18n from '@/i18n/core';
 import type { KubeObject } from '@/types';
 import { asArray, asNumber, asObject, asString, field, isObject, spec } from '../accessors';
 import { makeFinding, nsKey, podSpecOf, type Emit } from './context';
+import { SECRET_REFERRERS, controllerSecretRefs } from './secretRefs';
 import type { HealthInput } from './types';
 
-/** Unreferenced ConfigMaps and Secrets, plus the reference index shared with storage rules. */
+/**
+ * Unreferenced ConfigMaps and Secrets, plus the reference index shared with
+ * storage rules. Secrets also count as referenced when a controller names
+ * them (`secretRefs.ts`).
+ */
 
 export const SYSTEM_NAMESPACES = new Set(['kube-system', 'kube-public', 'kube-node-lease']);
 
@@ -22,9 +27,25 @@ const MANAGED_SECRET_TYPES = new Set([
   'bootstrap.kubernetes.io/token',
 ]);
 
+/** Written or read by a controller that finds them itself; never "unused". */
+const CONTROLLER_SECRET_ANNOTATIONS = [
+  // cert-manager output (Certificate secrets) and CA bundles for direct injection.
+  'cert-manager.io/certificate-name',
+  'cert-manager.io/allow-direct-injection',
+];
+const ARGOCD_SECRETS = new Set([
+  'argocd-secret',
+  'argocd-initial-admin-secret',
+  'argocd-redis',
+  'argocd-notifications-secret',
+]);
+
 export interface References {
   configMaps: Set<string>;
+  /** `nsKey(namespace, name)`. */
   secrets: Set<string>;
+  /** Secret names a cluster-scoped referrer names without a namespace (any namespace). */
+  anyNamespaceSecrets: Set<string>;
   claims: Set<string>;
 }
 
@@ -90,7 +111,12 @@ export function podSpecReferences(obj: KubeObject): Refs {
 }
 
 export function collectReferences(input: HealthInput): References {
-  const refs: References = { configMaps: new Set(), secrets: new Set(), claims: new Set() };
+  const refs: References = {
+    configMaps: new Set(),
+    secrets: new Set(),
+    anyNamespaceSecrets: new Set(),
+    claims: new Set(),
+  };
   const owners = [
     ...input.pods,
     ...input.deployments,
@@ -128,6 +154,12 @@ export function collectReferences(input: HealthInput): References {
   for (const cert of input.certificates)
     if (spec(cert).secretName)
       refs.secrets.add(nsKey(cert.metadata.namespace, asString(spec(cert).secretName)));
+  // Issuers, Gateways, webhook CA injection and Flux read their Secrets through the API.
+  for (const kind of SECRET_REFERRERS)
+    for (const o of input[kind])
+      for (const r of controllerSecretRefs(o))
+        if (r.namespace === null) refs.anyNamespaceSecrets.add(r.name);
+        else refs.secrets.add(nsKey(r.namespace, r.name));
   return refs;
 }
 
@@ -143,19 +175,34 @@ export function unusedConfigFindings(input: HealthInput, refs: References, emit:
     if (refs.configMaps.has(nsKey(cm.metadata.namespace, cm.metadata.name))) continue;
     emit(makeFinding('configmap-unused', cm, i18n.t('Not referenced by any pod or workload')));
   }
-  if (input.loaded.has('secrets'))
-    for (const s of input.secrets) {
-      if (managed(s) || MANAGED_SECRET_TYPES.has(asString(field(s, 'type')))) continue;
-      if (s.metadata.name.startsWith('sh.helm.release.v1.')) continue;
-      // Argo CD discovers repository and cluster secrets by label.
-      if (s.metadata.labels?.['argocd.argoproj.io/secret-type']) continue;
-      if (refs.secrets.has(nsKey(s.metadata.namespace, s.metadata.name))) continue;
-      emit(
-        makeFinding(
-          'secret-unused',
-          s,
-          i18n.t('Not referenced by any pod, workload, service account or ingress'),
-        ),
-      );
-    }
+}
+
+/** Secrets a controller reads without a reference Kubepit can see. */
+function controllerOwned(s: KubeObject): boolean {
+  const annotations = s.metadata.annotations ?? {};
+  const labels = s.metadata.labels ?? {};
+  return (
+    CONTROLLER_SECRET_ANNOTATIONS.some((a) => a in annotations) ||
+    // Argo CD discovers repository and cluster secrets by label.
+    !!labels['argocd.argoproj.io/secret-type'] ||
+    labels['app.kubernetes.io/part-of'] === 'argocd' ||
+    ARGOCD_SECRETS.has(s.metadata.name)
+  );
+}
+
+export function unusedSecretFindings(input: HealthInput, refs: References, emit: Emit) {
+  if (!input.loaded.has('secrets')) return;
+  for (const s of input.secrets) {
+    if (managed(s) || MANAGED_SECRET_TYPES.has(asString(field(s, 'type')))) continue;
+    if (s.metadata.name.startsWith('sh.helm.release.v1.') || controllerOwned(s)) continue;
+    if (refs.anyNamespaceSecrets.has(s.metadata.name)) continue;
+    if (refs.secrets.has(nsKey(s.metadata.namespace, s.metadata.name))) continue;
+    emit(
+      makeFinding(
+        'secret-unused',
+        s,
+        i18n.t('Not referenced by any workload, service account, ingress or controller'),
+      ),
+    );
+  }
 }

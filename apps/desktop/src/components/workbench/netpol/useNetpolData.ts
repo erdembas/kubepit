@@ -11,7 +11,11 @@ import {
   type UnevaluatedPolicy,
 } from '@/lib/kube/netpol';
 import type { ApiResourceInfo, ClusterId, Gvk, KubeObject } from '@/types';
+import { hasListError } from '../data/listState';
 import { useWatch, type WatchSnapshot } from '../data/watchCache';
+import { watchErrors, type NetpolWatchError } from './uncertain';
+
+export type { NetpolWatchError };
 
 /**
  * Live input of the NetworkPolicy simulator: pods, namespaces, policies
@@ -22,18 +26,17 @@ import { useWatch, type WatchSnapshot } from '../data/watchCache';
  * shared by every component showing the same snapshot.
  */
 
-export interface NetpolWatchError {
-  kind: string;
-  forbidden: boolean;
-  message: string;
-}
-
 export interface NetpolData {
   cluster: NpCluster;
   /** Every list delivered (or failed). */
   synced: boolean;
   loading: boolean;
   errors: NetpolWatchError[];
+  /**
+   * The NetworkPolicy list failed or only partly loaded (one namespace
+   * forbidden): verdicts are not certain, pods may look unprotected.
+   */
+  policiesIncomplete: boolean;
   /** Only the selected namespaces could be listed. */
   scoped: boolean;
   cni: CniDetection;
@@ -97,7 +100,7 @@ export function useNetpolData(
   const core = [pods, nsList, policies, services];
   const narrowed = pods.scoped || policies.scoped || services.scoped;
   const key = [
-    ...core.map((s) => `${s.version}:${s.status}:${s.items.length}`),
+    ...core.map((s) => `${s.version}:${s.status}:${s.items.length}:${s.error ? 1 : 0}`),
     nsList.status === 'error' ? 'ns-error' : '',
     narrowed
       ? `scoped:${[pods.scoped, policies.scoped, services.scoped].join(',')}:${namespaces.join(',')}`
@@ -151,16 +154,13 @@ export function useNetpolData(
     [extraKey, gvks],
   );
 
-  const errors: NetpolWatchError[] = [];
-  const named: Array<[string, WatchSnapshot]> = [
+  const errors = watchErrors([
     ['Pod', pods],
     ['NetworkPolicy', policies],
     ['Service', services],
     ['Namespace', nsList],
-  ];
-  for (const [kind, snap] of named)
-    if (snap.status === 'error' && snap.error)
-      errors.push({ kind, forbidden: snap.forbidden, message: snap.error });
+  ]);
+  const policiesIncomplete = !!gvks.policies && hasListError(policies);
 
   const watched = [pods, policies, services, nsList].filter(
     (_, i) => [gvks.pods, gvks.policies, gvks.services, gvks.namespaces][i],
@@ -190,6 +190,7 @@ export function useNetpolData(
     synced,
     loading,
     errors,
+    policiesIncomplete,
     scoped: pods.scoped || policies.scoped,
     cni,
     unevaluated,

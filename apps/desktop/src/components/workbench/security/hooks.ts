@@ -3,6 +3,7 @@ import { BUILTIN, isServed, toGvk } from '@/lib/kube/catalog';
 import { podSpecOwners } from '@/lib/kube/pss';
 import { trivyGvk, type TrivyKind } from '@/lib/kube/trivy';
 import type { ApiResourceInfo, ClusterId, Gvk, KubeObject } from '@/types';
+import { hasListError } from '../data/listState';
 import { restartWatch, useWatch, type WatchSnapshot } from '../data/watchCache';
 
 /** Shared watches of the Security view and the security details sections. */
@@ -94,7 +95,7 @@ export function useTrivyReports(
     items,
     lists,
     synced: lists.length > 0 && settled(lists),
-    errors: lists.filter((l) => l.snap.status === 'error' && l.snap.error),
+    errors: lists.filter((l) => hasListError(l.snap) && l.snap.error),
     restart: () => lists.forEach((l) => restartWatch(clusterId, l.gvk, namespaces)),
   };
 }
@@ -174,6 +175,6 @@ export function usePodSpecOwners(
     owners,
     namespaces: nsList.items,
     synced: settled(lists),
-    errors: lists.filter((l) => l.snap.status === 'error' && l.snap.error),
+    errors: lists.filter((l) => hasListError(l.snap) && l.snap.error),
   };
 }

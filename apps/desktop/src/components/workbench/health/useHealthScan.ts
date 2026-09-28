@@ -16,6 +16,7 @@ import { restartWatch, useWatch, type WatchSnapshot } from '../data/watchCache';
 import { useCostPrefs } from '../cost/prefs';
 import { useRightsizing } from '../cost/useCost';
 import { useNow } from '../util';
+import { hasListIssue, scanLists } from './scanLists';
 
 /**
  * Feeds the health engine from the shared watch cache. Lists are watched
@@ -47,6 +48,31 @@ const KINDS: ReadonlyArray<[HealthKind, KindDef]> = [
   ['clusterRoles', BUILTIN.ClusterRole],
   ['roleBindings', BUILTIN.RoleBinding],
   ['clusterRoleBindings', BUILTIN.ClusterRoleBinding],
+];
+
+/**
+ * Optional lists of controllers that read Secrets through the API
+ * (`secret-unused`). Resolved from the served API resources like
+ * `certificates`: an unserved kind watches nothing and counts as loaded.
+ */
+const REFERENCE_KINDS: ReadonlyArray<[HealthKind, { group: string; kind: string }]> = [
+  ['issuers', { group: 'cert-manager.io', kind: 'Issuer' }],
+  ['clusterIssuers', { group: 'cert-manager.io', kind: 'ClusterIssuer' }],
+  ['gateways', { group: 'gateway.networking.k8s.io', kind: 'Gateway' }],
+  [
+    'validatingWebhooks',
+    { group: 'admissionregistration.k8s.io', kind: 'ValidatingWebhookConfiguration' },
+  ],
+  [
+    'mutatingWebhooks',
+    { group: 'admissionregistration.k8s.io', kind: 'MutatingWebhookConfiguration' },
+  ],
+  ['gitRepositories', { group: 'source.toolkit.fluxcd.io', kind: 'GitRepository' }],
+  ['helmRepositories', { group: 'source.toolkit.fluxcd.io', kind: 'HelmRepository' }],
+  ['ociRepositories', { group: 'source.toolkit.fluxcd.io', kind: 'OCIRepository' }],
+  ['kustomizations', { group: 'kustomize.toolkit.fluxcd.io', kind: 'Kustomization' }],
+  ['helmReleases', { group: 'helm.toolkit.fluxcd.io', kind: 'HelmRelease' }],
+  ['fluxProviders', { group: 'notification.toolkit.fluxcd.io', kind: 'Provider' }],
 ];
 
 const THROTTLE_MS = 3_000;
@@ -110,6 +136,10 @@ export function useHealthScan(
       (r) => r.group === 'cert-manager.io' && r.kind === 'Certificate',
     );
     out.certificates = cert ? gvkFromApiResource(cert) : null;
+    for (const [kind, ref] of REFERENCE_KINDS) {
+      const r = apiResources?.find((a) => a.group === ref.group && a.kind === ref.kind);
+      out[kind] = r ? gvkFromApiResource(r) : null;
+    }
     return out;
   }, [apiResources]);
 
@@ -136,6 +166,17 @@ export function useHealthScan(
     clusterRoles: useWatch(clusterId, gvks.clusterRoles, namespaces, enabled),
     roleBindings: useWatch(clusterId, gvks.roleBindings, namespaces, enabled),
     clusterRoleBindings: useWatch(clusterId, gvks.clusterRoleBindings, namespaces, enabled),
+    issuers: useWatch(clusterId, gvks.issuers, namespaces, enabled),
+    clusterIssuers: useWatch(clusterId, gvks.clusterIssuers, namespaces, enabled),
+    gateways: useWatch(clusterId, gvks.gateways, namespaces, enabled),
+    validatingWebhooks: useWatch(clusterId, gvks.validatingWebhooks, namespaces, enabled),
+    mutatingWebhooks: useWatch(clusterId, gvks.mutatingWebhooks, namespaces, enabled),
+    gitRepositories: useWatch(clusterId, gvks.gitRepositories, namespaces, enabled),
+    helmRepositories: useWatch(clusterId, gvks.helmRepositories, namespaces, enabled),
+    ociRepositories: useWatch(clusterId, gvks.ociRepositories, namespaces, enabled),
+    kustomizations: useWatch(clusterId, gvks.kustomizations, namespaces, enabled),
+    helmReleases: useWatch(clusterId, gvks.helmReleases, namespaces, enabled),
+    fluxProviders: useWatch(clusterId, gvks.fluxProviders, namespaces, enabled),
   };
   // Cost insight: right-sizing findings (efficiency) when a report is available.
   const rightsizing = useRightsizing(
@@ -165,7 +206,11 @@ export function useHealthScan(
     nonce,
     Math.floor(clock / 60_000),
     rightsizing?.computed_at ?? 0,
-    ...kinds.map((k) => `${gvks[k] ? 1 : 0}:${snaps[k].version}:${snaps[k].synced ? 1 : 0}`),
+    // Whether a list has an error changes what loaded (a retrying error does not).
+    ...kinds.map(
+      (k) =>
+        `${gvks[k] ? 1 : 0}:${snaps[k].version}:${snaps[k].synced ? 1 : 0}:${snaps[k].error ? 1 : 0}`,
+    ),
   ].join('|');
 
   const snapsRef = useRef(snaps);
@@ -209,14 +254,7 @@ export function useHealthScan(
       }
       inflight.add(key);
       lastRun.set(key, Date.now());
-      const current = snapsRef.current;
-      const loaded = new Set<HealthKind>();
-      const lists = {} as Record<HealthKind, WatchSnapshot['items']>;
-      for (const k of kinds) {
-        const s = current[k];
-        if (!gvks[k] || (s.synced && s.status !== 'error')) loaded.add(k);
-        lists[k] = gvks[k] && s.status !== 'error' ? s.items : [];
-      }
+      const { lists, loaded } = scanLists(kinds, (k) => !!gvks[k], snapsRef.current);
       const input: HealthInput = {
         ...lists,
         loaded,
@@ -261,7 +299,7 @@ export function useHealthScan(
   );
 
   const issues: ListIssue[] = watched
-    .filter((k) => snaps[k].status === 'error')
+    .filter((k) => hasListIssue(true, snaps[k]))
     .map((k) => ({
       kind: k,
       title: gvks[k]!.kind,

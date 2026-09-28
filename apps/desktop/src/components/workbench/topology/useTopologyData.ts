@@ -9,6 +9,7 @@ import {
   type TopologyList,
 } from '@/lib/kube/topology';
 import type { ApiResourceInfo, ClusterId, Gvk, KubeObject } from '@/types';
+import { hasListError, isListComplete } from '../data/listState';
 import { useWatch, type WatchSnapshot } from '../data/watchCache';
 
 export interface TopologyWatchError {
@@ -54,7 +55,7 @@ export function useTopologyData(
     ? `${extra.obj.metadata.uid}@${extra.obj.metadata.resourceVersion ?? ''}`
     : '';
   const key = `${namespaces.join(',')}#${extraKey}#${snaps
-    .map((s, i) => (sources[i] ? `${s.version}:${s.status}` : '-'))
+    .map((s, i) => (sources[i] ? `${s.version}:${s.status}:${s.error ? 1 : 0}` : '-'))
     .join(',')}`;
 
   const built = useMemo(() => {
@@ -67,9 +68,10 @@ export function useTopologyData(
       lists.push({
         gvk,
         items: snap.items,
-        synced: snap.synced && snap.status !== 'error',
+        // A partial list (one namespace forbidden) is not synced: no "missing" guesses.
+        synced: isListComplete(snap),
       });
-      if (snap.status === 'error' && snap.error)
+      if (hasListError(snap) && snap.error)
         errors.push({ kind: gvk.kind, forbidden: snap.forbidden, message: snap.error });
       const key = kindKey(gvk);
       for (const obj of snap.items)

@@ -40,6 +40,7 @@ import type { ApiResourceInfo, ClusterId, Gvk } from '@/types';
 import { OPEN_GATE, useActionGates } from '../access/gates';
 import { resourceActions } from '../actions/resourceActions';
 import { useCluster } from '../data/hooks';
+import { hasListError } from '../data/listState';
 import { restartWatch, useWatch, type WatchSnapshot } from '../data/watchCache';
 import { DetailsPanel } from '../details/DetailsPanel';
 import { TableSkeleton } from '../table/TableStates';
@@ -201,7 +202,7 @@ export function GitOpsPage({
   const detection = detectGitOps(apiResources);
   const synced =
     watches.length > 0 && watches.every((w) => w.snap.synced || w.snap.status === 'error');
-  const errors = watches.filter((w) => w.snap.status === 'error' && w.snap.error);
+  const errors = watches.filter((w) => hasListError(w.snap) && w.snap.error);
   const selectedGvk = selection ? gvkForKey(selection.key, apiResources) : null;
   const selectedObj = useMemo(
     () =>

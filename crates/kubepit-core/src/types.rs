@@ -228,6 +228,11 @@ pub struct WatchBatch {
     pub deletes: Vec<String>,
     pub synced: bool,
     pub error: Option<String>,
+    /// Every source that reported an error delivered events again: the
+    /// error shown for this watch no longer applies. Never set together
+    /// with `error`.
+    #[serde(default)]
+    pub recovered: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
