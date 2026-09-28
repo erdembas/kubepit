@@ -14,12 +14,14 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::Result;
+use kube::Client;
 
 use super::parse::PromData;
 use super::promql::{quote, regex_escape};
 use super::proxy;
 use crate::app::Kubepit;
 use crate::cost::estimate::{PodUsage, UsageMap};
+use crate::types::PrometheusService;
 
 /// cAdvisor series of real containers (not the pod cgroup nor the pause container).
 const CONTAINERS: &str = r#"container!="",container!="POD""#;
@@ -165,12 +167,43 @@ pub fn merge_pod_usage(cpu: &PromData, memory: &PromData) -> UsageMap {
     out
 }
 
+/// Parameters of an instant query, evaluated at `time` (epoch seconds) when
+/// set, else at the server's "now".
+pub(super) fn instant_params(query: &str, time: Option<i64>) -> Vec<(&'static str, String)> {
+    let mut params = vec![("query", query.to_string())];
+    if let Some(time) = time {
+        params.push(("time", time.to_string()));
+    }
+    params
+}
+
+/// One instant query against `service` (no cache invalidation).
+pub(super) async fn instant_query(
+    client: &Client,
+    service: &PrometheusService,
+    query: &str,
+    time: Option<i64>,
+) -> Result<PromData> {
+    let path = proxy::proxy_path(service, "/api/v1/query", &instant_params(query, time));
+    proxy::get(client, &path, USAGE_TIMEOUT).await
+}
+
 impl Kubepit {
     /// One instant query against the cluster's Prometheus.
     async fn prometheus_instant(&self, cluster_id: &str, query: &str) -> Result<PromData> {
+        self.prometheus_instant_at(cluster_id, query, None).await
+    }
+
+    /// One instant query evaluated at `time` (epoch seconds; `None` = now).
+    /// A vanished service (proxy 404 / 502 / 503) is re-detected next time.
+    pub(crate) async fn prometheus_instant_at(
+        &self,
+        cluster_id: &str,
+        query: &str,
+        time: Option<i64>,
+    ) -> Result<PromData> {
         let (service, client) = self.prometheus_service(cluster_id).await?;
-        let path = proxy::proxy_path(&service, "/api/v1/query", &[("query", query.to_string())]);
-        proxy::get(&client, &path, USAGE_TIMEOUT)
+        instant_query(&client, &service, query, time)
             .await
             .inspect_err(|e| {
                 if super::is_proxy_failure(e) {
@@ -282,6 +315,21 @@ mod tests {
             r#"sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{container!="",container!="POD"}[604800s]))"#
         );
         assert!(pod_memory_avg(3600).contains("avg_over_time(container_memory_working_set_bytes"));
+    }
+
+    #[test]
+    fn instant_queries_send_the_evaluation_time_when_set() {
+        assert_eq!(
+            instant_params("up", None),
+            vec![("query", "up".to_string())]
+        );
+        assert_eq!(
+            instant_params("up", Some(1_700_000_100)),
+            vec![
+                ("query", "up".to_string()),
+                ("time", "1700000100".to_string())
+            ]
+        );
     }
 
     #[test]

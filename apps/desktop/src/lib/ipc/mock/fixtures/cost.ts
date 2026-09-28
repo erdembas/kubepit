@@ -659,6 +659,8 @@ function syntheticUsage(seed: string, current: ResourceValues, hours: number): U
     cpu_max: cpu * (1.3 + r2 * 0.8),
     memory_max: mem,
     hours,
+    cpu_avg: null,
+    memory_avg: null,
   };
 }
 

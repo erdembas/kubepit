@@ -220,19 +220,28 @@ pub fn stats_from_samples(cpu: &[f64], memory: &[f64], interval_secs: f64) -> Op
         cpu_max,
         memory_max,
         hours: cpu.len() as f64 * interval_secs / 3600.0,
+        cpu_avg: None,
+        memory_avg: None,
     })
 }
 
 /// Worst replica wins: the largest p95, maximum and memory of `stats`;
-/// hours add up (the caller divides by the replica count).
+/// hours add up (the caller divides by the replica count). Averages are
+/// not combined (the metrics-server path has none): they are `None`.
 pub fn combine(stats: &[UsageStats]) -> Option<UsageStats> {
     let mut iter = stats.iter();
-    let first = *iter.next()?;
+    let first = UsageStats {
+        cpu_avg: None,
+        memory_avg: None,
+        ..*iter.next()?
+    };
     Some(iter.fold(first, |acc, s| UsageStats {
         cpu_p95: acc.cpu_p95.max(s.cpu_p95),
         cpu_max: acc.cpu_max.max(s.cpu_max),
         memory_max: acc.memory_max.max(s.memory_max),
         hours: acc.hours + s.hours,
+        cpu_avg: None,
+        memory_avg: None,
     }))
 }
 
@@ -253,6 +262,8 @@ mod tests {
             cpu_max: cpu_p95 * 1.5,
             memory_max,
             hours: 168.0,
+            cpu_avg: None,
+            memory_avg: None,
         }
     }
 
@@ -403,6 +414,8 @@ mod tests {
                 cpu_max: 900.0,
                 memory_max: 1.0,
                 hours: 0.5,
+                cpu_avg: None,
+                memory_avg: None,
             },
         ])
         .unwrap();

@@ -291,6 +291,13 @@ An entry is dropped when `owner_kind` or `owner_name` is empty or `<none>`, or w
 fold into workloads through the existing `PodMatcher` (`workload_pod_regex`, the longest
 name wins), and every row gets the `identity-by-name` flag.
 
+The same fallback applies per pod when Q11 works but Q12 or Q13 failed or answered
+nothing for the pod's namespace (for example an allowlist that drops
+`kube_replicaset_owner`): a pod whose ReplicaSet or Job has no owner series is matched by
+name among Deployments (ReplicaSet) or CronJobs (Job) only, and its workload's rows get `identity-by-name` and `partial-data`. A namespace with
+any Q12 / Q13 series, `<none>` owners included, keeps rule 3 / 4 (orphans stay
+`Unowned`).
+
 ### 6.5 Folding into per-container usage and evidence (`rightsizing/evidence.rs`)
 
 **Notation:**
@@ -318,8 +325,10 @@ hours      = observed_hours           (below)
 
 ```
 observed_hours  = |⋃_p [first_seen_p, last_seen_p + 300] ∩ [start, end]| / 3600
-                  (interval union; pods of w; 0 when Q9/Q10 are missing → then
-                   hours = Σ_p s.memory_samples·300/3600 / max(replicas,1), capped at D·24)
+                  (interval union; pods of w). When w has no Q9/Q10 span, both
+                  observed_hours and hours = max_c Σ_p s[p,c].memory_samples·300/3600
+                  / max(replicas,1), capped at D·24 (the container with the most
+                  samples decides)
 cpu_coverage    = min(1, Σ_p s.cpu_samples    / Σ_p s.running)   (None if Σ running = 0)
 memory_coverage = min(1, Σ_p s.memory_samples / Σ_p s.running)
 cpu_samples     = Σ_p s.cpu_samples,  memory_samples = Σ_p s.memory_samples

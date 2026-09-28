@@ -138,6 +138,8 @@ mod tests {
             cpu_max: cpu_p95 * 1.5,
             memory_max,
             hours: 168.0,
+            cpu_avg: None,
+            memory_avg: None,
         }
     }
 

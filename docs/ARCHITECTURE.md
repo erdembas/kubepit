@@ -866,7 +866,44 @@ applying a recommendation only reads, so read-only clusters get it all.
   by the pod names their kind generates (longest name wins), worst replica
   wins, hours are per replica. Without Prometheus the last metrics-server
   hour is used, split per container by the current snapshot (always low
-  confidence). The math sits behind `rightsizing::strategy::RecommendationStrategy`
+  confidence). Ownership-aware collection is built from
+  `rightsizing/ownership.rs`: kube-state-metrics owner series
+  (`kube_pod_owner`, `kube_replicaset_owner`, `kube_job_owner`) index pod
+  names per namespace; `<none>`, empty and non-controller owners are
+  dropped; `OwnerIndex::resolve` follows one hop (ReplicaSet → Deployment,
+  Job → CronJob, StatefulSet / DaemonSet directly) and reports bare pods,
+  orphan ReplicaSets and standalone Jobs as unowned, other parents
+  (`Node`, `Rollout`) as unsupported, and a pod name with several owners
+  as ambiguous with its sorted candidates (several owners that resolve to
+  one workload are that workload). `prometheus/workload_stats.rs`
+  builds the 16 instant queries of one batch (Q1–Q16: CPU p95 / max /
+  average / samples, memory max / average / samples, running samples,
+  first / last running step, pod / ReplicaSet / Job owners, OOM kills, CFS
+  throttled and total periods), all `max by (…)` and evaluated at
+  `time=` the window end floored to 5 minutes (`window_end`), four in
+  flight. Answers merge per `(namespace, pod, container)`: duplicates keep
+  the maximum, negative counts clamp at 0, Prometheus warnings mark the
+  batch partial. CPU p95 and memory max are required: a failed answer or
+  one above 50,000 series makes the batch splittable, a service-proxy
+  failure aborts (and re-detects Prometheus), other failures are listed as
+  failed queries. `rightsizing/evidence.rs` folds a batch into
+  per-(workload, container) usage (`ContainerUsage`: `UsageStats` plus
+  `UsageEvidence`): pods resolve through the owner index (or, without
+  owner series, by name with identity `name-match`), only containers of
+  the live pod template count (sidecars and renamed containers are
+  skipped), the maxima are over pods that have both a CPU p95 and a memory
+  max, averages are sample-weighted, observed hours are the union of the
+  pods' running spans (without them, memory samples per replica, capped at
+  the window), coverage is samples ÷ running samples, duty the average
+  running pods, the throttling ratio needs 600 CFS periods, and an
+  ambiguous pod name adds nothing but flags every live candidate
+  (`WorkloadExtras.identity`, even for rows left without usage). When the
+  ReplicaSet or Job owner query failed or answered nothing for a namespace
+  (`OwnerIndex::missing_parent_series`), pods owned by a ReplicaSet / Job
+  there are matched by name among Deployments / CronJobs instead, with
+  identity `name-match` and partial data. Rows keep at most 50 sorted pod names and the HPA whose
+  `scaleTargetRef` names the workload. The metrics-server and legacy Prometheus paths produce
+  `ContainerUsage` without evidence. The math sits behind `rightsizing::strategy::RecommendationStrategy`
   (`fn info() -> RightsizingStrategyInfo`, `fn recommend(&ContainerInput) ->
   StrategyOutput`; input = name, current requests/limits, `UsageStats`,
   source, settings; output = recommended values, confidence, warnings).
