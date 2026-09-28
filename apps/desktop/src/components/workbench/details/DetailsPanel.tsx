@@ -300,7 +300,7 @@ export function DetailsPanel({
         (tab === 'history' && !hasRollout(obj)) ||
         (tab === 'changes' && !isJournaled(obj)) ||
         (tab === 'reachability' && !hasReachability(obj)) ? (
-        <div className="overlay-scroll min-h-0 flex-1 overflow-auto">
+        <div data-details-scroll className="overlay-scroll min-h-0 flex-1 overflow-auto">
           <DetailsOverview obj={obj} gvk={gvk} ctx={ctx} isActive={isActive} readOnly={readOnly} />
         </div>
       ) : tab === 'history' ? (
