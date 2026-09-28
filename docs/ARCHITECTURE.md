@@ -811,12 +811,15 @@ deterministic:
   → pods by `spec.nodeName`; StorageClass → PVCs; ClusterRole →
   RoleBindings whose `roleRef` names it (their own namespace and their
   ServiceAccount subjects') and ClusterRoleBindings (their ServiceAccount
-  subjects'); IngressClass → Ingresses by `ingressClassName`, else the
+  subjects'); ClusterRoleBinding → its own ServiceAccount subjects'
+  namespaces plus those of the RoleBindings that bind one of them (so their
+  Roles too); IngressClass → Ingresses by `ingressClassName`, else the
   legacy `kubernetes.io/ingress.class` annotation, plus class-less Ingresses
   when the root is the default class. `planMapScope` scopes every other
   namespaced slot to the union of those namespaces. Until every seed kind
   syncs (or fails), when nothing matches, and for roots without a seed
-  (PriorityClass, ClusterRoleBinding, …) namespaced slots stay unwatched.
+  (PriorityClass, unbound PersistentVolumes, …) namespaced slots stay
+  unwatched.
   The graph is scoped to the union of the explicit lists (`scopeNamespaces`);
   on those Map tabs `plannedGraphScope` makes "none" mean no namespace
   (`buildTopology` `namespaces: null`), so the seed objects elsewhere make no

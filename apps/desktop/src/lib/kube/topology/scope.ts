@@ -13,6 +13,8 @@ export interface MapRoot {
   kind: string;
   name: string;
   annotations?: Readonly<Record<string, string>>;
+  /** `subjects` of a ClusterRoleBinding root (raw Kubernetes JSON). */
+  subjects?: unknown;
 }
 
 /** Marks the IngressClass that class-less Ingresses use. */
@@ -29,6 +31,8 @@ export interface MapSeed {
   gvkKeys: readonly string[];
   /** Namespaces one seed object ties the root to (none when it is unrelated). */
   namespaces(o: KubeObject, root: MapRoot): string[];
+  /** Namespaces the root itself names, whatever the seed objects say. */
+  rootNamespaces?(root: MapRoot): string[];
 }
 
 const own = (o: KubeObject) => (o.metadata.namespace ? [o.metadata.namespace] : []);
@@ -38,16 +42,20 @@ const namesRole = (o: KubeObject, root: MapRoot) => {
   return asString(ref.kind) === 'ClusterRole' && asString(ref.name) === root.name;
 };
 
-/** Namespaces of a binding's ServiceAccount subjects (`fallback` when unset). */
-function subjectNamespaces(o: KubeObject, fallback: string | undefined): string[] {
-  const out: string[] = [];
-  for (const s of asArray(field(o, 'subjects')).filter(isObject)) {
+/** A binding's ServiceAccount subjects as `[namespace, name]` (`fallback` namespace when unset). */
+function saSubjects(subjects: unknown, fallback: string | undefined): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  for (const s of asArray(subjects).filter(isObject)) {
     if (asString(s.kind) !== 'ServiceAccount') continue;
     const ns = asString(s.namespace) || fallback;
-    if (ns) out.push(ns);
+    if (ns) out.push([ns, asString(s.name)]);
   }
   return out;
 }
+
+/** Namespaces of a binding's ServiceAccount subjects (`fallback` when unset). */
+const subjectNamespaces = (o: KubeObject, fallback: string | undefined) =>
+  saSubjects(field(o, 'subjects'), fallback).map(([ns]) => ns);
 
 const SEEDS: Record<string, MapSeed> = {
   Node: {
@@ -73,6 +81,22 @@ const SEEDS: Record<string, MapSeed> = {
       return [];
     },
   },
+  ClusterRoleBinding: {
+    // Its ServiceAccount subjects, plus the RoleBindings elsewhere that bind
+    // them (the builder links those once the service account is observed)
+    // and so their Roles.
+    gvkKeys: ['rolebindings.rbac.authorization.k8s.io'],
+    rootNamespaces: (root) => saSubjects(root.subjects, undefined).map(([ns]) => ns),
+    namespaces: (o, root) => {
+      if (o.kind !== 'RoleBinding') return [];
+      const bound = new Set(saSubjects(root.subjects, undefined).map(([ns, n]) => `${ns}/${n}`));
+      return saSubjects(field(o, 'subjects'), o.metadata.namespace).some(([ns, n]) =>
+        bound.has(`${ns}/${n}`),
+      )
+        ? own(o)
+        : [];
+    },
+  },
   IngressClass: {
     gvkKeys: ['ingresses.networking.k8s.io'],
     namespaces: (o, root) => {
@@ -94,11 +118,12 @@ export function mapSeed(rootKind: string): MapSeed | null {
 /**
  * Per-slot watch scope of the Map tab of a cluster-scoped root. The seed
  * slots and cluster-scoped slots are watched cluster-wide; every other
- * namespaced slot is scoped to the namespaces the seed objects name for the
- * root. `seed` holds the objects of every seed kind, synced when all of them
- * are. Namespaced slots stay unwatched (`null`) while the seed has not
- * synced, when nothing matches, and for roots without a seed: they never
- * fall back to cluster-wide.
+ * namespaced slot is scoped to the namespaces the root itself and the seed
+ * objects name for it. `seed` holds the objects of every seed kind, synced
+ * when all of them are (`null` when no seed kind is served). Namespaced slots
+ * stay unwatched (`null`) while the seed has not synced, when nothing
+ * matches, and for roots without a seed: they never fall back to
+ * cluster-wide.
  */
 export function planMapScope(
   root: MapRoot,
@@ -107,9 +132,10 @@ export function planMapScope(
 ): SlotScope[] {
   const def = mapSeed(root.kind);
   let namespaces: string[] | null = null;
-  if (def && seed?.synced) {
-    const found = new Set<string>();
-    for (const o of seed.items) for (const ns of def.namespaces(o, root)) found.add(ns);
+  // A seed that is not served (`null`) has nothing to wait for.
+  if (def && (seed === null || seed.synced)) {
+    const found = new Set<string>(def.rootNamespaces?.(root) ?? []);
+    for (const o of seed?.items ?? []) for (const ns of def.namespaces(o, root)) found.add(ns);
     if (found.size) namespaces = [...found].sort();
   }
   return sources.map((gvk) => {

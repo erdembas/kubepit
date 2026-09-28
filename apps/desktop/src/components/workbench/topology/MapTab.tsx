@@ -86,6 +86,7 @@ export function MapTab({
   const rootName = obj.metadata.name;
   const rootKind = obj.kind;
   const defaultClass = obj.metadata.annotations?.[DEFAULT_INGRESS_CLASS_ANNOTATION];
+  const rootSubjects = obj.subjects;
   const slotScopes = useMemo<SlotScope[]>(() => {
     if (!planned) {
       const scope = scopeKey ? scopeKey.split(',') : [];
@@ -95,6 +96,7 @@ export function MapTab({
       kind: rootKind,
       name: rootName,
       annotations: defaultClass ? { [DEFAULT_INGRESS_CLASS_ANNOTATION]: defaultClass } : undefined,
+      subjects: rootSubjects,
     };
     const seedItems = itemsA || itemsB ? [...(itemsA ?? []), ...(itemsB ?? [])] : null;
     return planMapScope(
@@ -102,7 +104,18 @@ export function MapTab({
       sources,
       seedItems ? { items: seedItems, synced: seedsSynced } : null,
     );
-  }, [planned, scopeKey, sources, rootKind, rootName, defaultClass, itemsA, itemsB, seedsSynced]);
+  }, [
+    planned,
+    scopeKey,
+    sources,
+    rootKind,
+    rootName,
+    defaultClass,
+    rootSubjects,
+    itemsA,
+    itemsB,
+    seedsSynced,
+  ]);
   const graphScope = useMemo(
     () => (planned ? plannedGraphScope(slotScopes) : undefined),
     [planned, slotScopes],

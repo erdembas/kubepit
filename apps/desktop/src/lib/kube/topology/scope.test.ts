@@ -173,6 +173,69 @@ describe('ClusterRole seeds', () => {
   });
 });
 
+describe('ClusterRoleBinding seeds', () => {
+  const subjects = [
+    { kind: 'ServiceAccount', name: 'coredns', namespace: 'kube-system' },
+    { kind: 'Group', name: 'system:authenticated' },
+  ];
+  const root = {
+    apiVersion: 'rbac.authorization.k8s.io/v1',
+    kind: 'ClusterRoleBinding',
+    metadata: { name: 'system:kube-dns', uid: 'crb' },
+    roleRef: {
+      apiGroup: 'rbac.authorization.k8s.io',
+      kind: 'ClusterRole',
+      name: 'system:kube-dns',
+    },
+    subjects,
+  };
+  const sa = {
+    apiVersion: 'v1',
+    kind: 'ServiceAccount',
+    metadata: { name: 'coredns', namespace: 'kube-system', uid: 'sa' },
+  };
+  const rb = (ns: string, saNs: string, saName: string) => ({
+    apiVersion: 'rbac.authorization.k8s.io/v1',
+    kind: 'RoleBinding',
+    metadata: { name: `leader-${ns}`, namespace: ns, uid: `rb-${ns}` },
+    roleRef: { apiGroup: 'rbac.authorization.k8s.io', kind: 'Role', name: 'leader' },
+    subjects: [{ kind: 'ServiceAccount', name: saName, namespace: saNs }],
+  });
+  const role = {
+    apiVersion: 'rbac.authorization.k8s.io/v1',
+    kind: 'Role',
+    metadata: { name: 'leader', namespace: 'dns-ops', uid: 'role' },
+  };
+  const mapRoot = { kind: 'ClusterRoleBinding', name: 'system:kube-dns', subjects };
+
+  it('reaches its service accounts, their RoleBindings elsewhere and their Roles', () => {
+    const bindings = [rb('dns-ops', 'kube-system', 'coredns'), rb('other', 'other', 'x')];
+    const plan = planMapScope(mapRoot, sources, { items: bindings, synced: true });
+    expect(slot(plan, 'rolebindings.rbac.authorization.k8s.io')).toEqual([]);
+    expect(slot(plan, 'serviceaccounts')).toEqual(['dns-ops', 'kube-system']);
+    const reach = neighbourhood(
+      mapGraph(plan, [root, sa, role, ...bindings]),
+      nodeId('clusterrolebindings.rbac.authorization.k8s.io', null, 'system:kube-dns'),
+      3,
+    );
+    expect(reach.get(nodeId('serviceaccounts', 'kube-system', 'coredns'))).toBe(1);
+    expect(
+      reach.get(nodeId('rolebindings.rbac.authorization.k8s.io', 'dns-ops', 'leader-dns-ops')),
+    ).toBe(2);
+    expect(reach.get(nodeId('roles.rbac.authorization.k8s.io', 'dns-ops', 'leader'))).toBe(3);
+    expect(
+      reach.has(nodeId('rolebindings.rbac.authorization.k8s.io', 'other', 'leader-other')),
+    ).toBe(false);
+  });
+  it("scopes to the subjects' namespaces when no RoleBinding binds them", () => {
+    const plan = planMapScope(mapRoot, sources, { items: [], synced: true });
+    expect(slot(plan, 'serviceaccounts')).toEqual(['kube-system']);
+    expect(
+      slot(planMapScope(mapRoot, sources, { items: [], synced: false }), 'serviceaccounts'),
+    ).toBeNull();
+  });
+});
+
 describe('IngressClass seeds', () => {
   const ing = (
     ns: string,
