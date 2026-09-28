@@ -2,7 +2,7 @@ import * as i18n from '@/i18n';
 import { useEffect } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { openAlert } from '@/lib/alerts/actions';
-import { createClickThrough } from '@/lib/alerts/clickThrough';
+import { createClickThrough, postedInBackground } from '@/lib/alerts/clickThrough';
 import { postNotification } from '@/lib/alerts/notify';
 import { alertSettingsOf, notifyDecision } from '@/lib/alerts/policy';
 import { alertBody, alertTitle } from '@/lib/alerts/text';
@@ -25,7 +25,7 @@ function clusterName(id: string) {
  * `notice.notifier` posts OS notifications, and while Kubepit is in front
  * (with "only in the background" on) the focused window shows a toast.
  * Desktop notifications report no clicks, so focusing this window shortly
- * after one was posted in the background opens its alert
+ * after one was posted while no Kubepit window was focused opens its alert
  * (`lib/alerts/clickThrough.ts`).
  */
 export function useAlertNotifications() {
@@ -79,7 +79,7 @@ export function useAlertNotifications() {
               onClick: () => useAppStore.setState({ rightPanel: 'alerts' }),
             };
       try {
-        const background = !document.hasFocus();
+        const background = postedInBackground(document.hasFocus(), os);
         const posted = await postNotification(notification);
         // Browser notifications open the alert themselves (`notify.ts`).
         if (posted && isTauri && background) clickThrough.posted(notification.onClick, Date.now());

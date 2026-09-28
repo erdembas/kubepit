@@ -212,7 +212,7 @@
   "Clear shown": "Gösterilenleri temizle",
   "Clear the audit log?": "Denetim kaydı temizlensin mi?",
   "Clear the filters or widen the time range.": "Filtreleri temizleyin veya zaman aralığını genişletin.",
-  "Clicking a desktop notification brings Kubepit to the front and opens the alert (within 10 seconds).": "Bir masaüstü bildirimine tıklamak Kubepit'i öne getirir ve uyarıyı açar (10 saniye içinde).",
+  "Clicking a desktop notification brings Kubepit to the front and opens the alert (within 10 seconds). With several windows open, the alert opens only when the main window comes to the front (or the first window, while the main window is closed).": "Bir masaüstü bildirimine tıklamak Kubepit'i öne getirir ve uyarıyı açar (10 saniye içinde). Birden fazla pencere açıkken uyarı yalnızca ana pencere (ana pencere kapalıysa ilk pencere) öne geldiğinde açılır.",
   "Close": "Kapat",
   "Close {label}": "{label} sekmesini kapat",
   "Close All": "Tümünü kapat",

@@ -3,10 +3,11 @@
  *
  * `tauri-plugin-notification` reports no clicks on desktop, but clicking a
  * notification brings Kubepit to the front. So the notifier window remembers
- * what the last notification it posted while Kubepit was in the background
- * would open, and runs it when a Kubepit window gains focus within
- * `CLICK_WINDOW_MS`. Bringing Kubepit to the front by other means within
- * that time does the same (a documented limitation).
+ * what the last notification it posted while no Kubepit window was focused
+ * would open, and runs it when it gains focus itself within
+ * `CLICK_WINDOW_MS`. Documented limitations: bringing that window to the
+ * front by other means within that time does the same, and a click that
+ * brings another Kubepit window to the front opens nothing.
  */
 
 /** How long after posting a notification focusing Kubepit counts as its click. */
@@ -19,6 +20,18 @@ export interface ClickThrough {
   focused(now: number): (() => void) | null;
   /** Forget the pending action. */
   clear(): void;
+}
+
+/**
+ * Whether a notification for `notices` was posted with no Kubepit window in
+ * front, so a focus soon after is its click. `documentFocused` is this
+ * window; `app_focused` covers every window when the alerts were raised.
+ */
+export function postedInBackground(
+  documentFocused: boolean,
+  notices: readonly { app_focused: boolean }[],
+): boolean {
+  return !documentFocused && notices.every((n) => !n.app_focused);
 }
 
 export function createClickThrough(windowMs: number = CLICK_WINDOW_MS): ClickThrough {

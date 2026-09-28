@@ -212,7 +212,7 @@
   "Clear shown": "Clear shown",
   "Clear the audit log?": "Clear the audit log?",
   "Clear the filters or widen the time range.": "Clear the filters or widen the time range.",
-  "Clicking a desktop notification brings Kubepit to the front and opens the alert (within 10 seconds).": "Clicking a desktop notification brings Kubepit to the front and opens the alert (within 10 seconds).",
+  "Clicking a desktop notification brings Kubepit to the front and opens the alert (within 10 seconds). With several windows open, the alert opens only when the main window comes to the front (or the first window, while the main window is closed).": "Clicking a desktop notification brings Kubepit to the front and opens the alert (within 10 seconds). With several windows open, the alert opens only when the main window comes to the front (or the first window, while the main window is closed).",
   "Close": "Close",
   "Close {label}": "Close {label}",
   "Close All": "Close All",

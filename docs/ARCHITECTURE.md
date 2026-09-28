@@ -41,7 +41,8 @@ single source of truth for the frontend ⇄ backend boundary.
   (KubeconfigChanged), `customactions://changed` (CustomAction[]),
   `settings://changed` (`{ source, settings }`, after `settings_set` or
   `kubeconfig_storage_set`; every window applies it except `source`, the
-  saving window, so its open settings draft is not reset).
+  saving window, so its open settings draft is not reset; a dirty draft
+  elsewhere keeps its edited fields, `lib/settingsSync.ts`).
 
 ## Windows
 
@@ -366,13 +367,16 @@ notifications and the notification center (status bar bell → right panel
   Kubernetes messages stay verbatim. Desktop notifications go through
   `tauri-plugin-notification`, which reports no clicks on desktop (actions
   are mobile-only); clicking one focuses Kubepit. So the notifier window
-  remembers the target of the last notification it posted while not
-  focused (`lib/alerts/clickThrough.ts`: the alert, or the notification
-  center for a group) and opens it when the window gains focus within 10 s;
-  the target is one-shot and a newer notification replaces it. Limitation:
-  bringing that window to the front by other means within 10 s does the
-  same. Browser previews use the web Notification API and open the alert
-  on click.
+  remembers the target of the last notification it posted while no Kubepit
+  window was focused (its own `document.hasFocus()` and every notice's
+  `app_focused`; `lib/alerts/clickThrough.ts`: the alert, or the
+  notification center for a group) and opens it when it gains focus itself
+  within 10 s; the target is one-shot and a newer notification replaces
+  it. Limitations: bringing the notifier window to the front by other
+  means within 10 s does the same, and a click that brings another Kubepit
+  window to the front opens nothing (Settings → Notifications says so).
+  Browser previews use the web Notification API and open the alert on
+  click.
 - **Settings** (`Settings.alerts`): master switch, disabled reasons,
   include/exclude namespace globs, disabled clusters (not watched), muted
   clusters (recorded, never notify; until a time or indefinitely), global
