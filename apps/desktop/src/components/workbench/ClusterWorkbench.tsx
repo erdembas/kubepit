@@ -10,6 +10,7 @@ import { ClusterDock } from './dock/ClusterDock';
 import { ResourceNavigator } from './nav/ResourceNavigator';
 import { ViewPanes } from './tabs/ViewPanes';
 import { WorkbenchHeader } from './WorkbenchHeader';
+import { WizardHost } from './wizards/WizardHost';
 
 /**
  * One cluster tab. The shell keeps hidden workbenches mounted, so every
@@ -93,6 +94,7 @@ export function ClusterWorkbench({
         </div>
       </div>
       {isActive && connected && <ActionDialogs clusterId={clusterId} />}
+      {isActive && connected && <WizardHost clusterId={clusterId} />}
     </div>
   );
 }

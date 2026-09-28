@@ -7,7 +7,6 @@ import {
   Download,
   Lock,
   Loader2,
-  Plus,
   Search,
   X,
 } from 'lucide-react';
@@ -44,6 +43,7 @@ import { ResourceTable } from './ResourceTable';
 import { SELECTION_BAR_INSET, SelectionBar } from './SelectionBar';
 import { TableEmpty, TableError, TableSkeleton } from './TableStates';
 import { useKindTable } from './useKindTable';
+import { CreateButton } from '../wizards/CreateMenu';
 
 /** A kind's list page: toolbar, virtualized table, bulk actions and the details panel. */
 export function ResourcePage({
@@ -305,7 +305,10 @@ export function ResourcePage({
                 openExplain(clusterId, { apiVersion: apiVersionOf(gvk), kind: gvk.kind })
               }
             />
-            <IconButton
+            <CreateButton
+              clusterId={clusterId}
+              kindKey={kindKey}
+              namespace={scopeNs}
               label={
                 readOnly
                   ? i18n.t('Read-only cluster: changes are blocked')
@@ -313,9 +316,8 @@ export function ResourcePage({
                     ? `${i18n.t('Create {kind}', { kind: gvk.kind })} — ${deniedMessage(createCheck)}`
                     : i18n.t('Create {kind}', { kind: gvk.kind })
               }
-              icon={<Plus />}
               disabled={readOnly || canCreate === 'denied'}
-              onClick={() =>
+              onTemplate={() =>
                 dock.create(clusterId, gvk.namespaced ? scopeNs : null, templateFor(gvk, scopeNs))
               }
             />

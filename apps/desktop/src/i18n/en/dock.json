@@ -411,6 +411,7 @@
   "The session ended.": "The session ended.",
   "The source cluster does not serve this kind.": "The source cluster does not serve this kind.",
   "The terminal could not be started.": "The terminal could not be started.",
+  "The wizard's manifest replaces what you typed.": "The wizard's manifest replaces what you typed.",
   "This cluster is read-only. Changes cannot be saved or applied.": "This cluster is read-only. Changes cannot be saved or applied.",
   "This folder is empty": "This folder is empty",
   "This query returns a string, which cannot be charted.": "This query returns a string, which cannot be charted.",
