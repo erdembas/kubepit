@@ -25,7 +25,7 @@ use crate::manifests::apply::parse_single;
 use crate::node_shell::NodeShellPod;
 use crate::objects::to_kube_object;
 use crate::resources::parse_documents;
-use crate::rightsizing::{apps_gvk, ContainerResourceChange, WorkloadRef};
+use crate::rightsizing::{workload_gvk, ContainerResourceChange, WorkloadRef};
 use crate::terminal::TerminalLaunch;
 use crate::types::{
     ApplyMode, ClusterDef, ContainerImage, DeleteOptions, DryRunResult, Gvk, HelmInstallRequest,
@@ -434,8 +434,10 @@ impl Kubepit {
         result
     }
 
-    /// `rightsizing_apply`, audited: the before/after of the workload are
-    /// kept (so it can be reverted); dry-run reviews are flagged like others.
+    /// `rightsizing_apply`, audited: the before/after of the workload (a
+    /// Deployment, StatefulSet, DaemonSet or CronJob) are kept (so it can be
+    /// reverted); dry-run reviews are flagged like others. Other kinds are
+    /// refused before anything is recorded or sent.
     pub async fn rightsizing_apply(
         &self,
         cluster_id: &str,
@@ -443,7 +445,11 @@ impl Kubepit {
         changes: &[ContainerResourceChange],
         dry_run: bool,
     ) -> Result<DryRunResult> {
-        let gvk = apps_gvk(&target.kind);
+        let Some(gvk) = workload_gvk(&target.kind) else {
+            return self
+                .rightsizing_apply_unaudited(cluster_id, target, changes, dry_run)
+                .await;
+        };
         let audit_target = AuditTarget::object(&gvk, Some(&target.namespace), &target.name);
         let Some(mut audit) = self.audit(
             cluster_id,

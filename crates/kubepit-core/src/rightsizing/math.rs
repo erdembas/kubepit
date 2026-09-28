@@ -172,10 +172,26 @@ pub fn change_of(current: Option<f64>, next: Option<f64>) -> Change {
     }
 }
 
-/// Requests of all replicas per month.
+/// Replicas behind a workload's monthly amounts and totals: its replicas,
+/// or for a CronJob the largest duty cycle (average running pods over the
+/// window) of its containers, one without evidence. A nightly job thus
+/// does not cost like an always-on replica.
+pub fn cost_replicas(kind: &str, replicas: u32, containers: &[ContainerRecommendation]) -> f64 {
+    if kind != "CronJob" {
+        return f64::from(replicas);
+    }
+    containers
+        .iter()
+        .filter_map(|c| c.evidence.as_ref()?.duty)
+        .filter(|d| d.is_finite())
+        .reduce(f64::max)
+        .unwrap_or(1.0)
+}
+
+/// Requests of `replicas` (cost replicas, possibly fractional) per month.
 pub fn monthly_requests(
     containers: &[ContainerRecommendation],
-    replicas: u32,
+    replicas: f64,
     pricing: &CostPricing,
     recommended: bool,
 ) -> f64 {
@@ -191,7 +207,7 @@ pub fn monthly_requests(
                 + pricing.memory_monthly(v.memory_request.unwrap_or(0.0))
         })
         .sum::<f64>()
-        * f64::from(replicas)
+        * replicas
 }
 
 /// Over- or under-provisioned, from the containers' usage and requests.
@@ -405,9 +421,9 @@ mod tests {
             Some(usage(100.0, 200.0 * MIB)),
         );
         let containers = vec![over];
-        let current = monthly_requests(&containers, 3, &pricing, false);
+        let current = monthly_requests(&containers, 3.0, &pricing, false);
         assert!((current - 3.0 * (0.04 + 0.005) * 730.0).abs() < 1e-9);
-        let recommended = monthly_requests(&containers, 3, &pricing, true);
+        let recommended = monthly_requests(&containers, 3.0, &pricing, true);
         assert!(recommended < current);
         assert_eq!(verdict(&containers, current, recommended), Verdict::Over);
 

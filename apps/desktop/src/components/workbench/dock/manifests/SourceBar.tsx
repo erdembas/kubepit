@@ -75,42 +75,46 @@ export function SourceBar({
   const problems = render?.problems.length ?? 0;
   const nested = render?.nested.length ?? 0;
 
+  // Three groups that wrap as wholes when the dock is narrow: open buttons,
+  // the source (its path truncates first), then counts / watch / reload.
   return (
-    <EditorBar>
-      <FolderGit2 className="text-accent h-3.5 w-3.5 shrink-0" />
-      <Button
-        size="xs"
-        variant="ghost"
-        leftIcon={<FolderOpen className="h-3 w-3" />}
-        onClick={() => void openFolder()}
-        title={i18n.t('Open a folder: plain manifests, a Kustomize directory or a Helm chart')}
-      >
-        {i18n.t('Folder')}
-      </Button>
-      <Button
-        size="xs"
-        variant="ghost"
-        leftIcon={<Files className="h-3 w-3" />}
-        onClick={() => void openFiles()}
-        title={i18n.t('Open one or more YAML / JSON files')}
-      >
-        {i18n.t('Files')}
-      </Button>
-      <Button
-        size="xs"
-        variant="ghost"
-        leftIcon={<History className="h-3 w-3" />}
-        disabled={recent.length === 0}
-        onClick={(e) => {
-          const r = e.currentTarget.getBoundingClientRect();
-          setMenu({ x: r.left, y: r.bottom + 4 });
-        }}
-      >
-        {i18n.t('Recent')}
-      </Button>
+    <EditorBar wrap>
+      <div className="flex shrink-0 items-center gap-1.5">
+        <FolderGit2 className="text-accent h-3.5 w-3.5 shrink-0" />
+        <Button
+          size="xs"
+          variant="ghost"
+          leftIcon={<FolderOpen className="h-3 w-3" />}
+          onClick={() => void openFolder()}
+          title={i18n.t('Open a folder: plain manifests, a Kustomize directory or a Helm chart')}
+        >
+          {i18n.t('Folder')}
+        </Button>
+        <Button
+          size="xs"
+          variant="ghost"
+          leftIcon={<Files className="h-3 w-3" />}
+          onClick={() => void openFiles()}
+          title={i18n.t('Open one or more YAML / JSON files')}
+        >
+          {i18n.t('Files')}
+        </Button>
+        <Button
+          size="xs"
+          variant="ghost"
+          leftIcon={<History className="h-3 w-3" />}
+          disabled={recent.length === 0}
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            setMenu({ x: r.left, y: r.bottom + 4 });
+          }}
+        >
+          {i18n.t('Recent')}
+        </Button>
+      </div>
       {source && (
-        <>
-          <span aria-hidden className="bg-border/70 mx-1 h-4 w-px shrink-0" />
+        <div className="flex min-w-0 flex-1 basis-56 items-center gap-1.5">
+          <span aria-hidden className="bg-border/70 mx-1 hidden h-4 w-px shrink-0 @lg:block" />
           <span
             className="text-fg min-w-0 truncate font-mono text-[11.5px]"
             title={source.paths.join('\n')}
@@ -131,7 +135,7 @@ export function SourceBar({
             disabled={source.paths.length > 1}
             className="h-6.5 min-w-32 shrink-0"
           />
-        </>
+        </div>
       )}
       <div className="ml-auto flex shrink-0 items-center gap-2 pl-2">
         {render && (

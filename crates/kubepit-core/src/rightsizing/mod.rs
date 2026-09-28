@@ -1,8 +1,10 @@
 //! Right-sizing: CPU / memory requests (and memory limits) per container
 //! from usage history, and the patch that applies them.
 //!
-//! - **Workloads**: Deployments, StatefulSets and DaemonSets in scope, with
-//!   the resources of their pod template.
+//! - **Workloads**: Deployments, StatefulSets, DaemonSets and CronJobs in
+//!   scope, with the resources of their pod template (a CronJob's job
+//!   template). A CronJob counts one replica; its cost follows the
+//!   observed duty cycle ([`math::cost_replicas`]).
 //! - **Usage**: Prometheus when available — p95 CPU, max CPU and max memory
 //!   per container over `settings.days` (presets in
 //!   [`crate::prometheus::usage`]); pods map to workloads by the names
@@ -16,8 +18,9 @@
 //!   headroom) is the default. Limits a new request would exceed are raised
 //!   proportionally for every strategy ([`strategy::finalize`]).
 //! - **Apply** ([`patch`]): a strategic merge patch of the pod template's
-//!   container resources, dry-run first (allowed on read-only clusters),
-//!   then applied (refused on read-only clusters).
+//!   container resources (`spec.jobTemplate.spec.template` for CronJobs),
+//!   dry-run first (allowed on read-only clusters), then applied (refused
+//!   on read-only clusters).
 
 pub mod evidence;
 pub mod math;
@@ -35,6 +38,7 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, bail, Context, Result};
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
+use k8s_openapi::api::batch::v1::CronJob;
 use k8s_openapi::api::core::v1::Pod;
 use kube::api::{Patch, PatchParams};
 use kube::Client;
@@ -81,20 +85,27 @@ fn resources_of(container: &Value) -> ResourceValues {
     }
 }
 
-/// The workload of a Deployment / StatefulSet / DaemonSet object.
+/// The workload of a Deployment / StatefulSet / DaemonSet / CronJob object:
+/// the containers at its [`patch::template_path`] and its replicas (a
+/// DaemonSet's desired pods; one for a CronJob). `None` for other kinds.
 pub fn workload_from_value(kind: &str, obj: &Value) -> Option<Workload> {
     let text = |p: &str| obj.pointer(p).and_then(Value::as_str).map(str::to_string);
-    let replicas = if kind == "DaemonSet" {
-        obj.pointer("/status/desiredNumberScheduled")
+    let replicas = match kind {
+        "DaemonSet" => obj
+            .pointer("/status/desiredNumberScheduled")
             .and_then(Value::as_u64)
-            .unwrap_or(0)
-    } else {
-        obj.pointer("/spec/replicas")
+            .unwrap_or(0),
+        "CronJob" => 1,
+        _ => obj
+            .pointer("/spec/replicas")
             .and_then(Value::as_u64)
-            .unwrap_or(1)
+            .unwrap_or(1),
     };
     let containers = obj
-        .pointer("/spec/template/spec/containers")
+        .pointer(&format!(
+            "/{}/containers",
+            patch::template_path(kind)?.join("/")
+        ))
         .and_then(Value::as_array)?
         .iter()
         .filter_map(|c| Some((c.get("name")?.as_str()?.to_string(), resources_of(c))))
@@ -259,8 +270,9 @@ pub fn recommend_workload(
         .iter()
         .filter_map(|c| c.usage.map(|u| u.hours))
         .fold(0.0, f64::max);
-    let monthly_current = math::monthly_requests(&containers, w.replicas, pricing, false);
-    let monthly_recommended = math::monthly_requests(&containers, w.replicas, pricing, true);
+    let cost_replicas = math::cost_replicas(&w.kind, w.replicas, &containers);
+    let monthly_current = math::monthly_requests(&containers, cost_replicas, pricing, false);
+    let monthly_recommended = math::monthly_requests(&containers, cost_replicas, pricing, true);
     // The weakest container with data decides.
     let confidence = containers
         .iter()
@@ -285,7 +297,7 @@ pub fn recommend_workload(
         pods_truncated: false,
         hpa: None,
         lenses: Vec::new(),
-        cost_replicas: f64::from(w.replicas),
+        cost_replicas,
     };
     rec.lenses = summary::lenses_of(&rec);
     rec
@@ -306,19 +318,34 @@ pub fn sort_recommendations(list: &mut [WorkloadRecommendation]) {
     });
 }
 
-pub(crate) fn apps_gvk(kind: &str) -> Gvk {
-    let plural = match kind {
-        "Deployment" => "deployments",
-        "StatefulSet" => "statefulsets",
-        _ => "daemonsets",
+/// The API resource of a kind right-sizing covers: `apps/v1` Deployments,
+/// StatefulSets and DaemonSets, `batch/v1` CronJobs; `None` otherwise.
+pub(crate) fn workload_gvk(kind: &str) -> Option<Gvk> {
+    let (group, plural) = match kind {
+        "Deployment" => ("apps", "deployments"),
+        "StatefulSet" => ("apps", "statefulsets"),
+        "DaemonSet" => ("apps", "daemonsets"),
+        "CronJob" => ("batch", "cronjobs"),
+        _ => return None,
     };
-    Gvk {
-        group: "apps".into(),
+    Some(Gvk {
+        group: group.into(),
         version: "v1".into(),
         kind: kind.into(),
         plural: plural.into(),
         namespaced: true,
-    }
+    })
+}
+
+/// The error for a kind right-sizing does not cover.
+const UNSUPPORTED_KIND: &str =
+    "right-sizing supports Deployments, StatefulSets, DaemonSets and CronJobs";
+
+/// The API resource and pod spec path of `kind`, or [`UNSUPPORTED_KIND`].
+fn supported(kind: &str) -> Result<(Gvk, &'static [&'static str])> {
+    workload_gvk(kind)
+        .zip(patch::template_path(kind))
+        .ok_or_else(|| anyhow!(UNSUPPORTED_KIND))
 }
 
 fn to_values<T: serde::Serialize>(items: Option<Vec<T>>) -> Vec<Value> {
@@ -334,10 +361,11 @@ async fn workloads_in_scope(
     namespaces: &[String],
     accessible: &[String],
 ) -> Result<Vec<Workload>> {
-    let (deployments, statefulsets, daemonsets) = futures::future::join3(
+    let (deployments, statefulsets, daemonsets, cronjobs) = futures::future::join4(
         lists::namespaced::<Deployment>(client, namespaces, accessible),
         lists::namespaced::<StatefulSet>(client, namespaces, accessible),
         lists::namespaced::<DaemonSet>(client, namespaces, accessible),
+        lists::namespaced::<CronJob>(client, namespaces, accessible),
     )
     .await;
     let deployments = deployments?.ok_or_else(|| {
@@ -348,6 +376,7 @@ async fn workloads_in_scope(
         ("Deployment", to_values(Some(deployments))),
         ("StatefulSet", to_values(statefulsets.ok().flatten())),
         ("DaemonSet", to_values(daemonsets.ok().flatten())),
+        ("CronJob", to_values(cronjobs.ok().flatten())),
     ] {
         out.extend(values.iter().filter_map(|o| workload_from_value(kind, o)));
     }
@@ -382,14 +411,8 @@ impl Kubepit {
         };
         let workloads = match &request.workload {
             Some(target) => {
-                if patch::template_path(&target.kind).is_none() {
-                    bail!("right-sizing supports Deployments, StatefulSets and DaemonSets");
-                }
-                let (api, _) = object_api(
-                    client.clone(),
-                    &apps_gvk(&target.kind),
-                    Some(&target.namespace),
-                )?;
+                let (gvk, _) = supported(&target.kind)?;
+                let (api, _) = object_api(client.clone(), &gvk, Some(&target.namespace))?;
                 let obj = api
                     .get(&target.name)
                     .await
@@ -601,15 +624,12 @@ impl Kubepit {
         changes: &[ContainerResourceChange],
         dry_run: bool,
     ) -> Result<DryRunResult> {
-        let path = patch::template_path(&target.kind).ok_or_else(|| {
-            anyhow!("right-sizing supports Deployments, StatefulSets and DaemonSets")
-        })?;
+        let (gvk, path) = supported(&target.kind)?;
         patch::validate(changes)?;
         if !dry_run {
             self.ensure_writable(cluster_id, "right-size")?;
         }
         let client = self.client(cluster_id).await?;
-        let gvk = apps_gvk(&target.kind);
         let (api, ar) = object_api(client, &gvk, Some(&target.namespace))?;
         let live = api
             .get(&target.name)
@@ -695,6 +715,117 @@ mod tests {
             1
         );
         assert!(workload_from_value("Deployment", &json!({"metadata": {}})).is_none());
+    }
+
+    fn cronjob() -> Value {
+        json!({
+            "metadata": {"name": "nightly", "namespace": "apps", "uid": "uid-nightly"},
+            "spec": {"schedule": "0 2 * * *", "jobTemplate": {"spec": {"template": {"spec": {
+                "containers": [{"name": "job", "resources": {"requests": {"cpu": "500m", "memory": "1Gi"}}}]
+            }}}}}
+        })
+    }
+
+    #[test]
+    fn cronjob_templates_are_read() {
+        let w = workload_from_value("CronJob", &cronjob()).unwrap();
+        assert_eq!(
+            (w.kind.as_str(), w.namespace.as_str(), w.name.as_str()),
+            ("CronJob", "apps", "nightly")
+        );
+        assert_eq!(
+            w.replicas, 1,
+            "one Job at a time; the cost uses the duty cycle"
+        );
+        assert_eq!(w.containers[0].0, "job");
+        assert_eq!(w.containers[0].1.cpu_request, Some(500.0));
+        assert_eq!(w.containers[0].1.memory_request, Some(1024.0 * MIB));
+        // A CronJob's pod template is only read at the job template.
+        let misplaced = json!({"metadata": {"name": "x", "namespace": "a"},
+                               "spec": {"template": {"spec": {"containers": [{"name": "job"}]}}}});
+        assert!(workload_from_value("CronJob", &misplaced).is_none());
+    }
+
+    #[test]
+    fn workload_kinds_have_their_api_group() {
+        let d = workload_gvk("Deployment").unwrap();
+        assert_eq!(
+            (d.api_version(), d.plural.as_str()),
+            ("apps/v1".into(), "deployments")
+        );
+        assert_eq!(workload_gvk("StatefulSet").unwrap().plural, "statefulsets");
+        assert_eq!(workload_gvk("DaemonSet").unwrap().plural, "daemonsets");
+        let c = workload_gvk("CronJob").unwrap();
+        assert_eq!(
+            (
+                c.api_version(),
+                c.kind.as_str(),
+                c.plural.as_str(),
+                c.namespaced
+            ),
+            ("batch/v1".into(), "CronJob", "cronjobs", true)
+        );
+        assert!(workload_gvk("Job").is_none());
+        assert!(workload_gvk("Pod").is_none());
+    }
+
+    #[test]
+    fn cronjob_cost_follows_the_duty_cycle() {
+        let pricing = CostPricing {
+            currency: "USD".into(),
+            cpu_hour: 0.04,
+            memory_gib_hour: 0.005,
+            gpu_hour: None,
+            storage_gib_month: None,
+            discount_percent: 0.0,
+        };
+        let nightly = workload_from_value("CronJob", &cronjob()).unwrap();
+        let stats = UsageStats {
+            cpu_p95: 120.0,
+            cpu_max: 300.0,
+            memory_max: 300.0 * MIB,
+            hours: 96.0,
+            cpu_avg: None,
+            memory_avg: None,
+        };
+        let usage_with = |duty: Option<f64>| -> WorkloadUsage {
+            [(
+                (0, "job".to_string()),
+                ContainerUsage {
+                    stats,
+                    evidence: duty.map(|d| UsageEvidence {
+                        duty: Some(d),
+                        ..UsageEvidence::default()
+                    }),
+                },
+            )]
+            .into()
+        };
+        let recommend = |w: &Workload, usage: &WorkloadUsage| {
+            recommend_workload(
+                w,
+                usage,
+                0,
+                RightsizingSource::Prometheus,
+                &RightsizingSettings::default(),
+                &pricing,
+                strategy::strategy(None).unwrap(),
+            )
+        };
+        // 72 running 5-minute slots of 288 in a day: a quarter of a replica.
+        let quarter = recommend(&nightly, &usage_with(Some(0.25)));
+        assert_eq!(quarter.cost_replicas, 0.25);
+        let always = recommend(&nightly, &usage_with(None));
+        assert_eq!(always.cost_replicas, 1.0, "without evidence: one replica");
+        assert!(quarter.monthly_current > 0.0);
+        assert!((quarter.monthly_current * 4.0 - always.monthly_current).abs() < 1e-9);
+        assert!((quarter.monthly_delta * 4.0 - always.monthly_delta).abs() < 1e-9);
+
+        // Other kinds keep their replicas, whatever the duty.
+        let mut web = workload_from_value("Deployment", &deployment("shop", "web", 3)).unwrap();
+        web.containers.truncate(1);
+        web.containers[0].0 = "job".into();
+        assert_eq!(recommend(&web, &usage_with(Some(0.25))).cost_replicas, 3.0);
     }
 
     #[test]

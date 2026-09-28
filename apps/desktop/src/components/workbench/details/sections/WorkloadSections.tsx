@@ -6,6 +6,7 @@ import { hasRollout } from '@/lib/kube/rollout';
 import { ChipList, MiniTable, MonoText, Row, Rows, Section } from '../primitives';
 import { WorkloadMetricsHistory } from '../MetricsHistoryCard';
 import { RightsizingSection } from '../../cost/RightsizingSection';
+import { DeferredSection } from '../DeferredSection';
 import { PodsMiniTable } from '../PodsMiniTable';
 import { ConditionsTable } from './PodSections';
 import type { SectionProps } from './types';
@@ -127,16 +128,19 @@ export function WorkloadSections({ obj, gvk, ctx, isActive, readOnly }: SectionP
       <Section title={i18n.t('Pod template')}>
         <TemplateContainers template={s.template} />
       </Section>
-      <WorkloadMetricsHistory obj={obj} ctx={ctx} isActive={isActive} />
-      <RightsizingSection obj={obj} gvk={gvk} ctx={ctx} isActive={isActive} readOnly={readOnly} />
-      <Section title={i18n.t('Pods')}>
-        <PodsMiniTable
-          ctx={ctx}
-          namespace={obj.metadata.namespace ?? null}
-          isActive={isActive}
-          match={(p) => matchesSelector(selector, p.metadata.labels)}
-        />
-      </Section>
+      {/* Below the fold: charts, the right-sizing report and the pods watch wait until seen. */}
+      <DeferredSection key={obj.metadata.uid}>
+        <WorkloadMetricsHistory obj={obj} ctx={ctx} isActive={isActive} />
+        <RightsizingSection obj={obj} gvk={gvk} ctx={ctx} isActive={isActive} readOnly={readOnly} />
+        <Section title={i18n.t('Pods')}>
+          <PodsMiniTable
+            ctx={ctx}
+            namespace={obj.metadata.namespace ?? null}
+            isActive={isActive}
+            match={(p) => matchesSelector(selector, p.metadata.labels)}
+          />
+        </Section>
+      </DeferredSection>
     </>
   );
 }

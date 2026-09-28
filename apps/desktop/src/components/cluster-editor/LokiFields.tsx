@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/Input';
 import { lokiServiceLabel } from '@/lib/logs/loki';
 import type { ClusterId, LokiConfig, PromScheme } from '@/types';
 import { Field } from './Field';
-import { Chip } from './PrometheusFields';
+import { Chip } from './Chip';
 
 /** Form state of `ClusterDef.loki` (the port stays text while typing). */
 export interface LokiDraft {

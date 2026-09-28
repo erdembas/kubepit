@@ -169,20 +169,25 @@ export function SyncPanel({
           </Button>
         </div>
       </EditorBar>
-      <EditorBar>
-        <BarLabel>{i18n.t('To')}</BarLabel>
-        <TargetPicker value={targets} onChange={setTargets} disabled={controls.applying} />
+      {/* Narrower than 48rem: targets on the first row, namespace and actions below. */}
+      <EditorBar wrap>
+        <div className="flex max-w-full min-w-0 basis-full items-center gap-1.5 @3xl:basis-auto">
+          <BarLabel>{i18n.t('To')}</BarLabel>
+          <TargetPicker value={targets} onChange={setTargets} disabled={controls.applying} />
+        </div>
         {ready?.namespaced && (
           <>
-            <span aria-hidden className="bg-border/70 mx-1 h-4 w-px shrink-0" />
-            <BarLabel>{i18n.t('Namespace')}</BarLabel>
-            <input
-              value={namespace}
-              onChange={(e) => setNamespace(e.target.value)}
-              aria-label={i18n.t('Target namespace')}
-              spellCheck={false}
-              className="border-border bg-surface-raised text-fg placeholder:text-fg-dim focus:border-accent rounded-app-sm h-6 w-36 shrink-0 border px-2 font-mono text-[11.5px] outline-none"
-            />
+            <span aria-hidden className="bg-border/70 mx-1 hidden h-4 w-px shrink-0 @3xl:block" />
+            <div className="flex min-w-0 items-center gap-1.5">
+              <BarLabel>{i18n.t('Namespace')}</BarLabel>
+              <input
+                value={namespace}
+                onChange={(e) => setNamespace(e.target.value)}
+                aria-label={i18n.t('Target namespace')}
+                spellCheck={false}
+                className="border-border bg-surface-raised text-fg placeholder:text-fg-dim focus:border-accent rounded-app-sm h-6 w-36 min-w-20 shrink border px-2 font-mono text-[11.5px] outline-none"
+              />
+            </div>
           </>
         )}
         <div className="ml-auto flex shrink-0 items-center gap-1.5 pl-2">

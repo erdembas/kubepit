@@ -12,6 +12,7 @@ import { BUILTIN, toGvk } from '@/lib/kube/catalog';
 import { RefLink } from '@/lib/kube/columns/cells';
 import { jobBucket, jobCompletions, jobDuration } from '@/lib/kube/workloads';
 import { formatAge } from '@/lib/format';
+import { RightsizingSection } from '../../cost/RightsizingSection';
 import { useWatch } from '../../data/watchCache';
 import { MiniTable, MonoText, Row, Rows, Section, ToneText } from '../primitives';
 import { PodsMiniTable } from '../PodsMiniTable';
@@ -101,7 +102,8 @@ export function JobSections({ obj, ctx, isActive }: SectionProps) {
   );
 }
 
-export function CronJobSections({ obj, ctx, isActive }: SectionProps) {
+export function CronJobSections(props: SectionProps) {
+  const { obj, ctx, isActive } = props;
   i18n.useLocale();
   const s = spec(obj);
   const st = status(obj);
@@ -221,6 +223,7 @@ export function CronJobSections({ obj, ctx, isActive }: SectionProps) {
       <Section title={i18n.t('Job template')}>
         <TemplateContainers template={asObject(asObject(s.jobTemplate).spec).template} />
       </Section>
+      <RightsizingSection {...props} />
     </>
   );
 }
