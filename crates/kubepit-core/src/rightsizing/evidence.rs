@@ -22,7 +22,8 @@
 //! A pod whose ReplicaSet or Job has no owner series because
 //! `replicaset_owners` / `job_owners` failed or answered nothing for its
 //! namespace ([`OwnerIndex::missing_parent_series`]) is matched by name
-//! instead, and its workload's rows are partial.
+//! among Deployments (ReplicaSet) or CronJobs (Job) instead, and its
+//! workload's rows are partial.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -199,12 +200,14 @@ pub fn fold(input: &FoldInput<'_>) -> Folded {
                 Owner::Unowned => {
                     // The pod's ReplicaSet / Job has no owner series because
                     // that query failed or answered nothing here: fall back
-                    // to its name (a partial row) instead of dropping it.
+                    // to its name among Deployments / CronJobs (a partial
+                    // row) instead of dropping it.
                     let fallback = batch
                         .owners
                         .missing_parent_series(ns, pod)
-                        .then(|| matcher.find(ns, pod))
-                        .flatten();
+                        .and_then(|kind| {
+                            matcher.find_where(ns, pod, |i| workloads[i].kind == kind)
+                        });
                     match fallback {
                         Some(i) => {
                             assigned.insert((ns, pod), i);
@@ -1019,6 +1022,55 @@ mod tests {
         // manual matches no live CronJob; adhoc is a standalone Job where job
         // owners did answer.
         assert_eq!(f.report.unowned_pods, 2);
+    }
+
+    #[test]
+    fn name_match_fallback_respects_the_owner_kind() {
+        // Same-named Deployment and CronJob; the order differs per namespace
+        // so "the later workload wins" would be wrong in both directions.
+        let mut f = Fixture {
+            workloads: vec![
+                workload("CronJob", "apps", "x", 1, &["job"]),
+                workload("Deployment", "apps", "x", 1, &["job"]),
+                workload("Deployment", "other", "y", 1, &["job"]),
+                workload("CronJob", "other", "y", 1, &["job"]),
+            ],
+            ..Default::default()
+        };
+        for (ns, pod) in [
+            ("apps", "x-28765432-abcde"),
+            ("apps", "x-12345-fghij"),
+            ("other", "y-12345-fghij"),
+            ("other", "y-28765432-klmno"),
+        ] {
+            f.put(ns, pod, "job", stats(10.0, 10.0 * MIB, 24.0, 24.0));
+        }
+        // Both names fit both regexes; only the owner kind tells them apart.
+        f.batch.owners = owners(
+            &[
+                ("apps", "x-28765432-abcde", "Job", "x-28765432"),
+                ("apps", "x-12345-fghij", "ReplicaSet", "x-12345"),
+                ("other", "y-12345-fghij", "ReplicaSet", "y-12345"),
+                ("other", "y-28765432-klmno", "Job", "y-28765432"),
+            ],
+            &[],
+        );
+        let f = f.fold();
+        let pods: Vec<Vec<String>> = f.extras.iter().map(|e| e.pods.clone()).collect();
+        assert_eq!(
+            pods,
+            vec![
+                vec!["x-28765432-abcde".to_string()],
+                vec!["x-12345-fghij".to_string()],
+                vec!["y-12345-fghij".to_string()],
+                vec!["y-28765432-klmno".to_string()],
+            ]
+        );
+        assert!(f
+            .extras
+            .iter()
+            .all(|e| e.identity == EvidenceIdentity::NameMatch));
+        assert_eq!(f.report, FoldReport::default());
     }
 
     #[test]

@@ -900,8 +900,8 @@ applying a recommendation only reads, so read-only clusters get it all.
   (`WorkloadExtras.identity`, even for rows left without usage). When the
   ReplicaSet or Job owner query failed or answered nothing for a namespace
   (`OwnerIndex::missing_parent_series`), pods owned by a ReplicaSet / Job
-  there are matched by name instead, with identity `name-match` and partial
-  data. Rows keep at most 50 sorted pod names and the HPA whose
+  there are matched by name among Deployments / CronJobs instead, with
+  identity `name-match` and partial data. Rows keep at most 50 sorted pod names and the HPA whose
   `scaleTargetRef` names the workload. The metrics-server and legacy Prometheus paths produce
   `ContainerUsage` without evidence. The math sits behind `rightsizing::strategy::RecommendationStrategy`
   (`fn info() -> RightsizingStrategyInfo`, `fn recommend(&ContainerInput) ->

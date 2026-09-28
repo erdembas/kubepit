@@ -294,7 +294,7 @@ name wins), and every row gets the `identity-by-name` flag.
 The same fallback applies per pod when Q11 works but Q12 or Q13 failed or answered
 nothing for the pod's namespace (for example an allowlist that drops
 `kube_replicaset_owner`): a pod whose ReplicaSet or Job has no owner series is matched by
-name, and its workload's rows get `identity-by-name` and `partial-data`. A namespace with
+name among Deployments (ReplicaSet) or CronJobs (Job) only, and its workload's rows get `identity-by-name` and `partial-data`. A namespace with
 any Q12 / Q13 series, `<none>` owners included, keeps rule 3 / 4 (orphans stay
 `Unowned`).
 

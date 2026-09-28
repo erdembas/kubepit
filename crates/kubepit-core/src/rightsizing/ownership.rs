@@ -122,25 +122,26 @@ impl OwnerIndex {
         self.pods.is_empty()
     }
 
-    /// The pod's only owner is a ReplicaSet or Job without owner series,
-    /// and the matching owner query (`replicaset_owners` / `job_owners`)
-    /// answered nothing for the namespace: it failed or its metric is not
-    /// collected. [`resolve`](Self::resolve) says `Unowned`, but the parent
-    /// is unknown rather than absent, so the caller may match by name.
-    pub fn missing_parent_series(&self, namespace: &str, pod: &str) -> bool {
-        let Some(owners) = self.pods.get(&(namespace.to_string(), pod.to_string())) else {
-            return false;
-        };
+    /// The parent kind (`Deployment` for a ReplicaSet, `CronJob` for a Job)
+    /// when the pod's only owner is a ReplicaSet or Job without owner
+    /// series, and the matching owner query (`replicaset_owners` /
+    /// `job_owners`) answered nothing for the namespace: it failed or its
+    /// metric is not collected. [`resolve`](Self::resolve) says `Unowned`,
+    /// but the parent is unknown rather than absent, so the caller may match
+    /// the pod by name among workloads of that kind.
+    pub fn missing_parent_series(&self, namespace: &str, pod: &str) -> Option<&'static str> {
+        let owners = self.pods.get(&(namespace.to_string(), pod.to_string()))?;
         let [(kind, name)] = owners.iter().collect::<Vec<_>>()[..] else {
-            return false;
+            return None;
         };
-        let (parents, answered) = match kind.as_str() {
-            "ReplicaSet" => (&self.replicasets, &self.replicaset_namespaces),
-            "Job" => (&self.jobs, &self.job_namespaces),
-            _ => return false,
+        let (parents, answered, parent_kind) = match kind.as_str() {
+            "ReplicaSet" => (&self.replicasets, &self.replicaset_namespaces, "Deployment"),
+            "Job" => (&self.jobs, &self.job_namespaces, "CronJob"),
+            _ => return None,
         };
-        !answered.contains(namespace)
-            && !parents.contains_key(&(namespace.to_string(), name.clone()))
+        (!answered.contains(namespace)
+            && !parents.contains_key(&(namespace.to_string(), name.clone())))
+        .then_some(parent_kind)
     }
 
     /// The owner of pod name `pod` in `namespace`.
@@ -442,14 +443,20 @@ mod tests {
         // replicaset_owners and job_owners failed or were dropped (an allowlist).
         let none = OwnerIndex::from_data(&pods(), &data(vec![]), &data(vec![]));
         assert_eq!(none.resolve("apps", "api-5d8f7-aaaaa"), Owner::Unowned);
-        assert!(none.missing_parent_series("apps", "api-5d8f7-aaaaa"));
-        assert!(none.missing_parent_series("apps", "nightly-28765432-abcde"));
+        assert_eq!(
+            none.missing_parent_series("apps", "api-5d8f7-aaaaa"),
+            Some("Deployment")
+        );
+        assert_eq!(
+            none.missing_parent_series("apps", "nightly-28765432-abcde"),
+            Some("CronJob")
+        );
         assert!(
-            !none.missing_parent_series("apps", "db-0"),
+            none.missing_parent_series("apps", "db-0").is_none(),
             "no parent needed"
         );
-        assert!(!none.missing_parent_series("apps", "bare"));
-        assert!(!none.missing_parent_series("apps", "never-seen"));
+        assert!(none.missing_parent_series("apps", "bare").is_none());
+        assert!(none.missing_parent_series("apps", "never-seen").is_none());
 
         // The queries answered for the namespace, if only with `<none>` owners:
         // a missing parent is a real orphan.
@@ -458,8 +465,12 @@ mod tests {
             &data(vec![rs("apps", "other-rs", "<none>", "<none>")]),
             &data(vec![job("apps", "other-job", "<none>", "<none>")]),
         );
-        assert!(!orphans.missing_parent_series("apps", "api-5d8f7-aaaaa"));
-        assert!(!orphans.missing_parent_series("apps", "nightly-28765432-abcde"));
+        assert!(orphans
+            .missing_parent_series("apps", "api-5d8f7-aaaaa")
+            .is_none());
+        assert!(orphans
+            .missing_parent_series("apps", "nightly-28765432-abcde")
+            .is_none());
 
         // Answers for other namespaces say nothing about this one.
         let elsewhere = OwnerIndex::from_data(
@@ -467,10 +478,14 @@ mod tests {
             &data(vec![rs("shop", "web-5d8f7", "Deployment", "web")]),
             &data(vec![]),
         );
-        assert!(elsewhere.missing_parent_series("apps", "api-5d8f7-aaaaa"));
+        assert!(elsewhere
+            .missing_parent_series("apps", "api-5d8f7-aaaaa")
+            .is_some());
         let mut merged = elsewhere.clone();
         merged.merge(orphans);
-        assert!(!merged.missing_parent_series("apps", "api-5d8f7-aaaaa"));
+        assert!(merged
+            .missing_parent_series("apps", "api-5d8f7-aaaaa")
+            .is_none());
     }
 
     #[test]

@@ -130,10 +130,20 @@ impl PodMatcher {
     /// The workload a pod belongs to; the longest matching name wins, so the
     /// pods of `web-api` never count for `web`.
     pub fn find(&self, namespace: &str, pod: &str) -> Option<usize> {
+        self.find_where(namespace, pod, |_| true)
+    }
+
+    /// [`find`](Self::find) among the workloads `keep` accepts (by index).
+    pub fn find_where(
+        &self,
+        namespace: &str,
+        pod: &str,
+        keep: impl Fn(usize) -> bool,
+    ) -> Option<usize> {
         self.by_namespace
             .get(namespace)?
             .iter()
-            .filter(|(_, re, _)| re.is_match(pod))
+            .filter(|(i, re, _)| keep(*i) && re.is_match(pod))
             .max_by_key(|(_, _, len)| *len)
             .map(|(i, _, _)| *i)
     }
