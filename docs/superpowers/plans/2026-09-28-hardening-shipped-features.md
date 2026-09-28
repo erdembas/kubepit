@@ -420,7 +420,7 @@ git commit -m "fix(watch): keep the objects of a batch that also reports an erro
   - `planMapScope(root: { kind: string; name: string }, sources: ReadonlyArray<Gvk | null>, seed: { items: readonly KubeObject[]; synced: boolean } | null): SlotScope[]`.
   - `useTopologyData(clusterId, slotScopes: ReadonlyArray<SlotScope>, enabled, apiResources, extra)`. It replaces the single `namespaces` argument. `buildTopology` receives the union of the non-null namespace lists.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // apps/desktop/src/lib/kube/topology/scope.test.ts
@@ -471,12 +471,12 @@ describe('planMapScope', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `pnpm --filter @kubepit/desktop test -- src/lib/kube/topology/scope.test.ts`
 Expected: FAIL with "Cannot find module './scope'".
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
   - The seed slot gets `[]`.
   - Other namespaced slots get the sorted unique namespaces of the matching seed items, or `null` when there are none or the seed is not synced.
   - Cluster-scoped slots get `[]`.
@@ -484,14 +484,14 @@ Expected: FAIL with "Cannot find module './scope'".
   - `MapTab`, for a cluster-scoped root with a seed, watches the seed gvk cluster-wide and passes `planMapScope(...)`. Namespaced roots keep `scopeFor` for every slot.
   - `ResourceMapPage` passes `sources.map(() => namespaces)`.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck`
 Expected: PASS.
 
-- [ ] **Step 5: Verify in the demo.** In `pnpm dev:ui` on c-prod-us, open a Node's details and its Map tab. It shows the node, its pods and their owners exactly as before. Opening a Namespace's or Pod's Map tab is unchanged.
+- [x] **Step 5: Verify in the demo.** In `pnpm dev:ui` on c-prod-us, open a Node's details and its Map tab. It shows the node, its pods and their owners exactly as before. Opening a Namespace's or Pod's Map tab is unchanged.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/desktop/src docs/ARCHITECTURE.md
@@ -514,9 +514,9 @@ git commit -m "fix(map): scope the Map tab of cluster-scoped objects to the name
   - `topologyDataKey(snaps: ReadonlyArray<Pick<WatchSnapshot, 'version' | 'synced' | 'forbidden'>>): string`.
   - `useTopologyData` returns its previous model while `enabled` is false.
 
-- [ ] **Step 1: Copy the current `hideKinds` body verbatim into `view.test.ts` as `hideKindsReference`,** before changing `view.ts`. It is the oracle.
+- [x] **Step 1: Copy the current `hideKinds` body verbatim into `view.test.ts` as `hideKindsReference`,** before changing `view.ts`. It is the oracle.
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 ```ts
 // apps/desktop/src/components/workbench/topology/dataKey.test.ts
@@ -558,17 +558,17 @@ describe('hideKinds', () => {
 
 `chainGraph` builds the `TopoGraph` shape from `model.ts`: `nodes` Map and `edges` array. Export `hideKinds` from `view.ts` if it is private.
 
-- [ ] **Step 3: Run the tests to verify they fail**
+- [x] **Step 3: Run the tests to verify they fail**
 
 Run: `pnpm --filter @kubepit/desktop test -- src/components/workbench/topology src/lib/kube/topology/view.test.ts`
 Expected: FAIL. `./dataKey` is missing; `hideKinds` is not exported.
 
-- [ ] **Step 4: Implement.**
+- [x] **Step 4: Implement.**
   - `useTopologyData` memoizes on `topologyDataKey(snaps)` and keeps the last result in a ref while `!enabled`.
   - `hideKinds` builds `incoming` / `outgoing` adjacency maps once and bridges each hidden node from them: O(nodes + edges), with no per-node edge copies.
   - `TopologyMap` skips `deriveView` / `layoutTopology` recomputation while `active` is false.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck`
 Expected: PASS.
@@ -578,7 +578,7 @@ Expected: PASS.
   2. Start a Chrome Performance recording and switch to the Overview view.
   3. Expected: the task after the click takes < 200 ms (it took > 1 s before). Put both numbers in the commit body.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/desktop/src
@@ -601,7 +601,7 @@ git commit -m "fix(map): leaving the Resource Map no longer rebuilds the graph"
   - `ChangesHeader(props: { count: number; recording: ReactNode; ranges: ReactNode; search: ReactNode; refresh: ReactNode }): JSX.Element`. It owns the root `@container`, the wrapping row, the title and the search wrapper.
   - `horizontalWheelDelta(e: { deltaX: number; deltaY: number; deltaMode: number }): number`. It takes the dominant axis and returns pixels (line mode × 16, page mode × 240).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```tsx
 // apps/desktop/src/components/workbench/changes/ChangesHeader.test.tsx
@@ -641,12 +641,12 @@ describe('horizontalWheelDelta', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm --filter @kubepit/desktop test -- src/components/workbench/changes src/lib/ui`
 Expected: FAIL (modules missing).
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
   - `ChangesHeader`:
     - root `@container`;
     - row `border-border/60 flex min-h-12 shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 border-b px-4 py-2`;
@@ -660,14 +660,14 @@ Expected: FAIL (modules missing).
     - adds an `onWheel` that adds `horizontalWheelDelta(e)` to `scrollLeft` when the strip overflows;
     - replaces `overlay-scroll` with `main-tabbar-scroll`.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck && pnpm i18n:check`
 Expected: PASS.
 
 - [ ] **Step 5: Verify visually.** In `pnpm dev:ui`, check the Changes view in a split pane about 560 px wide: the header wraps to two rows and nothing is clipped. Drag the details panel to its 380 px minimum and open the Map tab through a node link: the Map tab scrolls into view, and the wheel scrolls the strip.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/desktop/src

@@ -4,7 +4,7 @@ import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { gvkForKey } from '@/lib/kube/catalog';
 import { kindIcon } from '@/lib/kube/icons';
-import { nodeId, type TopoNode } from '@/lib/kube/topology';
+import { nodeId, TOPOLOGY_SOURCE_COUNT, type SlotScope, type TopoNode } from '@/lib/kube/topology';
 import { useWorkbenchStore, VIEW } from '@/store/useWorkbenchStore';
 import type { ApiResourceInfo } from '@/types';
 import { DetailsPanel } from '../details/DetailsPanel';
@@ -31,7 +31,12 @@ export function ResourceMapPage({
   apiResources: ApiResourceInfo[] | null;
 }) {
   i18n.useLocale();
-  const data = useTopologyData(clusterId, namespaces, isActive, apiResources);
+  // Every slot watches the selected namespaces.
+  const slotScopes = useMemo(
+    () => Array<SlotScope>(TOPOLOGY_SOURCE_COUNT).fill(namespaces),
+    [namespaces],
+  );
+  const data = useTopologyData(clusterId, slotScopes, isActive, apiResources);
   const selection = useWorkbenchStore((s) => s.selection[clusterId]?.[VIEW.resourceMap] ?? null);
   const focusRequest = useMapFocus((s) => (s.request?.clusterId === clusterId ? s.request : null));
   const selectedId = selection ? nodeId(selection.key, selection.namespace, selection.name) : null;
@@ -89,6 +94,7 @@ export function ResourceMapPage({
           selectedId={selectedId}
           showNamespace={namespaces.length !== 1}
           persistKey="namespace"
+          active={isActive}
           synced={data.synced}
           errors={data.errors}
           fitKey={`${clusterId}|${namespaces.join(',')}`}

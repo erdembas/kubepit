@@ -686,7 +686,11 @@ shell enables it, tests and headless tools do not.
   (normalized before/after YAML) are polled by the UI. The Changes view
   (`components/workbench/changes/`, logic in `lib/kube/changes/`) merges
   journal entries with Warning events, Helm revisions and ReplicaSet
-  rollouts; journaled kinds get a Changes tab in the details panel.
+  rollouts; journaled kinds get a Changes tab in the details panel. Its
+  header (`ChangesHeader`) is its own `@container`: in a narrow split pane
+  it wraps the ranges, search and refresh onto a second row, the search
+  fills that row below `@lg` and the recording label (kept as a tooltip)
+  hides below `@2xl`.
 - Tests keep the journal off (`tests/support` setup) unless they enable
   it; `tests/change_journal.rs` drives it through the fake API server.
 
@@ -932,6 +936,29 @@ deterministic:
 
 - `sources.ts` — the kinds read (a fixed list of built-ins plus Gateway API
   `Gateway`/`HTTPRoute`/`GRPCRoute` when served), one watch slot each.
+- `scope.ts` — one watch scope per slot (`SlotScope`: a namespace list, `[]`
+  for cluster-wide, `null` for not watched). The Resource Map and the Map tab
+  of namespaced objects, Namespaces and bound PersistentVolumes use one list
+  for every slot. Other cluster-scoped roots never watch namespaced kinds
+  cluster-wide: `mapSeed` names the kinds that tie the root to namespaces,
+  watched cluster-wide (keys other views share), and the namespaces each
+  seed object names for the root, mirroring how the builder links it: Node
+  → pods by `spec.nodeName`; StorageClass → PVCs; ClusterRole →
+  RoleBindings whose `roleRef` names it (their own namespace and their
+  ServiceAccount subjects') and ClusterRoleBindings (their ServiceAccount
+  subjects'); ClusterRoleBinding → its own ServiceAccount subjects'
+  namespaces plus those of the RoleBindings that bind one of them (so their
+  Roles too); IngressClass → Ingresses by `ingressClassName`, else the
+  legacy `kubernetes.io/ingress.class` annotation, plus class-less Ingresses
+  when the root is the default class. `planMapScope` scopes every other
+  namespaced slot to the union of those namespaces. Until every seed kind
+  syncs (or fails), when nothing matches, and for roots without a seed
+  (PriorityClass, unbound PersistentVolumes, …) namespaced slots stay
+  unwatched.
+  The graph is scoped to the union of the explicit lists (`scopeNamespaces`);
+  on those Map tabs `plannedGraphScope` makes "none" mean no namespace
+  (`buildTopology` `namespaces: null`), so the seed objects elsewhere make no
+  placeholders for what they reference.
 - `build.ts` + `refs.ts` — one node per object (id `kindKey|namespace|name`)
   and typed edges from referrer to referent: ownerReferences, Service /
   PodDisruptionBudget / NetworkPolicy selectors, Service → EndpointSlices,
@@ -946,8 +973,9 @@ deterministic:
   hops where ownership links are free and hubs such as nodes, service
   accounts, classes and cluster roles only expand from the root), drop old
   ReplicaSets and bookkeeping objects, hide kinds (bridging ownership
-  chains), collapse pods per controller into group nodes, and cap the map at
-  400 nodes with one "+N more" node per kind.
+  chains in linear time through an adjacency index), collapse pods per
+  controller into group nodes, and cap the map at 400 nodes with one
+  "+N more" node per kind.
 - `layout.ts` — tier columns (entry → route → service → workload →
   controller → pods → config/storage/identity → bindings → cluster → node),
   barycenter sweeps against crossings, isotonic (PAV) coordinate passes and
@@ -959,7 +987,17 @@ theme tokens, pan / wheel and pinch zoom, hover highlighting, roving
 keyboard focus), `TopologyMap` (search, kind chips, legend, notices),
 `ResourceMapPage` (the `@resource-map` view scoped by the namespace picker,
 with the details panel docked beside the map) and `MapTab` (the details
-panel tab; clicking a node opens that object on its own Map tab).
+panel tab; clicking a node opens that object on its own Map tab). The
+details tab strip overflows at the panel's 380 px minimum, so it scrolls the
+active tab into view (tab requests open the right-most tabs, such as Map)
+and turns the wheel into horizontal scrolling (`lib/ui/wheelScroll.ts`).
+
+Views stay mounted, so leaving one only turns it inactive, and that must cost
+nothing. `useTopologyData` rebuilds the graph on `topologyDataKey`
+(`dataKey.ts`: each slot's `version`, `synced`, `forbidden` and `error`, never
+the `status` that stopping the watches flips), and returns its previous model
+while disabled. `TopologyMap` likewise keeps its derived view, and so its
+layout, while `active` is false (`pausedMemo`).
 
 ## NetworkPolicy simulator
 

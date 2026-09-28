@@ -44,6 +44,7 @@ import { navigateTo, useWorkbenchStore, VIEW } from '@/store/useWorkbenchStore';
 import type { ApiResourceInfo, ChangeJournalStatus } from '@/types';
 import { openRolloutHistory } from '../details/detailsTabs';
 import { useNow } from '../util';
+import { ChangesHeader } from './ChangesHeader';
 import { ChangeRow, HelmRow, RolloutRow, WarningRow } from './TimelineRows';
 import {
   useDebounced,
@@ -253,17 +254,11 @@ export function ChangesPage({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="border-border/60 flex h-12 shrink-0 items-center gap-2 border-b px-4">
-        <span className="bg-accent/10 text-accent flex h-6 w-6 items-center justify-center rounded-md">
-          <History className="h-3.5 w-3.5" />
-        </span>
-        <h2 className="text-fg text-[13px] font-semibold">{i18n.t('Changes')}</h2>
-        <span className="bg-surface-muted text-fg-dim rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums">
-          {items.length}
-        </span>
-        <RecordingIndicator clusterId={clusterId} status={status} />
-        <div className="ml-auto flex items-center gap-1.5">
-          <div className="bg-fg/4 inline-flex gap-0.5 rounded-md p-0.5" role="group">
+      <ChangesHeader
+        count={items.length}
+        recording={<RecordingIndicator clusterId={clusterId} status={status} />}
+        ranges={
+          <div className="bg-fg/4 inline-flex shrink-0 gap-0.5 rounded-md p-0.5" role="group">
             {[...LIVE_RANGES, ...(persisted ? HISTORY_RANGES : [])].map((r) => (
               <button
                 key={r}
@@ -285,7 +280,9 @@ export function ChangesPage({
               </button>
             ))}
           </div>
-          <div className="bg-surface border-border focus-within:border-accent/50 flex h-8 w-56 items-center gap-2 rounded-lg border px-2.5">
+        }
+        search={
+          <>
             <Search className="text-fg-dim h-3.5 w-3.5 shrink-0" />
             <input
               value={text}
@@ -307,14 +304,16 @@ export function ChangesPage({
                 <X className="h-3 w-3" />
               </button>
             )}
-          </div>
+          </>
+        }
+        refresh={
           <IconButton
             label={i18n.t('Refresh')}
             icon={journal.loading ? <Loader2 className="animate-spin" /> : <RefreshCw />}
             onClick={refresh}
           />
-        </div>
-      </div>
+        }
+      />
 
       <div className="border-border/60 flex min-h-10 shrink-0 flex-wrap items-center gap-1 border-b px-4 py-1.5">
         {TIMELINE_SOURCES.map((source) => {
@@ -483,14 +482,22 @@ function RecordingIndicator({
   const since = status.started_at
     ? i18n.date(status.started_at, { hour: '2-digit', minute: '2-digit' })
     : null;
+  const label = recording
+    ? status.synced
+      ? since
+        ? i18n.t('Recording since {time}', { time: since })
+        : i18n.t('Recording')
+      : i18n.t('Building baseline…')
+    : i18n.t('Not recording');
   return (
-    <span className="ml-2 flex items-center gap-2">
+    <span className="flex shrink-0 items-center gap-2 @2xl:ml-2">
       <span
         className="text-fg-dim flex items-center gap-1.5 text-[11px]"
+        // The label hides in narrow panes; the tooltip always carries it.
         title={
           recording && since
             ? i18n.t('Recording since {time}. Changes before that are unknown.', { time: since })
-            : undefined
+            : label
         }
       >
         <span
@@ -504,13 +511,7 @@ function RecordingIndicator({
               : 'bg-fg-dim/50',
           )}
         />
-        {recording
-          ? status.synced
-            ? since
-              ? i18n.t('Recording since {time}', { time: since })
-              : i18n.t('Recording')
-            : i18n.t('Building baseline…')
-          : i18n.t('Not recording')}
+        <span className="hidden @2xl:inline">{label}</span>
       </span>
       {toggle.globallyOn && (
         <span title={i18n.t('Record changes of this cluster')}>
