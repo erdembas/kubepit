@@ -915,6 +915,21 @@ applying a recommendation only reads, so read-only clusters get it all.
   warning). Workloads get a verdict (over / under / balanced / no data;
   any `oom-killed` container makes it under), the monthly cost delta of
   their requests and the weakest container's confidence.
+  `rightsizing/summary.rs` adds what the review needs, in Rust so every
+  view and export agrees: `lenses_of` (KubeFit's quick-focus groups:
+  `cpu-reduction`, `memory-reduction`, `increase` (increase or set),
+  `request-unset`, `missing-data`, `needs-review` (changed, not high
+  confidence), `limit-raised`) sets `WorkloadRecommendation.lenses`;
+  `risk_score` (`+∞` after an OOM kill, else the largest usage ÷ request,
+  a missing request counting as 2); `one_click_eligible` (high
+  confidence, changed, no raised limit — the UI adds the cluster
+  conditions); `summarize` turns a report into a `RecommendationSummary`:
+  counts by verdict, confidence and change, one-click count, CPU and
+  memory totals (requests × `cost_replicas` over containers with a
+  current request and usage, plus the containers without a request),
+  monthly current / savings / increases, and `top` — at most five
+  under-provisioned workloads (confidence ≥ medium) by risk, then at most
+  five high-confidence savings, ties by namespace and name.
 - **Apply** (`rightsizing_apply`): a strategic merge patch of the named
   containers' resources at the pod template plus a
   `kubernetes.io/change-cause`; `dryRun: true` returns live vs. result like

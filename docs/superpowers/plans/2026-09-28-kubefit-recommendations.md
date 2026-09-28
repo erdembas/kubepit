@@ -1046,7 +1046,7 @@ git commit -m "feat(rightsizing): recommend and patch CronJobs"
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn lenses_follow_kubefit_semantics() {
@@ -1065,21 +1065,21 @@ Steps:
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core rightsizing::summary`
 
 Expected: FAIL to compile.
 
-- [ ] **Step 3: Implement `summary.rs`, set the lenses, mirror the TS types, and update the docs section**
+- [x] **Step 3: Implement `summary.rs`, set the lenses, mirror the TS types, and update the docs section**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core && pnpm typecheck`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/src/rightsizing apps/desktop/src/types/index.ts docs/ARCHITECTURE.md

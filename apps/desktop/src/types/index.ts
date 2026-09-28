@@ -2387,6 +2387,57 @@ export interface RightsizingReport {
   window_end: number;
 }
 
+/** Current vs. recommended requests (× cost replicas) of one resource. */
+export interface ResourceTotals {
+  /** Σ current requests × cost replicas over comparable containers (millicores or bytes). */
+  current: number;
+  recommended: number;
+  /** Containers with a current request and usage behind the recommendation. */
+  comparable: number;
+  /** Containers without a current request. */
+  unset: number;
+}
+
+/** A workload of the review spotlight. */
+export interface SummaryEntry {
+  kind: string;
+  namespace: string;
+  name: string;
+  verdict: RightsizingVerdict;
+  confidence: RightsizingConfidence;
+  monthly_delta: number;
+  /** Recommended − current CPU requests × cost replicas (millicores). */
+  cpu_delta: number;
+  /** Recommended − current memory requests × cost replicas (bytes). */
+  memory_delta: number;
+}
+
+/** Totals, counts and the spotlight of one successful run. */
+export interface RecommendationSummary {
+  workloads: number;
+  containers: number;
+  namespaces: number;
+  over: number;
+  under: number;
+  balanced: number;
+  no_data: number;
+  high: number;
+  medium: number;
+  low: number;
+  changed: number;
+  /** High-confidence changed workloads without a raised limit. */
+  one_click: number;
+  cpu: ResourceTotals;
+  memory: ResourceTotals;
+  monthly_current: number;
+  /** Savings of changed workloads per month (a positive number). */
+  monthly_savings: number;
+  monthly_increases: number;
+  currency: string;
+  /** Under-provisioned by risk (≤ 5), then high-confidence savings (≤ 5). */
+  top: SummaryEntry[];
+}
+
 /** New values of one container (`null` = unchanged). */
 export interface ContainerResourceChange {
   container: string;

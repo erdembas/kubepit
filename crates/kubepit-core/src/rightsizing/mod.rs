@@ -23,6 +23,7 @@ pub mod math;
 pub mod patch;
 pub mod percentile;
 pub mod strategy;
+pub mod summary;
 pub mod types;
 pub mod workload_history;
 
@@ -249,7 +250,7 @@ pub fn recommend_workload(
         .map(|c| c.confidence)
         .min()
         .unwrap_or(Confidence::Low);
-    WorkloadRecommendation {
+    let mut rec = WorkloadRecommendation {
         kind: w.kind.clone(),
         namespace: w.namespace.clone(),
         name: w.name.clone(),
@@ -267,7 +268,9 @@ pub fn recommend_workload(
         hpa: None,
         lenses: Vec::new(),
         cost_replicas: f64::from(w.replicas),
-    }
+    };
+    rec.lenses = summary::lenses_of(&rec);
+    rec
 }
 
 /// Changed first, then the largest saving, then the largest increase.
@@ -726,6 +729,8 @@ mod tests {
             strategy::strategy(None).unwrap(),
         );
         assert_eq!(rec.confidence, Confidence::High);
+        assert_eq!(rec.lenses, summary::lenses_of(&rec), "lenses are set");
+        assert!(rec.lenses.contains(&RecommendationLens::CpuReduction));
         assert!(rec.changed);
         assert!(rec.monthly_delta < 0.0, "a saving");
         // The proxy container has no usage: untouched (and it does not lower the confidence).
