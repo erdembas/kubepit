@@ -25,6 +25,7 @@ pub mod audit;
 pub mod audited;
 pub mod db;
 pub mod persist;
+pub mod recommendations;
 pub mod redact;
 pub mod types;
 pub mod writer;

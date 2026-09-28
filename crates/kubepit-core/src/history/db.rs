@@ -29,9 +29,10 @@ pub const MAX_PAGE: u32 = 1000;
 pub const MAX_EXPORT: u32 = 100_000;
 
 /// Every migration, in order. Never edit a released one; append.
-const MIGRATIONS: &[(i64, &str)] = &[(
-    1,
-    r#"
+pub(crate) const MIGRATIONS: &[(i64, &str)] = &[
+    (
+        1,
+        r#"
 CREATE TABLE audit (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     ts           INTEGER NOT NULL,
@@ -103,7 +104,9 @@ CREATE TABLE changes (
 CREATE INDEX changes_cluster_id ON changes (cluster_id, id DESC);
 CREATE INDEX changes_ts ON changes (ts);
 "#,
-)];
+    ),
+    (2, super::recommendations::MIGRATION),
+];
 
 /// Newest schema this build knows.
 pub fn latest_version() -> i64 {

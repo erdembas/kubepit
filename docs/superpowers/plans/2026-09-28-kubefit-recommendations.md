@@ -1215,7 +1215,7 @@ git commit -m "feat(recommendations): backend settings with per-strategy overrid
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn migration_two_applies_on_fresh_and_version_one_databases() {
@@ -1240,21 +1240,21 @@ Steps:
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core history::recommendations`
 
 Expected: FAIL to compile.
 
-- [ ] **Step 3: Implement `history/recommendations.rs` and append the migration**
+- [x] **Step 3: Implement `history/recommendations.rs` and append the migration**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core history`
 
 Expected: PASS, including the existing history tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/src/history crates/kubepit-core/src/history.rs crates/kubepit-core/src/recommendations
