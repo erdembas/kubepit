@@ -348,14 +348,15 @@ git commit -m "perf(bench): Criterion benches for watch batching and metrics his
 | `journal/details_after_500` | journal with 5 000 entries | `details_after(0, 500)` |
 | `history/writer_events_10k` | temp-dir `Writer::start(path, QUEUE_CAPACITY)` | `submit(WriteOp::Events(rows))` in batches of 100 until 10 000, then `flush(10 s)`. After the run, assert `stats().dropped == 0` |
 
-- [ ] **Step 1: Write the benches** as specified. `writer_events_10k` uses `iter_custom` with a fresh temp dir per iteration.
+- [x] **Step 1: Write the benches** as specified. `writer_events_10k` uses `iter_custom` with a fresh temp dir per iteration.
+  _(Done. `book_record` records a new alert on a new object a minute after the last one, so every call takes the slowest path: index, push, evict the oldest. `apply_update` and `details_after_500` apply real `data` changes, so each apply records a Modified entry. The writer bench also asserts `failed == 0`.)_
 
-- [ ] **Step 2: Run them**
+- [x] **Step 2: Run them**
 
 Run: `cargo bench -p kubepit-core --bench watchers -- --quick --noplot`
 Expected: every id prints a time, and the writer bench reports no drops (the bench panics otherwise).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add crates/kubepit-core/benches/watchers.rs
