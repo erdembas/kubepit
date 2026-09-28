@@ -16,6 +16,7 @@ import './updates';
 import './alerts';
 import './insights';
 import './prometheus';
+import './loki';
 import './openapi';
 // Registered after './app': it wraps `port_forward_start` and `cluster_connect`.
 import './connectivity';

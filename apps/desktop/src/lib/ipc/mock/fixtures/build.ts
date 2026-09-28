@@ -10,6 +10,7 @@ import { buildHealthDemo } from './health';
 import { buildGitOps } from './gitops';
 import { buildHelm } from './helm';
 import { buildClasses, buildLeaderLeases, buildNamespaces, buildWebhooks } from './infra';
+import { buildLokiServices } from './loki';
 import { buildMonitoring } from './monitoring';
 import { buildIngress, buildNetworkPolicies } from './network';
 import { buildNodes } from './nodes';
@@ -32,6 +33,7 @@ function buildCluster(db: ClusterDb) {
   buildCertManager(db);
   buildMonitoring(db);
   buildPrometheusServices(db);
+  buildLokiServices(db);
   buildArgo(db);
   buildCheckout(db);
   buildWeb(db);
