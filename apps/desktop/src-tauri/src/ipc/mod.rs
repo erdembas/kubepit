@@ -39,6 +39,8 @@ mod connectivity;
 mod manifests;
 // Change timeline: in-memory change journal.
 mod changes;
+// Resource wizards: user-picked local files.
+mod files;
 
 pub use access::*;
 pub use alerts::*;
@@ -46,6 +48,7 @@ pub use app::*;
 pub use changes::*;
 pub use clusters::*;
 pub use connectivity::*;
+pub use files::*;
 pub use fleet::*;
 pub use helm::*;
 pub use helm_charts::*;
