@@ -25,7 +25,11 @@ import {
   changeItems,
   countBySource,
   helmItems,
+  historyChangeItems,
+  HISTORY_RANGES,
+  isHistoryItem,
   kindFacets,
+  LIVE_RANGES,
   mergeTimeline,
   rolloutItems,
   TIME_RANGES,
@@ -49,6 +53,13 @@ import {
   useReplicaSets,
   useWarningEvents,
 } from './useChanges';
+import {
+  journalCoverageStart,
+  mergeEvents,
+  useHistoryChanges,
+  useHistoryWarnings,
+  usePersistedHistory,
+} from './useHistory';
 
 const PAGE = 300;
 const MAX_LIMIT = 1000;
@@ -81,12 +92,20 @@ function rangeLabel(range: TimeRange) {
       return i18n.t('{hours}h', { hours: 1 });
     case '6h':
       return i18n.t('{hours}h', { hours: 6 });
+    case '7d':
+      return i18n.t('{days}d', { days: 7 });
+    case '30d':
+      return i18n.t('{days}d', { days: 30 });
     default:
       return i18n.t('{hours}h', { hours: 24 });
   }
 }
 
 function rangeTitle(range: TimeRange) {
+  if (range === '7d' || range === '30d')
+    return i18n.t('Last {count} days (from the history on this machine)', {
+      count: TIME_RANGES[range] / 86_400_000,
+    });
   return range === '15m'
     ? i18n.t('Last {minutes} minutes', { minutes: 15 })
     : i18n.plural('Last hour', 'Last {count} hours', TIME_RANGES[range] / 3_600_000);
@@ -118,7 +137,8 @@ export function ChangesPage({
   const [limit, setLimit] = useState(PAGE);
   const [expanded, setExpanded] = useState<string | null>(null);
   const now = useNow(15_000, isActive);
-  const rangeMs = TIME_RANGES[range];
+  const persisted = usePersistedHistory(clusterId);
+  const rangeMs = TIME_RANGES[persisted || !HISTORY_RANGES.includes(range) ? range : '24h'];
   const shows = (source: TimelineSource) => !hidden.includes(source);
 
   const journal = useJournal(
@@ -132,6 +152,21 @@ export function ChangesPage({
   const replicaSets = useReplicaSets(clusterId, namespaces, isActive && shows('rollouts'));
   const status = journal.data?.status;
   const entries = useMemo(() => journal.data?.entries ?? [], [journal.data]);
+  // Persistent history: entries older than the live journal and expired warnings.
+  const older = useHistoryChanges(
+    clusterId,
+    { namespaces, kinds: [], name: null, text: query || null, limit },
+    rangeMs,
+    journalCoverageStart(status),
+    isActive && persisted && !!journal.data,
+  );
+  const olderWarnings = useHistoryWarnings(
+    clusterId,
+    namespaces,
+    rangeMs,
+    isActive && persisted && shows('warnings'),
+  );
+  const olderEntries = useMemo(() => older.data?.entries ?? [], [older.data]);
 
   const scope: TimelineWindow = useMemo(
     () => ({
@@ -146,12 +181,15 @@ export function ChangesPage({
   );
   const bySource = useMemo(
     (): Record<TimelineSource, TimelineItem[]> => ({
-      changes: changeItems(entries, scope),
-      warnings: warningItems(warnings.data ?? [], scope),
+      changes: [...changeItems(entries, scope), ...historyChangeItems(olderEntries, scope)],
+      warnings: warningItems(
+        mergeEvents(warnings.data ?? [], olderWarnings.data?.events ?? []),
+        scope,
+      ),
       helm: helmItems(helm.data ?? [], scope),
       rollouts: rolloutItems(replicaSets.data ?? [], scope),
     }),
-    [entries, scope, warnings.data, helm.data, replicaSets.data],
+    [entries, olderEntries, scope, warnings.data, olderWarnings.data, helm.data, replicaSets.data],
   );
   const counts = countBySource(TIMELINE_SOURCES.flatMap((s) => bySource[s]));
   const items = useMemo(
@@ -162,10 +200,10 @@ export function ChangesPage({
   const buckets = useMemo(() => bucketize(items, now), [items, now]);
   const facets = useMemo(
     () =>
-      kindFacets(entries).sort(
+      kindFacets([...entries, ...olderEntries]).sort(
         (a, b) => b[1] - a[1] || journaledOrder(a[0]) - journaledOrder(b[0]),
       ),
-    [entries],
+    [entries, olderEntries],
   );
   const filtered = !!query || kinds.length > 0 || hidden.length > 0;
   const clear = () => {
@@ -179,11 +217,12 @@ export function ChangesPage({
     setHidden((h) => (h.includes(source) ? h.filter((x) => x !== source) : [...h, source]));
   const refresh = () => {
     void journal.refresh();
+    if (persisted) void older.refresh();
     if (shows('warnings')) void warnings.refresh();
     if (shows('helm')) void helm.refresh();
     if (shows('rollouts')) void replicaSets.refresh();
   };
-  const truncatedPage = journal.data?.next_cursor != null;
+  const truncatedPage = journal.data?.next_cursor != null || older.data?.next_cursor != null;
 
   const openWarning = (item: Extract<TimelineItem, { type: 'warning' }>) => {
     const gvk = resolveRef(item.object.apiVersion || undefined, item.object.kind, apiResources);
@@ -225,11 +264,11 @@ export function ChangesPage({
         <RecordingIndicator clusterId={clusterId} status={status} />
         <div className="ml-auto flex items-center gap-1.5">
           <div className="bg-fg/4 inline-flex gap-0.5 rounded-md p-0.5" role="group">
-            {(Object.keys(TIME_RANGES) as TimeRange[]).map((r) => (
+            {[...LIVE_RANGES, ...(persisted ? HISTORY_RANGES : [])].map((r) => (
               <button
                 key={r}
                 type="button"
-                aria-pressed={range === r}
+                aria-pressed={TIME_RANGES[r] === rangeMs}
                 onClick={() => {
                   setRange(r);
                   setLimit(PAGE);
@@ -237,7 +276,7 @@ export function ChangesPage({
                 title={rangeTitle(r)}
                 className={cn(
                   'rounded px-2 py-0.5 text-[11px] tabular-nums transition-colors',
-                  range === r
+                  TIME_RANGES[r] === rangeMs
                     ? 'bg-surface-raised text-fg font-medium shadow-sm'
                     : 'text-fg-dim hover:text-fg',
                 )}
@@ -377,6 +416,7 @@ export function ChangesPage({
                         last={last}
                         expanded={expanded === item.key}
                         onToggle={() => setExpanded((k) => (k === item.key ? null : item.key))}
+                        historic={isHistoryItem(item)}
                       />
                     );
                   if (item.type === 'warning')
@@ -416,6 +456,7 @@ export function ChangesPage({
             </section>
           ))}
           <TimelineFooter
+            persisted={persisted}
             status={status}
             since={now - rangeMs}
             truncated={truncatedPage}
@@ -595,12 +636,15 @@ function EmptyTimeline({
 }
 
 function TimelineFooter({
+  persisted = false,
   status,
   since,
   truncated,
   canLoadMore,
   onLoadMore,
 }: {
+  /** Older entries come from the persistent history. */
+  persisted?: boolean;
   status: ChangeJournalStatus | undefined;
   since: number;
   truncated: boolean;
@@ -620,7 +664,12 @@ function TimelineFooter({
           {i18n.t('Showing the newest changes only. Narrow the filters to see older ones.')}
         </span>
       ) : null}
-      {started !== null && started > since && (
+      {persisted && (
+        <span>
+          {i18n.t('Entries older than the live journal come from the history on this machine.')}
+        </span>
+      )}
+      {!persisted && started !== null && started > since && (
         <span className="flex items-center gap-2">
           <span className="bg-border h-px w-8" aria-hidden />
           {i18n.t('Recording started at {time}; earlier changes are unknown.', {

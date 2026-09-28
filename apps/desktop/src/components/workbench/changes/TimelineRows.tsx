@@ -241,6 +241,7 @@ export function ChangeRow({
   expanded,
   onToggle,
   compact = false,
+  historic = false,
 }: {
   entry: ChangeSummary;
   now: number;
@@ -249,6 +250,8 @@ export function ChangeRow({
   expanded: boolean;
   onToggle: () => void;
   compact?: boolean;
+  /** From the persistent history (not the live journal). */
+  historic?: boolean;
 }) {
   i18n.useLocale();
   const gvk = journaledGvk(entry.gvk);
@@ -322,7 +325,7 @@ export function ChangeRow({
       </RowShell>
       {expanded && (
         <div className="border-border/60 bg-surface-muted/30 border-y">
-          <ChangeDiff entry={entry} />
+          <ChangeDiff entry={entry} historic={historic} />
         </div>
       )}
     </li>
