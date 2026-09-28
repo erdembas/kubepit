@@ -447,7 +447,7 @@ export interface ManifestRender {
   nested: ManifestNested[];
   /** Tool invocation for display (`kubectl kustomize …`, `helm template …`). */
   command: string | null;
-  /** Compare with `manifestsFingerprint` to notice edits. */
+  /** Compare with `ManifestsWatchEvent.fingerprint` to notice edits. */
   fingerprint: string;
   rendered_at: number;
 }
@@ -462,6 +462,16 @@ export interface ManifestRecent {
 export interface ManifestApplyResult {
   object: KubeObject | null;
   error: string | null;
+}
+
+/**
+ * `manifestsWatch`: the files of a watched source changed (debounced), or
+ * already differed from `since` when the watch started.
+ */
+export interface ManifestsWatchEvent {
+  watch_id: string;
+  /** Re-render when it differs from `ManifestRender.fingerprint`. */
+  fingerprint: string;
 }
 
 // ---------------------------------------------------------------------------

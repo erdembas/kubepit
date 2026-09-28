@@ -1,5 +1,5 @@
 import * as i18n from '@/i18n';
-import { Loader2, Send } from 'lucide-react';
+import { Loader2, Lock, Send } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useAppStore } from '@/store/useAppStore';
 import type { ReviewControls } from './FleetReview';
@@ -23,6 +23,12 @@ function blocker(
       plan.errors,
     );
   if (plan.changes === 0) {
+    if (plan.denied > 0)
+      return i18n.plural(
+        'You may not apply {count} selected change (RBAC)',
+        'You may not apply {count} of the selected changes (RBAC)',
+        plan.denied,
+      );
     if (review.targets.every((t) => t.readOnly))
       return i18n.t('Every selected cluster is read-only: nothing can be applied.');
     return i18n.t('Nothing selected would change.');
@@ -32,7 +38,8 @@ function blocker(
 
 /**
  * Applies the reviewed plan. Production targets always need an explicit
- * confirmation (typing the cluster name), like other risky actions.
+ * confirmation (typing the cluster name), like other risky actions. Changes
+ * RBAC denies are left out; a note names how many.
  */
 export function ApplyButton({
   review,
@@ -85,27 +92,44 @@ export function ApplyButton({
     });
   };
 
-  return (
-    <Button
-      size="xs"
-      variant="primary"
-      leftIcon={
-        applying ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />
-      }
-      disabled={blocked !== null || applying}
-      title={
-        blocked ??
-        i18n.plural(
-          'Server-side apply on {count} cluster',
-          'Server-side apply on {count} clusters',
-          clusterCount,
+  const skipped =
+    !blocked && plan.denied > 0
+      ? i18n.plural(
+          '{count} change skipped: no permission (RBAC)',
+          '{count} changes skipped: no permission (RBAC)',
+          plan.denied,
         )
-      }
-      onClick={run}
-    >
-      {applying
-        ? i18n.t('Applying…')
-        : i18n.plural('Apply {count} change', 'Apply {count} changes', plan.changes)}
-    </Button>
+      : null;
+
+  return (
+    <>
+      {skipped && (
+        <span className="text-fg-dim flex min-w-0 items-center gap-1 text-[11px]" title={skipped}>
+          <Lock className="h-3 w-3 shrink-0" />
+          <span className="truncate">{skipped}</span>
+        </span>
+      )}
+      <Button
+        size="xs"
+        variant="primary"
+        leftIcon={
+          applying ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />
+        }
+        disabled={blocked !== null || applying}
+        title={
+          blocked ??
+          i18n.plural(
+            'Server-side apply on {count} cluster',
+            'Server-side apply on {count} clusters',
+            clusterCount,
+          )
+        }
+        onClick={run}
+      >
+        {applying
+          ? i18n.t('Applying…')
+          : i18n.plural('Apply {count} change', 'Apply {count} changes', plan.changes)}
+      </Button>
+    </>
   );
 }

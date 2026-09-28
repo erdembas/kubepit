@@ -8,6 +8,7 @@ import type {
   ManifestApplyResult,
   ManifestDocument,
 } from '@/types';
+import { deniedKey } from './access';
 
 /**
  * Pure model of a fleet review: N documents dry-run against M targets
@@ -213,11 +214,24 @@ export interface ApplyPlan {
   errors: number;
   /** Included targets whose dry run has not finished (or failed). */
   unchecked: number;
+  /** Selected changes left out because RBAC denies them (`access.ts`). */
+  denied: number;
 }
+
+export const EMPTY_PLAN: ApplyPlan = {
+  targets: [],
+  changes: 0,
+  errors: 0,
+  unchecked: 0,
+  denied: 0,
+};
+
+const NONE: ReadonlySet<string> = new Set();
 
 /**
  * What "Apply" would do: every selected document that changes on an
- * included, writable target. Read-only targets never take part.
+ * included, writable target, unless RBAC denies that cell (`denied`, keyed
+ * by `deniedKey`). Read-only targets never take part.
  */
 export function planApply(
   docs: ReviewDoc[],
@@ -225,8 +239,9 @@ export function planApply(
   runs: Record<string, TargetRun>,
   selected: Set<string>,
   included: Set<string>,
+  denied: ReadonlySet<string> = NONE,
 ): ApplyPlan {
-  const plan: ApplyPlan = { targets: [], changes: 0, errors: 0, unchecked: 0 };
+  const plan: ApplyPlan = { ...EMPTY_PLAN, targets: [] };
   for (const target of targets) {
     if (target.readOnly || !included.has(target.key)) continue;
     const run = runs[target.key];
@@ -239,7 +254,9 @@ export function planApply(
       if (!selected.has(doc.id)) return;
       const badge = run.cells[i]?.badge;
       if (badge === 'error') plan.errors++;
-      if (badge === 'create' || badge === 'update') indexes.push(i);
+      if (badge !== 'create' && badge !== 'update') return;
+      if (denied.has(deniedKey(target.key, i))) plan.denied++;
+      else indexes.push(i);
     });
     if (indexes.length) plan.targets.push({ target, indexes });
     plan.changes += indexes.length;

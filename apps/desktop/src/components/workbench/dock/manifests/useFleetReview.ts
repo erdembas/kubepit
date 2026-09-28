@@ -1,6 +1,11 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ipc } from '@/lib/ipc';
+import { useAccessMany } from '@/store/useAccessStore';
+import { useWorkbenchStore } from '@/store/useWorkbenchStore';
+import type { AccessCheck, ClusterId } from '@/types';
+import { gateState } from '../../access/gates';
 import { errorText } from '../../util';
+import { reviewCellChecks } from './access';
 import {
   applyCells,
   buildCells,
@@ -135,5 +140,76 @@ export function useFleetReview() {
     setReview(null);
   }, []);
 
-  return { review, run, apply, clear };
+  const denied = useApplyDenied(review);
+  return { review, run, apply, clear, denied };
+}
+
+/** Clusters whose discovery is being fetched for a review (shared by every review). */
+const discovering = new Set<ClusterId>();
+
+/**
+ * Apply cells RBAC denies, keyed by `deniedKey`, with the denied check (for
+ * the lock's tooltip). Answers come from the access cache of each target
+ * cluster; unknown answers and kinds discovery does not know are never
+ * denied.
+ */
+export function useApplyDenied(review: FleetReview | null): ReadonlyMap<string, AccessCheck> {
+  const apiResources = useWorkbenchStore((s) => s.apiResources);
+  // Discovery resolves plurals; fetch it for targets whose dry run finished.
+  const missing = useMemo(() => {
+    if (!review) return [];
+    const ids = review.targets
+      .filter((t) => !t.readOnly && review.runs[t.key]?.status === 'done')
+      .map((t) => t.clusterId)
+      .filter((id) => !apiResources[id]);
+    return [...new Set(ids)];
+  }, [review, apiResources]);
+  useEffect(() => {
+    for (const clusterId of missing) {
+      if (discovering.has(clusterId)) continue;
+      discovering.add(clusterId);
+      ipc
+        .apiResources(clusterId)
+        .then((resources) => useWorkbenchStore.getState().setApiResources(clusterId, resources))
+        // Without discovery nothing is checked, so nothing is denied.
+        .catch(() => undefined)
+        .finally(() => discovering.delete(clusterId));
+    }
+  }, [missing]);
+
+  const cells = useMemo(
+    () =>
+      review
+        ? reviewCellChecks(
+            review.docs,
+            review.targets,
+            review.runs,
+            (id) => apiResources[id] ?? null,
+          )
+        : new Map<ClusterId, never[]>(),
+    [review, apiResources],
+  );
+  const requests = useMemo(
+    () =>
+      [...cells].map(([clusterId, list]) => ({
+        clusterId,
+        checks: list.flatMap((cell) => cell.checks),
+      })),
+    [cells],
+  );
+  const answers = useAccessMany(requests);
+  return useMemo(() => {
+    const denied = new Map<string, AccessCheck>();
+    [...cells.values()].forEach((list, r) => {
+      let at = 0;
+      for (const cell of list) {
+        const blocking = cell.checks.find(
+          (check, i) => gateState(answers[r]?.[at + i], check) === 'denied',
+        );
+        if (blocking) denied.set(cell.key, blocking);
+        at += cell.checks.length;
+      }
+    });
+    return denied;
+  }, [cells, answers]);
 }

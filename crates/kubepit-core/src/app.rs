@@ -46,6 +46,8 @@ pub struct Kubepit {
     // Fleet: per-cluster metrics samplers and running fleet-wide searches.
     pub(crate) metrics_history: MetricsHistory,
     pub(crate) fleet_searches: TaskRegistry,
+    // Local manifests: running "Watch"es of sources (`manifests/watch.rs`).
+    pub(crate) manifest_watches: TaskRegistry,
     // Alerts: per-cluster monitors and the notification center's history.
     pub(crate) alerts: AlertCenter,
     // Prometheus: detection result per connection.
@@ -102,6 +104,7 @@ impl Kubepit {
             metrics_gate: MetricsGate::default(),
             metrics_history: MetricsHistory::default(),
             fleet_searches: TaskRegistry::default(),
+            manifest_watches: TaskRegistry::default(),
             alerts,
             prometheus: PrometheusCache::default(),
             proxy_clients: ProxyClients::default(),
@@ -220,6 +223,7 @@ impl Kubepit {
         self.log_streams.stop_all();
         self.metrics_history.stop_all();
         self.fleet_searches.stop_all();
+        self.manifest_watches.stop_all();
         self.alerts.stop_all();
         self.change_journals.stop_all();
         self.history.shutdown();

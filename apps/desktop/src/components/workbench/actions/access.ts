@@ -109,6 +109,8 @@ export const ACTION_ACCESS: Record<string, Requirement> = {
   // Resource wizards: what the generated manifest creates.
   expose: ({ ns }) => [accessCheck('create', SERVICE, { namespace: ns })],
   'create-ingress': ({ ns }) => [accessCheck('create', INGRESS, { namespace: ns })],
+  // On a Role or ClusterRole the action sets its own `access` for the namespace
+  // it binds in (`roleBindingTarget.ts`); this entry covers ServiceAccounts.
   'add-rolebinding': ({ ns }) => [accessCheck('create', ROLE_BINDING, { namespace: ns })],
 };
 

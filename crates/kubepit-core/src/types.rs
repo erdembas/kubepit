@@ -397,7 +397,7 @@ pub struct ManifestRender {
     pub nested: Vec<ManifestNested>,
     /// The tool invocation, for display (`kubectl kustomize …`, `helm template …`).
     pub command: Option<String>,
-    /// Changes whenever a file under the source changes (see `manifests_fingerprint`).
+    /// Changes whenever a file under the source changes (see `manifests_watch`).
     pub fingerprint: String,
     pub rendered_at: i64,
 }
@@ -414,6 +414,15 @@ pub struct ManifestRecent {
 pub struct ManifestApplyResult {
     pub object: Option<KubeObject>,
     pub error: Option<String>,
+}
+
+/// `manifests_watch`: the files of a watched source changed (or already
+/// differed from `since` when it started); compare `fingerprint` with
+/// [`ManifestRender::fingerprint`] to decide on a re-render.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestsWatchEvent {
+    pub watch_id: String,
+    pub fingerprint: String,
 }
 
 // ---------------------------------------------------------------------------

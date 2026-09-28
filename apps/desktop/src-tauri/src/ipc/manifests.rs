@@ -3,7 +3,9 @@
 
 use kubepit_core::types::{
     DryRunResult, ManifestApplyResult, ManifestRecent, ManifestRender, ManifestSource,
+    ManifestsWatchEvent,
 };
+use tauri::ipc::Channel;
 use tauri::State;
 
 use super::{blocking, ipc_err, IpcResult};
@@ -19,13 +21,30 @@ pub async fn manifests_render(
     core.manifests_render(&source).await.map_err(ipc_err)
 }
 
+/// Local only: watches the source's files and streams a
+/// [`ManifestsWatchEvent`] on `on_event` when their fingerprint changes, or
+/// right away when it already differs from `since` (the rendered one).
+/// Resolves to the watch id once the watcher is in place.
 #[tauri::command]
-pub async fn manifests_fingerprint(
+pub async fn manifests_watch(
     source: ManifestSource,
+    since: Option<String>,
+    on_event: Channel<ManifestsWatchEvent>,
     state: State<'_, AppState>,
 ) -> IpcResult<String> {
     let core = state.core.clone();
-    blocking(move || core.manifests_fingerprint(&source)).await
+    blocking(move || {
+        core.manifests_watch(&source, since.as_deref(), move |event| {
+            on_event.send(event).is_ok()
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn manifests_unwatch(watch_id: String, state: State<'_, AppState>) -> IpcResult<()> {
+    state.core.manifests_unwatch(&watch_id);
+    Ok(())
 }
 
 #[tauri::command]

@@ -3,6 +3,8 @@
   "{cluster} does not serve this kind.": "{cluster} does not serve this kind.",
   "{cluster} is read-only: it is diffed, never applied": "{cluster} is read-only: it is diffed, never applied",
   "{cluster}: {message}": "{cluster}: {message}",
+  "{count} change skipped: no permission (RBAC)": "{count} change skipped: no permission (RBAC)",
+  "{count} changes skipped: no permission (RBAC)": "{count} changes skipped: no permission (RBAC)",
   "{count} cluster is not connected and was not checked.": "{count} cluster is not connected and was not checked.",
   "{count} clusters are not connected and were not checked.": "{count} clusters are not connected and were not checked.",
   "{count} differ": "{count} differ",
@@ -513,5 +515,7 @@
   "Workload": "Workload",
   "Wrap": "Wrap",
   "Wrap long lines": "Wrap long lines",
-  "You are not allowed to read {object} on {cluster}.": "You are not allowed to read {object} on {cluster}."
+  "You are not allowed to read {object} on {cluster}.": "You are not allowed to read {object} on {cluster}.",
+  "You may not apply {count} of the selected changes (RBAC)": "You may not apply {count} of the selected changes (RBAC)",
+  "You may not apply {count} selected change (RBAC)": "You may not apply {count} selected change (RBAC)"
 }

@@ -305,10 +305,13 @@ typed confirmations, `read_only` in the backend, RBAC all unchanged).
   applied in order.
 - Entry points: a Create menu on the resource page's "+" for kinds with
   wizards (`wizards/catalog.ts`), object actions Expose / Create Ingress /
-  Add RoleBinding (`actions/wizardActions.ts`, gated in `ACTION_ACCESS`),
-  the create editor's template picker and the palette (`create secret`,
-  `expose`, …; not on read-only clusters). "Job from a CronJob" lists the
-  namespace's CronJobs and runs their existing "Trigger now" action.
+  Add RoleBinding (`actions/wizardActions.ts`, gated in `ACTION_ACCESS`;
+  on a Role or ClusterRole, `actions/roleBindingTarget.ts` picks the
+  namespace the wizard binds in and checks `create rolebindings` there,
+  never cluster-wide), the create editor's template picker and the palette
+  (`create secret`, `expose`, …; not on read-only clusters). "Job from a
+  CronJob" lists the namespace's CronJobs and runs their existing "Trigger
+  now" action.
 - Local files: `local_file_read` (`local_files.rs`) reads a file picked in
   the open dialog — regular files up to 1 MiB, bytes as base64 plus a UTF-8
   flag, content never logged, errors name only path and sizes.
@@ -581,8 +584,26 @@ or more clusters like `kubectl diff`, then applies the selected changes.
   and values files (`# Source:` comments name the template). Nothing touches a
   cluster. Kustomize folders and charts inside a plain folder are listed as
   `nested` instead of being read as YAML; skipped files come back as
-  `problems`. `manifests_fingerprint` hashes path/size/mtime so "Watch" can
-  poll for edits; successful renders land in `manifests.json`.
+  `problems`. Each render carries a fingerprint (path/size/mtime of every
+  file the source depends on); successful renders land in `manifests.json`.
+- "Watch" (`manifests/watch.rs`): `manifests_watch(source, since,
+  onEvent)` returns an id and watches with `notify` the source's folders
+  recursively (a chart's or Kustomize directory's root, a plain source's
+  picked folders) plus, non-recursively, the folders of picked files and
+  Helm values files, so rename-based editor saves are seen. After 300 ms
+  of quiet it recomputes the fingerprint and sends `ManifestsWatchEvent {
+  watch_id, fingerprint }` only when it changed (edits of hidden folders
+  or `node_modules` stay silent); the tab re-renders when it differs from
+  the render's. The baseline is `since`, the fingerprint the tab rendered:
+  edits made while no watch ran (tab hidden, Watch off) are reported as
+  soon as a watch starts. Each watch is a `manifest_watches` task under
+  cluster id `""` that owns the watcher; it runs only while a visible
+  Manifests tab has Watch on (`manifests_unwatch` on toggle-off, hide or
+  unmount) and is stopped at shutdown. Limitations: Kustomize bases
+  outside the root are not watched, and a symlinked manifest whose target
+  lies outside the watched folders counts in the fingerprint, but edits of
+  the target send no event. The demo backend hands out an id and never
+  fires.
 - `manifests_dry_run` sends each document with `dryRun=All` (same request
   as `resource_apply_yaml`, concurrently, allowed on read-only clusters).
   `manifests_apply` refuses read-only clusters, applies in dependency order
@@ -597,6 +618,15 @@ or more clusters like `kubectl diff`, then applies the selected changes.
   new. Read-only clusters are diffed but excluded from apply; production
   targets need a typed confirmation. Applies send exactly the reviewed
   documents and report per cell.
+- Apply is gated per cell on RBAC (`access.ts`, `useApplyDenied`): each
+  cell that would create or update asks for `patch` on the object (its
+  plural resolved through the target's discovery, namespace = the
+  document's, else the target's, else `default`) plus `create` when it is
+  new. `planApply` leaves denied cells out and counts them; the apply
+  button names the count (or blocks when nothing else is left) and a
+  target whose every selected change is denied shows a lock with the
+  denied check. Unknown answers and kinds discovery does not know never
+  block; the API server still enforces.
 - "Sync to…" in compare and drift reuses the same review: the source
   object goes through `lib/kube/syncable.ts` (status, server bookkeeping,
   owner references, cluster IPs, node names, bound volumes, generated Job
