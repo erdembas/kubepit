@@ -20,6 +20,8 @@ import './openapi';
 // Registered after './app': it wraps `port_forward_start` and `cluster_connect`.
 import './connectivity';
 import './changes';
+// Security: Pod Security enforce dry run.
+import './podSecurity';
 
 export { mockListen } from './bus';
 

@@ -19,6 +19,7 @@ import { buildRbac } from './rbac';
 import { buildStorage } from './storage';
 import { buildRolloutHistory } from './rollouts';
 import { buildKubeSystem } from './system';
+import { buildSecurityDemo } from './security';
 
 /** Builds one demo cluster. Order matters: later steps reference earlier objects. */
 function buildCluster(db: ClusterDb) {
@@ -67,6 +68,8 @@ function buildCluster(db: ClusterDb) {
   buildGitOps(db);
   buildEvents(db);
   buildRolloutHistory(db);
+  // Security: Pod Security labels, risky RBAC and Trivy reports (last: they cover everything).
+  buildSecurityDemo(db);
 }
 
 setBuilder(buildCluster);
