@@ -3,13 +3,19 @@ import type { ReactNode } from 'react';
 import { AlertTriangle, Lock } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
-/** Toolbar row above a dock editor (same height/tone as the log toolbar). */
-export function EditorBar({ children }: { children: ReactNode }) {
+/**
+ * Toolbar row above a dock editor (same height/tone as the log toolbar).
+ * It scrolls sideways when too narrow; `wrap` makes it a size container
+ * whose items wrap onto more rows instead (children may use `@…:` variants).
+ */
+export function EditorBar({ children, wrap = false }: { children: ReactNode; wrap?: boolean }) {
   return (
     <div
       className={cn(
-        'border-border/60 bg-surface flex h-9 shrink-0 items-center gap-1.5 overflow-x-auto border-b px-2',
-        'main-tabbar-scroll',
+        'border-border/60 bg-surface flex shrink-0 items-center gap-1.5 border-b px-2',
+        wrap
+          ? '@container min-h-9 flex-wrap gap-y-1.5 py-1.5'
+          : 'main-tabbar-scroll h-9 overflow-x-auto',
       )}
     >
       {children}

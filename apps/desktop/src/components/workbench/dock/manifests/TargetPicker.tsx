@@ -66,12 +66,14 @@ export function TargetPicker({
     };
   }, [open]);
 
+  // Chips wrap (and a lone chip truncates) rather than overflow into the next
+  // item of the bar; host it in a wrapping `EditorBar`.
   return (
-    <div className="flex min-w-0 items-center gap-1">
+    <div className="flex min-w-0 flex-wrap items-center gap-1">
       {picked.map((c) => (
         <span
           key={c.id}
-          className="border-border/70 bg-surface/60 text-fg flex h-6 max-w-44 shrink-0 items-center gap-1.5 rounded-md border pr-0.5 pl-1.5 text-[11px]"
+          className="border-border/70 bg-surface/60 text-fg flex h-6 max-w-44 min-w-0 items-center gap-1.5 rounded-md border pr-0.5 pl-1.5 text-[11px]"
           title={
             c.read_only
               ? i18n.t('{cluster} is read-only: it is diffed, never applied', { cluster: c.name })
