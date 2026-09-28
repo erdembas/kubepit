@@ -974,7 +974,7 @@ feed are described in `docs/RELEASING.md`.
   once every list synced or failed (10 s timeout), at most every 3 s, and is
   never cancelled by newer data; rules whose lists could not be read (RBAC)
   are skipped instead of guessing. A list counts as loaded only when it
-  synced with no error at all (`health/scanLists.ts`): a partial one (rows
+  synced with no error at all (`data/listState.ts`): a partial one (rows
   kept, one namespace forbidden) is reported with the unreadable lists and
   skips the rules that need it. The last scan per cluster is published
   to `useHealthStore` for the details panels.
@@ -1117,7 +1117,10 @@ the generic watches.
   on ServiceAccounts and Bound subjects on Roles / ClusterRoles.
   `access/useRbacData.ts` watches the RBAC lists cluster-wide (RoleBindings
   fall back to the asked namespace) and reports lists it cannot read instead
-  of guessing. Only RBAC is evaluated: webhook and cloud IAM authorizers are
+  of guessing. A list counts as loaded only when it is complete
+  (`data/listState.ts`, shared with the health scan): one that kept the rows
+  of the readable namespaces but reports an error is listed with the
+  unreadable ones ("answers may be incomplete"). Only RBAC is evaluated: webhook and cloud IAM authorizers are
   not visible to it, which the UI says.
 - **Demo**: `mock/fixtures/trivy.ts` writes reports for prod-eu, staging and
   dev (not prod-us or the local clusters) from the demo workloads and a

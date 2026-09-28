@@ -1,4 +1,5 @@
 import type { HealthKind, HealthLists } from '@/lib/kube/health';
+import { hasListError, isListComplete, type ListState } from '../data/listState';
 import type { WatchSnapshot } from '../data/watchCache';
 
 /**
@@ -14,13 +15,13 @@ export type ListSnapshot = Pick<WatchSnapshot, 'items' | 'synced' | 'status' | '
  * namespace forbidden) is not loaded, so rules that compare lists skip
  * instead of reporting the objects they could not see.
  */
-export function isListLoaded(served: boolean, s: Omit<ListSnapshot, 'items'>): boolean {
-  return !served || (s.synced && s.status !== 'error' && !s.error);
+export function isListLoaded(served: boolean, s: ListState): boolean {
+  return !served || isListComplete(s);
 }
 
 /** A served list to report as unreadable: failed, or loaded with an error on the side. */
-export function hasListIssue(served: boolean, s: Omit<ListSnapshot, 'items'>): boolean {
-  return served && (s.status === 'error' || !!s.error);
+export function hasListIssue(served: boolean, s: ListState): boolean {
+  return served && hasListError(s);
 }
 
 export function scanLists(
