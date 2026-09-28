@@ -16,6 +16,11 @@
 //! the backend, so `mutating` actions are refused on read-only clusters no
 //! matter what the UI sends, and `KUBECONFIG` always points at the
 //! cluster's `run/<id>.kubeconfig`.
+//!
+//! The public run entry points (`custom_action_run`,
+//! `prepare_custom_action_terminal`) live in `history/audited.rs`: runs of
+//! `mutating` actions are recorded in the audit log with the command
+//! re-rendered by [`Kubepit::redacted_command`]; output is never stored.
 
 pub mod import;
 pub mod model;
@@ -29,6 +34,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use parking_lot::RwLock;
 
 use crate::app::Kubepit;
+use crate::change_journal::normalize::Redactor;
+use crate::history::redact::secret_like;
 use crate::store::{load_json_or_default, write_json};
 use crate::terminal::{LaunchProgram, TerminalLaunch};
 use crate::types::ClusterDef;
@@ -218,7 +225,7 @@ impl Kubepit {
     }
 
     /// The saved action `action_id`, checked for a run against `target`.
-    fn runnable_action(
+    pub(crate) fn runnable_action(
         &self,
         cluster_id: &str,
         action_id: &str,
@@ -270,9 +277,34 @@ impl Kubepit {
         env
     }
 
-    /// `custom_action_run`: run a saved `background` action and capture its
-    /// output, or resolve an `open-url` action's URL for the UI to open.
-    pub async fn custom_action_run(
+    /// The command `action` runs for `target`, as the audit log keeps it:
+    /// every `annotations.*` value (and, for Secret-like kinds, every
+    /// `labels.*` value) is replaced by one of `redactor`'s markers.
+    pub(crate) fn redacted_command(
+        &self,
+        action: &CustomAction,
+        cluster: &ClusterDef,
+        target: &CustomActionTarget,
+        redactor: &Redactor,
+    ) -> Result<String> {
+        let mut values = self.template_values(Some(cluster), None, target);
+        let mask = |map: &mut std::collections::BTreeMap<String, String>| {
+            for (key, value) in map.iter_mut() {
+                let marker = redactor.secret_marker(key, &serde_json::Value::String(value.clone()));
+                *value = marker.as_str().unwrap_or_default().to_string();
+            }
+        };
+        mask(&mut values.annotations);
+        if secret_like(target.kind.as_deref().unwrap_or_default()) {
+            mask(&mut values.labels);
+        }
+        Ok(render_shell(&action.command, &values)?.text)
+    }
+
+    /// `custom_action_run` without the audit log (see `history/audited.rs`):
+    /// run a saved `background` action and capture its output, or resolve an
+    /// `open-url` action's URL for the UI to open.
+    pub(crate) async fn custom_action_run_unaudited(
         &self,
         cluster_id: &str,
         action_id: &str,
@@ -313,8 +345,9 @@ impl Kubepit {
         }
     }
 
-    /// Launch plan of a `terminal` action (`TerminalSpec::CustomAction`).
-    pub(crate) fn prepare_custom_action_terminal(
+    /// Launch plan of a `terminal` action (`TerminalSpec::CustomAction`),
+    /// without the audit log (see `history/audited.rs`).
+    pub(crate) fn prepare_custom_action_terminal_unaudited(
         &self,
         cluster_id: &str,
         action_id: &str,
@@ -473,6 +506,32 @@ mod tests {
         assert!(app
             .custom_action_resolve(&a, Some("missing"), &pod("p"))
             .is_err());
+    }
+
+    #[test]
+    fn redacted_commands_mask_annotations_and_secret_labels() {
+        let (_dir, app, cluster) = app_with_cluster(false);
+        let a = action("r", "echo {annotations.note} {labels.app} {name}");
+        let redactor = Redactor::new();
+        let mut target = pod("web-0");
+        target.annotations = BTreeMap::from([("note".into(), "hunter2".into())]);
+        target.labels = BTreeMap::from([("app".into(), "shop".into())]);
+        let pod_command = app
+            .redacted_command(&a, &cluster, &target, &redactor)
+            .unwrap();
+        assert!(!pod_command.contains("hunter2"), "{pod_command}");
+        assert!(
+            pod_command.starts_with("echo '<redacted #"),
+            "{pod_command}"
+        );
+        assert!(pod_command.ends_with(" shop web-0"), "{pod_command}");
+        // Labels of Secret-like kinds are masked too.
+        target.kind = Some("SealedSecret".into());
+        let secret_command = app
+            .redacted_command(&a, &cluster, &target, &redactor)
+            .unwrap();
+        assert!(!secret_command.contains("shop"), "{secret_command}");
+        assert!(secret_command.ends_with(" web-0"), "{secret_command}");
     }
 
     #[cfg(unix)]

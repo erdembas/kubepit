@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use kubepit_core::change_journal::ChangeFilter;
+use kubepit_core::custom_actions::CustomActionTarget;
 use kubepit_core::history::{
     AuditAction, AuditEntry, AuditFilter, AuditOutcome, HistoryEventFilter, HistoryKind,
     HistorySettings,
@@ -760,6 +761,23 @@ async fn read_only_rejections_are_not_recorded_but_dry_runs_are() {
         "refused before any request, the audit GET included"
     );
     app.node_drain(&id, "n1", true).await.unwrap_err();
+    // A mutating custom action is refused before anything is recorded.
+    let import = app
+        .custom_actions_import(
+            None,
+            Some(
+                &json!([{ "id": "mut", "name": "Delete", "mode": "background",
+                          "mutating": true, "command": "printf deleted {name}" }])
+                .to_string(),
+            ),
+        )
+        .unwrap();
+    app.custom_actions_save(import.actions).unwrap();
+    let err = app
+        .custom_action_run(&id, "mut", &pod_target("web-0"))
+        .await
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("read-only"), "{err:#}");
     // Dry runs are allowed on read-only clusters and recorded as such.
     app.helm_install(
         &id,
@@ -901,6 +919,134 @@ async fn secret_values_never_reach_the_database_file() {
     ] {
         assert!(!stored.contains(secret), "{secret} reached the history");
     }
+}
+
+/// A custom action target: pod `name` in `default`.
+fn pod_target(name: &str) -> CustomActionTarget {
+    CustomActionTarget {
+        namespace: Some("default".into()),
+        name: Some(name.into()),
+        kind: Some("Pod".into()),
+        group: Some(String::new()),
+        version: Some("v1".into()),
+        resource: Some("pods".into()),
+        ..CustomActionTarget::default()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mutating_custom_actions_are_audited_without_output() {
+    if !cfg!(unix) {
+        return;
+    }
+    let server = start(router()).await;
+    let (dir, app, _recorder, id) = setup(&server.url, false);
+    enable(&app, dir.path(), HistorySettings::default());
+    let import = app
+        .custom_actions_import(
+            None,
+            Some(
+                &json!([
+                    { "id": "mut", "name": "Echo", "mode": "background", "mutating": true,
+                      "command": "printf '%s %s' {annotations.kubectl.kubernetes.io/last-applied-configuration} {name}" },
+                    { "id": "read", "name": "Read", "mode": "background", "command": "printf ok" },
+                    { "id": "fail", "name": "Fail", "mode": "background", "mutating": true,
+                      "command": "printf %s {annotations.kubectl.kubernetes.io/last-applied-configuration}; exit 3" },
+                    { "id": "term", "name": "Shell", "mode": "terminal", "mutating": true,
+                      "command": "echo {annotations.kubectl.kubernetes.io/last-applied-configuration} {labels.app}" }
+                ])
+                .to_string(),
+            ),
+        )
+        .unwrap();
+    app.custom_actions_save(import.actions).unwrap();
+    let mut target = pod_target("web-0");
+    target.kind = Some("Secret".into());
+    target.annotations.insert(
+        "kubectl.kubernetes.io/last-applied-configuration".into(),
+        format!(r#"{{"data":{{"password":"{PASSWORD}"}}}}"#),
+    );
+    let out = app.custom_action_run(&id, "mut", &target).await.unwrap();
+    assert!(out.stdout.contains(PASSWORD));
+    app.custom_action_run(&id, "read", &target).await.unwrap();
+
+    let all = entries(&app);
+    let entry = find(&all, AuditAction::CustomAction);
+    let text = serde_json::to_string(entry).unwrap();
+    assert!(!text.contains(PASSWORD), "{text}");
+    assert!(text.contains("web-0"));
+    assert_eq!(
+        all.iter()
+            .filter(|e| e.action == AuditAction::CustomAction)
+            .count(),
+        1,
+        "non-mutating runs are not audited"
+    );
+    let request = entry.request.as_ref().unwrap();
+    assert_eq!(request["action"], "Echo");
+    assert_eq!(request["id"], "mut");
+    assert_eq!(request["mode"], "background");
+    assert_eq!(request["targets"], 1);
+    let command = request["command"].as_str().unwrap();
+    assert!(command.contains("<redacted #"), "{command}");
+    assert!(command.ends_with(" web-0"), "{command}");
+    assert_eq!(entry.result.as_deref(), Some("exit 0"));
+    assert_eq!(entry.outcome, AuditOutcome::Ok);
+    assert_eq!(
+        (
+            entry.targets[0].kind.as_str(),
+            entry.targets[0].api_version.as_str()
+        ),
+        ("Secret", "v1")
+    );
+    assert_eq!(entry.targets[0].namespace.as_deref(), Some("default"));
+    assert!(!entry.revertible && !entry.has_diff);
+
+    // A non-zero exit fails the entry; its output is not kept either.
+    let failed = app.custom_action_run(&id, "fail", &target).await.unwrap();
+    assert_eq!(failed.exit_code, Some(3));
+    // Terminal launches are recorded when the terminal starts.
+    target.labels.insert("app".into(), "web".into());
+    app.prepare_terminal(
+        "t1",
+        &TerminalSpec::CustomAction {
+            cluster_id: id.clone(),
+            action_id: "term".into(),
+            target: target.clone(),
+        },
+        &|_| true,
+    )
+    .await
+    .unwrap();
+    let all = entries(&app);
+    let runs: Vec<&AuditEntry> = all
+        .iter()
+        .filter(|e| e.action == AuditAction::CustomAction)
+        .collect();
+    assert_eq!(runs.len(), 3, "{runs:#?}");
+    assert_eq!(runs[1].outcome, AuditOutcome::Error);
+    assert_eq!(runs[1].result.as_deref(), Some("exit 3"));
+    let terminal = runs[2];
+    let request = terminal.request.as_ref().unwrap();
+    assert_eq!(request["mode"], "terminal");
+    // Labels of Secret-like targets are redacted too.
+    let command = request["command"].as_str().unwrap();
+    assert!(!command.contains("web"), "{command}");
+    assert_eq!(terminal.result.as_deref(), Some("started in a terminal"));
+
+    let mut stored = serde_json::to_string(&all).unwrap();
+    stored.push_str(&app.history_audit_export(&AuditFilter::default()).unwrap());
+    assert!(app.history_flush());
+    let home = dir.path().join("home");
+    for name in ["history.db", "history.db-wal", "history.db-shm"] {
+        if let Ok(bytes) = std::fs::read(home.join(name)) {
+            stored.push_str(&String::from_utf8_lossy(&bytes));
+        }
+    }
+    assert!(
+        !stored.contains(PASSWORD),
+        "the annotation value reached the history"
+    );
 }
 
 async fn wait_until(mut done: impl FnMut() -> bool) -> bool {

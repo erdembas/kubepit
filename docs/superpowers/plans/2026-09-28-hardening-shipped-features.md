@@ -1594,7 +1594,7 @@ git commit -m "fix(core): metrics sampling is opt-in per process; guard backgrou
   - Audit result: `exit {code}`, or the error `timed out after {s}s`; a non-zero exit is recorded with `Audit::fail`.
   - Targets: `AuditTarget::document(api_version, kind, namespace, name)` per selected name (≤ 20); cluster runs use the cluster as the target.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 // tests/history.rs
@@ -1707,24 +1707,24 @@ fn mutating_commands_call_audited_entry_points() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core --test history mutating_custom_actions && cargo test -p kubepit-desktop audit_coverage`
 Expected: FAIL. `AuditAction::CustomAction` is missing; `custom_action_run` and `prepare_custom_action_terminal` are not defined in `audited.rs`.
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
   - Wrappers per the Interfaces: audit only `mutating` actions in `Background` or `Terminal` mode.
   - A read-only refusal happens inside `runnable_action`, before `self.audit(...)` returns `Some`, so nothing is recorded.
   - Fill `NOT_MUTATING` from the current `generate_handler!` list.
   - The TS union, `AUDIT_ACTIONS`, `actionLabel` ("Custom action") and `actionTone` (tone of `patch`) gain `custom-action`.
   - The mock history wraps `custom_action_run` when the saved action is mutating.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test --workspace && pnpm typecheck && pnpm i18n:check`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates apps/desktop docs/ARCHITECTURE.md

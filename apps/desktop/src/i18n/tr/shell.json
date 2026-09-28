@@ -280,6 +280,7 @@
   "Current version {version}": "Geçerli sürüm {version}",
   "Current version {version} · last checked {time}": "Geçerli sürüm {version} · son denetim {time}",
   "Custom action shortcuts work with keyboard mode off too.": "Özel işlem kısayolları klavye modu kapalıyken de çalışır.",
+  "Custom action": "Özel işlem",
   "Custom actions": "Özel işlemler",
   "Custom price model": "Özel fiyat modeli",
   "Custom service": "Özel servis",

@@ -89,6 +89,9 @@ pub enum AuditAction {
     NodeShell,
     /// `rightsizing_apply`: container requests/limits from a recommendation.
     Rightsize,
+    /// A `mutating` custom action run in the background or launched in a
+    /// terminal (the command is stored redacted, its output never).
+    CustomAction,
 }
 
 impl AuditAction {
@@ -115,6 +118,7 @@ impl AuditAction {
         Self::FileUpload,
         Self::NodeShell,
         Self::Rightsize,
+        Self::CustomAction,
     ];
 
     /// The wire name (`set-image`), also stored in the database.
@@ -142,6 +146,7 @@ impl AuditAction {
             Self::FileUpload => "file-upload",
             Self::NodeShell => "node-shell",
             Self::Rightsize => "rightsize",
+            Self::CustomAction => "custom-action",
         }
     }
 
@@ -441,4 +446,20 @@ pub struct HistoryStatus {
     pub dropped: u64,
     /// Connected clusters whose events and changes are being persisted now.
     pub persisting: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audit_actions_round_trip_their_wire_names() {
+        for action in AuditAction::ALL {
+            let wire = serde_json::to_value(action).unwrap();
+            assert_eq!(wire, action.as_str());
+            assert_eq!(AuditAction::parse(action.as_str()), Some(*action));
+        }
+        assert_eq!(AuditAction::CustomAction.as_str(), "custom-action");
+        assert!(!AuditAction::CustomAction.revertible());
+    }
 }

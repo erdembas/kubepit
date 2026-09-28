@@ -54,6 +54,9 @@ mod custom_actions;
 mod security;
 // Cost insight and right-sizing.
 mod cost;
+// Guard: every mutating command goes through the audit log.
+#[cfg(test)]
+mod audit_coverage;
 
 pub use access::*;
 pub use alerts::*;

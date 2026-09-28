@@ -55,6 +55,7 @@ export const AUDIT_ACTIONS: readonly AuditAction[] = [
   'file-upload',
   'node-shell',
   'rightsize',
+  'custom-action',
 ];
 
 export function actionLabel(action: AuditAction): string {
@@ -103,6 +104,8 @@ export function actionLabel(action: AuditAction): string {
       return i18n.t('Node shell');
     case 'rightsize':
       return i18n.t('Right-size');
+    case 'custom-action':
+      return i18n.t('Custom action');
   }
 }
 
@@ -194,6 +197,9 @@ export function requestSummary(entry: AuditEntry): string | null {
       const changes = Array.isArray(r.changes) ? (r.changes as Record<string, unknown>[]) : [];
       return changes.map((c) => String(c.container)).join(', ') || null;
     }
+    // The action's name is user content: shown verbatim.
+    case 'custom-action':
+      return typeof r.action === 'string' && r.action ? r.action : null;
     default:
       return null;
   }

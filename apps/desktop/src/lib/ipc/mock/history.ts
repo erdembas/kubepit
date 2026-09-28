@@ -1,4 +1,5 @@
 import YAML from 'yaml';
+import { actionApplies } from '@/lib/customActions';
 import { historySettings } from '@/lib/history/audit';
 import { kindKey, resolveRef } from '@/lib/kube/catalog';
 import type {
@@ -14,6 +15,11 @@ import type {
   ChangeSummary,
   ClusterDef,
   ClusterStatus,
+  CustomAction,
+  CustomActionMode,
+  CustomActionResult,
+  CustomActionsState,
+  CustomActionTarget,
   Gvk,
   HistoryChangePage,
   HistoryEventFilter,
@@ -499,8 +505,110 @@ wrap('pod_fs_upload', (args) => ({
     return transfer?.path ? `${transfer.path} (${transfer.bytes ?? 0} bytes)` : null;
   },
 }));
+// Mutating custom actions: background runs keep the exit code, terminal
+// launches are recorded when they start. The command is re-resolved with
+// annotation values (and labels of Secret-like kinds) replaced by markers;
+// output is never kept. Refused runs (disabled, out of scope, read-only) are
+// not recorded, like in the backend.
+const MAX_ACTION_TARGETS = 20;
+
+function customActionPlan(
+  clusterId: string,
+  actionId: string,
+  target: CustomActionTarget,
+  mode: CustomActionMode,
+): Plan | null {
+  const state = handlers.custom_actions_list?.({}) as CustomActionsState | undefined;
+  const action = state?.actions.find((a: CustomAction) => a.id === actionId);
+  const cluster = clusters().find((c) => c.id === clusterId);
+  if (!action || !cluster || !action.enabled || !action.mutating || action.mode !== mode)
+    return null;
+  const applies = actionApplies(action, {
+    cluster,
+    kind: target.kind,
+    group: target.group ?? '',
+    namespace: target.namespace,
+  });
+  if (!applies) return null;
+  const selected = target.selection.filter(Boolean);
+  const names = selected.length ? selected : target.name ? [target.name] : [];
+  const version = target.version || 'v1';
+  const targets: AuditTarget[] =
+    target.kind && names.length
+      ? names.slice(0, MAX_ACTION_TARGETS).map((name) => ({
+          api_version: target.group ? `${target.group}/${version}` : version,
+          kind: target.kind!,
+          gvk: null,
+          namespace: target.namespace || null,
+          name,
+          error: null,
+        }))
+      : [
+          {
+            api_version: '',
+            kind: 'Cluster',
+            gvk: null,
+            namespace: null,
+            name: cluster.name,
+            error: null,
+          },
+        ];
+  const mask = (values: Record<string, string>) =>
+    Object.fromEntries(Object.entries(values).map(([k, v]) => [k, marker(k, v)]));
+  const redacted: CustomActionTarget = {
+    ...target,
+    annotations: mask(target.annotations),
+    labels: secretLike(target.kind ?? '') ? mask(target.labels) : target.labels,
+  };
+  let command: string | null = null;
+  try {
+    command =
+      (
+        handlers.custom_action_resolve?.({ action, clusterId, target: redacted }) as
+          { command: string } | undefined
+      )?.command ?? null;
+  } catch {
+    command = null;
+  }
+  return {
+    clusterId,
+    action: 'custom-action',
+    targets,
+    request: { action: action.name, id: action.id, mode, command, targets: names.length },
+    result: (r) => {
+      if (mode === 'terminal') return 'started in a terminal';
+      const out = r as CustomActionResult;
+      return out.timed_out || out.exit_code === null ? null : `exit ${out.exit_code}`;
+    },
+    failure: (r) => {
+      if (mode === 'terminal') return null;
+      const out = r as CustomActionResult;
+      if (out.timed_out) return `timed out after ${Math.max(1, action.timeout_secs)}s`;
+      return out.exit_code !== null && out.exit_code !== 0 ? `exit ${out.exit_code}` : null;
+    },
+  };
+}
+
+wrap('custom_action_run', (args) =>
+  customActionPlan(
+    String(args.clusterId),
+    String(args.actionId),
+    args.target as CustomActionTarget,
+    'background',
+  ),
+);
 wrap('terminal_create', (args) => {
-  const spec = args.spec as { kind?: string; cluster_id?: string; node?: string } | undefined;
+  const spec = args.spec as
+    | {
+        kind?: string;
+        cluster_id?: string;
+        node?: string;
+        action_id?: string;
+        target?: CustomActionTarget;
+      }
+    | undefined;
+  if (spec?.kind === 'custom-action' && spec.cluster_id && spec.action_id && spec.target)
+    return customActionPlan(spec.cluster_id, spec.action_id, spec.target, 'terminal');
   if (spec?.kind !== 'node-shell' || !spec.cluster_id) return null;
   return {
     clusterId: spec.cluster_id,

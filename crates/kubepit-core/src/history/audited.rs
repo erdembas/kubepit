@@ -1,8 +1,10 @@
 //! The public entry points of every mutating command: each records an audit
 //! entry around the unaudited implementation next to its domain code
 //! (`resources.rs`, `nodes.rs`, `helm.rs`, …). Keeping the wrappers here
-//! means every caller — IPC commands, internal flows, future custom
-//! actions — is covered, and the domain modules only gained a name suffix.
+//! means every caller — IPC commands, internal flows, custom actions — is
+//! covered, and the domain modules only gained a name suffix. A src-tauri
+//! guard (`ipc/audit_coverage.rs`) checks that every mutating command calls
+//! a method defined in this file.
 //!
 //! Each wrapper follows the same shape: [`Kubepit::audit`] (which returns
 //! `None` when nothing is recorded, including read-only rejections), the
@@ -16,13 +18,17 @@ use super::audit::{Audit, MAX_CAPTURED_OBJECTS};
 use super::redact;
 use super::types::{AuditAction, AuditTarget};
 use crate::app::Kubepit;
+use crate::custom_actions::{
+    CustomAction, CustomActionMode, CustomActionResult, CustomActionTarget,
+};
 use crate::manifests::apply::parse_single;
 use crate::node_shell::NodeShellPod;
 use crate::objects::to_kube_object;
 use crate::resources::parse_documents;
 use crate::rightsizing::{apps_gvk, ContainerResourceChange, WorkloadRef};
+use crate::terminal::TerminalLaunch;
 use crate::types::{
-    ApplyMode, ContainerImage, DeleteOptions, DryRunResult, Gvk, HelmInstallRequest,
+    ApplyMode, ClusterDef, ContainerImage, DeleteOptions, DryRunResult, Gvk, HelmInstallRequest,
     HelmInstallResult, HelmUpgradeRequest, KubeObject, ManifestApplyResult, PatchType,
     PodDebugRequest, PodFsTransfer,
 };
@@ -43,6 +49,37 @@ fn doc_audit_target(doc: &Value, namespace: Option<&str>) -> AuditTarget {
             .or_else(|| str_at(doc, "/metadata/generateName"))
             .unwrap_or("?"),
     )
+}
+
+/// Targets of a custom action run: every selected object (at most
+/// [`MAX_CAPTURED_OBJECTS`]), or the cluster for cluster-level runs.
+fn custom_action_targets(cluster: &ClusterDef, target: &CustomActionTarget) -> Vec<AuditTarget> {
+    fn nonempty(v: &Option<String>) -> Option<&str> {
+        v.as_deref().filter(|s| !s.is_empty())
+    }
+    let names: Vec<&str> = if target.selection.iter().any(|s| !s.is_empty()) {
+        target
+            .selection
+            .iter()
+            .map(String::as_str)
+            .filter(|s| !s.is_empty())
+            .collect()
+    } else {
+        nonempty(&target.name).into_iter().collect()
+    };
+    let Some(kind) = nonempty(&target.kind).filter(|_| !names.is_empty()) else {
+        return vec![AuditTarget::document("", "Cluster", None, &cluster.name)];
+    };
+    let version = nonempty(&target.version).unwrap_or("v1");
+    let api_version = match nonempty(&target.group) {
+        Some(group) => format!("{group}/{version}"),
+        None => version.to_string(),
+    };
+    names
+        .into_iter()
+        .take(MAX_CAPTURED_OBJECTS)
+        .map(|name| AuditTarget::document(&api_version, kind, nonempty(&target.namespace), name))
+        .collect()
 }
 
 fn helm_result(result: &Result<HelmInstallResult>) -> Option<String> {
@@ -687,6 +724,107 @@ impl Kubepit {
             .await;
         if let Ok(transfer) = &result {
             audit.result(format!("{} ({} bytes)", transfer.path, transfer.bytes));
+        }
+        audit.finish(self, &result);
+        result
+    }
+
+    /// The audit entry of a `mutating` custom action run (`mode`:
+    /// `background` / `terminal`), or `None` when nothing is recorded.
+    fn custom_action_audit(
+        &self,
+        action: &CustomAction,
+        cluster: &ClusterDef,
+        target: &CustomActionTarget,
+        mode: &str,
+    ) -> Option<Audit> {
+        let targets = custom_action_targets(cluster, target);
+        let mut audit = self.audit(&cluster.id, AuditAction::CustomAction, false, targets)?;
+        let selected = target.selection.iter().filter(|s| !s.is_empty()).count();
+        let count = if selected > 0 {
+            selected
+        } else {
+            usize::from(target.name.as_deref().is_some_and(|n| !n.is_empty()))
+        };
+        let command = self
+            .redacted_command(action, cluster, target, &self.history.redactor)
+            .ok();
+        audit.request(json!({
+            "action": action.name,
+            "id": action.id,
+            "mode": mode,
+            "command": command,
+            "targets": count,
+        }));
+        Some(audit)
+    }
+
+    /// `custom_action_run`, audited for `mutating` background actions: the
+    /// redacted command and the exit code are kept, never the output.
+    /// Refusals (read-only cluster, disabled, out of scope) are not
+    /// recorded; non-mutating and open-url runs are not audited.
+    pub async fn custom_action_run(
+        &self,
+        cluster_id: &str,
+        action_id: &str,
+        target: &CustomActionTarget,
+    ) -> Result<CustomActionResult> {
+        let audit = match self.runnable_action(cluster_id, action_id, target) {
+            Ok((action, cluster))
+                if action.mutating && action.mode == CustomActionMode::Background =>
+            {
+                self.custom_action_audit(&action, &cluster, target, "background")
+                    .map(|audit| (audit, action.timeout_secs.max(1)))
+            }
+            _ => None,
+        };
+        let Some((mut audit, timeout_secs)) = audit else {
+            return self
+                .custom_action_run_unaudited(cluster_id, action_id, target)
+                .await;
+        };
+        let result = self
+            .custom_action_run_unaudited(cluster_id, action_id, target)
+            .await;
+        match &result {
+            Ok(out) if out.timed_out => audit.fail(format!("timed out after {timeout_secs}s")),
+            Ok(out) => {
+                if let Some(code) = out.exit_code {
+                    audit.result(format!("exit {code}"));
+                    if code != 0 {
+                        audit.fail(format!("exit {code}"));
+                    }
+                }
+            }
+            Err(_) => {}
+        }
+        audit.finish(self, &result);
+        result
+    }
+
+    /// Launch plan of a terminal custom action, audited for `mutating`
+    /// actions when the plan is ready ("started in a terminal"); what runs
+    /// in the terminal afterwards is not recorded.
+    pub(crate) fn prepare_custom_action_terminal(
+        &self,
+        cluster_id: &str,
+        action_id: &str,
+        target: &CustomActionTarget,
+    ) -> Result<TerminalLaunch> {
+        let audit = match self.runnable_action(cluster_id, action_id, target) {
+            Ok((action, cluster))
+                if action.mutating && action.mode == CustomActionMode::Terminal =>
+            {
+                self.custom_action_audit(&action, &cluster, target, "terminal")
+            }
+            _ => None,
+        };
+        let Some(mut audit) = audit else {
+            return self.prepare_custom_action_terminal_unaudited(cluster_id, action_id, target);
+        };
+        let result = self.prepare_custom_action_terminal_unaudited(cluster_id, action_id, target);
+        if result.is_ok() {
+            audit.result("started in a terminal");
         }
         audit.finish(self, &result);
         result
