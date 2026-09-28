@@ -3,7 +3,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
-import { installPerfGlobal, perfEnabled } from '@/lib/perf/probe';
+import { perfEnabled } from '@/lib/perf/probe';
 import { installScrollIdleTracker } from '@/lib/scrollIdle';
 import { useAppStore } from '@/store/useAppStore';
 import { useDockStore } from '@/store/useDockStore';
@@ -19,8 +19,7 @@ if (import.meta.env.DEV) {
 
 // Performance probe (`?perf=1`): `window.__kubepitPerf`. The driver is its own
 // chunk, loaded only while the probe is on.
-if (perfEnabled())
-  void import('@/lib/perf/driver').then((m) => installPerfGlobal(m.createPerfDriver()));
+if (perfEnabled()) void import('@/lib/perf/driver').then((m) => m.installPerfDriver());
 
 initializeDesktopLocale();
 

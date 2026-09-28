@@ -479,7 +479,7 @@ Expected: FAIL (module missing).
   - With `churn > 0`, the liveness timer ticks every 100 ms and applies `churn / 10` pod changes per tick round-robin: 90% status/label updates, 10% delete + recreate.
   - `db.ts` keeps `byName: Map<kindKey, Map<"ns/name", uid>>` and `byOwner: Map<ownerUid, Set<uid>>` in sync in `put`/`drop`.
 
-- [x] **Step 4: Run the tests and check the build time** _(Browser check on 2026-09-28, `pnpm dev:ui` at `?scale=l` in the desktop app's browser pane (pane hidden, `setTimeout` polling): `c-scale-l` connected 1.5 s after the click, and the pods table showed all 20 000 pods 0.77 s after opening Pods, 2.3 s in total. Earlier, the tests and typecheck passed. Headless (Vitest, fake timers): `c-scale-l` builds in ~0.25 s; the list arrives 150–350 ms after the watch, its 40 full batches go out at once (one macrotask each), and `synced` follows at the first 150 ms tick after them: at 450 ms under fake timers.)_
+- [x] **Step 4: Run the tests and check the build time** _(Browser check on 2026-09-28, `pnpm dev:ui` at `?scale=l` in the desktop app's browser pane (pane hidden, `setTimeout` polling): `c-scale-l` connected 1.5 s after the click, and the pods table showed all 20 000 pods 0.77 s after opening Pods, 2.3 s in total. Earlier, the tests and typecheck passed. Headless (Vitest, fake timers): `c-scale-l` builds in ~0.25 s; the list arrives 20–140 ms after the watch, its 40 full batches go out at once (one macrotask each), and `synced` follows at the first 150 ms tick after them: the list at 80 ms, its batches by 119 ms and `synced` at 150 ms under fake timers.)_
 
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck`
 Expected: PASS. Then open `pnpm dev:ui` at `http://localhost:1430/?scale=l`: the `c-scale-l` cluster connects and the pods table fills within 3 s.
@@ -541,8 +541,8 @@ git commit -m "perf(bench): Vitest benches for topology, health, netpol, logs an
 **Files:**
 - Create: `apps/desktop/src/lib/perf/stats.ts`, `apps/desktop/src/lib/perf/probe.ts`
 - Modify: `apps/desktop/src/main.tsx:15-17` (install the probe global)
-- Modify: `apps/desktop/src/components/workbench/table/ResourcePage.tsx` (marks), `components/workbench/data/watchCache.ts:108-145` (apply → flush duration), `components/workbench/topology/TopologyMap.tsx:98-120` (build/view/layout), `components/workbench/health/useHealthScan.ts:~226` (scan duration), `components/workbench/ViewPanes.tsx` (view switch)
-  - As built: the driver is `apps/desktop/src/lib/perf/driver.ts`, a lazy chunk that `main.tsx` loads only while the probe is on; `map:build` is timed in `topology/useTopologyData.ts` (where the graph is built); the view switch is in `components/workbench/tabs/ViewPanes.tsx`.
+- Modify: `apps/desktop/src/components/workbench/table/ResourcePage.tsx` (marks), `components/workbench/data/watchCache.ts:108-145` (apply → commit: the batches' apply cost plus flush start → React commit), `components/workbench/topology/TopologyMap.tsx:98-120` (build/view/layout), `components/workbench/health/useHealthScan.ts:~226` (scan duration), `components/workbench/ViewPanes.tsx` (view switch)
+  - As built: the driver is `apps/desktop/src/lib/perf/driver.ts`, a lazy chunk that `main.tsx` loads only while the probe is on, and `installPerfGlobal` lives in `lib/perf/global.ts`, which only that chunk imports (the entry bundle never names the global); `map:build` is timed in `topology/useTopologyData.ts` (where the graph is built); the view switch is in `components/workbench/tabs/ViewPanes.tsx`.
 - Test: `apps/desktop/src/lib/perf/stats.test.ts`, `apps/desktop/src/lib/perf/probe.test.ts`
 
 **Interfaces:**
@@ -560,7 +560,7 @@ git commit -m "perf(bench): Vitest benches for topology, health, netpol, logs an
     - `heap(): number | null` (`performance.memory` when present), `domNodes()`;
     - `watchStats()` (watchCache entries: key, listeners, items), `mockWatchStats()`;
     - `report()`, `reset()`.
-  - Recorded ids: `table:ttfr` (navigate → first non-empty rows committed), `table:synced`, `watch:apply` (with `items`), `map:build`, `map:view`, `map:layout`, `health:scan`, `view:switch`.
+  - Recorded ids: `table:ttfr` (navigate → first non-empty rows committed), `table:synced`, `watch:apply` (applying the batches plus flush start → React commit, without the frame wait; meta `items`, `applyMs`, `flushMs`, `commitMs` and `latencyMs`, first batch → commit), `map:build`, `map:view`, `map:layout`, `health:scan`, `view:switch`.
 
 - [x] **Step 1: Write the failing tests**
 
@@ -691,7 +691,7 @@ Expected: FAIL (module missing).
 - [x] **Step 3: Implement.** Each scenario calls the probe driver:
   - `ttfr`: `connect('c-scale-<p>')`, `openKind(…, 'pods')`, then poll `report()` for `table:ttfr` and `table:synced`.
   - `scroll`: `scrollTable(5000)`.
-  - `apply`: needs churn; run for 20 s and take the p95 of `watch:apply`.
+  - `apply`: needs churn; run for 20 s and take the p95 of `watch:apply` (the work per flush; the frame wait is only in its `latencyMs`).
   - `map`: `openView(…, 'resource-map')` scoped to `ns-0001`, then all namespaces on `m`.
   - `health`: `health:scan` plus the long tasks.
   - `leave`: `switchView` from the map to the overview.

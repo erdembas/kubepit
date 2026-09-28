@@ -10,9 +10,12 @@ describe('probe', () => {
     const mark = vi.fn();
     vi.stubGlobal('performance', { mark, now: () => 0 });
     const p = await import('./probe');
+    const { installPerfGlobal } = await import('./global');
     p.perfMark('table:navigate');
     p.recordDuration('watch:apply', 3);
-    p.installPerfGlobal({} as never);
+    p.recordWatchCommit({ arrivedAt: 1, applyMs: 1, flushStart: 1, items: 1 });
+    installPerfGlobal({} as never);
+    await Promise.resolve();
     expect(mark).not.toHaveBeenCalled();
     expect(p.perfReport().durations).toEqual({});
     expect((globalThis.window as { __kubepitPerf?: unknown }).__kubepitPerf).toBeUndefined();
@@ -34,10 +37,36 @@ describe('probe', () => {
       localStorage: { getItem: (key: string) => (key === 'kubepit.perf' ? '1' : null) },
     });
     vi.stubGlobal('performance', { mark: vi.fn(), now: () => 0 });
-    const p = await import('./probe');
+    const { installPerfGlobal } = await import('./global');
     const driver = { reset: () => undefined };
-    p.installPerfGlobal(driver as never);
+    installPerfGlobal(driver as never);
     expect((globalThis.window as { __kubepitPerf?: unknown }).__kubepitPerf).toBe(driver);
+  });
+  it('records watch:apply after the commit the emit scheduled, without the frame wait', async () => {
+    vi.stubGlobal('window', {
+      location: { search: '?perf=1' },
+      localStorage: { getItem: () => null },
+    });
+    let now = 0;
+    vi.stubGlobal('performance', { mark: vi.fn(), now: () => now });
+    const p = await import('./probe');
+    // A batch arrived at 100 ms (applying it took 2 ms); the frame flushed at 114 ms.
+    const flushStart = 114;
+    now = 115;
+    // The emit: React queues its sync render, which commits in 5 ms.
+    queueMicrotask(() => (now += 5));
+    p.recordWatchCommit({ arrivedAt: 100, applyMs: 2, flushStart, items: 20_000 });
+    await Promise.resolve();
+    await Promise.resolve();
+    const { values, details } = p.perfSamples('watch:apply');
+    expect(values).toEqual([8]);
+    expect(details[0]).toEqual({
+      items: 20_000,
+      applyMs: 2,
+      flushMs: 1,
+      commitMs: 5,
+      latencyMs: 20,
+    });
   });
   it('records time to first rows and to synced once per navigation, after the commit', async () => {
     vi.stubGlobal('window', {

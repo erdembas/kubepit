@@ -11,7 +11,7 @@
 //   pnpm perf:ui -- --preset s --scenarios ttfr,scroll
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -19,7 +19,9 @@ import {
   isAllowedUrl,
   parseArgs,
   percentile,
+  previewListening,
   resultIds,
+  servesBuild,
   soakSummary,
   USAGE,
   withUnits,
@@ -37,9 +39,17 @@ const log = (...args) => console.log('[perf:ui]', ...args);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const max = (values) => (values.length ? Math.max(...values) : 0);
 
+/**
+ * Starts `vite preview` of this checkout's build. Ready only once vite says
+ * it listens on the port and `/` serves this build's `index.html`: another
+ * server on the port (a stale preview of another worktree) is never
+ * measured, and a vite that exits (`--strictPort`) fails the run at once.
+ */
 async function startPreview(port) {
-  if (!existsSync(path.join(DESKTOP, 'dist/index.html')))
+  const index = path.join(DESKTOP, 'dist/index.html');
+  if (!existsSync(index))
     throw new Error('No production build: run `pnpm --filter @kubepit/desktop build` first.');
+  const built = await readFile(index, 'utf8');
   const server = spawn(
     process.execPath,
     [VITE, 'preview', '--port', String(port), '--strictPort', '--host', 'localhost'],
@@ -48,21 +58,26 @@ async function startPreview(port) {
   let output = '';
   server.stdout.on('data', (d) => (output += d));
   server.stderr.on('data', (d) => (output += d));
-  const exited = new Promise((resolve) => server.once('exit', resolve));
+  let exitCode = null;
+  const exited = new Promise((resolve) =>
+    server.once('exit', (code, signal) => resolve((exitCode = code ?? signal))),
+  );
   const deadline = Date.now() + 30_000;
   for (;;) {
-    if (server.exitCode !== null) throw new Error(`vite preview exited:\n${output}`);
-    try {
-      const res = await fetch(`http://localhost:${port}/`);
-      if (res.ok) break;
-    } catch {
-      // Not listening yet.
-    }
+    if (exitCode !== null) throw new Error(`vite preview exited (${exitCode}):\n${output}`);
+    const body = await fetch(`http://localhost:${port}/`)
+      .then((res) => (res.ok ? res.text() : null))
+      .catch(() => null);
+    if (exitCode === null && previewListening(output, port) && servesBuild(body, built)) break;
     if (Date.now() > deadline) {
       server.kill();
-      throw new Error(`vite preview did not start on port ${port}:\n${output}`);
+      throw new Error(
+        body === null
+          ? `vite preview did not start on port ${port}:\n${output}`
+          : `port ${port} does not serve this checkout's build (another server?):\n${output}`,
+      );
     }
-    await sleep(200);
+    await Promise.race([sleep(200), exited]);
   }
   return {
     async stop() {
@@ -160,15 +175,21 @@ const SCENARIOS = {
     await sleep(APPLY_SECONDS * 1000);
     const { durations, details } = await page.evaluate(() => window.__kubepitPerf.report());
     await page.close();
+    // `watch:apply` is the work (apply + flush + React commit); the frame wait
+    // is only in `latencyMs` (first batch → commit).
     const apply = durations['watch:apply'] ?? [];
-    const flush = (details['watch:apply'] ?? []).map((d) => d?.flushMs ?? 0);
+    const meta = (key) => (details['watch:apply'] ?? []).map((d) => d?.[key] ?? 0);
+    const p95 = (key) => percentile(meta(key), 95);
     ctx.raw.apply = {
       seconds: APPLY_SECONDS,
-      batches: apply.length,
+      flushes: apply.length,
       p50: percentile(apply, 50),
       p95: percentile(apply, 95),
       max: max(apply),
-      flushP95: percentile(flush, 95),
+      applyP95: p95('applyMs'),
+      flushP95: p95('flushMs'),
+      commitP95: p95('commitMs'),
+      latencyP95: p95('latencyMs'),
     };
     return { applyP95: percentile(apply, 95) };
   },

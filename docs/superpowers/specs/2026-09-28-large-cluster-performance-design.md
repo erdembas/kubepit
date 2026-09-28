@@ -99,7 +99,7 @@ Deterministic structural probes (request counts per path) are ordinary tests, no
 1. **Vitest bench** (`*.bench.ts`, Node) for the pure engines: topology build/view/layout, `scanHealth`, `buildCluster` + `namespaceMatrix`, `parseLogLine`, `detectLevelToken`, `RecordIndex`, and table filter/sort. None of them imports React or zustand (verified); they use `@/i18n/core`.
 2. **An in-app probe** (`lib/perf/`), active only with `?perf=1` or `localStorage['kubepit.perf'] = '1'`, with no cost when inactive. It records:
    - time-to-first-rows and time-to-synced;
-   - watch batch apply → flush duration;
+   - the cost of applying watch batches: their apply, the snapshot flush and React's commit (the wait for the next frame is recorded apart, as latency);
    - FPS during a programmatic scroll;
    - long tasks;
    - map build/view/layout and health scan durations;

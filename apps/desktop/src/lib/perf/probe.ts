@@ -145,6 +145,46 @@ export function afterFrames(n = 2): Promise<number> {
 }
 
 // ---------------------------------------------------------------------------
+// Watch batches: apply → commit
+// ---------------------------------------------------------------------------
+
+export interface WatchCommitTiming {
+  /** When the first batch since the last flush arrived. */
+  arrivedAt: number;
+  /** Time spent applying those batches to the watch's map. */
+  applyMs: number;
+  /** When the flush began (building the snapshot, then emitting it). */
+  flushStart: number;
+  /** Objects in the snapshot. */
+  items: number;
+}
+
+/**
+ * Called right after a watch emits a snapshot: records `watch:apply` once
+ * React has committed it. `useSyncExternalStore` re-renders at sync
+ * priority in a microtask that the emit queued, so a microtask queued after
+ * the emit runs after that render and commit.
+ *
+ * The value is the work: applying the batches plus flush start → commit.
+ * The wait for the animation frame is left out; `latencyMs` (first batch →
+ * commit) keeps it.
+ */
+export function recordWatchCommit(t: WatchCommitTiming): void {
+  if (!perfEnabled()) return;
+  const emitted = performance.now();
+  queueMicrotask(() => {
+    const end = performance.now();
+    recordDuration('watch:apply', t.applyMs + (end - t.flushStart), {
+      items: t.items,
+      applyMs: t.applyMs,
+      flushMs: emitted - t.flushStart,
+      commitMs: end - emitted,
+      latencyMs: end - t.arrivedAt,
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Tables: time to first rows and to synced
 // ---------------------------------------------------------------------------
 
@@ -259,10 +299,4 @@ declare global {
   interface Window {
     __kubepitPerf?: PerfDriver;
   }
-}
-
-/** Exposes the driver as `window.__kubepitPerf`, only while the probe is on. */
-export function installPerfGlobal(driver: PerfDriver): void {
-  if (!perfEnabled()) return;
-  window.__kubepitPerf = driver;
 }

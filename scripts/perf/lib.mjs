@@ -120,6 +120,21 @@ export function isAllowedUrl(raw, port) {
   );
 }
 
+/**
+ * Whether `body` (what the preview server answers for `/`) is this
+ * checkout's built `index.html`. Its asset names carry content hashes, so
+ * another build, another app or another server never matches.
+ */
+export function servesBuild(body, builtIndex) {
+  return typeof body === 'string' && body.trim() === builtIndex.trim();
+}
+
+/** Whether vite preview's output says it listens on `port` itself. */
+export function previewListening(output, port) {
+  // eslint-disable-next-line no-control-regex -- strips ANSI colours
+  return output.replace(/\x1b\[[0-9;]*m/g, '').includes(`://localhost:${port}/`);
+}
+
 /** Nearest-rank percentile (`p` in 0–100); `NaN` for an empty list (as `lib/perf/stats.ts`). */
 export function percentile(values, p) {
   if (!values.length) return NaN;

@@ -6,6 +6,7 @@ import { VIEW, useWorkbenchStore } from '@/store/useWorkbenchStore';
 import {
   afterFrames,
   nextRecord,
+  perfEnabled,
   perfMark,
   perfReport,
   perfSamples,
@@ -14,6 +15,7 @@ import {
   resetPerf,
   type PerfDriver,
 } from './probe';
+import { installPerfGlobal } from './global';
 import { fpsReport, type FpsReport } from './stats';
 
 /**
@@ -56,6 +58,11 @@ function activeTableScroller(): HTMLElement | null {
 interface LongTask {
   start: number;
   duration: number;
+}
+
+/** Creates the driver and exposes it (no-op while the probe is off). */
+export function installPerfDriver(): void {
+  if (perfEnabled()) installPerfGlobal(createPerfDriver());
 }
 
 export function createPerfDriver(): PerfDriver {

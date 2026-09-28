@@ -5,8 +5,10 @@ import {
   isAllowedUrl,
   parseArgs,
   percentile,
+  previewListening,
   resultIds,
   SCENARIOS,
+  servesBuild,
   soakSummary,
   withUnits,
 } from './lib.mjs';
@@ -89,6 +91,20 @@ test('the driver only talks to the local preview server', () => {
   assert.equal(isAllowedUrl('http://localhost:6443/api', 4173), false);
   assert.equal(isAllowedUrl('https://fonts.googleapis.com/css', 4173), false);
   assert.equal(isAllowedUrl('https://kubernetes.default.svc/api', 4173), false);
+});
+test('the preview must serve this checkout’s build, from vite itself', () => {
+  const built =
+    '<!doctype html>\n<script type="module" src="/assets/index-CHuGkJDi.js"></script>\n';
+  assert.equal(servesBuild(built, built), true);
+  assert.equal(servesBuild(`${built}\n`, built), true);
+  assert.equal(servesBuild(built.replace('CHuGkJDi', 'Bx81kQ0a'), built), false);
+  assert.equal(servesBuild('<html>another app</html>', built), false);
+  assert.equal(servesBuild(null, built), false);
+  const ready =
+    '  \x1b[32m➜\x1b[39m  \x1b[1mLocal\x1b[22m:   \x1b[36mhttp://localhost:\x1b[1m4180\x1b[22m/\x1b[39m\n';
+  assert.equal(previewListening(ready, 4180), true);
+  assert.equal(previewListening(ready, 418), false);
+  assert.equal(previewListening('error: Port 4180 is already in use\n', 4180), false);
 });
 test('percentile uses nearest rank', () => {
   assert.equal(percentile([5, 1, 3], 50), 3);
