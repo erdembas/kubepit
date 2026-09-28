@@ -233,7 +233,7 @@ git commit -m "test(perf): scale presets and a paged, selector-aware fake API se
 
   Task 12 (H1) and Task 15 (H4) update the expectations pinned here.
 
-- [ ] **Step 1: Write the test** (a snapshot of today's behaviour; it passes on the current code)
+- [x] **Step 1: Write the test** (a snapshot of today's behaviour; it passes on the current code)
 
 ```rust
 // crates/kubepit-core/tests/perf_probe.rs
@@ -271,14 +271,14 @@ Where the counts come from:
 - secrets and configmaps = journal;
 - events = history persistence.
 
-The helpers `scale_setup`, `persist_history`, `wait_synced` and `gvk` live in this file.
+The helpers `scale_setup`, `persist_history`, `wait_synced` and `gvk` live in this file. _(Done: they, `watch_streams_per_path` and `unpaged_lists` live in `tests/support/perf.rs` instead, so `benches/e2e.rs` shares them. `unpaged_lists(log)` counts every list-shaped path, including ones the fixture answers 404, so it takes no cluster. The whole fan-out map, all 20 paths, is pinned. An ignored test repeats the snapshot at `m` and `l`: `cargo test -p kubepit-core --test perf_probe -- --ignored`. The counts matched at all three presets.)_
 
-- [ ] **Step 2: Run the test**
+- [x] **Step 2: Run the test**
 
 Run: `cargo test -p kubepit-core --test perf_probe -- --nocapture`
 Expected: PASS. If a count differs, the code changed after this plan was written. Pin the observed value, state it in the commit body, and record it in the spec's Results table (`structural/fanout`).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add crates/kubepit-core/tests/perf_probe.rs docs/superpowers/specs
@@ -308,19 +308,20 @@ git commit -m "test(perf): pin watch fan-out and unpaged lists at scale"
 | `metrics_history/series_cluster` | full ring | `series(&MetricsHistoryQuery::Cluster, 0)` |
 | `metrics_history/series_100_pods` | full ring | `series(&Pods { namespace, names: 100 }, 0)` |
 
-- [ ] **Step 1: Write the benches.** Use `criterion_group!{ name = benches; config = Criterion::default().sample_size(20); targets = … }` and build inputs outside `b.iter`. For benches that consume their input, use `iter_batched` with `BatchSize::LargeInput`.
+- [x] **Step 1: Write the benches.** Use `criterion_group!{ name = benches; config = Criterion::default().sample_size(20); targets = … }` and build inputs outside `b.iter`. For benches that consume their input, use `iter_batched` with `BatchSize::LargeInput`.
+  _(Done. `watch/aggregator_initial_20k` flushes every `FLUSH_MAX_OBJECTS` like `run_watch`; `watch/reset_batch_20k` times only `take_batch` (`iter_custom`, the re-list is untimed); `metrics_history` uses synthetic metrics with 100 pods per namespace, so one namespace holds the 100 queried pods. `[lib] bench = false` keeps `cargo bench -p kubepit-core -- <criterion flags>` from handing the flags to libtest.)_
 
-- [ ] **Step 2: Run them**
+- [x] **Step 2: Run them**
 
 Run: `cargo bench -p kubepit-core --bench watch --bench metrics_history -- --quick --noplot`
 Expected: each id above prints a time, and `target/criterion/watch/aggregator_initial_20k/new/estimates.json` exists.
 
-- [ ] **Step 3: Lint**
+- [x] **Step 3: Lint**
 
 Run: `cargo clippy --workspace --all-targets -- -D warnings`
 Expected: no warnings.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add Cargo.toml Cargo.lock crates/kubepit-core
@@ -347,14 +348,15 @@ git commit -m "perf(bench): Criterion benches for watch batching and metrics his
 | `journal/details_after_500` | journal with 5 000 entries | `details_after(0, 500)` |
 | `history/writer_events_10k` | temp-dir `Writer::start(path, QUEUE_CAPACITY)` | `submit(WriteOp::Events(rows))` in batches of 100 until 10 000, then `flush(10 s)`. After the run, assert `stats().dropped == 0` |
 
-- [ ] **Step 1: Write the benches** as specified. `writer_events_10k` uses `iter_custom` with a fresh temp dir per iteration.
+- [x] **Step 1: Write the benches** as specified. `writer_events_10k` uses `iter_custom` with a fresh temp dir per iteration.
+  _(Done. `book_record` records a new alert on a new object a minute after the last one, so every call takes the slowest path: index, push, evict the oldest. `apply_update` and `details_after_500` apply real `data` changes, so each apply records a Modified entry. The writer bench also asserts `failed == 0`.)_
 
-- [ ] **Step 2: Run them**
+- [x] **Step 2: Run them**
 
 Run: `cargo bench -p kubepit-core --bench watchers -- --quick --noplot`
 Expected: every id prints a time, and the writer bench reports no drops (the bench panics otherwise).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add crates/kubepit-core/benches/watchers.rs
@@ -387,14 +389,18 @@ git commit -m "perf(bench): alerts, change journal and history writer benches"
   - `{ "e2e/max_rss_l_all_watchers": <bytes> }`: `getrusage(RUSAGE_SELF).ru_maxrss` (KiB on Linux, bytes on macOS; normalize to bytes). It is measured after connecting to `l` with every opt-in switch on, one pods watch, and a 5 s settle.
   - `"structural/list_requests_without_limit"`: the Task 2 `unpaged_lists` count at `l`.
 
-- [ ] **Step 1: Write the benches.** e2e benches build a `tokio::runtime::Runtime` and use the fixture router from Task 1. They never touch `~/.kube`: `Paths` points at a temp dir.
+- [x] **Step 1: Write the benches.** e2e benches build a `tokio::runtime::Runtime` and use the fixture router from Task 1. They never touch `~/.kube`: `Paths` points at a temp dir.
+  _(Done, with three choices worth knowing:_
+  - _`e2e/max_rss_l_all_watchers` is measured in a child process (the bench binary re-run with `KUBEPIT_PERF_RSS_CHILD_URL`), so the in-process fixture's own memory is not counted. The report is written only under `cargo bench`: it needs `--bench` and skips `--list`._
+  - _`e2e/fleet_search_l` sets `limit_per_kind` to 20 000, so every page is read: 40 pod pages, 80 lists in all. The UI's 200 would stop after about two pages per kind at `l`. The coordinator decided to keep 20 000, because the spec's risk is the many-page path. Discovery is cached first with `api_resources`, as the UI does, so each search makes exactly its 80 list requests. The bench asserts that count._
+  - _`e2e/prometheus_query` detects `prometheus-operated` once, untimed. The service is added to the last page of the fixture's Services list.)_
 
-- [ ] **Step 2: Run them**
+- [x] **Step 2: Run them**
 
 Run: `cargo bench -p kubepit-core --bench search_proxies --bench e2e -- --quick --noplot && cat target/perf/backend-e2e.json`
 Expected: every id prints a time, and the JSON file holds both keys.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add crates/kubepit-core
@@ -473,7 +479,7 @@ Expected: FAIL (module missing).
   - With `churn > 0`, the liveness timer ticks every 100 ms and applies `churn / 10` pod changes per tick round-robin: 90% status/label updates, 10% delete + recreate.
   - `db.ts` keeps `byName: Map<kindKey, Map<"ns/name", uid>>` and `byOwner: Map<ownerUid, Set<uid>>` in sync in `put`/`drop`.
 
-- [ ] **Step 4: Run the tests and check the build time** _(Partly verified on 2026-09-28: the tests and typecheck pass; the browser check below was not run, no browser was available. Headless (Vitest, fake timers): `c-scale-l` builds in ~0.25 s; the list arrives 150–350 ms after the watch, its 40 full batches go out at once (one macrotask each), and `synced` follows at the first 150 ms tick after them: at 450 ms under fake timers.)_
+- [x] **Step 4: Run the tests and check the build time** _(Browser check on 2026-09-28, `pnpm dev:ui` at `?scale=l` in the desktop app's browser pane (pane hidden, `setTimeout` polling): `c-scale-l` connected 1.5 s after the click, and the pods table showed all 20 000 pods 0.77 s after opening Pods, 2.3 s in total. Earlier, the tests and typecheck passed. Headless (Vitest, fake timers): `c-scale-l` builds in ~0.25 s; the list arrives 150–350 ms after the watch, its 40 full batches go out at once (one macrotask each), and `synced` follows at the first 150 ms tick after them: at 450 ms under fake timers.)_
 
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck`
 Expected: PASS. Then open `pnpm dev:ui` at `http://localhost:1430/?scale=l`: the `c-scale-l` cluster connects and the pods table fills within 3 s.

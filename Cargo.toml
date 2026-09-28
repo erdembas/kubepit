@@ -18,3 +18,12 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+
+# Criterion benches (`cargo bench`): release optimisation (`opt-level = "s"`,
+# like shipping code) with cheaper LTO and codegen so CI builds stay fast.
+[profile.bench]
+lto = "thin"
+codegen-units = 16
+debug = "line-tables-only"
+# Release strips symbols; keep the line tables for profiling benches.
+strip = "none"

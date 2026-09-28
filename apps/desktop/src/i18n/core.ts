@@ -80,14 +80,40 @@ export function t(key: MessageKey, values: Values = {}): string {
     Object.hasOwn(values, name) ? String(values[name]) : token,
   );
 }
+/**
+ * Intl formatters per kind, locale and options. Building one costs tens of
+ * microseconds (a DateTimeFormat in the webview far more), formatting with
+ * it well under one, and charts and tables format hundreds of values per
+ * render. Options are plain literals, so their JSON is a stable key; the
+ * cache is dropped if a caller ever makes keys unbounded.
+ */
+const formatters = new Map<string, unknown>();
+const MAX_FORMATTERS = 500;
+
+function formatter<T>(kind: string, options: object | undefined, make: (locale: string) => T): T {
+  const locale = getFormatLocale();
+  const key = `${kind}|${locale}|${options === undefined ? '' : JSON.stringify(options)}`;
+  let hit = formatters.get(key) as T | undefined;
+  if (hit === undefined) {
+    if (formatters.size >= MAX_FORMATTERS) formatters.clear();
+    hit = make(locale);
+    formatters.set(key, hit);
+  }
+  return hit;
+}
+
 export function number(value: number, options?: Intl.NumberFormatOptions): string {
-  return new Intl.NumberFormat(getFormatLocale(), options).format(value);
+  return formatter('n', options, (l) => new Intl.NumberFormat(l, options)).format(value);
 }
 export function date(value: Date | number, options?: Intl.DateTimeFormatOptions): string {
-  return new Intl.DateTimeFormat(getFormatLocale(), options).format(value);
+  return formatter('d', options, (l) => new Intl.DateTimeFormat(l, options)).format(value);
 }
 export function relative(value: number, unit: Intl.RelativeTimeFormatUnit): string {
-  return new Intl.RelativeTimeFormat(getFormatLocale(), { numeric: 'auto' }).format(value, unit);
+  return formatter(
+    'r',
+    undefined,
+    (l) => new Intl.RelativeTimeFormat(l, { numeric: 'auto' }),
+  ).format(value, unit);
 }
 
 /** Translate a complete count-dependent message. Both keys must exist in both catalogs. */
@@ -97,6 +123,7 @@ export function plural(
   count: number,
   values: Values = {},
 ): string {
-  const key = new Intl.PluralRules(getFormatLocale()).select(count) === 'one' ? one : other;
+  const rules = formatter('p', undefined, (l) => new Intl.PluralRules(l));
+  const key = rules.select(count) === 'one' ? one : other;
   return t(key, { ...values, count: number(count) });
 }

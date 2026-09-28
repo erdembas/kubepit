@@ -701,14 +701,25 @@ async fn applying_a_recommendation_dry_runs_and_honours_read_only() {
         .rightsizing_apply(&id, &target, &unknown, true)
         .await
         .is_err());
-    let cron = WorkloadRef {
-        kind: "CronJob".into(),
+    let job = WorkloadRef {
+        kind: "Job".into(),
         ..target.clone()
     };
-    assert!(app
-        .rightsizing_apply(&id, &cron, &changes, true)
+    let err = app
+        .rightsizing_apply(&id, &job, &changes, true)
         .await
-        .is_err());
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("right-sizing supports"), "{err}");
+    assert_eq!(
+        server
+            .log
+            .lock()
+            .iter()
+            .filter(|r| r.method == "PATCH")
+            .count(),
+        1
+    );
 
     // Writable cluster: a real patch (no dryRun).
     let server = start(rightsizing_router(false)).await;
@@ -779,4 +790,239 @@ async fn applied_recommendations_land_in_the_audit_log() {
     assert!(!entry.dry_run);
     assert!(entry.revertible, "the before-state is kept for Revert");
     assert_eq!(entry.targets[0].name, "web");
+}
+
+const NIGHTLY: &str = "/apis/batch/v1/namespaces/shop/cronjobs/nightly";
+
+fn cronjob(cpu: &str, memory: &str) -> Value {
+    json!({
+        "apiVersion": "batch/v1", "kind": "CronJob",
+        "metadata": {"name": "nightly", "namespace": "shop", "uid": "uid-nightly", "resourceVersion": "7"},
+        "spec": {"schedule": "0 2 * * *", "jobTemplate": {"spec": {"template": {"spec": {
+            "restartPolicy": "Never",
+            "containers": [{"name": "job", "image": "nightly:1",
+                            "resources": {"requests": {"cpu": cpu, "memory": memory},
+                                          "limits": {"memory": memory}}}]
+        }}}}}
+    })
+}
+
+fn cron_ref() -> WorkloadRef {
+    WorkloadRef {
+        kind: "CronJob".into(),
+        namespace: "shop".into(),
+        name: "nightly".into(),
+    }
+}
+
+fn cron_changes() -> Vec<ContainerResourceChange> {
+    vec![ContainerResourceChange {
+        container: "job".into(),
+        cpu_request: Some(140.0),
+        cpu_limit: None,
+        memory_request: Some(368.0 * MIB),
+        memory_limit: Some(432.0 * MIB),
+    }]
+}
+
+/// A cluster whose only workload is the CronJob `shop/nightly`; its pods
+/// (`nightly-<scheduled time>-<suffix>`) ran for a day.
+fn cronjob_router(prometheus: bool) -> Router {
+    Arc::new(move |req: &Request, _log: &Log| {
+        let key = json!({"namespace": "shop", "pod": "nightly-28765432-abcde", "container": "job"});
+        match (req.method.as_str(), bare(&req.path)) {
+            (_, "/version") => version(),
+            (_, "/api/v1/services") => list(
+                "ServiceList",
+                if prometheus {
+                    vec![service(
+                        "monitoring",
+                        "prometheus-operated",
+                        json!({"operated-prometheus": "true"}),
+                        json!([{"name": "web", "port": 9090}]),
+                    )]
+                } else {
+                    vec![]
+                },
+            ),
+            (_, p) if p == format!("{OPERATED}/api/v1/query") => {
+                let q = param(&req.path, "query").unwrap_or_default();
+                if q == "1" {
+                    Reply::Json(
+                        200,
+                        json!({"status": "success", "data": {"resultType": "scalar", "result": [1, "1"]}}),
+                    )
+                } else if q.starts_with("quantile_over_time(0.95") {
+                    vector(key, "120")
+                } else if q.starts_with("max_over_time((sum") {
+                    vector(key, "300")
+                } else if q.contains("max_over_time(container_memory_working_set_bytes") {
+                    vector(key, "314572800")
+                } else if q.starts_with("count_over_time") {
+                    vector(key, "24")
+                } else {
+                    vector(json!({}), "0")
+                }
+            }
+            (_, "/apis/apps/v1/deployments") => list("DeploymentList", vec![]),
+            (_, "/apis/apps/v1/statefulsets") => list("StatefulSetList", vec![]),
+            (_, "/apis/apps/v1/daemonsets") => list("DaemonSetList", vec![]),
+            (_, "/apis/batch/v1/cronjobs") => list("CronJobList", vec![cronjob("1", "1Gi")]),
+            (_, "/api/v1/pods") => list("PodList", vec![]),
+            ("GET", NIGHTLY) => Reply::Json(200, cronjob("1", "1Gi")),
+            ("PATCH", NIGHTLY) => {
+                let mut obj = cronjob("140m", "368Mi");
+                obj["metadata"]["resourceVersion"] = json!("8");
+                Reply::Json(200, obj)
+            }
+            _ => not_found(),
+        }
+    })
+}
+
+fn patches(log: &Log) -> Vec<Request> {
+    log.lock()
+        .iter()
+        .filter(|r| r.method == "PATCH")
+        .cloned()
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cronjobs_are_recommended_and_dry_run_patched() {
+    let server = start(cronjob_router(true)).await;
+    let (_dir, app, _recorder, id) = setup(&server.url, true);
+
+    let report = app
+        .rightsizing_report(&id, &RightsizingRequest::default())
+        .await
+        .unwrap();
+    assert_eq!(
+        report.source,
+        RightsizingSource::Prometheus,
+        "{:?}",
+        report.notes
+    );
+    let nightly = report
+        .workloads
+        .iter()
+        .find(|w| w.kind == "CronJob")
+        .expect("a CronJob row");
+    assert_eq!(
+        (nightly.namespace.as_str(), nightly.name.as_str()),
+        ("shop", "nightly")
+    );
+    assert_eq!(nightly.replicas, 1);
+    let job = &nightly.containers[0];
+    assert_eq!(job.name, "job");
+    assert_eq!(job.usage.unwrap().cpu_p95, 120.0, "pods matched by name");
+    assert_eq!(job.recommended.cpu_request, Some(140.0));
+    assert_eq!(job.recommended.memory_request, Some(368.0 * MIB));
+    assert!(nightly.changed && nightly.monthly_delta < 0.0);
+    // The name-matched presets carry no duty cycle: one replica.
+    assert_eq!(nightly.cost_replicas, 1.0);
+
+    // One CronJob is read at its own path.
+    let one = app
+        .rightsizing_report(
+            &id,
+            &RightsizingRequest {
+                workload: Some(cron_ref()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(one.workloads.len(), 1);
+    assert_eq!(
+        one.workloads[0].containers[0].recommended.cpu_request,
+        Some(140.0)
+    );
+
+    // Read-only: the dry run patches the job template…
+    let review = app
+        .rightsizing_apply(&id, &cron_ref(), &cron_changes(), true)
+        .await
+        .unwrap();
+    assert_eq!(
+        (review.api_version.as_str(), review.kind.as_str()),
+        ("batch/v1", "CronJob")
+    );
+    assert_eq!(review.operation, DryRunOperation::Update);
+    let sent = patches(&server.log);
+    assert_eq!(sent.len(), 1);
+    assert_eq!(bare(&sent[0].path), NIGHTLY);
+    assert_eq!(param(&sent[0].path, "dryRun").as_deref(), Some("All"));
+    assert!(sent[0].body.contains("jobTemplate"));
+    let body: Value = serde_json::from_str(&sent[0].body).unwrap();
+    assert_eq!(
+        body.pointer("/spec/jobTemplate/spec/template/spec/containers/0"),
+        Some(
+            &json!({"name": "job", "resources": {"requests": {"cpu": "140m", "memory": "368Mi"},
+                                                   "limits": {"memory": "432Mi"}}})
+        )
+    );
+    assert!(body.pointer("/spec/template").is_none());
+    assert_eq!(
+        body["metadata"]["annotations"]["kubernetes.io/change-cause"],
+        "kubepit right-size cronjob/nightly"
+    );
+
+    // …and the real apply is refused before anything is sent.
+    let err = app
+        .rightsizing_apply(&id, &cron_ref(), &cron_changes(), false)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("read-only"), "{err}");
+    assert_eq!(patches(&server.log).len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cronjob_right_sizing_is_audited_and_revertible() {
+    let server = start(cronjob_router(false)).await;
+    let (_dir, app, _recorder, id) = setup(&server.url, false);
+    app.set_history_recording(true);
+
+    let applied = app
+        .rightsizing_apply(&id, &cron_ref(), &cron_changes(), false)
+        .await
+        .unwrap();
+    assert_eq!(applied.kind, "CronJob");
+    let sent = patches(&server.log);
+    assert_eq!(sent.len(), 1);
+    assert_eq!(bare(&sent[0].path), NIGHTLY);
+    assert!(param(&sent[0].path, "dryRun").is_none());
+
+    assert!(app.history_flush());
+    let entries = app
+        .history_audit_list(&AuditFilter {
+            limit: 100,
+            ..AuditFilter::default()
+        })
+        .unwrap()
+        .entries;
+    let entry = entries
+        .iter()
+        .find(|e| e.action == AuditAction::Rightsize)
+        .unwrap_or_else(|| panic!("no rightsize entry in {entries:#?}"));
+    assert_eq!(entry.outcome, AuditOutcome::Ok);
+    assert!(!entry.dry_run);
+    assert!(entry.revertible, "the before-state is kept for Revert");
+    let target = &entry.targets[0];
+    assert_eq!(
+        (
+            target.api_version.as_str(),
+            target.kind.as_str(),
+            target.namespace.as_deref(),
+            target.name.as_str()
+        ),
+        ("batch/v1", "CronJob", Some("shop"), "nightly")
+    );
+    assert_eq!(target.gvk.as_ref().unwrap().plural, "cronjobs");
+    let detail = app.history_audit_get(entry.id).unwrap();
+    let object = &detail.objects[0];
+    assert!(object.revertible);
+    assert!(object.before_yaml.as_deref().unwrap().contains("cpu: '1'"));
+    assert!(object.after_yaml.as_deref().unwrap().contains("cpu: 140m"));
 }

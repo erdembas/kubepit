@@ -1,8 +1,10 @@
 import * as i18n from '@/i18n/core';
 import { formatBytes, formatCpu } from '@/lib/format';
+import { BUILTIN, toGvk } from '@/lib/kube/catalog';
 import type {
   ContainerRecommendation,
   ContainerResourceChange,
+  Gvk,
   RecommendationWarning,
   ResourceChange,
   RightsizingConfidence,
@@ -36,11 +38,30 @@ export const DEFAULT_RIGHTSIZING: RightsizingSettings = {
   throttle_threshold_percent: 5,
 };
 
-/** Kinds the recommendations cover (and `rightsizing_apply` patches). */
-export const RIGHTSIZABLE_KINDS = ['Deployment', 'StatefulSet', 'DaemonSet'] as const;
+/**
+ * Kinds the recommendations cover (and `rightsizing_apply` patches). A
+ * CronJob is patched at its job template (`spec.jobTemplate.spec.template`),
+ * so only the Jobs it starts afterwards get the new values.
+ */
+export const RIGHTSIZABLE_KINDS = ['Deployment', 'StatefulSet', 'DaemonSet', 'CronJob'] as const;
 
-export function isRightsizable(kind: string): boolean {
+export type RightsizableKind = (typeof RIGHTSIZABLE_KINDS)[number];
+
+export function isRightsizable(kind: string): kind is RightsizableKind {
   return (RIGHTSIZABLE_KINDS as readonly string[]).includes(kind);
+}
+
+const WORKLOAD_GVK: Record<RightsizableKind, Gvk> = {
+  Deployment: toGvk(BUILTIN.Deployment),
+  StatefulSet: toGvk(BUILTIN.StatefulSet),
+  DaemonSet: toGvk(BUILTIN.DaemonSet),
+  CronJob: toGvk(BUILTIN.CronJob),
+};
+
+/** The API resource of a recommended workload (`apps/v1`, or `batch/v1` for CronJobs). */
+export function workloadGvk(kind: string): Gvk {
+  if (isRightsizable(kind)) return WORKLOAD_GVK[kind];
+  return { group: 'apps', version: 'v1', kind, plural: `${kind.toLowerCase()}s`, namespaced: true };
 }
 
 export function cpuText(millicores: number | null | undefined): string {

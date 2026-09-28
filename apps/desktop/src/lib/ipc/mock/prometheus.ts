@@ -10,7 +10,8 @@ import type {
   PromQueryResult,
 } from '@/types';
 import { sleep } from './bus';
-import { getDb, list } from './fixtures/db';
+import { accessKey } from '@/lib/prometheusAccess';
+import { find, getDb, list } from './fixtures/db';
 import {
   ALL_METRICS,
   detectServices,
@@ -27,7 +28,11 @@ import { handlers, register, type MockArgs } from './registry';
  * on prod-eu-west-1, the prometheus chart on the other cloud clusters,
  * nothing on the local ones, so they show the metrics-server fallback),
  * synthetic preset series and a PromQL look-alike. Mirrors the backend's
- * step selection and error messages.
+ * step selection and error messages. `prometheus_access` is kept with the
+ * cluster (`cluster_update` stores it) and keys the status like the backend;
+ * credentials are "read" from the fixture Secret it references, and a
+ * missing Secret or key makes the source unreachable with the backend's
+ * message (the tunnel itself is not simulated).
  */
 
 const NICE_STEPS = [15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400];
@@ -65,10 +70,27 @@ function blank(state: PrometheusStatus['state']): PrometheusStatus {
   };
 }
 
+/** The backend's error for credentials it cannot read, or null. */
+function credentialsProblem(cluster: ClusterDef): string | null {
+  const auth = cluster.prometheus_access?.auth;
+  if (!auth) return null;
+  // Like the backend: never to a detected service.
+  if (cluster.prometheus?.mode !== 'service')
+    return 'Prometheus credentials are only sent to a service chosen in the cluster settings, never to a detected one: choose the service, or remove the credentials';
+  const secret = find(getDb(cluster.id), 'secrets', auth.namespace, auth.secret);
+  if (!secret)
+    return `could not read Secret ${auth.namespace}/${auth.secret}: secrets "${auth.secret}" not found`;
+  const data = (secret.data ?? {}) as Record<string, string>;
+  const keys = auth.type === 'bearer' ? [auth.token_key] : [auth.username_key, auth.password_key];
+  const missing = keys.find((k) => !data[k]);
+  return missing ? `Secret ${auth.namespace}/${auth.secret} has no key "${missing}"` : null;
+}
+
 async function detect(cluster: ClusterDef): Promise<PrometheusStatus> {
   const config = cluster.prometheus ?? { mode: 'auto' };
   if (config.mode === 'off') return blank('off');
   const db = getDb(cluster.id);
+  const problem = credentialsProblem(cluster);
   if (config.mode === 'service') {
     await sleep(120);
     const service: PrometheusService = {
@@ -82,6 +104,8 @@ async function detect(cluster: ClusterDef): Promise<PrometheusStatus> {
     const exists = list(db, 'services').some(
       (s) => s.metadata.namespace === config.namespace && s.metadata.name === config.service,
     );
+    if (exists && problem)
+      return { ...blank('unreachable'), service, source: 'configured', error: problem };
     return exists
       ? { ...blank('available'), service, source: 'configured' }
       : {
@@ -94,6 +118,14 @@ async function detect(cluster: ClusterDef): Promise<PrometheusStatus> {
   await sleep(350);
   const candidates = detectServices(db);
   if (!candidates.length) return blank('not-found');
+  if (problem)
+    return {
+      ...blank('unreachable'),
+      service: candidates[0]!,
+      source: 'detected',
+      error: problem,
+      candidates,
+    };
   return { ...blank('available'), service: candidates[0]!, source: 'detected', candidates };
 }
 
@@ -104,7 +136,7 @@ async function status(clusterId: string, refresh: boolean): Promise<PrometheusSt
   if (cluster.prometheus?.mode === 'off') return blank('off');
   const conn = connection(clusterId);
   if (conn?.state !== 'connected') throw new Error(`cluster "${cluster.name}" is not connected`);
-  const key = `${clusterId}|${conn.connected_at}|${JSON.stringify(cluster.prometheus ?? null)}`;
+  const key = `${clusterId}|${conn.connected_at}|${JSON.stringify(cluster.prometheus ?? null)}|${accessKey(cluster.prometheus_access)}`;
   const cached = cache.get(key);
   if (cached && !refresh) {
     await sleep(25);

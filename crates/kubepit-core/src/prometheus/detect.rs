@@ -12,7 +12,7 @@
 use anyhow::Result;
 use kube::Client;
 
-use super::proxy::{self, PROBE_TIMEOUT};
+use super::proxy::PROBE_TIMEOUT;
 use crate::service_proxy;
 use crate::types::{PromScheme, PrometheusKind, PrometheusService};
 
@@ -195,10 +195,17 @@ pub async fn list_services(client: &Client, namespaces: &[String]) -> Result<Vec
     service_proxy::list_services(client, FALLBACK_NAMESPACES, namespaces).await
 }
 
-/// Does `service` answer Prometheus queries? `Err` explains why not.
-pub async fn probe(client: &Client, service: &PrometheusService) -> Result<()> {
-    let path = proxy::proxy_path(service, "/api/v1/query", &[("query", "1".to_string())]);
-    proxy::get(client, &path, PROBE_TIMEOUT).await.map(|_| ())
+/// Does the service of `link` answer Prometheus queries with the cluster's
+/// access settings (tenant, credentials)? `Err` explains why not. The probe
+/// is never given the cluster-label selector.
+pub(crate) async fn probe(link: &super::Link<'_>) -> Result<()> {
+    link.get(
+        "/api/v1/query",
+        &[("query", "1".to_string())],
+        PROBE_TIMEOUT,
+    )
+    .await
+    .map(|_| ())
 }
 
 #[cfg(test)]

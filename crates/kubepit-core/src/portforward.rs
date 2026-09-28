@@ -348,8 +348,12 @@ async fn bind_local(wanted: u16) -> Result<TcpListener> {
     }
 }
 
-/// Resolve the pod and container port a new connection should go to.
-async fn resolve_target(client: &Client, request: &PortForwardRequest) -> Result<(String, u16)> {
+/// Resolve the pod and container port a new connection should go to (also
+/// the Prometheus tunnel's, per request).
+pub(crate) async fn resolve_target(
+    client: &Client,
+    request: &PortForwardRequest,
+) -> Result<(String, u16)> {
     let pods: Api<Pod> = Api::namespaced(client.clone(), &request.namespace);
     match request.kind {
         PortForwardKind::Pod => {

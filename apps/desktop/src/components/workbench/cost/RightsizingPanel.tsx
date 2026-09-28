@@ -31,12 +31,13 @@ import {
   sourceLabel,
   strategyLabel,
   verdictLabel,
+  workloadGvk,
   type RightsizingFilter,
 } from '@/lib/kube/rightsizing/model';
 import { navigateTo } from '@/store/useWorkbenchStore';
 import type { RightsizingSettings, WorkloadRecommendation } from '@/types';
 import { Card, StatTile } from '../overview/charts';
-import { ChangeCell, RaisedTag, RightsizingDialog, appsGvk } from './RightsizingDialog';
+import { ChangeCell, RaisedTag, RightsizingDialog } from './RightsizingDialog';
 import { NoteBanner, rightsizingNoteText } from './CostNotes';
 import { useCostPrefs } from './prefs';
 import { CONFIDENCE_TONE, VERDICT_TONE } from './tones';
@@ -450,7 +451,7 @@ export function RightsizingPanel({
               key={`${rec.kind}/${rec.namespace}/${rec.name}`}
               rec={rec}
               currency={currency}
-              onOpen={() => navigateTo(clusterId, appsGvk(rec.kind), rec.namespace, rec.name)}
+              onOpen={() => navigateTo(clusterId, workloadGvk(rec.kind), rec.namespace, rec.name)}
               onApply={() => setApplying(rec)}
             />
           ))

@@ -7,6 +7,13 @@
 //!   ([`PrometheusCache`]).
 //! - [`proxy`] sends every request through the API server's service proxy
 //!   with the cluster's own client: no port-forward, RBAC applies.
+//! - [`access`] holds the settings of a shared or secured source (tenant,
+//!   cluster labels, Secret-backed credentials); [`matchers`] injects the
+//!   cluster-label selector into every preset. `Kubepit::prometheus_send`
+//!   (after `prometheus_source`) is the one transport every caller uses,
+//!   `prometheus_get` its single-request form; with credentials it goes
+//!   through an in-process port-forward tunnel (`tunnel`) instead of the
+//!   service proxy, which does not forward `Authorization`.
 //! - [`promql`] holds the preset queries (cluster, node, namespace,
 //!   workload, pod, container, PVC × CPU, memory, network, filesystem,
 //!   volumes, restarts), so the UI never builds PromQL; [`range`] picks the
@@ -19,17 +26,20 @@
 //! read-only clusters. Charts fall back to the metrics-server history when
 //! the status is anything but `available`.
 
+pub mod access;
 pub mod detect;
+pub mod matchers;
 pub mod parse;
 pub mod promql;
 pub mod proxy;
 pub mod range;
+pub(crate) mod tunnel;
 // Usage statistics for cost estimates and right-sizing.
 pub mod usage;
 // Server-side workload statistics (right-sizing collection).
 pub mod workload_stats;
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Result};
 use kube::Client;
@@ -37,16 +47,19 @@ use kube::Client;
 use crate::app::Kubepit;
 use crate::objects::now_millis;
 use crate::service_proxy::{
-    all_forbidden, is_proxy_failure, is_proxy_forbidden, valid_name, DetectCache, DetectedStatus,
+    all_forbidden, is_proxy_failure, is_proxy_forbidden, valid_name, with_query, DetectCache,
+    DetectedStatus,
 };
 use crate::types::{
     ClusterDef, PromQueryResult, PrometheusConfig, PrometheusKind, PrometheusMetric,
     PrometheusMetricsResult, PrometheusRange, PrometheusSeries, PrometheusService,
     PrometheusSource, PrometheusState, PrometheusStatus, PrometheusTarget,
 };
+use access::PrometheusAccess;
 use detect::MAX_PROBES;
 use parse::PromData;
 use range::Window;
+use tunnel::TunnelCache;
 
 pub use crate::service_proxy::RECHECK_AFTER;
 /// Series one ad-hoc query returns at most.
@@ -122,8 +135,10 @@ impl PrometheusConfig {
 // Detection cache
 // ---------------------------------------------------------------------------
 
-/// Detection results per cluster (see [`DetectCache`]).
-pub type PrometheusCache = DetectCache<PrometheusConfig, PrometheusStatus>;
+/// Detection results per cluster (see [`DetectCache`]), keyed by the
+/// source setting and its access settings (a new tenant or credentials
+/// probe again).
+pub type PrometheusCache = DetectCache<(PrometheusConfig, PrometheusAccess), PrometheusStatus>;
 
 impl DetectedStatus for PrometheusStatus {
     fn is_available(&self) -> bool {
@@ -142,16 +157,147 @@ fn status(state: PrometheusState) -> PrometheusStatus {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Transport
+// ---------------------------------------------------------------------------
+
+/// Who wrote a query: Kubepit (presets get the cluster-label selector) or
+/// the user (the PromQL tab; sent as typed).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    Preset,
+    User,
+}
+
+/// How requests reach one cluster's Prometheus: the service, the cluster's
+/// access settings and, for the tunnel, where its Secret values are cached.
+pub(crate) struct Link<'a> {
+    pub client: &'a Client,
+    pub service: &'a PrometheusService,
+    pub access: &'a PrometheusAccess,
+    /// `service` is the one the cluster settings name
+    /// ([`access::credentials_allowed`]); credentials go nowhere else.
+    pub credentials_allowed: bool,
+    pub tunnels: &'a TunnelCache,
+    pub cluster_id: &'a str,
+    pub connected_at: Option<i64>,
+}
+
+impl Link<'_> {
+    /// One GET of `endpoint` (`/api/v1/query`) with `params` as they are,
+    /// with `X-Scope-OrgID` when a tenant is set: through the service proxy,
+    /// or through the port-forward tunnel when credentials are configured.
+    pub(crate) async fn get(
+        &self,
+        endpoint: &str,
+        params: &[(&str, String)],
+        timeout: Duration,
+    ) -> Result<PromData> {
+        if self.access.auth.is_some() {
+            // Defence in depth: validation already refuses credentials
+            // without a chosen service (an older clusters.json may not).
+            if !self.credentials_allowed {
+                bail!(access::CREDENTIALS_NEED_A_SERVICE);
+            }
+            let response = async {
+                let secrets = self
+                    .tunnels
+                    .secrets(self.cluster_id, self.connected_at, self.client, self.access)
+                    .await?;
+                let path = with_query(&format!("{}{endpoint}", self.service.path_prefix), params);
+                tunnel::tunnel_get(
+                    self.client,
+                    self.service,
+                    self.access,
+                    &secrets,
+                    &path,
+                    timeout,
+                )
+                .await
+            }
+            .await
+            .map_err(tunnel::tunnel_failure)?;
+            return proxy::answer(response);
+        }
+        let tenant = self.access.tenant.trim();
+        let headers: &[(&str, &str)] = if tenant.is_empty() {
+            &[]
+        } else {
+            &[("X-Scope-OrgID", tenant)]
+        };
+        let path = proxy::proxy_path(self.service, endpoint, params);
+        proxy::get(self.client, &path, headers, timeout).await
+    }
+}
+
+/// The Prometheus of one cluster connection, resolved once per command.
+pub(crate) struct Source<'a> {
+    pub cluster_id: String,
+    pub client: Client,
+    pub connected_at: Option<i64>,
+    pub service: PrometheusService,
+    pub access: PrometheusAccess,
+    pub tunnels: &'a TunnelCache,
+    /// See [`Link::credentials_allowed`].
+    pub credentials_allowed: bool,
+}
+
+impl Source<'_> {
+    pub(crate) fn link(&self) -> Link<'_> {
+        Link {
+            client: &self.client,
+            service: &self.service,
+            access: &self.access,
+            credentials_allowed: self.credentials_allowed,
+            tunnels: self.tunnels,
+            cluster_id: &self.cluster_id,
+            connected_at: self.connected_at,
+        }
+    }
+
+    /// `query` as it is sent: presets get the cluster-label selector.
+    pub(crate) fn query(&self, query: &str, origin: Origin) -> String {
+        match origin {
+            Origin::Preset => matchers::with_matchers(query, &self.access.matchers()),
+            Origin::User => query.to_string(),
+        }
+    }
+}
+
+fn range_params(query: &str, window: &Window) -> Vec<(&'static str, String)> {
+    vec![
+        ("query", query.to_string()),
+        ("start", window.start_secs.to_string()),
+        ("end", window.end_secs.to_string()),
+        ("step", window.step_secs.to_string()),
+    ]
+}
+
 /// Run detection (or probe the configured service). Never fails: problems
 /// become `not-found` / `unreachable` / `forbidden` with an explanation.
 /// Any candidate answering wins; `forbidden` needs every probed candidate
 /// refused by the API server (no `get` on `services/proxy`).
-async fn detect_status(client: &Client, cluster: &ClusterDef) -> PrometheusStatus {
+async fn detect_status(
+    client: &Client,
+    cluster: &ClusterDef,
+    tunnels: &TunnelCache,
+    connected_at: Option<i64>,
+) -> PrometheusStatus {
+    let link = |service| Link {
+        client,
+        service,
+        access: &cluster.prometheus_access,
+        // Detected candidates never qualify: only the configured service.
+        credentials_allowed: access::credentials_allowed(&cluster.prometheus, service),
+        tunnels,
+        cluster_id: &cluster.id,
+        connected_at,
+    };
     match &cluster.prometheus {
         PrometheusConfig::Off => status(PrometheusState::Off),
         config @ PrometheusConfig::Service { .. } => {
             let service = config.service().expect("service mode");
-            let result = detect::probe(client, &service).await;
+            let result = detect::probe(&link(&service)).await;
             PrometheusStatus {
                 state: match &result {
                     Ok(()) => PrometheusState::Available,
@@ -187,7 +333,7 @@ async fn detect_status(client: &Client, cluster: &ClusterDef) -> PrometheusStatu
                 candidates
                     .iter()
                     .take(MAX_PROBES)
-                    .map(|service| detect::probe(client, service)),
+                    .map(|service| async move { detect::probe(&link(service)).await }),
             )
             .await;
             let winner = probes.iter().position(Result::is_ok);
@@ -219,25 +365,6 @@ async fn detect_status(client: &Client, cluster: &ClusterDef) -> PrometheusStatu
     }
 }
 
-async fn fetch_range(
-    client: &Client,
-    service: &PrometheusService,
-    query: &str,
-    window: &Window,
-) -> Result<PromData> {
-    let path = proxy::proxy_path(
-        service,
-        "/api/v1/query_range",
-        &[
-            ("query", query.to_string()),
-            ("start", window.start_secs.to_string()),
-            ("end", window.end_secs.to_string()),
-            ("step", window.step_secs.to_string()),
-        ],
-    );
-    proxy::get(client, &path, proxy::QUERY_TIMEOUT).await
-}
-
 impl Kubepit {
     /// The Prometheus client of the cluster's current connection (connecting
     /// on demand, like every command).
@@ -259,17 +386,19 @@ impl Kubepit {
         let (client, connected_at) = self.prometheus_client(&cluster).await?;
         let lock = self.prometheus.detect_lock(cluster_id);
         let _serialised = lock.lock().await;
+        let key = (
+            cluster.prometheus.clone(),
+            cluster.prometheus_access.clone(),
+        );
         if !refresh {
-            if let Some(cached) = self.prometheus.get_at(
-                cluster_id,
-                connected_at,
-                &cluster.prometheus,
-                Instant::now(),
-            ) {
+            if let Some(cached) =
+                self.prometheus
+                    .get_at(cluster_id, connected_at, &key, Instant::now())
+            {
                 return Ok(cached);
             }
         }
-        let result = detect_status(&client, &cluster).await;
+        let result = detect_status(&client, &cluster, &self.prometheus_tunnels, connected_at).await;
         if let (PrometheusState::Available, Some(service)) = (result.state, &result.service) {
             tracing::info!(
                 cluster = %cluster.name,
@@ -279,23 +408,28 @@ impl Kubepit {
                 service.port
             );
         }
-        self.prometheus.put(
-            cluster_id,
-            connected_at,
-            cluster.prometheus.clone(),
-            result.clone(),
-        );
+        self.prometheus
+            .put(cluster_id, connected_at, key, result.clone());
         Ok(result)
     }
 
-    /// The service to query and a client for it, or why there is none.
-    async fn prometheus_service(&self, cluster_id: &str) -> Result<(PrometheusService, Client)> {
+    /// The service to query, a client for it and the access settings, or
+    /// why there is none.
+    pub(crate) async fn prometheus_source(&self, cluster_id: &str) -> Result<Source<'_>> {
         let status = self.prometheus_status(cluster_id, false).await?;
         match (status.state, status.service) {
             (PrometheusState::Available, Some(service)) => {
                 let cluster = self.cluster_def(cluster_id)?;
-                let (client, _) = self.prometheus_client(&cluster).await?;
-                Ok((service, client))
+                let (client, connected_at) = self.prometheus_client(&cluster).await?;
+                Ok(Source {
+                    cluster_id: cluster_id.to_string(),
+                    client,
+                    connected_at,
+                    credentials_allowed: access::credentials_allowed(&cluster.prometheus, &service),
+                    service,
+                    access: cluster.prometheus_access,
+                    tunnels: &self.prometheus_tunnels,
+                })
             }
             (PrometheusState::Off, _) => bail!("Prometheus is turned off for this cluster"),
             (PrometheusState::Unreachable, Some(service)) => bail!(
@@ -315,6 +449,53 @@ impl Kubepit {
         }
     }
 
+    /// The one Prometheus transport: one request to `source` (resolved once
+    /// per command by `prometheus_source`). Every request carries the tenant
+    /// and goes through the proxy or, with credentials, the tunnel; the query
+    /// of a preset gets the cluster-label selector; a proxy or tunnel failure
+    /// (the service vanished, no ready pod, unreadable credentials) makes the
+    /// next status request detect again.
+    pub(crate) async fn prometheus_send(
+        &self,
+        source: &Source<'_>,
+        endpoint: &str,
+        params: Vec<(&str, String)>,
+        origin: Origin,
+        timeout: Duration,
+    ) -> Result<PromData> {
+        let params: Vec<(&str, String)> = params
+            .into_iter()
+            .map(|(key, value)| match key {
+                "query" => (key, source.query(&value, origin)),
+                _ => (key, value),
+            })
+            .collect();
+        source
+            .link()
+            .get(endpoint, &params, timeout)
+            .await
+            .inspect_err(|e| {
+                if is_proxy_failure(e) || tunnel::is_tunnel_failure(e) {
+                    self.prometheus.invalidate(&source.cluster_id);
+                }
+            })
+    }
+
+    /// One request without a resolved source: `prometheus_source`, then
+    /// `prometheus_send`.
+    pub(crate) async fn prometheus_get(
+        &self,
+        cluster_id: &str,
+        endpoint: &str,
+        params: Vec<(&str, String)>,
+        origin: Origin,
+        timeout: Duration,
+    ) -> Result<PromData> {
+        let source = self.prometheus_source(cluster_id).await?;
+        self.prometheus_send(&source, endpoint, params, origin, timeout)
+            .await
+    }
+
     /// `prometheus_metrics`: preset series of `target` over `range`.
     /// `metrics` empty = every metric that applies to the target. Series
     /// fail individually; only when every one fails is the call an error.
@@ -326,7 +507,7 @@ impl Kubepit {
         range: &PrometheusRange,
     ) -> Result<PrometheusMetricsResult> {
         let window = Window::new(range)?;
-        let (service, client) = self.prometheus_service(cluster_id).await?;
+        let source = self.prometheus_source(cluster_id).await?;
         let rate = range::rate_window(window.step_secs);
         let mut wanted: Vec<PrometheusMetric> = if metrics.is_empty() {
             promql::default_metrics(target)
@@ -339,11 +520,15 @@ impl Kubepit {
             .into_iter()
             .filter_map(|m| promql::preset(target, m, rate).map(|q| (m, q)))
             .collect();
-        let results = futures::future::join_all(
-            queries
-                .iter()
-                .map(|(_, q)| fetch_range(&client, &service, q, &window)),
-        )
+        let results = futures::future::join_all(queries.iter().map(|(_, q)| {
+            self.prometheus_send(
+                &source,
+                "/api/v1/query_range",
+                range_params(q, &window),
+                Origin::Preset,
+                proxy::QUERY_TIMEOUT,
+            )
+        }))
         .await;
 
         let mut first_error: Option<anyhow::Error> = None;
@@ -359,21 +544,19 @@ impl Kubepit {
             };
             series.push(PrometheusSeries {
                 metric,
-                query,
+                // What was sent, so a PromQL tab opened from it matches.
+                query: source.query(&query, Origin::Preset),
                 points,
                 error,
             });
         }
         if let Some(err) = first_error {
             if series.iter().all(|s| s.error.is_some()) {
-                if is_proxy_failure(&err) {
-                    self.prometheus.invalidate(cluster_id);
-                }
                 return Err(err);
             }
         }
         Ok(PrometheusMetricsResult {
-            service,
+            service: source.service,
             step_secs: window.step_secs,
             rate_window_secs: rate,
             start: window.start_ms(),
@@ -382,12 +565,25 @@ impl Kubepit {
         })
     }
 
-    /// `prometheus_query_range`: an ad-hoc PromQL range query (PromQL tab).
+    /// `prometheus_query_range`: an ad-hoc PromQL range query (PromQL tab),
+    /// sent as typed.
     pub async fn prometheus_query_range(
         &self,
         cluster_id: &str,
         query: &str,
         range: &PrometheusRange,
+    ) -> Result<PromQueryResult> {
+        self.prometheus_range(cluster_id, query, range, Origin::User)
+            .await
+    }
+
+    /// A range query of `origin` (upgrade readiness sends a preset).
+    pub(crate) async fn prometheus_range(
+        &self,
+        cluster_id: &str,
+        query: &str,
+        range: &PrometheusRange,
+        origin: Origin,
     ) -> Result<PromQueryResult> {
         let query = query.trim();
         if query.is_empty() {
@@ -400,14 +596,16 @@ impl Kubepit {
             );
         }
         let window = Window::new(range)?;
-        let (service, client) = self.prometheus_service(cluster_id).await?;
-        let data = fetch_range(&client, &service, query, &window)
-            .await
-            .inspect_err(|e| {
-                if is_proxy_failure(e) {
-                    self.prometheus.invalidate(cluster_id);
-                }
-            })?;
+        let source = self.prometheus_source(cluster_id).await?;
+        let data = self
+            .prometheus_send(
+                &source,
+                "/api/v1/query_range",
+                range_params(query, &window),
+                origin,
+                proxy::QUERY_TIMEOUT,
+            )
+            .await?;
         let total = data.series.len();
         let mut points = 0usize;
         let series: Vec<_> = data
@@ -420,7 +618,7 @@ impl Kubepit {
             })
             .collect();
         Ok(PromQueryResult {
-            service,
+            service: source.service,
             step_secs: window.step_secs,
             start: window.start_ms(),
             end: window.end_ms(),
@@ -436,7 +634,6 @@ impl Kubepit {
 mod tests {
     use super::*;
     use crate::types::PromScheme;
-    use std::time::Duration;
 
     fn service_config(prefix: &str) -> PrometheusConfig {
         PrometheusConfig::Service {
@@ -529,7 +726,7 @@ mod tests {
     fn cache_is_per_connection_and_config_and_negative_answers_expire() {
         let cache = PrometheusCache::default();
         let now = Instant::now();
-        let auto = PrometheusConfig::Auto;
+        let auto = (PrometheusConfig::Auto, PrometheusAccess::default());
         assert!(cache.get_at("c", Some(1), &auto, now).is_none());
 
         cache.put(
@@ -545,9 +742,24 @@ mod tests {
         );
         assert!(
             cache
-                .get_at("c", Some(1), &PrometheusConfig::Off, now)
+                .get_at(
+                    "c",
+                    Some(1),
+                    &(PrometheusConfig::Off, PrometheusAccess::default()),
+                    now
+                )
                 .is_none(),
             "setting changed"
+        );
+        let tenant = PrometheusAccess {
+            tenant: "team-a".into(),
+            ..Default::default()
+        };
+        assert!(
+            cache
+                .get_at("c", Some(1), &(PrometheusConfig::Auto, tenant), now)
+                .is_none(),
+            "access settings changed"
         );
         let later = now + RECHECK_AFTER * 3;
         assert!(

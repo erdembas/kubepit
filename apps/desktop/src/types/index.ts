@@ -92,6 +92,11 @@ export interface ClusterDef {
   last_connected_at: number | null;
   /** Where charts read Prometheus metrics from (auto-detected by default). */
   prometheus: PrometheusConfig;
+  /**
+   * Tenant, cluster-label selector and Secret-backed credentials of that
+   * Prometheus (shared or secured sources; missing = none).
+   */
+  prometheus_access?: PrometheusAccess;
   /** Where historical logs are read from (Loki; missing = auto-detect). */
   loki?: LokiConfig;
   /** Cost insight: cost source and price model (missing = auto, platform prices). */
@@ -121,6 +126,8 @@ export interface ClusterInput {
   proxy_url?: string | null;
   /** Prometheus source (see `ClusterDef.prometheus`; missing = auto-detect). */
   prometheus?: PrometheusConfig;
+  /** Prometheus access settings (see `ClusterDef.prometheus_access`; missing = none). */
+  prometheus_access?: PrometheusAccess;
   /** Loki source (see `ClusterDef.loki`; missing = auto-detect). */
   loki?: LokiConfig;
   /** Cost source and price model (see `ClusterDef.cost`; missing = auto, platform prices). */
@@ -1563,6 +1570,48 @@ export type PrometheusConfig =
       path_prefix: string;
     }
   | { mode: 'off' };
+
+/**
+ * Access settings of a shared or secured Prometheus (`ClusterDef.prometheus_access`),
+ * for both `auto` and `service` modes. Only Secret *references* are stored; the
+ * backend reads the values on demand and never returns them.
+ */
+export interface PrometheusAccess {
+  /** `X-Scope-OrgID` of a multi-tenant Prometheus, Thanos or Mimir; '' = none. */
+  tenant: string;
+  /** Selector added to every Kubepit-built query, e.g. `{ cluster: 'prod-eu' }`. */
+  cluster_labels: Record<string, string>;
+  /** Credentials from a Secret; set = requests go through a port-forward tunnel. */
+  auth: PrometheusAuth | null;
+  /** Trust of an `https` service reached through the tunnel. */
+  tls: TunnelTls | null;
+}
+
+/** Where the credentials of an authenticated Prometheus live. */
+export type PrometheusAuth =
+  | { type: 'bearer'; namespace: string; secret: string; token_key: string }
+  | {
+      type: 'basic';
+      namespace: string;
+      secret: string;
+      username_key: string;
+      password_key: string;
+    };
+
+export interface TunnelTls {
+  /** PEM CA bundle; null = the system roots. */
+  ca: KeyRef | null;
+  /** Accept any certificate. */
+  insecure_skip_verify: boolean;
+}
+
+/** One key of a ConfigMap or Secret. */
+export interface KeyRef {
+  kind: 'ConfigMap' | 'Secret';
+  namespace: string;
+  name: string;
+  key: string;
+}
 
 /** `forbidden`: every probed service was refused (no get on services/proxy). */
 export type PrometheusState = 'available' | 'not-found' | 'unreachable' | 'forbidden' | 'off';

@@ -419,6 +419,7 @@ register({
         notes: input.notes,
         proxy_url: input.proxy_url ?? null,
         prometheus: input.prometheus ?? { mode: 'auto' },
+        prometheus_access: input.prometheus_access,
         loki: input.loki,
         cost: input.cost,
         created_at: Date.now(),

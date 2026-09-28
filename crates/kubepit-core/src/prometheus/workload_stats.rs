@@ -16,16 +16,20 @@
 //! Q1 and Q5 are required: when either fails (or answers more than
 //! [`MAX_SCAN_SERIES`] series) the batch is [`BatchFailure::Splittable`]
 //! and the caller retries smaller scopes. The others only refine: their
-//! failures are recorded in [`StatsBatch::failed`]. A proxy failure means
-//! Prometheus is gone ([`BatchFailure::Proxy`]). Read-only like the rest.
+//! failures are recorded in [`StatsBatch::failed`]. A proxy or tunnel
+//! failure means Prometheus is gone ([`BatchFailure::Proxy`]). Read-only
+//! like the rest.
 
 use std::collections::{BTreeMap, HashMap};
 
 use futures::stream::{self, StreamExt};
 
+use super::matchers::{series_carry_labels, CLUSTER_LABEL_MISMATCH};
 use super::parse::PromData;
 use super::promql::{quote, regex_escape};
-use super::usage::{instant_query, MAX_NAMESPACE_MATCHERS};
+use super::tunnel::is_tunnel_failure;
+use super::usage::{instant_params, MAX_NAMESPACE_MATCHERS, USAGE_TIMEOUT};
+use super::Origin;
 use crate::app::Kubepit;
 use crate::rightsizing::ownership::OwnerIndex;
 use crate::service_proxy::is_proxy_failure;
@@ -110,7 +114,7 @@ impl StatQuery {
 }
 
 /// What one batch covers.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct StatScope {
     /// Namespaces of the batch; empty = the whole cluster.
     pub namespaces: Vec<String>,
@@ -120,6 +124,10 @@ pub struct StatScope {
     pub days: u32,
     /// Evaluation time of every query (epoch seconds, see [`window_end`]).
     pub end_secs: i64,
+    /// Label names of a shared Prometheus that Q11 keeps, so its answer can
+    /// be checked (fail closed). [`Kubepit::prometheus_stats_batch`] fills
+    /// them from the cluster's access settings.
+    pub cluster_labels: Vec<String>,
 }
 
 /// The window end for `now_ms`: epoch seconds, floored to 5 minutes, so
@@ -199,7 +207,12 @@ pub fn query(q: StatQuery, scope: &StatScope) -> String {
             format!("max_over_time(timestamp(max by (namespace, pod) ({running} == 1))[{d}d:5m])")
         }
         StatQuery::PodOwners => format!(
-            "max by (namespace, pod, owner_kind, owner_name) (max_over_time({}[{d}d]))",
+            "max by (namespace, pod, owner_kind, owner_name{}) (max_over_time({}[{d}d]))",
+            scope
+                .cluster_labels
+                .iter()
+                .map(|name| format!(", {name}"))
+                .collect::<String>(),
             selector("kube_pod_owner", &with(r#"owner_is_controller!="false""#))
         ),
         StatQuery::ReplicasetOwners => format!(
@@ -271,8 +284,9 @@ pub struct StatsBatch {
 /// Why a batch produced nothing.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum BatchFailure {
-    /// Prometheus is gone (service proxy 404 / 502 / 503) or not available:
-    /// smaller batches would fail the same way.
+    /// Prometheus is gone (service proxy 404 / 502 / 503, a tunnel
+    /// failure), not available, or answering for another cluster
+    /// ([`CLUSTER_LABEL_MISMATCH`]): smaller batches would fail the same way.
     #[error("{0}")]
     Proxy(String),
     /// A required query failed or answered too many series: retry with
@@ -364,16 +378,33 @@ fn timestamps(data: Option<&PromData>, earliest: bool) -> HashMap<(String, Strin
     out
 }
 
-/// Merge the answers of one batch. A proxy failure aborts; a failed or
-/// oversized required answer makes the batch splittable; other failures
-/// are recorded in `failed`.
+/// A shared Prometheus answered Q11 with series lacking a configured
+/// cluster label (or with another value): it ignored the selector, so none
+/// of the batch can be trusted to belong to this cluster.
+pub fn owners_mismatch(
+    answers: &[(StatQuery, anyhow::Result<PromData>)],
+    labels: &BTreeMap<String, String>,
+) -> Option<BatchFailure> {
+    answers
+        .iter()
+        .find_map(|(q, answer)| match (q, answer) {
+            (StatQuery::PodOwners, Ok(data)) => Some(data),
+            _ => None,
+        })
+        .filter(|data| !series_carry_labels(&data.series, labels))
+        .map(|_| BatchFailure::Proxy(CLUSTER_LABEL_MISMATCH.to_string()))
+}
+
+/// Merge the answers of one batch. A proxy or tunnel failure aborts; a
+/// failed or oversized required answer makes the batch splittable; other
+/// failures are recorded in `failed`.
 pub fn merge(
     mut answers: Vec<(StatQuery, anyhow::Result<PromData>)>,
 ) -> Result<StatsBatch, BatchFailure> {
     if let Some(e) = answers
         .iter()
         .filter_map(|(_, answer)| answer.as_ref().err())
-        .find(|e| is_proxy_failure(e))
+        .find(|e| is_proxy_failure(e) || is_tunnel_failure(e))
     {
         return Err(BatchFailure::Proxy(format!("{e:#}")));
     }
@@ -445,25 +476,41 @@ pub fn merge(
 impl Kubepit {
     /// Run the 16 queries of one batch ([`QUERIES_IN_FLIGHT`] at a time,
     /// all at `scope.end_secs`) and merge them. `on_answer` fires once per
-    /// answer (progress). A proxy failure re-detects Prometheus next time.
-    // Consumed by the collection pipeline (`rightsizing/collect.rs`).
-    #[allow(dead_code)]
-    pub(crate) async fn prometheus_stats_batch(
+    /// answer (progress). A proxy or tunnel failure re-detects Prometheus
+    /// next time. On a shared Prometheus every query carries the cluster
+    /// selector, and Q11 answering for another cluster fails the batch with
+    /// [`CLUSTER_LABEL_MISMATCH`] (consumed by the collection pipeline,
+    /// `rightsizing/collect.rs`).
+    pub async fn prometheus_stats_batch(
         &self,
         cluster_id: &str,
         scope: &StatScope,
         on_answer: &(dyn Fn() + Send + Sync),
     ) -> Result<StatsBatch, BatchFailure> {
-        let (service, client) = self
-            .prometheus_service(cluster_id)
+        let source = self
+            .prometheus_source(cluster_id)
             .await
             .map_err(|e| BatchFailure::Proxy(format!("{e:#}")))?;
-        let (service, client) = (&service, &client);
+        let labels = &source.access.cluster_labels;
+        let scope = &StatScope {
+            cluster_labels: labels.keys().cloned().collect(),
+            ..scope.clone()
+        };
+        let source = &source;
         let answers: Vec<(StatQuery, anyhow::Result<PromData>)> = stream::iter(StatQuery::ALL)
             .map(|q| {
                 let text = query(q, scope);
                 async move {
-                    let answer = instant_query(client, service, &text, Some(scope.end_secs)).await;
+                    // The one transport: tenant, tunnel and cluster-label selector.
+                    let answer = self
+                        .prometheus_send(
+                            source,
+                            "/api/v1/query",
+                            instant_params(&text, Some(scope.end_secs)),
+                            Origin::Preset,
+                            USAGE_TIMEOUT,
+                        )
+                        .await;
                     on_answer();
                     (q, answer)
                 }
@@ -471,6 +518,9 @@ impl Kubepit {
             .buffer_unordered(QUERIES_IN_FLIGHT)
             .collect()
             .await;
+        if let Some(mismatch) = owners_mismatch(&answers, labels) {
+            return Err(mismatch);
+        }
         let result = merge(answers);
         if matches!(result, Err(BatchFailure::Proxy(_))) {
             self.prometheus.invalidate(cluster_id);
@@ -545,6 +595,7 @@ mod tests {
             pod_regex: None,
             days: 7,
             end_secs: 1_700_000_100,
+            cluster_labels: Vec::new(),
         };
         assert_eq!(
             query(StatQuery::CpuP95, &scope),
@@ -574,6 +625,69 @@ mod tests {
             .all(|q| !query(*q, &all).contains("namespace=~")));
         assert!(query(StatQuery::FirstSeen, &all)
             .starts_with("min_over_time(timestamp(max by (namespace, pod)"));
+
+        // A shared Prometheus: Q11 keeps the cluster labels, so the answer can
+        // be checked; nothing else changes.
+        let shared = StatScope {
+            cluster_labels: vec!["cluster".into(), "region".into()],
+            ..all.clone()
+        };
+        assert_eq!(
+            query(StatQuery::PodOwners, &shared),
+            r#"max by (namespace, pod, owner_kind, owner_name, cluster, region) (max_over_time(kube_pod_owner{owner_is_controller!="false"}[7d]))"#
+        );
+        for q in StatQuery::ALL {
+            if q != StatQuery::PodOwners {
+                assert_eq!(query(q, &shared), query(q, &all), "{q:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn owner_answers_must_carry_the_cluster_labels() {
+        let labels: BTreeMap<String, String> = [("cluster".to_string(), "prod".to_string())]
+            .into_iter()
+            .collect();
+        let owner = |cluster: Option<&str>| {
+            let mut pairs = vec![
+                ("namespace", "shop"),
+                ("pod", "web-1"),
+                ("owner_kind", "ReplicaSet"),
+                ("owner_name", "web-7d9f8"),
+            ];
+            if let Some(cluster) = cluster {
+                pairs.push(("cluster", cluster));
+            }
+            series(&pairs, 1.0)
+        };
+        let answers = |q11: anyhow::Result<PromData>| {
+            vec![
+                (StatQuery::CpuP95, Ok(data(vec![series(&WEB, 1.0)]))),
+                (StatQuery::PodOwners, q11),
+            ]
+        };
+        assert_eq!(
+            owners_mismatch(&answers(Ok(data(vec![owner(Some("prod"))]))), &labels),
+            None
+        );
+        for wrong in [owner(None), owner(Some("staging"))] {
+            assert_eq!(
+                owners_mismatch(
+                    &answers(Ok(data(vec![owner(Some("prod")), wrong]))),
+                    &labels
+                ),
+                Some(BatchFailure::Proxy(CLUSTER_LABEL_MISMATCH.into()))
+            );
+        }
+        // No labels, no answer or a failed Q11: nothing to check here.
+        assert_eq!(
+            owners_mismatch(&answers(Ok(data(vec![owner(None)]))), &BTreeMap::new()),
+            None
+        );
+        assert_eq!(
+            owners_mismatch(&answers(Err(anyhow!("timeout"))), &labels),
+            None
+        );
     }
 
     #[test]
@@ -583,6 +697,7 @@ mod tests {
             pod_regex: None,
             days: 2,
             end_secs: 0,
+            cluster_labels: Vec::new(),
         };
         let expected = [
             (
@@ -859,5 +974,19 @@ mod tests {
             ]),
             Err(BatchFailure::Proxy(_))
         ));
+        // So did the tunnel (no ready pod, unreadable credentials): smaller
+        // batches would fail the same way.
+        let tunnel = super::super::tunnel::tunnel_failure(anyhow!(
+            "no running and ready pod backs service prometheus-operated"
+        ));
+        assert_eq!(
+            merge(vec![
+                (StatQuery::CpuP95, Err(tunnel)),
+                (StatQuery::MemoryMax, Ok(data(vec![series(&WEB, 1.0)]))),
+            ]),
+            Err(BatchFailure::Proxy(
+                "no running and ready pod backs service prometheus-operated".into()
+            ))
+        );
     }
 }
