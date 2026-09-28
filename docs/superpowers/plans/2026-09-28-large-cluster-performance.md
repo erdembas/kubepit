@@ -116,7 +116,7 @@
     Empty kinds (statefulsets, daemonsets, jobs, cronjobs, RBAC, networking) answer empty lists, so alerts and journal watchers sync.
   - Discovery: `/version` (v1.31.0), `/api`, `/api/v1`, `/apis`, `/apis/{group}/{version}`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 // crates/kubepit-core/tests/scale_fixture.rs
@@ -193,12 +193,12 @@ async fn metadata_only_lists_and_selectors() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core --test scale_fixture`
 Expected: FAIL (`support::scale` not found).
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
   - Generation uses a seeded xorshift and names objects `ns-0001`, `node-0001`, `app-0001-api` and so on. Pods get owner refs to their current ReplicaSet, `spec.nodeName` round-robin over nodes, labels `app`/`team`, and `status.phase: Running` with container statuses. Secrets are `Opaque` with two data keys.
   - Items are kept sorted by (namespace, name).
   - The continue token is base64 of `"{offset}:{rv}"`. An unknown or undecodable token answers `Reply::Json(410, status(410, "Expired", "…"))`.
@@ -206,12 +206,12 @@ Expected: FAIL (`support::scale` not found).
   - Metadata-only responses apply when `req.header("accept")` contains `as=PartialObjectMetadataList`.
   - `fieldSelector` supports `spec.nodeName=` and `metadata.namespace=`; `labelSelector` supports `k=v[,k=v]`. Decode query values with `%3D`/`%2C` handling.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core --test scale_fixture`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add perf crates/kubepit-core/tests

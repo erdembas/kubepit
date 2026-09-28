@@ -7,6 +7,8 @@
 //! [`Router`] closure.
 #![allow(dead_code)]
 
+pub mod scale;
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -189,6 +191,34 @@ async fn write_json(
         text.len()
     );
     socket.write_all(response.as_bytes()).await
+}
+
+/// A raw HTTP/1.1 GET of `path` on the fake server at `base`, read to EOF
+/// (every non-stream reply is `Connection: close`): the status code and the
+/// JSON body (`Null` when the body is not JSON).
+pub async fn get_json(base: &str, path: &str, headers: &[(&str, &str)]) -> (u16, Value) {
+    let host = base.trim_start_matches("http://").trim_end_matches('/');
+    let mut socket = TcpStream::connect(host).await.unwrap();
+    let extra: String = headers
+        .iter()
+        .map(|(name, value)| format!("{name}: {value}\r\n"))
+        .collect();
+    let request =
+        format!("GET {path} HTTP/1.1\r\nHost: {host}\r\n{extra}Connection: close\r\n\r\n");
+    socket.write_all(request.as_bytes()).await.unwrap();
+    let mut raw = Vec::new();
+    socket.read_to_end(&mut raw).await.unwrap();
+    let head_end = raw
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .map_or(raw.len(), |pos| pos + 4);
+    let code = String::from_utf8_lossy(&raw[..head_end])
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .unwrap_or(0);
+    let body = serde_json::from_slice(&raw[head_end..]).unwrap_or(Value::Null);
+    (code, body)
 }
 
 pub fn status(code: u16, reason: &str, message: &str) -> Value {
