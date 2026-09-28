@@ -481,9 +481,8 @@ An optional, richer metrics source next to the metrics-server history
   for minutes. `Kubepit::prometheus_source` (the service, client and
   access settings of the connection, resolved once per command) +
   `prometheus_send` is the one transport of every caller — chart presets,
-  cost usage and trend, right-sizing, the statistics batches, upgrade
-  readiness and the PromQL tab (`prometheus_get` is its single-request
-  form, used by `prometheus_instant_at`): it sends
+  cost usage and trend, the statistics batches, the usage history of the
+  recommendation charts, upgrade readiness and the PromQL tab: it sends
   `X-Scope-OrgID` when a tenant is set (the detection probe too), injects
   the cluster-label selector into `Origin::Preset` queries and makes the
   next status request detect again after a proxy or tunnel failure.
@@ -543,7 +542,17 @@ An optional, richer metrics source next to the metrics-server history
   kube-state-metrics and kubelet volume stats; the UI never builds PromQL.
   `range.rs` picks a round step for ~240 points (1h → 15 s, 7d → 1 h) and
   a `rate()` window of at least four scrapes. `prometheus_query_range`
-  serves the PromQL dock tab (≤ 200 series). All of it is read-only.
+  serves the PromQL dock tab (≤ 200 series). `workload_stats.rs` holds the
+  16 instant statistics queries of right-sizing (see Cost insight &
+  right-sizing). `usage_history.rs` (`recommendations_usage_history`)
+  charts one container of one workload: four range queries (CPU peak and
+  average in millicores, memory peak and average) over the last 1–30 days
+  (7 by default) up to the scans' aligned window end, at the automatic
+  step (1 h for 7 days), each aggregated to one series and gaps left as
+  gaps; pods are selected by the row's names (DNS-1123, at most 50,
+  regex-escaped) or else by the workload's pod-name pattern, and a series
+  that fails becomes a warning (the call fails only when all four do).
+  All of it is read-only.
 - **UI**: `components/workbench/metrics/UsageMetrics.tsx` shows
   `PrometheusUsage` (1h/6h/24h/7d, requests/limits as lines, network,
   filesystem, volumes, restarts) when the status is `available`, else the

@@ -10,17 +10,18 @@
 //! - [`access`] holds the settings of a shared or secured source (tenant,
 //!   cluster labels, Secret-backed credentials); [`matchers`] injects the
 //!   cluster-label selector into every preset. `Kubepit::prometheus_send`
-//!   (after `prometheus_source`) is the one transport every caller uses,
-//!   `prometheus_get` its single-request form; with credentials it goes
-//!   through an in-process port-forward tunnel (`tunnel`) instead of the
-//!   service proxy, which does not forward `Authorization`.
+//!   (after `prometheus_source`) is the one transport every caller uses;
+//!   with credentials it goes through an in-process port-forward tunnel
+//!   (`tunnel`) instead of the service proxy, which does not forward
+//!   `Authorization`.
 //! - [`promql`] holds the preset queries (cluster, node, namespace,
 //!   workload, pod, container, PVC × CPU, memory, network, filesystem,
 //!   volumes, restarts), so the UI never builds PromQL; [`range`] picks the
 //!   step and rate window; [`parse`] reads the API's JSON.
 //! - [`usage`] and [`workload_stats`] hold the instant queries of cost
 //!   estimates and right-sizing (16 per-pod-container statistics per batch,
-//!   evaluated at an aligned window end).
+//!   evaluated at an aligned window end); [`usage_history`] the range
+//!   queries of one container's usage for the recommendation charts.
 //!
 //! Everything here only reads (GETs through the proxy), so it is allowed on
 //! read-only clusters. Charts fall back to the metrics-server history when
@@ -36,6 +37,8 @@ pub mod range;
 pub(crate) mod tunnel;
 // Usage statistics for cost estimates and right-sizing.
 pub mod usage;
+// Per-container usage history (recommendation charts).
+pub mod usage_history;
 // Server-side workload statistics (right-sizing collection).
 pub mod workload_stats;
 
@@ -479,21 +482,6 @@ impl Kubepit {
                     self.prometheus.invalidate(&source.cluster_id);
                 }
             })
-    }
-
-    /// One request without a resolved source: `prometheus_source`, then
-    /// `prometheus_send`.
-    pub(crate) async fn prometheus_get(
-        &self,
-        cluster_id: &str,
-        endpoint: &str,
-        params: Vec<(&str, String)>,
-        origin: Origin,
-        timeout: Duration,
-    ) -> Result<PromData> {
-        let source = self.prometheus_source(cluster_id).await?;
-        self.prometheus_send(&source, endpoint, params, origin, timeout)
-            .await
     }
 
     /// `prometheus_metrics`: preset series of `target` over `range`.

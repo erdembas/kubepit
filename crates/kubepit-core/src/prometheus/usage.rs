@@ -99,28 +99,6 @@ impl Kubepit {
         .await
     }
 
-    /// One instant preset query against the cluster's Prometheus, evaluated
-    /// at `time` (epoch seconds; `None` = now): the source is resolved first,
-    /// then the one transport sends it.
-    // For single queries of later tasks (usage history); batches resolve the
-    // source once and use `prometheus_instant`.
-    #[allow(dead_code)]
-    pub(crate) async fn prometheus_instant_at(
-        &self,
-        cluster_id: &str,
-        query: &str,
-        time: Option<i64>,
-    ) -> Result<PromData> {
-        self.prometheus_get(
-            cluster_id,
-            "/api/v1/query",
-            instant_params(query, time),
-            Origin::Preset,
-            USAGE_TIMEOUT,
-        )
-        .await
-    }
-
     /// Average usage of every pod over `window_secs`.
     pub async fn prometheus_pod_usage(
         &self,

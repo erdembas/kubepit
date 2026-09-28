@@ -7,6 +7,8 @@ mod support;
 
 use std::sync::Arc;
 
+use kubepit_core::prometheus::access::PrometheusAccess;
+use kubepit_core::prometheus::usage_history::PodFilter;
 use kubepit_core::recommendations::RecommendationSettings;
 use kubepit_core::rightsizing::collect::ScanProgress;
 use kubepit_core::rightsizing::{
@@ -240,6 +242,29 @@ fn prometheus(f: &Fixture, req: &Request) -> Reply {
     vector(duplicated(series))
 }
 
+/// One aggregated series over the requested range: a sample every step,
+/// with a gap in the middle (a missing step stays missing).
+fn usage_range(req: &Request) -> Reply {
+    let number = |key: &str| {
+        param(&req.path, key)
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(0)
+    };
+    let (start, end, step) = (number("start"), number("end"), number("step").max(1));
+    let values: Vec<Value> = (0..)
+        .map(|i| start + i * step)
+        .take_while(|t| *t <= end)
+        .enumerate()
+        .filter(|(i, _)| *i != 3)
+        .map(|(i, t)| json!([t, format!("{}", 100 + i)]))
+        .collect();
+    Reply::Json(
+        200,
+        json!({"status": "success", "data": {"resultType": "matrix",
+               "result": [{"metric": {}, "values": values}]}}),
+    )
+}
+
 /// The fake API server of `f`, with kube-prometheus-stack's Prometheus.
 fn kubefit_router(f: Fixture) -> Router {
     Arc::new(move |req: &Request, _log: &Log| {
@@ -249,6 +274,9 @@ fn kubefit_router(f: Fixture) -> Router {
         }
         if path == format!("{OPERATED}/api/v1/query") {
             return prometheus(&f, req);
+        }
+        if path == format!("{OPERATED}/api/v1/query_range") {
+            return usage_range(req);
         }
         let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
         // `/api/v1/<resource>` or `/apis/<group>/<version>/<resource>`.
@@ -690,4 +718,79 @@ async fn a_per_strategy_window_is_collected_again() {
     let progress = progress.into_inner();
     assert!(progress_is_monotonic_and_complete(&progress));
     assert_eq!(progress.last().unwrap().total, 2 * 16);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn usage_history_reads_four_range_queries() {
+    let server = start(kubefit_router(base())).await;
+    let (_dir, app, _recorder, id) = setup(&server.url, true);
+    // A shared, multi-tenant Prometheus: the one transport adds both.
+    let mut def = app.cluster_def(&id).unwrap();
+    def.prometheus_access = PrometheusAccess {
+        tenant: "team-a".into(),
+        cluster_labels: [("cluster".to_string(), "prod".to_string())].into(),
+        ..Default::default()
+    };
+    app.cluster_update(def).unwrap();
+    let api = WorkloadRef {
+        kind: "Deployment".into(),
+        namespace: "apps".into(),
+        name: "api".into(),
+    };
+
+    let h = app
+        .recommendations_usage_history(&id, &api, "api", &[OLD.into(), NEW.into()], None)
+        .await
+        .unwrap();
+    let ranges: Vec<Request> = server
+        .log
+        .lock()
+        .iter()
+        .filter(|r| r.path_only().ends_with("/api/v1/query_range"))
+        .cloned()
+        .collect();
+    assert_eq!(
+        (h.step_secs, !h.cpu_peak.is_empty(), ranges.len()),
+        (3600, true, 4)
+    );
+    assert_eq!(h.pod_filter, PodFilter::Names);
+    // Seven days up to the aligned window end; the start is aligned to the step.
+    assert_eq!(h.end % 300_000, 0);
+    let span = h.end - h.start;
+    assert!(
+        (7 * DAY * 1000..7 * DAY * 1000 + 3_600_000).contains(&span),
+        "{span}"
+    );
+    for series in [&h.cpu_peak, &h.cpu_avg, &h.memory_peak, &h.memory_avg] {
+        // One point per step, and the gap stays a gap.
+        assert!(series.windows(2).any(|w| w[1].0 - w[0].0 == 7_200_000));
+        assert!(series.iter().all(|(t, _)| *t >= h.start && *t <= h.end));
+    }
+    for request in &ranges {
+        let q = param(&request.path, "query").unwrap();
+        assert!(q.contains(r#"cluster="prod""#), "{q}");
+        assert!(q.contains(&format!(r#"pod=~"{OLD}|{NEW}""#)), "{q}");
+        assert_eq!(request.header("x-scope-orgid"), Some("team-a"));
+        assert_eq!(param(&request.path, "step").as_deref(), Some("3600"));
+    }
+
+    // Without pod names the workload's pattern selects its pods; the window
+    // is clamped to 30 days.
+    let h = app
+        .recommendations_usage_history(&id, &api, "api", &[], Some(90))
+        .await
+        .unwrap();
+    assert_eq!(h.pod_filter, PodFilter::Pattern);
+    assert_eq!(h.step_secs, 10_800);
+    let last = server.log.lock().last().cloned().unwrap();
+    assert!(param(&last.path, "query")
+        .unwrap()
+        .contains(r#"pod=~"api-[a-z0-9]+-[a-z0-9]+""#));
+    // Pod names are validated before anything is sent.
+    let sent = server.log.lock().len();
+    assert!(app
+        .recommendations_usage_history(&id, &api, "api", &["a|b".into()], None)
+        .await
+        .is_err());
+    assert_eq!(server.log.lock().len(), sent);
 }

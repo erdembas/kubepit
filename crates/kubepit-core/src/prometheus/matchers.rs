@@ -305,9 +305,12 @@ mod tests {
 
     /// Every other query Kubepit builds: cost usage, the 16 statistics
     /// queries of right-sizing (cluster-wide, namespace and single-workload
-    /// scopes, with the kept cluster labels too) and upgrade readiness.
+    /// scopes, with the kept cluster labels too), the recommendation usage
+    /// history (pod names and pattern) and upgrade readiness.
     fn other_presets() -> Vec<String> {
+        use crate::prometheus::usage_history::history_queries;
         use crate::prometheus::workload_stats::{query, StatQuery, StatScope};
+        use crate::rightsizing::WorkloadRef;
         let scope = vec!["shop".to_string(), "a.b".to_string()];
         let mut out = vec![
             usage::pod_cpu_avg(604_800),
@@ -332,7 +335,15 @@ mod tests {
         for scope in [&cluster_wide, &namespaces, &workload] {
             out.extend(StatQuery::ALL.iter().map(|q| query(*q, scope)));
         }
-        assert_eq!(out.len(), 3 + 3 * 16);
+        let web = WorkloadRef {
+            kind: "Deployment".into(),
+            namespace: "shop".into(),
+            name: "web".into(),
+        };
+        for pods in [vec![], vec!["web-1".to_string(), "web.2".to_string()]] {
+            out.extend(history_queries(&web, "app", &pods, 3_600).unwrap().0);
+        }
+        assert_eq!(out.len(), 3 + 3 * 16 + 2 * 4);
         out
     }
 
