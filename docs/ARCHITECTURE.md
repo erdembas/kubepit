@@ -541,6 +541,15 @@ or more clusters like `kubectl diff`, then applies the selected changes.
   new. Read-only clusters are diffed but excluded from apply; production
   targets need a typed confirmation. Applies send exactly the reviewed
   documents and report per cell.
+- Apply is gated per cell on RBAC (`access.ts`, `useApplyDenied`): each
+  cell that would create or update asks for `patch` on the object (its
+  plural resolved through the target's discovery, namespace = the
+  document's, else the target's, else `default`) plus `create` when it is
+  new. `planApply` leaves denied cells out and counts them; the apply
+  button names the count (or blocks when nothing else is left) and a
+  target whose every selected change is denied shows a lock with the
+  denied check. Unknown answers and kinds discovery does not know never
+  block; the API server still enforces.
 - "Sync to…" in compare and drift reuses the same review: the source
   object goes through `lib/kube/syncable.ts` (status, server bookkeeping,
   owner references, cluster IPs, node names, bound volumes, generated Job

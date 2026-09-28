@@ -361,6 +361,49 @@ export function useAccess(
   }, [clusterId, key, mode, revision, epoch]);
 }
 
+/** Checks of one cluster, for `useAccessMany`. */
+export interface AccessRequest {
+  clusterId: ClusterId;
+  checks: readonly AccessCheck[];
+}
+
+/**
+ * `useAccess` for several clusters at once (a fleet review): answers per
+ * request, in order.
+ */
+export function useAccessMany(
+  requests: readonly AccessRequest[],
+  { mode = 'auto', enabled = true }: { mode?: AccessMode; enabled?: boolean } = {},
+): AccessAnswer[][] {
+  const revision = useAccessStore((s) => s.revision);
+  const epochs = useAppStore((s) =>
+    requests
+      .map((r) => {
+        const status = s.statuses[r.clusterId];
+        return status?.state === 'connected' ? (status.connected_at ?? 0) : -1;
+      })
+      .join(','),
+  );
+  const key = requests
+    .map((r) => `${r.clusterId}\n${r.checks.map(checkKey).join('\n')}`)
+    .join('\n\n');
+  useEffect(() => {
+    if (!enabled) return;
+    for (const r of requests) if (r.checks.length) ensure(r.clusterId, r.checks, mode);
+    // `key` captures `requests`; `revision` re-runs after answers or refreshes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, mode, enabled, revision, epochs]);
+  return useMemo(
+    () =>
+      requests.map((r) => {
+        const cache = cacheFor(r.clusterId);
+        return r.checks.map((c) => resolve(cache, c, mode));
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [key, mode, revision, epochs],
+  );
+}
+
 /** `allowed` only when every check is allowed; `denied` as soon as one is. */
 export function useCan(
   clusterId: ClusterId,

@@ -3,6 +3,8 @@
   "{cluster} does not serve this kind.": "{cluster} bu türü sunmuyor.",
   "{cluster} is read-only: it is diffed, never applied": "{cluster} salt okunur: yalnızca farkı alınır, asla uygulanmaz",
   "{cluster}: {message}": "{cluster}: {message}",
+  "{count} change skipped: no permission (RBAC)": "{count} değişiklik atlandı: yetkin yok (RBAC)",
+  "{count} changes skipped: no permission (RBAC)": "{count} değişiklik atlandı: yetkin yok (RBAC)",
   "{count} cluster is not connected and was not checked.": "{count} cluster bağlı değil, denetlenmedi.",
   "{count} clusters are not connected and were not checked.": "{count} cluster bağlı değil, denetlenmedi.",
   "{count} differ": "{count} farklı",
@@ -513,5 +515,7 @@
   "Workload": "İş yükü",
   "Wrap": "Satır kaydır",
   "Wrap long lines": "Uzun satırları kaydır",
-  "You are not allowed to read {object} on {cluster}.": "{cluster} üzerinde {object} nesnesini okuma iznin yok."
+  "You are not allowed to read {object} on {cluster}.": "{cluster} üzerinde {object} nesnesini okuma iznin yok.",
+  "You may not apply {count} of the selected changes (RBAC)": "Seçili değişikliklerden {count} tanesini uygulama yetkin yok (RBAC)",
+  "You may not apply {count} selected change (RBAC)": "Seçili {count} değişikliği uygulama yetkin yok (RBAC)"
 }

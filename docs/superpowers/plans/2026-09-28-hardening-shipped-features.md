@@ -826,7 +826,7 @@ git commit -m "fix(rbac): Add RoleBinding checks create rolebindings in the targ
   - `planApply(docs, targets, runs, selected, included, denied?: ReadonlySet<string>): ApplyPlan`, with `ApplyPlan.denied: number`.
   - `useApplyDenied(review): ReadonlySet<string>`. It reads `useAccess` per target cluster; unknown answers are never denied.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // apps/desktop/src/components/workbench/dock/manifests/access.test.ts
@@ -867,23 +867,23 @@ describe('manifest apply access', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `pnpm --filter @kubepit/desktop test -- src/components/workbench/dock/manifests/access.test.ts`
 Expected: FAIL (module missing).
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
   - Resolve the plural by `group` (from `apiVersion`) and `kind` in `apiResources`.
   - `useFleetReview` exposes `denied`, built from `useApplyDenied`.
   - `ApplyButton` shows the blocker "You may not apply {count} of the selected changes (RBAC)" (`i18n.plural`) when the plan is empty only because of denials. Otherwise it applies the rest and shows the count as a note.
   - `TargetHeader` shows `LockedIcon` with `deniedMessage` when every selected cell of the target is denied.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck && pnpm i18n:check`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/src

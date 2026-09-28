@@ -7,6 +7,7 @@ import {
   Hourglass,
   Loader2,
   Lock,
+  Send,
   XCircle,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
@@ -16,12 +17,15 @@ import { clusterColor } from '@/lib/clusterMeta';
 import { cn } from '@/lib/cn';
 import { deprecatedApi, deprecationMessage } from '@/lib/kube/deprecations';
 import { useAppStore } from '@/store/useAppStore';
-import type { ClusterDef } from '@/types';
+import type { AccessCheck, ClusterDef } from '@/types';
+import { deniedMessage, LockedIcon } from '../../access/gates';
 import { DiffView } from '../../common/DiffView';
 import { MonacoView } from '../../common/MonacoView';
+import { targetLock } from './access';
 import { BADGE_TONE, badgeLabel, filterLabel } from './labels';
 import {
   BADGES,
+  EMPTY_PLAN,
   cellSides,
   countCells,
   countDocs,
@@ -49,18 +53,26 @@ export interface ReviewControls {
   toggleTarget: (key: string) => void;
   cells: Record<string, Cell[]>;
   plan: ApplyPlan;
+  /** Apply cells RBAC denies (`useApplyDenied`), with the denied check. */
+  denied: ReadonlyMap<string, AccessCheck>;
   /** A dry run is still running on some target. */
   running: boolean;
   /** An apply is running on some target. */
   applying: boolean;
 }
 
+const NO_DENIED: ReadonlyMap<string, AccessCheck> = new Map();
+
 /**
  * Which documents and targets an apply covers. Every new review starts
  * with all writable targets included; the selection defaults to the
  * documents that change somewhere and fail nowhere, until the user edits it.
+ * Cells RBAC denies (`denied`) are left out of the plan and counted.
  */
-export function useReviewControls(review: FleetReview | null): ReviewControls {
+export function useReviewControls(
+  review: FleetReview | null,
+  denied: ReadonlyMap<string, AccessCheck> = NO_DENIED,
+): ReviewControls {
   const [selected, setSelectedState] = useState<Set<string>>(() => new Set());
   const [included, setIncluded] = useState<Set<string>>(() => new Set());
   const touched = useRef(false);
@@ -103,12 +115,13 @@ export function useReviewControls(review: FleetReview | null): ReviewControls {
     });
   }, []);
 
+  const deniedKeys = useMemo(() => new Set(denied.keys()), [denied]);
   const plan = useMemo(
     () =>
       review
-        ? planApply(review.docs, review.targets, review.runs, selected, included)
-        : { targets: [], changes: 0, errors: 0, unchecked: 0 },
-    [review, selected, included],
+        ? planApply(review.docs, review.targets, review.runs, selected, included, deniedKeys)
+        : EMPTY_PLAN,
+    [review, selected, included, deniedKeys],
   );
   const running = !!review && Object.values(review.runs).some((r) => r.status === 'running');
   const applying = !!review && Object.values(review.applies).some((a) => a.status === 'running');
@@ -120,6 +133,7 @@ export function useReviewControls(review: FleetReview | null): ReviewControls {
     toggleTarget,
     cells,
     plan,
+    denied,
     running,
     applying,
   };
@@ -285,6 +299,9 @@ export function FleetReviewPane({
                   review={review}
                   cells={cells[t.key]}
                   included={controls.included.has(t.key)}
+                  lock={
+                    reviewed ? targetLock(docs, t, cells[t.key], selected, controls.denied) : null
+                  }
                   onToggle={() => controls.toggleTarget(t.key)}
                 />
               ))}
@@ -394,6 +411,7 @@ function TargetHeader({
   review,
   cells,
   included,
+  lock,
   onToggle,
 }: {
   target: ReviewTarget;
@@ -401,6 +419,8 @@ function TargetHeader({
   review: FleetReview | null;
   cells: Cell[] | undefined;
   included: boolean;
+  /** RBAC denies every selected change here: the denied check. */
+  lock: AccessCheck | null;
   onToggle: () => void;
 }) {
   i18n.useLocale();
@@ -449,6 +469,12 @@ function TargetHeader({
             {i18n.t('Apply')}
           </label>
         ) : null}
+        {lock && (
+          <span className="text-fg-dim flex items-center" title={deniedMessage(lock)}>
+            <LockedIcon icon={Send} className="h-3 w-3" />
+            <span className="sr-only">{deniedMessage(lock)}</span>
+          </span>
+        )}
         {run?.status === 'running' && <Loader2 className="text-accent h-3 w-3 animate-spin" />}
         {run?.status === 'error' && (
           <span className="text-status-error flex items-center gap-0.5" title={run.message}>

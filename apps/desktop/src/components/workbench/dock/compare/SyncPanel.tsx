@@ -54,8 +54,8 @@ export function SyncPanel({
   const [loaded, setLoaded] = useState<Loaded>({ status: 'loading' });
   const [targets, setTargets] = useState<ClusterId[]>(request.targets);
   const [namespace, setNamespace] = useState(request.namespace ?? request.source.namespace ?? '');
-  const { review, run, apply } = useFleetReview();
-  const controls = useReviewControls(review);
+  const { review, run, apply, denied } = useFleetReview();
+  const controls = useReviewControls(review, denied);
   const source = request.source;
   const objectLabel = `${source.namespace ? `${source.namespace}/` : ''}${source.name}`;
 
