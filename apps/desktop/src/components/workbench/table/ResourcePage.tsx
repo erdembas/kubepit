@@ -41,7 +41,7 @@ import { SavedViewsMenu } from './SavedViewsMenu';
 import { SaveViewDialog } from './SaveViewDialog';
 import { ResourceTable } from './ResourceTable';
 import { SELECTION_BAR_INSET, SelectionBar } from './SelectionBar';
-import { TableEmpty, TableError, TableSkeleton } from './TableStates';
+import { PartialWatchNotice, TableEmpty, TableError, TableSkeleton } from './TableStates';
 import { useKindTable } from './useKindTable';
 import { CreateButton } from '../wizards/CreateMenu';
 // Power user: keyboard mode cursor and the focused-table controller.
@@ -336,6 +336,14 @@ export function ResourcePage({
             />
           </div>
         </div>
+        {status === 'ready' && error && (
+          <PartialWatchNotice
+            error={error}
+            forbidden={forbidden}
+            onRetry={() => restartWatch(clusterId, gvk, t.watchNs)}
+            onExplain={() => setExplain(listChecks())}
+          />
+        )}
         {status === 'error' && error ? (
           <TableError
             error={error}

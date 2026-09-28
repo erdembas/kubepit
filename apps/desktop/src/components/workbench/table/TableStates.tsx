@@ -152,3 +152,49 @@ export function TableError({
     />
   );
 }
+
+/**
+ * A list that loaded with an error on the side (typically one forbidden
+ * namespace of several): the rows stay, this strip explains what is missing.
+ */
+export function PartialWatchNotice({
+  error,
+  forbidden,
+  onRetry,
+  onExplain,
+}: {
+  error: string;
+  forbidden: boolean;
+  onRetry: () => void;
+  onExplain?: () => void;
+}) {
+  i18n.useLocale();
+  const Icon = forbidden ? ShieldAlert : AlertTriangle;
+  return (
+    <div
+      role="note"
+      className="border-tone-warning/30 bg-tone-warning/8 text-tone-warning-fg flex shrink-0 items-start gap-2 border-b px-4 py-1.5 text-[11.5px]"
+    >
+      <Icon className="mt-0.5 h-3 w-3 shrink-0" />
+      <span className="min-w-0 flex-1 break-words">
+        {i18n.t('Some namespaces could not be watched: {error}', { error })}
+      </span>
+      {forbidden && onExplain && (
+        <button
+          type="button"
+          onClick={onExplain}
+          className="shrink-0 font-medium underline-offset-2 hover:underline"
+        >
+          {i18n.t('Why?')}
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={onRetry}
+        className="shrink-0 font-medium underline-offset-2 hover:underline"
+      >
+        {i18n.t('Retry')}
+      </button>
+    </div>
+  );
+}

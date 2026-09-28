@@ -2,6 +2,7 @@ import { useCallback, useSyncExternalStore } from 'react';
 import { ipc } from '@/lib/ipc';
 import { kindKey } from '@/lib/kube/catalog';
 import type { ClusterId, Gvk, KubeObject, WatchBatch } from '@/types';
+import { applyBatch, batchPatch, isForbidden } from './watchBatch';
 
 /**
  * Shared, ref-counted resource watches. Every table, mini-table and overview
@@ -12,6 +13,10 @@ import type { ClusterId, Gvk, KubeObject, WatchBatch } from '@/types';
  *
  * The last snapshot is kept after the watch stops (hidden tab, disconnected
  * view) so returning to a view paints instantly while the new watch resyncs.
+ *
+ * A batch that reports an error still carries its objects (`watchBatch.ts`):
+ * the list only turns `error` when nothing is left; otherwise the rows stay
+ * and `error` / `forbidden` feed a notice (one forbidden namespace of many).
  */
 
 export type WatchStatus = 'idle' | 'loading' | 'ready' | 'error';
@@ -36,10 +41,6 @@ const EMPTY: WatchSnapshot = {
   synced: false,
   version: 0,
 };
-
-function isForbidden(message: string) {
-  return /forbidden|\b403\b|cannot (list|watch|get)/i.test(message);
-}
 
 function errorText(error: unknown) {
   return error instanceof Error ? error.message : String(error);
@@ -106,17 +107,12 @@ class WatchEntry {
   }
 
   private apply(batch: WatchBatch) {
-    if (batch.error) {
-      this.flush({ status: 'error', error: batch.error, forbidden: isForbidden(batch.error) });
-      return;
-    }
-    if (batch.reset) this.map.clear();
-    for (const obj of batch.upserts) this.map.set(obj.metadata.uid, obj);
-    for (const uid of batch.deletes) this.map.delete(uid);
+    applyBatch(this.map, batch);
     this.version++;
     const synced = this.snapshot.synced || batch.synced;
-    if (synced && this.snapshot.status !== 'ready')
-      this.flush({ status: 'ready', error: null, synced: true });
+    // Errors and the first sync (or the recovery from an error) paint at once.
+    if (batch.error || (synced && this.snapshot.status !== 'ready'))
+      this.flush(batchPatch(this.snapshot, batch, this.map.size));
     else this.schedule();
   }
 

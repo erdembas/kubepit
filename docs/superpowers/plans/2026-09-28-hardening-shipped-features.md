@@ -344,7 +344,7 @@ git commit -m "fix(health): unused-Secrets rule honours its lists and skips cont
   - `applyBatch(map: Map<string, KubeObject>, batch: WatchBatch): void`. It always applies `reset`, then `upserts`, then `deletes`.
   - `batchPatch(prev: Pick<WatchSnapshot, 'synced'>, batch: Pick<WatchBatch, 'error' | 'synced'>, size: number): Partial<WatchSnapshot>`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // apps/desktop/src/components/workbench/data/watchBatch.test.ts
@@ -377,19 +377,19 @@ describe('watch batches', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `pnpm --filter @kubepit/desktop test -- src/components/workbench/data/watchBatch.test.ts`
 Expected: FAIL with "Cannot find module './watchBatch'".
 
-- [ ] **Step 3: Implement.** Move `isForbidden` into `watchBatch.ts`. `WatchEntry.apply` calls `applyBatch`, bumps `version`, then flushes with `batchPatch(...)` when `batch.error` is set or the batch newly makes the entry synced, else schedules. Add `PartialWatchNotice` ("Some namespaces could not be watched: {error}"), shown by `ResourcePage` when `snapshot.status === 'ready' && snapshot.error`.
+- [x] **Step 3: Implement.** Move `isForbidden` into `watchBatch.ts`. `WatchEntry.apply` calls `applyBatch`, bumps `version`, then flushes with `batchPatch(...)` when `batch.error` is set or the batch newly makes the entry synced, else schedules. Add `PartialWatchNotice` ("Some namespaces could not be watched: {error}"), shown by `ResourcePage` when `snapshot.status === 'ready' && snapshot.error`.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck && pnpm i18n:check`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/src

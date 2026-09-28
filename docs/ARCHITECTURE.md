@@ -83,7 +83,13 @@ localStorage (`kubepit.workbench.v1`, `kubepit.views.v1`,
   built from a `Gvk`; typed k8s-openapi structs are used only where logic
   needs them (pods for logs/exec, nodes for drain, metrics).
 - `managedFields` are stripped from everything sent to the UI.
-- Watches are batched (~150 ms) into `WatchBatch` messages.
+- Watches are batched (~150 ms) into `WatchBatch` messages. A watch error
+  travels in the same batch as the pending `reset`, upserts and deletes, so
+  the UI's shared watch cache (`components/workbench/data/watchCache.ts`,
+  pure logic in `watchBatch.ts`) always applies the objects first. The list
+  turns `error` only when nothing is left; otherwise the rows stay and the
+  resource table shows a "Some namespaces could not be watched" notice (for
+  example one forbidden namespace of several).
 - `read_only` clusters reject every mutating command in the backend (dry runs
   and RBAC self-reviews only read, so they stay available).
 

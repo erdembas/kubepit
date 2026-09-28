@@ -2224,6 +2224,7 @@
   "Some kinds have more objects than a scan reads; their findings may be incomplete.": "Some kinds have more objects than a scan reads; their findings may be incomplete.",
   "Some lists could not be read, so the evaluation is incomplete: {kinds}": "Some lists could not be read, so the evaluation is incomplete: {kinds}",
   "Some long values were shortened to fit the journal.": "Some long values were shortened to fit the journal.",
+  "Some namespaces could not be watched: {error}": "Some namespaces could not be watched: {error}",
   "Some sources could not be read and were skipped: {what}": "Some sources could not be read and were skipped: {what}",
   "Source": "Source",
   "Source and price model": "Source and price model",
