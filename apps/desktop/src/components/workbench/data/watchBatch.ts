@@ -1,5 +1,5 @@
 import type { KubeObject, WatchBatch } from '@/types';
-import type { WatchSnapshot } from './watchCache';
+import type { WatchSnapshot, WatchStatus } from './watchCache';
 
 /**
  * Pure watch batch handling for `watchCache`. The backend reports a watch
@@ -28,21 +28,28 @@ export function applyBatch(map: Map<string, KubeObject>, batch: WatchBatch): boo
  * Snapshot status after a batch that left `size` objects. An error turns the
  * list into `error` only when nothing is left to show; otherwise the rows
  * stay and the snapshot carries `error` and `forbidden` for a notice.
+ *
+ * Only the backend's `recovered` signal clears an earlier error: a clean
+ * batch of another namespace proves nothing about the one that failed, so
+ * the error (and `forbidden`) stays and only the status follows the rows.
  */
 export function batchPatch(
-  prev: Pick<WatchSnapshot, 'synced'>,
-  batch: Pick<WatchBatch, 'error' | 'synced'>,
+  prev: Pick<WatchSnapshot, 'synced'> & Partial<Pick<WatchSnapshot, 'error'>>,
+  batch: Pick<WatchBatch, 'error' | 'synced'> & Partial<Pick<WatchBatch, 'recovered'>>,
   size: number,
 ): Partial<WatchSnapshot> {
   const synced = prev.synced || batch.synced;
-  if (!batch.error)
+  const error = batch.error ?? (batch.recovered ? null : (prev.error ?? null));
+  if (!error)
     return synced
       ? { status: 'ready', error: null, forbidden: false, synced: true }
       : { status: 'loading', error: null, forbidden: false };
-  const error = batch.error;
-  const forbidden = isForbidden(error);
-  if (size === 0) return { status: 'error', error, forbidden };
-  return { status: synced ? 'ready' : 'loading', error, forbidden, synced };
+  const status: WatchStatus = size === 0 ? 'error' : synced ? 'ready' : 'loading';
+  const patch: Partial<WatchSnapshot> = batch.error
+    ? { status, error, forbidden: isForbidden(error) }
+    : { status };
+  if (size > 0) patch.synced = synced;
+  return patch;
 }
 
 /**

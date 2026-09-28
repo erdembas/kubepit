@@ -114,19 +114,31 @@ describe('watch batch sequences', () => {
   it('a failed list recovers when rows arrive', () => {
     const [failed, recovered] = run([
       batch({ reset: true, synced: true, error: forbiddenB }),
-      batch({ upserts: [pod('b1', 'b')], synced: true }),
+      batch({ upserts: [pod('b1', 'b')], synced: true, recovered: true }),
     ]);
     expect(failed).toMatchObject({ status: 'error', error: forbiddenB, forbidden: true });
     expect(recovered).toMatchObject({ status: 'ready', error: null, forbidden: false });
     expect(recovered!.rows).toEqual(['b1']);
   });
 
-  it('an error before the other namespaces synced leaves the list loading', () => {
+  it('rows of another namespace keep the error of a failed list', () => {
+    // Namespace a is empty, b is forbidden: nothing to show, so `error`.
+    const [failed, other] = run([
+      batch({ reset: true, synced: true, error: forbiddenB }),
+      // A pod appears in a; b has not recovered.
+      batch({ upserts: [pod('a1')], synced: true }),
+    ]);
+    expect(failed).toMatchObject({ status: 'error', error: forbiddenB });
+    expect(other).toMatchObject({ status: 'ready', error: forbiddenB, forbidden: true });
+    expect(other!.rows).toEqual(['a1']);
+  });
+
+  it('an error before the other namespaces synced stays after the sync', () => {
     const [partial, synced] = run([
       batch({ reset: true, upserts: [pod('a1')], synced: false, error: forbiddenB }),
       batch({ upserts: [pod('a2')], synced: true }),
     ]);
     expect(partial).toMatchObject({ status: 'loading', error: forbiddenB, synced: false });
-    expect(synced).toMatchObject({ status: 'ready', synced: true });
+    expect(synced).toMatchObject({ status: 'ready', synced: true, error: forbiddenB });
   });
 });

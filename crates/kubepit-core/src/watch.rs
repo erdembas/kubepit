@@ -52,8 +52,8 @@ struct SourceState {
     buffer: Option<HashMap<String, Value>>,
     synced_once: bool,
     failed_initial: bool,
-    /// Reported an error and has not delivered an event since.
-    failing: bool,
+    /// Last error of a source that has not delivered an event since (failing).
+    error: Option<String>,
 }
 
 impl SourceState {
@@ -154,17 +154,23 @@ impl WatchAggregator {
 
     /// `source` delivered an event: if it was failing and no other source
     /// still is, the next batch reports the recovery (and drops an error
-    /// that is older than it).
+    /// that is older than it). While others still fail, a pending error
+    /// names one of them instead of the source that just recovered.
     fn on_healthy(&mut self, source: usize) {
-        let state = self.source(source);
-        if !state.failing {
+        if self.source(source).error.take().is_none() {
             return;
         }
-        state.failing = false;
-        if self.sources.iter().all(|s| !s.failing) {
-            self.error = None;
-            self.recovered = true;
-            self.pending += 1;
+        match self.sources.iter().find_map(|s| s.error.clone()) {
+            None => {
+                self.error = None;
+                self.recovered = true;
+                self.pending += 1;
+            }
+            Some(still_failing) => {
+                if self.error.is_some() {
+                    self.error = Some(still_failing);
+                }
+            }
         }
     }
 
@@ -207,7 +213,7 @@ impl WatchAggregator {
         if !state.synced_once {
             state.failed_initial = true;
         }
-        state.failing = true;
+        state.error = Some(message.clone());
         self.error = Some(message);
         // The error is newer than any recovery still pending.
         self.recovered = false;
@@ -602,6 +608,24 @@ mod tests {
         );
         agg.on_apply(1, "b".into(), obj("b", 1));
         assert!(agg.take_batch().unwrap().recovered);
+    }
+
+    #[test]
+    fn a_recovered_source_does_not_leave_its_message_behind() {
+        let mut agg = WatchAggregator::new("w", 2);
+        for source in 0..2 {
+            agg.on_init(source);
+            agg.on_init_done(source);
+        }
+        agg.take_batch();
+        agg.on_error(1, "b is forbidden".into());
+        agg.take_batch();
+        // Source 0 fails and recovers within one flush; source 1 still fails.
+        agg.on_error(0, "a: connection reset".into());
+        agg.on_apply(0, "a".into(), obj("a", 1));
+        let batch = agg.take_batch().unwrap();
+        assert!(!batch.recovered);
+        assert_eq!(batch.error.as_deref(), Some("b is forbidden"));
     }
 
     #[test]

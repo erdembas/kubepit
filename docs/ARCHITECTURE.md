@@ -95,11 +95,13 @@ localStorage (`kubepit.workbench.v1`, `kubepit.views.v1`,
   streams its later list without a reset. So the backend (`watch.rs`)
   counts a source that reported an error as failing until it delivers an
   event again (`InitDone`, `Apply` or `Delete`); once none is failing, the
-  next batch has `recovered: true` and the UI clears the error. A `reset`
-  alone keeps it (another namespace may still fail), and a quiet namespace
-  keeps the error until its next event or Retry. Error-only batches change
-  no rows and do not bump the snapshot `version`. Views that read several
-  lists use `data/listState.ts`: a list with an error is incomplete.
+  next batch has `recovered: true` and the UI clears the error. Only that
+  signal clears it: a `reset` or rows of another namespace keep it (with
+  `ready` once rows exist), and a batch's message always names a source
+  that still fails. A quiet namespace keeps the error until its next event
+  or Retry. Error-only batches change no rows and do not bump the snapshot
+  `version`. Views that read several lists use `data/listState.ts`: a list
+  with an error is incomplete.
 - `read_only` clusters reject every mutating command in the backend (dry runs
   and RBAC self-reviews only read, so they stay available).
 
