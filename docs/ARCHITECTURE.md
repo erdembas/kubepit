@@ -579,7 +579,11 @@ shell enables it, tests and headless tools do not.
   (normalized before/after YAML) are polled by the UI. The Changes view
   (`components/workbench/changes/`, logic in `lib/kube/changes/`) merges
   journal entries with Warning events, Helm revisions and ReplicaSet
-  rollouts; journaled kinds get a Changes tab in the details panel.
+  rollouts; journaled kinds get a Changes tab in the details panel. Its
+  header (`ChangesHeader`) is its own `@container`: in a narrow split pane
+  it wraps the ranges, search and refresh onto a second row, the search
+  fills that row below `@lg` and the recording label (kept as a tooltip)
+  hides below `@2xl`.
 - Tests keep the journal off (`tests/support` setup) unless they enable
   it; `tests/change_journal.rs` drives it through the fake API server.
 
@@ -839,7 +843,10 @@ theme tokens, pan / wheel and pinch zoom, hover highlighting, roving
 keyboard focus), `TopologyMap` (search, kind chips, legend, notices),
 `ResourceMapPage` (the `@resource-map` view scoped by the namespace picker,
 with the details panel docked beside the map) and `MapTab` (the details
-panel tab; clicking a node opens that object on its own Map tab).
+panel tab; clicking a node opens that object on its own Map tab). The
+details tab strip overflows at the panel's 380 px minimum, so it scrolls the
+active tab into view (tab requests open the right-most tabs, such as Map)
+and turns the wheel into horizontal scrolling (`lib/ui/wheelScroll.ts`).
 
 Views stay mounted, so leaving one only turns it inactive, and that must cost
 nothing. `useTopologyData` rebuilds the graph on `topologyDataKey`

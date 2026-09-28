@@ -1,5 +1,5 @@
 import * as i18n from '@/i18n';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Bell, FileCode2, FileDiff, History, Info, Loader2, X } from 'lucide-react';
 import { ResizeHandle } from '@/components/ui/ResizeHandle';
 import { ipc } from '@/lib/ipc';
@@ -8,6 +8,7 @@ import type { ColumnContext } from '@/lib/kube/columns';
 import { kindIcon } from '@/lib/kube/icons';
 import { cn } from '@/lib/cn';
 import { formatAge } from '@/lib/format';
+import { horizontalWheelDelta } from '@/lib/ui/wheelScroll';
 import { useAppStore } from '@/store/useAppStore';
 import {
   DETAILS_WIDTH,
@@ -176,6 +177,30 @@ export function DetailsPanel({
       : []),
   ];
 
+  // The strip overflows at narrow widths: keep the active tab in view (tab
+  // requests usually open the right-most tabs) and let the wheel scroll it.
+  const tabStrip = useRef<HTMLElement>(null);
+  useEffect(() => {
+    tabStrip.current
+      ?.querySelector(`[data-details-tab="${tab}"]`)
+      ?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+  }, [tab, tabs.length]);
+  useEffect(() => {
+    const el = tabStrip.current;
+    if (!el) return;
+    // Native and non-passive, so the strip takes the whole wheel movement
+    // (no double scroll on trackpads); pinch zoom (ctrl) is left alone.
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || el.scrollWidth <= el.clientWidth) return;
+      const delta = horizontalWheelDelta(e);
+      if (!delta) return;
+      e.preventDefault();
+      el.scrollLeft += delta;
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
   return (
     <aside
       aria-label={i18n.t('{kind} details', { kind: gvk.kind })}
@@ -224,15 +249,17 @@ export function DetailsPanel({
         </button>
       </header>
       <nav
+        ref={tabStrip}
         role="tablist"
         aria-label={i18n.t('Details tabs')}
-        className="border-border/60 overlay-scroll flex h-10 shrink-0 items-center gap-1 overflow-x-auto border-b px-3"
+        className="border-border/60 main-tabbar-scroll flex h-10 shrink-0 items-center gap-1 overflow-x-auto border-b px-3"
       >
         {tabs.map(({ id, label, icon: TabIcon }) => (
           <button
             key={id}
             type="button"
             role="tab"
+            data-details-tab={id}
             aria-selected={tab === id}
             onClick={() => setTab(id)}
             className={cn(

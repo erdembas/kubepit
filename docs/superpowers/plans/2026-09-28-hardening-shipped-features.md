@@ -601,7 +601,7 @@ git commit -m "fix(map): leaving the Resource Map no longer rebuilds the graph"
   - `ChangesHeader(props: { count: number; recording: ReactNode; ranges: ReactNode; search: ReactNode; refresh: ReactNode }): JSX.Element`. It owns the root `@container`, the wrapping row, the title and the search wrapper.
   - `horizontalWheelDelta(e: { deltaX: number; deltaY: number; deltaMode: number }): number`. It takes the dominant axis and returns pixels (line mode × 16, page mode × 240).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```tsx
 // apps/desktop/src/components/workbench/changes/ChangesHeader.test.tsx
@@ -641,12 +641,12 @@ describe('horizontalWheelDelta', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm --filter @kubepit/desktop test -- src/components/workbench/changes src/lib/ui`
 Expected: FAIL (modules missing).
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
   - `ChangesHeader`:
     - root `@container`;
     - row `border-border/60 flex min-h-12 shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 border-b px-4 py-2`;
@@ -660,14 +660,14 @@ Expected: FAIL (modules missing).
     - adds an `onWheel` that adds `horizontalWheelDelta(e)` to `scrollLeft` when the strip overflows;
     - replaces `overlay-scroll` with `main-tabbar-scroll`.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck && pnpm i18n:check`
 Expected: PASS.
 
 - [ ] **Step 5: Verify visually.** In `pnpm dev:ui`, check the Changes view in a split pane about 560 px wide: the header wraps to two rows and nothing is clipped. Drag the details panel to its 380 px minimum and open the Map tab through a node link: the Map tab scrolls into view, and the wheel scrolls the strip.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/desktop/src
