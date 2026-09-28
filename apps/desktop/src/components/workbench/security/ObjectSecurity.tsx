@@ -395,13 +395,22 @@ function RoleSubjects({ obj, ctx, isActive }: SectionProps) {
 
 // ---------------------------------------------------------------------------
 
-export function ObjectSecurity(props: SectionProps) {
-  const { obj } = props;
+function securitySection(obj: KubeObject) {
   const { group } = parseApiVersion(obj.apiVersion ?? '');
   if (!builtinByGroupKind(group, obj.kind)) return null;
-  if (WORKLOADS.has(obj.kind)) return <WorkloadSecurity {...props} />;
-  if (obj.kind === 'Namespace') return <NamespacePodSecurity {...props} />;
-  if (obj.kind === 'ServiceAccount') return <ServiceAccountPermissions {...props} />;
-  if (obj.kind === 'Role' || obj.kind === 'ClusterRole') return <RoleSubjects {...props} />;
+  if (WORKLOADS.has(obj.kind)) return WorkloadSecurity;
+  if (obj.kind === 'Namespace') return NamespacePodSecurity;
+  if (obj.kind === 'ServiceAccount') return ServiceAccountPermissions;
+  if (obj.kind === 'Role' || obj.kind === 'ClusterRole') return RoleSubjects;
   return null;
+}
+
+/** Whether `ObjectSecurity` renders anything for this object. */
+export function hasObjectSecurity(obj: KubeObject): boolean {
+  return securitySection(obj) !== null;
+}
+
+export function ObjectSecurity(props: SectionProps) {
+  const Kind = securitySection(props.obj);
+  return Kind ? <Kind {...props} /> : null;
 }

@@ -198,7 +198,8 @@ export function DriftPane({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="border-border/60 text-fg-dim flex h-10 shrink-0 items-center gap-3 border-b px-3 text-[11.5px] tabular-nums">
+      {/* Items wrap as wholes onto more rows instead of spilling out of a fixed-height row. */}
+      <div className="border-border/60 text-fg-dim flex min-h-10 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-1.5 text-[11.5px] whitespace-nowrap tabular-nums">
         <span>
           {i18n.plural(
             'Checked on {count} connected cluster',
@@ -217,21 +218,23 @@ export function DriftPane({
             <span>{i18n.t('{count} missing', { count: counts.missing })}</span>
           </>
         )}
-        <span className="ml-auto">
-          {i18n.rich('Baseline: {cluster}', {
-            cluster: <span className="text-fg font-medium">{baselineName}</span>,
-          })}
-        </span>
-        <button
-          type="button"
-          disabled={baselineSide?.state !== 'ok'}
-          onClick={() => syncFromBaseline(drifted)}
-          title={i18n.t('Apply the baseline object to clusters that differ: review, then apply')}
-          className="text-fg-muted hover:text-fg hover:bg-fg/5 flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 transition-colors disabled:opacity-40"
-        >
-          <ArrowRightLeft className="h-3 w-3" />
-          {i18n.t('Sync to…')}
-        </button>
+        <div className="ml-auto flex max-w-full min-w-0 items-center gap-3">
+          <span className="min-w-0 truncate" title={baselineName}>
+            {i18n.rich('Baseline: {cluster}', {
+              cluster: <span className="text-fg font-medium">{baselineName}</span>,
+            })}
+          </span>
+          <button
+            type="button"
+            disabled={baselineSide?.state !== 'ok'}
+            onClick={() => syncFromBaseline(drifted)}
+            title={i18n.t('Apply the baseline object to clusters that differ: review, then apply')}
+            className="text-fg-muted hover:text-fg hover:bg-fg/5 flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 transition-colors disabled:opacity-40"
+          >
+            <ArrowRightLeft className="h-3 w-3" />
+            {i18n.t('Sync to…')}
+          </button>
+        </div>
       </div>
       <div className="overlay-scroll min-h-0 flex-1 overflow-y-auto px-2 py-1.5">
         {baselineSide && baselineSide.state !== 'ok' && (

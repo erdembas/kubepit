@@ -25,7 +25,8 @@ import { gitopsSectionsFor } from './sections/gitopsSections';
 import { NetworkPolicySections } from '../netpol/PolicySections';
 // Security: Trivy report sections; Trivy, Pod Security and RBAC extras on built-in kinds.
 import { securitySectionsFor } from './sections/securitySections';
-import { ObjectSecurity } from '../security/ObjectSecurity';
+import { hasObjectSecurity, ObjectSecurity } from '../security/ObjectSecurity';
+import { DeferredSection } from './DeferredSection';
 
 const BY_KIND: Record<string, ComponentType<SectionProps>> = {
   Pod: PodSections,
@@ -163,7 +164,12 @@ export function DetailsOverview({
       <HealthBanner clusterId={ctx.clusterId} obj={obj} now={ctx.now} />
       <MetaSection obj={obj} ctx={ctx} />
       <Kind obj={obj} gvk={gvk} ctx={ctx} isActive={isActive} readOnly={readOnly} />
-      <ObjectSecurity obj={obj} gvk={gvk} ctx={ctx} isActive={isActive} readOnly={readOnly} />
+      {/* Last section: its Trivy watches, Pod Security checks or RBAC index wait until seen. */}
+      {hasObjectSecurity(obj) && (
+        <DeferredSection key={obj.metadata.uid} placeholderHeight={120}>
+          <ObjectSecurity obj={obj} gvk={gvk} ctx={ctx} isActive={isActive} readOnly={readOnly} />
+        </DeferredSection>
+      )}
     </>
   );
 }
