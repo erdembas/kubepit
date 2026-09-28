@@ -16,7 +16,8 @@
 //!
 //! Each watch is a task in `Kubepit::manifest_watches` under cluster id `""`
 //! (it belongs to no cluster). The task owns the watcher: stopping it
-//! (`manifests_unwatch`, shutdown) drops the watcher and its OS resources.
+//! (`manifests_unwatch`, shutdown) drops the watcher and its OS resources,
+//! on a plain thread (`DropOffThread`) so no async worker waits for it.
 //! Nothing runs unless the UI starts a watch.
 //!
 //! Limitations: Kustomize bases outside the root folder are not watched,
@@ -28,7 +29,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use notify::{EventKind, RecursiveMode, Watcher};
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::mpsc;
 
 use super::discover::{fingerprint, resolve, Resolved};
@@ -38,6 +39,23 @@ use crate::types::{ManifestSource, ManifestSourceKind, ManifestsWatchEvent};
 
 /// Quiet time after the last file event before the fingerprint is checked.
 pub const WATCH_DEBOUNCE: Duration = Duration::from_millis(300);
+
+/// Owns a watcher and drops it on a plain thread. Stopping notify's
+/// FSEvents backend joins its run-loop thread, which can take a second; an
+/// aborted watch task is dropped on an async worker that must not stall.
+struct DropOffThread(Option<RecommendedWatcher>);
+
+impl Drop for DropOffThread {
+    fn drop(&mut self) {
+        if let Some(watcher) = self.0.take() {
+            // If no thread can be started, the closure (and the watcher) is
+            // dropped right here instead.
+            let _ = std::thread::Builder::new()
+                .name("manifests-unwatch".into())
+                .spawn(move || drop(watcher));
+        }
+    }
+}
 
 /// Folders to watch, and whether recursively. Folders inside a recursively
 /// watched one are left out.
@@ -125,8 +143,8 @@ impl Kubepit {
         let watch_id = uuid::Uuid::new_v4().to_string();
         let id = watch_id.clone();
         self.manifest_watches.spawn(&watch_id, "", async move {
-            // Owned by the task: aborting it drops the watcher.
-            let _watcher = watcher;
+            // Owned by the task: aborting it drops the watcher (off-thread).
+            let _watcher = DropOffThread(Some(watcher));
             if changed_since {
                 let event = ManifestsWatchEvent {
                     watch_id: id.clone(),

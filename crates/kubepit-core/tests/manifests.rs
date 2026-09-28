@@ -594,7 +594,8 @@ async fn shutdown_stops_manifest_watches() {
     app.shutdown().await;
     std::fs::write(dir.path().join("b.yaml"), CONFIGMAP_B).unwrap();
     // The task (and with it the callback's sender) is gone: the channel closes
-    // without an event.
-    let closed = tokio::time::timeout(Duration::from_secs(1), rx.recv()).await;
+    // without an event. Generous timeout: tearing a watcher down can be slow
+    // on a busy machine (FSEvents joins its run-loop thread).
+    let closed = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await;
     assert!(matches!(closed, Ok(None)), "{closed:?}");
 }
