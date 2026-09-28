@@ -993,10 +993,14 @@ applying a recommendation only reads, so read-only clusters get it all.
   cluster-wide again, are halved on the spot) down to single namespaces,
   within 32 batches: a namespace that still fails gets `namespace-failed`,
   namespaces left over `query-budget-exceeded`, and refining queries that
-  failed or warned `partial-data` (naming them). A proxy or tunnel failure
-  or a shared Prometheus answering for another cluster falls back to
-  metrics-server with `prometheus-failed`; when no batch succeeds the
-  report fails with the first error. The batches are folded (below), the
+  failed or warned `partial-data` (naming them). A proxy or tunnel setup
+  failure, a shared Prometheus answering for another cluster, or no batch
+  succeeding abandons the collection: `RightsizingOutcome.source_abort`
+  says why, typed (proxy, tunnel, label mismatch, all batches failed),
+  and the report falls back to metrics-server with a `prometheus-failed`
+  note carrying the same detail. The live `rightsizing_report` shows that
+  fallback; scans fail on any `source_abort` and keep the last good
+  result, without parsing notes. The batches are folded (below), the
   strategy is resolved (automatic = `workload-history` when owner series
   resolved pods, else `percentile-headroom` with `ownership-unavailable`)
   and runs with the request's settings, else its effective ones; the

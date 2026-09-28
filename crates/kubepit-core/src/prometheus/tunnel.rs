@@ -943,7 +943,7 @@ j6EzTBQKCIK44Ht1hGckQEbsh5M4xlh8CvAbHO7lGMeusAjsKyS4dyiR
         assert!(is_tunnel_failure(&setup), "{setup:#}");
         assert!(matches!(
             merge(vec![(StatQuery::CpuP95, Err(setup))]),
-            Err(BatchFailure::Proxy(_))
+            Err(BatchFailure::Tunnel(_))
         ));
     }
 

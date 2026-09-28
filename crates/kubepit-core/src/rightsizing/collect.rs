@@ -13,9 +13,9 @@
 //!    namespace that still fails gets `namespace-failed`, namespaces left
 //!    over `query-budget-exceeded`. Refining queries that failed or warned
 //!    make the batch partial (`partial-data`, naming them). A proxy or
-//!    tunnel failure (or a shared Prometheus answering for another
-//!    cluster) aborts, and the report falls back to metrics-server; when no
-//!    batch succeeded at all the collection fails with the first error.
+//!    tunnel failure, or a shared Prometheus answering for another cluster,
+//!    aborts the collection; so does no batch succeeding at all (the
+//!    first error).
 //! 3. **Fold** the batches into per-container usage and evidence
 //!    ([`evidence::fold`]); without owner series pods match by name
 //!    (`ownership-unavailable`).
@@ -29,6 +29,15 @@
 //! `progress` reports answered queries against `16 × planned batches` (the
 //! total grows when a batch splits). Everything goes through the one
 //! Prometheus transport (tenant, tunnel, cluster-label selector).
+//!
+//! **Contract of an aborted collection.** When Prometheus was available
+//! but its usage could not be used, [`RightsizingOutcome::source_abort`]
+//! says why, typed ([`SourceAbortKind`]: proxy, tunnel, label mismatch
+//! with the detail `cluster-label-mismatch`, all batches failed). The
+//! report is then the metrics-server (else none) fallback with a
+//! `prometheus-failed` note carrying the same detail. The live
+//! `rightsizing_report` shows that report; background scans fail on any
+//! `source_abort` (keeping the last good result) and never parse notes.
 
 use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -152,12 +161,51 @@ struct Collected {
     notes: Vec<RightsizingNote>,
 }
 
-/// Why a collection produced nothing.
-enum Abort {
-    /// Prometheus is gone or answers for another cluster: fall back.
-    Source(String),
-    /// No batch succeeded: the first error.
-    Failed(String),
+/// Why the Prometheus usage of a report could not be used.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum SourceAbortKind {
+    /// The service proxy lost Prometheus (or it is not available).
+    Proxy,
+    /// The authenticated tunnel could not be set up.
+    Tunnel,
+    /// A shared Prometheus answered for another cluster.
+    LabelMismatch,
+    /// No batch succeeded (every one failed, was left over or unverified).
+    AllBatchesFailed,
+}
+
+/// A collection that was abandoned, and why (see the module docs).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct SourceAbort {
+    pub kind: SourceAbortKind,
+    /// The error (`cluster-label-mismatch` for a label mismatch).
+    pub detail: String,
+}
+
+impl SourceAbort {
+    fn of(failure: BatchFailure) -> Self {
+        let kind = match &failure {
+            BatchFailure::Tunnel(_) => SourceAbortKind::Tunnel,
+            BatchFailure::LabelMismatch => SourceAbortKind::LabelMismatch,
+            BatchFailure::Proxy(_) => SourceAbortKind::Proxy,
+            BatchFailure::Splittable { .. } | BatchFailure::Unverified => {
+                SourceAbortKind::AllBatchesFailed
+            }
+        };
+        Self {
+            kind,
+            detail: failure.to_string(),
+        }
+    }
+}
+
+/// `compute_rightsizing`: the report, and why Prometheus was abandoned
+/// when it was (the report is then a fallback).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RightsizingOutcome {
+    pub report: RightsizingReport,
+    pub source_abort: Option<SourceAbort>,
 }
 
 fn note(kind: RightsizingNoteKind, detail: Option<String>) -> RightsizingNote {
@@ -296,7 +344,7 @@ impl Kubepit {
         plan: &Plan<'_>,
         days: u32,
         progress: &Progress<'_>,
-    ) -> std::result::Result<Collected, Abort> {
+    ) -> std::result::Result<Collected, SourceAbort> {
         let end_secs = window_end(now_millis());
         let on_answer = || progress.answered();
         let mut queue = VecDeque::from([plan.namespaces.to_vec()]);
@@ -329,8 +377,11 @@ impl Kubepit {
                     }
                     absorb(&mut merged, batch);
                 }
-                Err(BatchFailure::Proxy(message)) => return Err(Abort::Source(message)),
-                Err(e @ BatchFailure::LabelMismatch) => return Err(Abort::Source(e.to_string())),
+                Err(
+                    e @ (BatchFailure::Proxy(_)
+                    | BatchFailure::Tunnel(_)
+                    | BatchFailure::LabelMismatch),
+                ) => return Err(SourceAbort::of(e)),
                 Err(e @ BatchFailure::Unverified) => {
                     // Not this cluster's for sure: unused, and smaller
                     // scopes would not prove more.
@@ -355,9 +406,10 @@ impl Kubepit {
             }
         }
         if !succeeded {
-            return Err(Abort::Failed(
-                first_error.unwrap_or_else(|| "no usage batch succeeded".into()),
-            ));
+            return Err(SourceAbort {
+                kind: SourceAbortKind::AllBatchesFailed,
+                detail: first_error.unwrap_or_else(|| "no usage batch succeeded".into()),
+            });
         }
 
         let mut notes = Vec::new();
@@ -409,13 +461,14 @@ impl Kubepit {
 
     /// Recommendations for the workloads a request covers, from Prometheus
     /// (the collection pipeline), else the last metrics-server hour, else
-    /// nothing. `progress` follows the Prometheus queries.
+    /// nothing, and why Prometheus was abandoned when it was (see the
+    /// module docs). `progress` follows the Prometheus queries.
     pub async fn compute_rightsizing(
         &self,
         cluster_id: &str,
         request: &RightsizingRequest,
         progress: &(dyn Fn(ScanProgress) + Send + Sync),
-    ) -> Result<RightsizingReport> {
+    ) -> Result<RightsizingOutcome> {
         let cluster = self.cluster_def(cluster_id)?;
         let client = self.client(cluster_id).await?;
         // The request's strategy (an unknown one is an error), else the
@@ -483,6 +536,7 @@ impl Kubepit {
                 .await
                 .is_ok_and(|s| s.state == PrometheusState::Available);
         let mut collected: Option<(Collected, u32)> = None;
+        let mut source_abort: Option<SourceAbort> = None;
         if prometheus {
             let mut days = settings_of(likely).days;
             let mut again = true;
@@ -497,10 +551,13 @@ impl Kubepit {
                         }
                         collected = Some((c, days));
                     }
-                    Err(Abort::Source(message)) => {
-                        notes.push(note(RightsizingNoteKind::PrometheusFailed, Some(message)))
+                    Err(abort) => {
+                        notes.push(note(
+                            RightsizingNoteKind::PrometheusFailed,
+                            Some(abort.detail.clone()),
+                        ));
+                        source_abort = Some(abort);
                     }
-                    Err(Abort::Failed(message)) => return Err(anyhow!(message)),
                 }
                 break;
             }
@@ -572,7 +629,7 @@ impl Kubepit {
             })
             .collect();
         sort_recommendations(&mut list);
-        Ok(RightsizingReport {
+        let report = RightsizingReport {
             strategy: strategy.info().id,
             strategies: strategy::strategies(),
             source,
@@ -585,6 +642,10 @@ impl Kubepit {
             computed_at: now,
             strategy_auto,
             window_end: window_end_ms,
+        };
+        Ok(RightsizingOutcome {
+            report,
+            source_abort,
         })
     }
 }

@@ -1555,6 +1555,11 @@ git commit -m "feat(prometheus): per-container usage history for recommendation 
 
 ### Task 16: Scan runner
 
+**Aborted collections:** `compute_rightsizing` returns a `RightsizingOutcome`. When its
+`source_abort` is `Some` (proxy, tunnel, label mismatch, all batches failed), the scan
+run fails with that kind and detail and keeps the last good result, even though the
+report holds a metrics-server fallback. Never parse the report's notes for it.
+
 **Files:**
 - Create: `crates/kubepit-core/src/recommendations/scan.rs`
 - Modify:

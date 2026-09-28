@@ -9,6 +9,7 @@ use std::sync::Arc;
 use kubepit_core::cost::{CostConfig, CostSourceConfig};
 use kubepit_core::prometheus::access::{PrometheusAccess, PrometheusAuth};
 use kubepit_core::prometheus::workload_stats::{BatchFailure, StatScope};
+use kubepit_core::rightsizing::collect::{SourceAbort, SourceAbortKind};
 use kubepit_core::rightsizing::{RightsizingNoteKind, RightsizingRequest, RightsizingSource};
 use kubepit_core::types::{
     ClusterInput, LokiConfig, PromScheme, PrometheusConfig, PrometheusKind, PrometheusMetric,
@@ -752,6 +753,18 @@ async fn every_preset_query_carries_the_cluster_label_and_mismatches_fail() {
         .find(|n| n.kind == RightsizingNoteKind::PrometheusFailed)
         .expect("Prometheus refused");
     assert_eq!(note.detail.as_deref(), Some("cluster-label-mismatch"));
+    // Typed for scans, which must fail instead of keeping the fallback.
+    let outcome = app
+        .compute_rightsizing(&id, &RightsizingRequest::default(), &|_| {})
+        .await
+        .unwrap();
+    assert_eq!(
+        outcome.source_abort,
+        Some(SourceAbort {
+            kind: SourceAbortKind::LabelMismatch,
+            detail: "cluster-label-mismatch".into(),
+        })
+    );
 }
 
 /// A Prometheus that needs a bearer token: the Secret, the service and its

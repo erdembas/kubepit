@@ -328,7 +328,10 @@ impl Kubepit {
         cluster_id: &str,
         request: &RightsizingRequest,
     ) -> Result<RightsizingReport> {
-        self.compute_rightsizing(cluster_id, request, &|_| {}).await
+        // The live report keeps its fallback; scans read `source_abort`.
+        self.compute_rightsizing(cluster_id, request, &|_| {})
+            .await
+            .map(|outcome| outcome.report)
     }
 
     /// Container usage from the last hour of metrics-server samples.

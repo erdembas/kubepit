@@ -10,7 +10,7 @@ use std::sync::Arc;
 use kubepit_core::prometheus::access::PrometheusAccess;
 use kubepit_core::prometheus::usage_history::PodFilter;
 use kubepit_core::recommendations::RecommendationSettings;
-use kubepit_core::rightsizing::collect::ScanProgress;
+use kubepit_core::rightsizing::collect::{ScanProgress, SourceAbortKind};
 use kubepit_core::rightsizing::{
     Confidence, EvidenceIdentity, RightsizingNoteKind, RightsizingReport, RightsizingRequest,
     RightsizingSettings, RightsizingSource, WorkloadRef,
@@ -329,6 +329,7 @@ fn one_day() -> RightsizingRequest {
 
 struct Scan {
     report: RightsizingReport,
+    abort: Option<kubepit_core::rightsizing::collect::SourceAbort>,
     progress: Vec<ScanProgress>,
     log: Log,
 }
@@ -350,18 +351,21 @@ async fn scan_with(f: Fixture, request: RightsizingRequest) -> anyhow::Result<Sc
     }
     let progress = Mutex::new(Vec::new());
     let record_progress = |p: ScanProgress| progress.lock().push(p);
-    let report = app
+    let outcome = app
         .compute_rightsizing(&id, &request, &record_progress)
         .await?;
     Ok(Scan {
-        report,
+        report: outcome.report,
+        abort: outcome.source_abort,
         progress: progress.into_inner(),
         log: server.log,
     })
 }
 
 async fn scan(f: Fixture) -> RightsizingReport {
-    scan_with(f, one_day()).await.unwrap().report
+    let scan = scan_with(f, one_day()).await.unwrap();
+    assert_eq!(scan.abort, None, "{:?}", scan.report.notes);
+    scan.report
 }
 
 /// Completed never goes back, the total only grows, and the last report
@@ -600,6 +604,7 @@ async fn failed_batches_split_down_to_namespaces() {
         report,
         progress,
         log,
+        ..
     } = scan_with(
         Fixture {
             namespaces: vec!["a", "b"],
@@ -629,8 +634,9 @@ async fn failed_batches_split_down_to_namespaces() {
     assert_eq!(p95.len(), 3);
     assert!(p95[0].contains(r#"namespace=~"a|b""#), "{p95:#?}");
 
-    // When no batch succeeds, the collection fails with the first error.
-    let err = scan_with(
+    // When no batch succeeds the collection is abandoned, typed: the live
+    // report falls back with the note, a scan would fail.
+    let failed = scan_with(
         Fixture {
             namespaces: vec!["b"],
             fail_q1_for: Some("b"),
@@ -639,9 +645,19 @@ async fn failed_batches_split_down_to_namespaces() {
         one_day(),
     )
     .await
-    .err()
-    .expect("no batch succeeded");
-    assert!(format!("{err:#}").contains("too many samples"), "{err:#}");
+    .unwrap();
+    let abort = failed.abort.expect("no batch succeeded");
+    assert_eq!(abort.kind, SourceAbortKind::AllBatchesFailed);
+    assert!(
+        abort.detail.contains("too many samples"),
+        "{}",
+        abort.detail
+    );
+    assert_ne!(failed.report.source, RightsizingSource::Prometheus);
+    assert!(failed.report.notes.iter().any(|n| {
+        n.kind == RightsizingNoteKind::PrometheusFailed
+            && n.detail.as_deref() == Some(&abort.detail)
+    }));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -703,7 +719,8 @@ async fn a_per_strategy_window_is_collected_again() {
     let report = app
         .compute_rightsizing(&id, &RightsizingRequest::default(), &record_progress)
         .await
-        .unwrap();
+        .unwrap()
+        .report;
     assert_eq!(
         (report.strategy.as_str(), report.strategy_auto),
         ("percentile-headroom", true)

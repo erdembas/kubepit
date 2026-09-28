@@ -289,10 +289,14 @@ pub struct StatsBatch {
 /// Why a batch produced nothing.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum BatchFailure {
-    /// Prometheus is gone (service proxy 404 / 502 / 503, a tunnel setup
-    /// failure) or not available: smaller batches would fail the same way.
+    /// Prometheus is gone (service proxy 404 / 502 / 503) or not
+    /// available: smaller batches would fail the same way.
     #[error("{0}")]
     Proxy(String),
+    /// The authenticated tunnel cannot be set up (Secret, pod,
+    /// port-forward, TLS): smaller batches would fail the same way.
+    #[error("{0}")]
+    Tunnel(String),
     /// A shared Prometheus answered for another cluster: a checked series
     /// lacks the cluster labels or has other values.
     #[error("{CLUSTER_LABEL_MISMATCH}")]
@@ -447,11 +451,15 @@ pub fn merge_with(
     mut answers: Vec<(StatQuery, anyhow::Result<PromData>)>,
     owners_required: bool,
 ) -> Result<StatsBatch, BatchFailure> {
-    if let Some(e) = answers
-        .iter()
-        .filter_map(|(_, answer)| answer.as_ref().err())
-        .find(|e| is_proxy_failure(e) || is_tunnel_failure(e))
-    {
+    let errors = || {
+        answers
+            .iter()
+            .filter_map(|(_, answer)| answer.as_ref().err())
+    };
+    if let Some(e) = errors().find(|e| is_tunnel_failure(e)) {
+        return Err(BatchFailure::Tunnel(format!("{e:#}")));
+    }
+    if let Some(e) = errors().find(|e| is_proxy_failure(e)) {
         return Err(BatchFailure::Proxy(format!("{e:#}")));
     }
     answers.sort_by_key(|(q, _)| *q);
@@ -576,7 +584,10 @@ impl Kubepit {
         if result.is_ok() && check == LabelCheck::Unverified {
             return Err(BatchFailure::Unverified);
         }
-        if matches!(result, Err(BatchFailure::Proxy(_))) {
+        if matches!(
+            result,
+            Err(BatchFailure::Proxy(_) | BatchFailure::Tunnel(_))
+        ) {
             self.prometheus.invalidate(cluster_id);
         }
         result
@@ -1106,7 +1117,7 @@ mod tests {
                 (StatQuery::CpuP95, Err(tunnel)),
                 (StatQuery::MemoryMax, Ok(data(vec![series(&WEB, 1.0)]))),
             ]),
-            Err(BatchFailure::Proxy(
+            Err(BatchFailure::Tunnel(
                 "no running and ready pod backs service prometheus-operated".into()
             ))
         );
