@@ -527,12 +527,21 @@ pub fn used_bytes(conn: &Connection) -> Result<u64> {
     Ok(((pages - free).max(0) * size) as u64)
 }
 
+/// Share of a table one size-cap round deletes.
+const CAP_FRACTION: f64 = 0.1;
+/// Rows one size-cap round deletes at least (while the table has them), so
+/// a table of any size empties in about a hundred rounds instead of
+/// crawling one row at a time through its tail.
+const CAP_MIN_ROWS: i64 = 100;
+/// Safety net only: every round deletes something or ends the loop.
+const CAP_MAX_ROUNDS: u32 = 10_000;
+
 fn delete_oldest(conn: &Connection, table: &str, ts: &str, fraction: f64) -> Result<u64> {
     let rows: i64 = conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))?;
     if rows == 0 {
         return Ok(0);
     }
-    let n = ((rows as f64 * fraction).ceil() as i64).max(1);
+    let n = ((rows as f64 * fraction).ceil() as i64).max(CAP_MIN_ROWS);
     let deleted = conn.execute(
         &format!(
             "DELETE FROM {table} WHERE id IN (SELECT id FROM {table} ORDER BY {ts} ASC, id ASC LIMIT ?1)"
@@ -557,22 +566,24 @@ pub fn prune(conn: &Connection, policy: &PrunePolicy) -> Result<PruneReport> {
         recommendations: recommendations::prune(conn, policy)?,
         vacuumed: false,
     };
+    // Until the cap is reached or nothing is left to delete: a fixed number
+    // of rounds could stop in bulky events before reaching the scans.
     let mut rounds = 0;
-    while used_bytes(conn)? > policy.max_bytes && rounds < 40 {
+    while used_bytes(conn)? > policy.max_bytes && rounds < CAP_MAX_ROUNDS {
         rounds += 1;
-        let events = delete_oldest(conn, "events", "last_ts", 0.1)?;
-        let changes = delete_oldest(conn, "changes", "ts", 0.1)?;
+        let events = delete_oldest(conn, "events", "last_ts", CAP_FRACTION)?;
+        let changes = delete_oldest(conn, "changes", "ts", CAP_FRACTION)?;
         report.events += events;
         report.changes += changes;
         if events + changes > 0 {
             continue;
         }
-        let scans = recommendations::delete_oldest_rows(conn, 0.1)?;
+        let scans = recommendations::delete_oldest_rows(conn, CAP_FRACTION)?;
         report.recommendations += scans;
         if scans > 0 {
             continue;
         }
-        let audit = delete_oldest(conn, "audit", "ts", 0.1)?;
+        let audit = delete_oldest(conn, "audit", "ts", CAP_FRACTION)?;
         if audit == 0 {
             break;
         }

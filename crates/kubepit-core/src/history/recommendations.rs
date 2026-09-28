@@ -1224,9 +1224,9 @@ mod tests {
         assert_eq!(rows_of(&conn, b), 1);
     }
 
-    #[test]
-    fn size_cap_drops_recommendation_rows_before_the_audit_log() {
-        let (_dir, mut conn) = temp_db();
+    /// Five audit entries and ten runs of 30 bulky workloads each (30 × 50
+    /// long pod names per run); returns the run ids, oldest first.
+    fn audit_and_bulky_runs(conn: &mut Connection) -> Vec<i64> {
         conn.execute_batch(
             &"INSERT INTO audit (ts, cluster_id, cluster_name, context, action, dry_run,
                  outcome, duration_ms, targets, has_diff, revertible, search)
@@ -1234,7 +1234,6 @@ mod tests {
                 .repeat(5),
         )
         .unwrap();
-        // Bulky rows: 30 workloads × 50 long pod names per run.
         let bulky = || {
             let workloads = (0..30)
                 .map(|i| WorkloadRecommendation {
@@ -1246,23 +1245,30 @@ mod tests {
                 .collect();
             success(report_of(workloads))
         };
-        let ids: Vec<i64> = (0..10)
-            .map(|i| run(&mut conn, "c1", 1_000 + i, &bulky()))
-            .collect();
+        (0..10)
+            .map(|i| run(conn, "c1", 1_000 + i, &bulky()))
+            .collect()
+    }
+
+    /// Only the size cap: no retention cutoff applies.
+    fn size_cap(max_bytes: u64) -> PrunePolicy {
+        PrunePolicy {
+            max_bytes,
+            rec_before: 0,
+            rec_rows_before: 0,
+            ..policy(0)
+        }
+    }
+
+    #[test]
+    fn size_cap_drops_recommendation_rows_before_the_audit_log() {
+        let (_dir, mut conn) = temp_db();
+        let ids = audit_and_bulky_runs(&mut conn);
         let before = count(&conn, "rec_rows");
         assert_eq!(before, 300);
         assert!(db::used_bytes(&conn).unwrap() > 1_000_000);
 
-        let report = db::prune(
-            &conn,
-            &PrunePolicy {
-                max_bytes: 400_000,
-                rec_before: 0,
-                rec_rows_before: 0,
-                ..policy(0)
-            },
-        )
-        .unwrap();
+        let report = db::prune(&conn, &size_cap(400_000)).unwrap();
         assert!(db::used_bytes(&conn).unwrap() <= 400_000);
         assert!(count(&conn, "audit") > 0 && count(&conn, "rec_rows") < before);
         assert_eq!(count(&conn, "audit"), 5, "the audit log is untouched");
@@ -1270,6 +1276,43 @@ mod tests {
         assert_eq!(rows_of(&conn, ids[9]), 30, "the latest run keeps its rows");
         assert_eq!(rows_of(&conn, ids[0]), 0, "the oldest go first");
         assert_eq!(count(&conn, "rec_runs"), 10);
+    }
+
+    #[test]
+    fn size_cap_is_reached_behind_many_events_and_changes() {
+        let (_dir, mut conn) = temp_db();
+        let ids = audit_and_bulky_runs(&mut conn);
+        // Far more events and changes than 40 rounds of 10 % can clear.
+        let tx = conn.transaction().unwrap();
+        let padding = "y".repeat(200);
+        for i in 0..3_000 {
+            tx.execute(
+                "INSERT INTO events (cluster_id, uid, count, last_ts, object, search)
+                 VALUES ('c1', ?1, 1, ?2, ?3, '')",
+                rusqlite::params![format!("e{i}"), i, padding],
+            )
+            .unwrap();
+            tx.execute(
+                "INSERT INTO changes (cluster_id, journal_started, journal_id, ts, kind, name,
+                     summary, omitted, search)
+                 VALUES ('c1', 1, ?1, ?1, 'ConfigMap', 'cfg', ?2, 0, '')",
+                rusqlite::params![i, padding],
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+        assert!(db::used_bytes(&conn).unwrap() > 2_500_000);
+
+        let report = db::prune(&conn, &size_cap(400_000)).unwrap();
+        assert!(
+            db::used_bytes(&conn).unwrap() <= 400_000,
+            "the cap is reached"
+        );
+        assert_eq!((count(&conn, "events"), count(&conn, "changes")), (0, 0));
+        assert_eq!((report.events, report.changes), (3_000, 3_000));
+        assert!(report.recommendations > 0, "then recommendation rows");
+        assert_eq!(rows_of(&conn, ids[9]), 30, "never the latest run's rows");
+        assert_eq!(count(&conn, "audit"), 5, "the audit log goes last");
     }
 
     #[test]

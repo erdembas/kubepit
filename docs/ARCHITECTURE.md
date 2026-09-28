@@ -881,10 +881,10 @@ that never leaves the machine.
   cluster's latest), and the rows of successful runs older than 48 hours
   unless they are the latest or the last successful run of their UTC day
   (the run and its summary stay), then the size cap `max_size_mb`
-  (default 512: the oldest events and changes go first, then the rows of
+  (default 512, applied until it is reached: the oldest events and
+  changes go first, 10 % but at least 100 rows a round, then the rows of
   the oldest recommendation runs, the audit log only when nothing else is
-  left), then
-  incremental vacuum (full `VACUUM` after a clear or when most of the file
+  left), then incremental vacuum (full `VACUUM` after a clear or when most of the file
   is free) and a WAL checkpoint.
 - **Opt-in per process** (`Kubepit::set_history_recording`, enabled in
   `src-tauri/src/setup.rs`): tests and headless tools record nothing, send
