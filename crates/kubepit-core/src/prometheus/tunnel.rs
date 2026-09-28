@@ -19,6 +19,12 @@
 //!    key, else the system roots, or nothing (`insecure_skip_verify`);
 //! 4. one HTTP/1.1 GET with `Authorization` and the tenant goes over it
 //!    ([`request_over`]).
+//!
+//! Steps 1–3 failing is a [`TunnelFailure`]: the tunnel cannot be set up,
+//! so like a service-proxy failure it aborts a scan and re-detects
+//! Prometheus. The exchange of step 4 failing (the query timeout, a
+//! closed connection) is a plain error, like the same failure behind the
+//! service proxy: a heavy statistics query stays splittable.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
@@ -610,9 +616,10 @@ where
         .map_err(|_| anyhow!("Prometheus did not answer within {}s", timeout.as_secs()))?
 }
 
-/// A failure of the tunnel itself (credentials, pod, port-forward, TLS,
-/// transport), as opposed to an answer of Prometheus. Like a proxy failure,
-/// it makes the next status request detect again.
+/// A failure to set the tunnel up (credentials, pod, port-forward, TLS
+/// handshake, or the pod refusing the forwarded connection), as opposed to
+/// a query over an established tunnel. Like a proxy failure, it makes the
+/// next status request detect again.
 #[derive(Debug)]
 pub(crate) struct TunnelFailure(String);
 
@@ -632,8 +639,48 @@ pub(crate) fn is_tunnel_failure(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| cause.is::<TunnelFailure>())
 }
 
+/// One authenticated GET of `path` over `stream` (the port-forward): TLS
+/// for an `https` service (a handshake failure or timeout is a
+/// [`TunnelFailure`]), then the exchange, whose failures and timeout stay
+/// plain errors.
+async fn query_over<S>(
+    stream: S,
+    service: &PrometheusService,
+    access: &PrometheusAccess,
+    secrets: &TunnelSecrets,
+    path: &str,
+    timeout: Duration,
+) -> Result<RawResponse>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    let (namespace, name) = (service.namespace.as_str(), service.service.as_str());
+    let server_name = format!("{name}.{namespace}.svc");
+    let host = format!("{server_name}:{}", service.port);
+    let mut headers = vec![("authorization", secrets.credentials.0.as_str())];
+    let tenant = access.tenant.trim();
+    if !tenant.is_empty() {
+        headers.push(("x-scope-orgid", tenant));
+    }
+    match service.scheme {
+        PromScheme::Http => request_over(stream, &host, path, &headers, timeout).await,
+        PromScheme::Https => {
+            let skip = access.tls.as_ref().is_some_and(|t| t.insecure_skip_verify);
+            let tls = tokio::time::timeout(
+                SETUP_TIMEOUT,
+                tls_connect(stream, &server_name, skip, secrets.ca.as_deref()),
+            )
+            .await
+            .map_err(|_| tunnel_failure(anyhow!("TLS handshake with {server_name} timed out")))?
+            .map_err(tunnel_failure)?;
+            request_over(tls, &host, path, &headers, timeout).await
+        }
+    }
+}
+
 /// GET `path` (prefix, endpoint and query) of `service` through a
 /// port-forward to a ready pod behind it, authenticated with `secrets`.
+/// Setup failures are [`TunnelFailure`]s; see the module docs.
 pub(crate) async fn tunnel_get(
     client: &Client,
     service: &PrometheusService,
@@ -654,47 +701,33 @@ pub(crate) async fn tunnel_get(
     let setup_timeout = || anyhow!("Prometheus port-forward to {namespace}/{name} timed out");
     let (pod, port) = tokio::time::timeout(SETUP_TIMEOUT, resolve_target(client, &target))
         .await
-        .map_err(|_| setup_timeout())?
-        .with_context(|| format!("Prometheus port-forward to service {namespace}/{name}"))?;
+        .map_err(|_| setup_timeout())
+        .and_then(|resolved| {
+            resolved
+                .with_context(|| format!("Prometheus port-forward to service {namespace}/{name}"))
+        })
+        .map_err(tunnel_failure)?;
     let pods: Api<Pod> = Api::namespaced(client.clone(), namespace);
     let mut forwarder = tokio::time::timeout(SETUP_TIMEOUT, pods.portforward(&pod, &[port]))
         .await
-        .map_err(|_| setup_timeout())?
-        .map_err(kube_error)
-        .with_context(|| {
-            format!("Prometheus port-forward to pod {namespace}/{pod}:{port} failed")
-        })?;
-    let stream = forwarder.take_stream(port).ok_or_else(|| {
-        anyhow!("Prometheus port-forward stream to pod {namespace}/{pod} is unavailable")
-    })?;
-    let pod_error = forwarder.take_error(port);
-
-    let server_name = format!("{name}.{namespace}.svc");
-    let host = format!("{server_name}:{}", service.port);
-    let mut headers = vec![("authorization", secrets.credentials.0.as_str())];
-    let tenant = access.tenant.trim();
-    if !tenant.is_empty() {
-        headers.push(("x-scope-orgid", tenant));
-    }
-    let result = match service.scheme {
-        PromScheme::Http => request_over(stream, &host, path, &headers, timeout).await,
-        PromScheme::Https => {
-            let skip = access.tls.as_ref().is_some_and(|t| t.insecure_skip_verify);
-            match tokio::time::timeout(
-                SETUP_TIMEOUT,
-                tls_connect(stream, &server_name, skip, secrets.ca.as_deref()),
-            )
-            .await
-            {
-                Ok(Ok(tls)) => request_over(tls, &host, path, &headers, timeout).await,
-                Ok(Err(e)) => Err(e),
-                Err(_) => Err(anyhow!("TLS handshake with {server_name} timed out")),
-            }
-        }
+        .map_err(|_| setup_timeout())
+        .and_then(|opened| {
+            opened.map_err(kube_error).with_context(|| {
+                format!("Prometheus port-forward to pod {namespace}/{pod}:{port} failed")
+            })
+        })
+        .map_err(tunnel_failure)?;
+    let Some(stream) = forwarder.take_stream(port) else {
+        forwarder.abort();
+        return Err(tunnel_failure(anyhow!(
+            "Prometheus port-forward stream to pod {namespace}/{pod} is unavailable"
+        )));
     };
-    let result = match result {
-        Err(e) => {
-            // The pod side may know better ("connection refused").
+    let pod_error = forwarder.take_error(port);
+    let result = match query_over(stream, service, access, secrets, path, timeout).await {
+        Err(e) if !is_tunnel_failure(&e) => {
+            // The pod side may know better ("connection refused"): then the
+            // forward itself failed, which is a setup failure.
             let detail = match pod_error {
                 Some(rx) => tokio::time::timeout(Duration::from_millis(200), rx)
                     .await
@@ -703,15 +736,15 @@ pub(crate) async fn tunnel_get(
                 None => None,
             };
             Err(match detail {
-                Some(detail) => e.context(format!(
+                Some(detail) => tunnel_failure(e.context(format!(
                     "port-forward to pod {namespace}/{pod}:{port}: {detail}"
-                )),
+                ))),
                 None => e.context(format!(
                     "over the port-forward to pod {namespace}/{pod}:{port}"
                 )),
             })
         }
-        ok => ok,
+        other => other,
     };
     forwarder.abort();
     result
@@ -821,6 +854,67 @@ j6EzTBQKCIK44Ht1hGckQEbsh5M4xlh8CvAbHO7lGMeusAjsKyS4dyiR
             .await
             .unwrap_err();
         assert!(err.to_string().contains("did not answer"), "{err}");
+    }
+
+    fn service(scheme: PromScheme) -> PrometheusService {
+        PrometheusService {
+            kind: crate::types::PrometheusKind::Custom,
+            namespace: "monitoring".into(),
+            service: "prometheus".into(),
+            port: 9090,
+            scheme,
+            path_prefix: String::new(),
+        }
+    }
+
+    fn secrets() -> TunnelSecrets {
+        TunnelSecrets {
+            credentials: Credentials("Bearer t0k".into()),
+            ca: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_query_timeout_splits_and_a_setup_failure_aborts() {
+        use crate::prometheus::workload_stats::{merge, BatchFailure, StatQuery};
+        // The exchange over an established tunnel times out: a plain error,
+        // so a required query of a batch makes it splittable, like behind
+        // the service proxy.
+        let (client, _server) = tokio::io::duplex(1024);
+        let slow = query_over(
+            client,
+            &service(PromScheme::Http),
+            &secured(""),
+            &secrets(),
+            "/api/v1/query",
+            Duration::from_millis(100),
+        )
+        .await
+        .unwrap_err();
+        assert!(!is_tunnel_failure(&slow), "{slow:#}");
+        assert!(matches!(
+            merge(vec![(StatQuery::CpuP95, Err(slow))]),
+            Err(BatchFailure::Splittable { .. })
+        ));
+        // The TLS handshake fails (the peer hangs up): the tunnel cannot be
+        // set up, so the batch aborts.
+        let (client, server) = tokio::io::duplex(1024);
+        drop(server);
+        let setup = query_over(
+            client,
+            &service(PromScheme::Https),
+            &secured(""),
+            &secrets(),
+            "/api/v1/query",
+            Duration::from_millis(100),
+        )
+        .await
+        .unwrap_err();
+        assert!(is_tunnel_failure(&setup), "{setup:#}");
+        assert!(matches!(
+            merge(vec![(StatQuery::CpuP95, Err(setup))]),
+            Err(BatchFailure::Proxy(_))
+        ));
     }
 
     #[test]

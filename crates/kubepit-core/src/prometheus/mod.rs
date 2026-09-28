@@ -202,24 +202,24 @@ impl Link<'_> {
             if !self.credentials_allowed {
                 bail!(access::CREDENTIALS_NEED_A_SERVICE);
             }
-            let response = async {
-                let secrets = self
-                    .tunnels
-                    .secrets(self.cluster_id, self.connected_at, self.client, self.access)
-                    .await?;
-                let path = with_query(&format!("{}{endpoint}", self.service.path_prefix), params);
-                tunnel::tunnel_get(
-                    self.client,
-                    self.service,
-                    self.access,
-                    &secrets,
-                    &path,
-                    timeout,
-                )
+            // Setup failures (the Secret, the pod, the port-forward, TLS)
+            // are tunnel failures; a query timing out over an established
+            // tunnel is not (see `tunnel`).
+            let secrets = self
+                .tunnels
+                .secrets(self.cluster_id, self.connected_at, self.client, self.access)
                 .await
-            }
-            .await
-            .map_err(tunnel::tunnel_failure)?;
+                .map_err(tunnel::tunnel_failure)?;
+            let path = with_query(&format!("{}{endpoint}", self.service.path_prefix), params);
+            let response = tunnel::tunnel_get(
+                self.client,
+                self.service,
+                self.access,
+                &secrets,
+                &path,
+                timeout,
+            )
+            .await?;
             return proxy::answer(response);
         }
         let tenant = self.access.tenant.trim();
