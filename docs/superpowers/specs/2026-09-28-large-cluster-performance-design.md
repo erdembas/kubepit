@@ -126,6 +126,7 @@ The macOS WKWebView number comes from the same probe in `pnpm tauri:dev`, opened
 - Every PR: structural tests run as part of `cargo test`, plus a `perf-guard` job: Criterion in quick mode + Vitest bench → `scripts/perf/compare.mjs` with slack.
 - `perf-nightly.yml` (schedule plus manual dispatch): the Playwright UI suite, including the 30-minute soak.
 - Both extend the CI plan's workflows. If the CI plan has not landed, the CI task stops and waits.
+  - As built: the CI plan had not landed, so the guard ships as a standalone `.github/workflows/perf-guard.yml` (pull requests and pushes to `main`). It moves into `ci.yml` when that exists. The nightly also runs `s` and `m`, whose ids have budgets too.
 
 **D8. Optimizations as gated hypotheses.** A gated task runs only when its gate fires. Every gated task records its before and after numbers in the Results table.
 

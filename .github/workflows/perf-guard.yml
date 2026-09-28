@@ -1,0 +1,101 @@
+# Performance regression guard (large-cluster performance plan, Task 11;
+# docs/ARCHITECTURE.md, "Performance").
+#
+# Standalone for now: the CI plan's `.github/workflows/ci.yml` does not exist
+# yet. When it lands, this job moves into ci.yml as its `perf-guard` job and
+# this file is deleted.
+#
+# Criterion in quick mode (rust, e2e and the structural count) and the Vitest
+# engine benches, checked against perf/budgets.json with the CI slack. The
+# e2e benches use the in-process fake API server on 127.0.0.1: nothing talks
+# to a cluster. No secrets; the only downloads are Node, pnpm, the Rust
+# toolchain, npm packages and crates.
+name: perf-guard
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  perf-guard:
+    name: perf-guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up pnpm 9.14.4
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.14.4 --activate
+          pnpm --version
+          echo "PNPM_STORE=$(pnpm store path --silent)" >> "$GITHUB_ENV"
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.PNPM_STORE }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
+
+      # Only kubepit-core is built: no Tauri system packages.
+      - name: Set up stable Rust
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          cargo --version
+
+      # Build output only: stale Criterion results must never stand in for a
+      # bench that did not run (a missing result fails the compare).
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+            !target/criterion/
+            !target/perf/
+          key: cargo-bench-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-bench-${{ runner.os }}-
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Compare script tests
+        run: node --test scripts/perf/
+
+      - name: Criterion (quick)
+        run: |
+          rm -rf target/criterion target/perf
+          cargo bench -p kubepit-core -- --warm-up-time 1 --measurement-time 3 --noplot
+
+      - name: Engine benches (Vitest)
+        run: pnpm perf:bench
+
+      - name: Compare with the budgets
+        run: node scripts/perf/compare.mjs --slack 2.5 --only rust,e2e,engines,structural
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-guard-results
+          path: |
+            perf-results/
+            target/perf/
+            target/criterion/
+          if-no-files-found: ignore
+          retention-days: 14

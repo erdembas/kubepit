@@ -1,0 +1,78 @@
+# Nightly UI performance suite (large-cluster performance plan, Task 11;
+# docs/ARCHITECTURE.md, "Performance").
+#
+# Playwright + Chromium against `vite preview` of the production build with
+# the in-memory demo backend (?scale=&churn=): no cluster, no Tauri. The
+# driver blocks every request outside the preview server. `l` runs every
+# scenario with 50 pod changes/s and the 30-minute soak; `s` and `m` add the
+# ids budgeted at those presets. Checked against perf/budgets.json with the
+# CI slack. No secrets; the downloads are Node, pnpm, npm packages, Chromium
+# and its system libraries (`playwright install --with-deps`).
+#
+# When the CI plan's workflows land, this stays a separate scheduled workflow.
+name: perf-nightly
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-nightly
+  cancel-in-progress: false
+
+jobs:
+  ui:
+    name: UI suite and soak
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up pnpm 9.14.4
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.14.4 --activate
+          pnpm --version
+          echo "PNPM_STORE=$(pnpm store path --silent)" >> "$GITHUB_ENV"
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.PNPM_STORE }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build the UI
+        run: pnpm --filter @kubepit/desktop build
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: UI suite at l with churn and the 30-minute soak
+        run: pnpm perf:ui -- --preset l --churn 50 --soak 30
+
+      - name: UI scenarios at s and m
+        run: |
+          for p in s m; do
+            pnpm perf:ui -- --preset "$p" --scenarios ttfr,map,health --out "perf-results/ui-$p.json"
+          done
+
+      - name: Compare with the budgets
+        run: node scripts/perf/compare.mjs --slack 2.5 --only ui
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-nightly-results
+          path: perf-results/
+          if-no-files-found: ignore
+          retention-days: 30

@@ -49,7 +49,7 @@
   - `Kubepit::set_metrics_sampling` (its Task 18).
 
   If any is missing, implement that hardening task first, exactly as specified there.
-- **CI.** Task 11 depends on the CI plan's workflow (assumed `.github/workflows/ci.yml`).
+- **CI.** Task 11 depends on the CI plan's workflow (assumed `.github/workflows/ci.yml`). _(As built: that workflow did not exist yet, so Task 11 added a standalone `perf-guard.yml`.)_
 
 ## Review Focus
 
@@ -821,11 +821,12 @@ git commit -m "perf: budgets, compare script and the first baseline"
 
 **Files:**
 - Modify: `.github/workflows/ci.yml` (from the CI plan): add a `perf-guard` job
+  - _As built: `ci.yml` did not exist (the CI plan had not run, and the repository has no remote yet). The job ships as a standalone `.github/workflows/perf-guard.yml`, on `pull_request` and on `push` to `main`. A comment in the file says it moves into `ci.yml` as its `perf-guard` job when the CI plan lands._
 - Create: `.github/workflows/perf-nightly.yml`
 - Modify: `docs/ARCHITECTURE.md` (new "Performance" section: presets, how to run each suite, budgets, CI)
 
 **Interfaces:**
-- Consumes: the CI plan's `ci.yml`. If it does not exist, stop and run the CI plan first.
+- Consumes: the CI plan's `ci.yml`. If it does not exist, stop and run the CI plan first. _(As built: it did not exist; see Files.)_
 - Produces:
   - Job `perf-guard` on `ubuntu-latest`, on pull requests. It sets up Node 22, pnpm 9.14.4 and stable Rust (no Tauri system packages; only `kubepit-core` is built), then runs:
     1. `pnpm install --frozen-lockfile`
@@ -842,15 +843,22 @@ git commit -m "perf: budgets, compare script and the first baseline"
     4. `node scripts/perf/compare.mjs --slack 2.5 --only ui`.
 
     It uploads the results.
+  - As built:
+    - Both workflows use only GitHub's own actions (`checkout`, `setup-node`, `cache`, `upload-artifact`) and no secrets, with `permissions: contents: read`.
+    - pnpm comes from Corepack, Rust from `rustup toolchain install stable --profile minimal`.
+    - The guard caches the Cargo registry and `target/`, but not `target/criterion` or `target/perf`, and deletes both before the benches. A stale result must never stand in for a bench that did not run.
+    - The nightly also runs `pnpm perf:ui -- --preset s|m --scenarios ttfr,map,health --out perf-results/ui-<p>.json` before the compare. Otherwise `ui/ttfr_pods_s`, `ui/ttfr_pods_m`, `ui/map_all_m`, `ui/health_scan_m` and `ui/health_long_task_max_m` would fail as missing.
 
-- [ ] **Step 1: Add the job and the workflow.**
+- [x] **Step 1: Add the job and the workflow.**
 
-- [ ] **Step 2: Validate the YAML and dry-run the commands locally**
+- [x] **Step 2: Validate the YAML and dry-run the commands locally**
 
-Run: `node -e "const y=require('./apps/desktop/node_modules/yaml');for (const f of ['.github/workflows/ci.yml','.github/workflows/perf-nightly.yml']) y.parse(require('fs').readFileSync(f,'utf8'));console.log('ok')"`, then run the `perf-guard` commands in order.
+Run: `node -e "const y=require('./apps/desktop/node_modules/yaml');for (const f of ['.github/workflows/perf-guard.yml','.github/workflows/perf-nightly.yml']) y.parse(require('fs').readFileSync(f,'utf8'));console.log('ok')"`, then run the `perf-guard` commands in order.
 Expected: `ok`, and `compare.mjs` exits 0 with the baseline results.
 
-- [ ] **Step 3: Commit**
+_(Done: `ok`, and `actionlint` passes. Locally the `perf-guard` commands exit 0 in order: `pnpm install --frozen-lockfile --offline`, `node --test scripts/perf/`, the quick `cargo bench`, `pnpm perf:bench`, and `compare.mjs --slack 2.5 --only rust,e2e,engines,structural`. The Corepack, rustup and `playwright install --with-deps` setup steps were not run locally, because they change the machine's toolchains. The nightly's commands are the ones the Task 10 baseline ran.)_
+
+- [x] **Step 3: Commit**
 
 ```bash
 git add .github docs/ARCHITECTURE.md
