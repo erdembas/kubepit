@@ -9,6 +9,7 @@ import type { MockHandler } from './registry';
 
 const PODS: Gvk = { group: '', version: 'v1', kind: 'Pod', plural: 'pods', namespaced: true };
 const JOBS: Gvk = { group: 'batch', version: 'v1', kind: 'Job', plural: 'jobs', namespaced: true };
+const EVENTS: Gvk = { group: '', version: 'v1', kind: 'Event', plural: 'events', namespaced: true };
 const CLUSTER = 'c-scale-s';
 
 let handlers: Record<string, MockHandler>;
@@ -18,7 +19,7 @@ beforeAll(async () => {
   vi.useFakeTimers({ now: new Date('2026-09-28T10:00:00Z') });
   vi.stubGlobal('window', globalThis);
   vi.stubGlobal('location', { search: '', href: 'http://localhost:1430/' });
-  // The list "arrives" 150 + random × 200 ms after the watch: at 250 ms.
+  // The list "arrives" 20 + random × 120 ms after the watch: at 80 ms.
   vi.spyOn(Math, 'random').mockReturnValue(0.5);
   ({ handlers } = await import('./registry'));
   await import('./resources');
@@ -65,16 +66,17 @@ function replay(batches: WatchBatch[]) {
 describe('demo resource_watch', () => {
   it('sends full chunks when the list arrives and the rest with synced at the next tick', async () => {
     const { id, batches } = watch(PODS);
-    await vi.advanceTimersByTimeAsync(249);
+    await vi.advanceTimersByTimeAsync(79);
     expect(batches).toHaveLength(0);
-    // The list arrives at 250 ms; each further full chunk takes a 0 ms
+    // The list arrives at 80 ms; each further full chunk takes a 0 ms
     // timer, which fake timers run 1 ms later.
     await vi.advanceTimersByTimeAsync(2);
     expect(batches.map(shape)).toEqual([
       [true, 500, false],
       [false, 500, false],
     ]);
-    await vi.advanceTimersByTimeAsync(48);
+    // The remainder goes out at the first tick, 150 ms after the watch.
+    await vi.advanceTimersByTimeAsync(68);
     expect(batches).toHaveLength(2);
     await vi.advanceTimersByTimeAsync(1);
     expect(batches.map(shape)).toEqual([
@@ -89,7 +91,7 @@ describe('demo resource_watch', () => {
 
   it('sends an empty list as one synced batch at the first tick', async () => {
     const { id, batches } = watch(JOBS);
-    await vi.advanceTimersByTimeAsync(299);
+    await vi.advanceTimersByTimeAsync(149);
     expect(batches).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(1);
     expect(batches).toEqual([
@@ -108,10 +110,44 @@ describe('demo resource_watch', () => {
     handlers.resource_unwatch!({ watchId: id });
   });
 
+  it('sends a list of an exact multiple of 500 as full chunks, then an empty synced batch at the next tick', async () => {
+    // 2 000 events (the `l` preset's pods and events take the same path).
+    const { id, batches } = watch(EVENTS);
+    await vi.advanceTimersByTimeAsync(79);
+    expect(batches).toHaveLength(0);
+    // 80–83 ms: every chunk is full, so none of them is synced.
+    await vi.advanceTimersByTimeAsync(4);
+    expect(batches.map(shape)).toEqual([
+      [true, 500, false],
+      [false, 500, false],
+      [false, 500, false],
+      [false, 500, false],
+    ]);
+    await vi.advanceTimersByTimeAsync(66);
+    expect(batches).toHaveLength(4);
+    // 150 ms: the first tick sends an empty synced batch.
+    await vi.advanceTimersByTimeAsync(1);
+    expect(batches.slice(4)).toEqual([
+      {
+        watch_id: id,
+        reset: false,
+        upserts: [],
+        deletes: [],
+        synced: true,
+        error: null,
+        recovered: false,
+      },
+    ]);
+    expect(replay(batches).size).toBe(2000);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(batches).toHaveLength(5);
+    handlers.resource_unwatch!({ watchId: id });
+  });
+
   it('sends changes made during the list after its synced batch, 500 at most per batch', async () => {
     const cluster = db.getDb(CLUSTER);
     const { id, batches } = watch(PODS);
-    await vi.advanceTimersByTimeAsync(260);
+    await vi.advanceTimersByTimeAsync(90);
     expect(batches).toHaveLength(2);
     // Churn before the synced batch: 1 100 pods change, 100 are deleted.
     const pods = db.list(cluster, 'pods');
@@ -120,16 +156,16 @@ describe('demo resource_watch', () => {
       db.put(cluster, pod);
     }
     for (const pod of pods.slice(0, 100)) db.drop(cluster, pod);
-    await vi.advanceTimersByTimeAsync(39);
+    await vi.advanceTimersByTimeAsync(59);
     expect(batches).toHaveLength(2);
-    // 300 ms: the synced remainder, then the held changes, full batches at once.
+    // 150 ms: the synced remainder, then the held changes, full batches at once.
     await vi.advanceTimersByTimeAsync(1);
     expect(batches.slice(2).map(shape)).toEqual([
       [false, 200, true],
       [false, 500, true],
       [false, 500, true],
     ]);
-    // 450 ms: the rest at the next tick.
+    // 300 ms: the rest at the next tick.
     await vi.advanceTimersByTimeAsync(150);
     expect(batches.slice(5).map(shape)).toEqual([[false, 200, true]]);
 

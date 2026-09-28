@@ -14,6 +14,7 @@ import {
   type TopologyView,
   type TopoNode,
 } from '@/lib/kube/topology';
+import { perfEnabled, perfNow, recordDuration, recordSince } from '@/lib/perf/probe';
 import { pausedMemo, type PausedMemo } from './dataKey';
 import { TopologyCanvas, type FocusRequest } from './TopologyCanvas';
 import { TopologyLegend } from './TopologyLegend';
@@ -106,14 +107,22 @@ export function TopologyMap({
     viewMemo.current,
     [graph, rootId, hops, expanded, hidden],
     active,
-    () =>
-      deriveView(graph, {
+    () => {
+      const start = perfNow();
+      const derived = deriveView(graph, {
         rootId,
         hops,
         expanded,
         hiddenKinds: hidden,
         maxNodes: DEFAULT_MAX_NODES,
-      }),
+      });
+      if (perfEnabled())
+        recordDuration('map:view', performance.now() - start, {
+          nodes: derived.nodes.length,
+          synced: synced ? 1 : 0,
+        });
+      return derived;
+    },
   );
   const view = viewMemo.current.value;
 
@@ -125,10 +134,12 @@ export function TopologyMap({
   );
   const viewRef = useRef(view);
   viewRef.current = view;
-  const layout = useMemo(
-    () => layoutTopology(viewRef.current.nodes, viewRef.current.edges),
-    [structure],
-  );
+  const layout = useMemo(() => {
+    const start = perfNow();
+    const placed = layoutTopology(viewRef.current.nodes, viewRef.current.edges);
+    recordSince('map:layout', start);
+    return placed;
+  }, [structure]);
   const nodes = useMemo(() => new Map(view.nodes.map((n) => [n.id, n])), [view]);
 
   const matches = useMemo(() => new Set(matchNodes(view.nodes, search)), [view.nodes, search]);

@@ -479,7 +479,7 @@ Expected: FAIL (module missing).
   - With `churn > 0`, the liveness timer ticks every 100 ms and applies `churn / 10` pod changes per tick round-robin: 90% status/label updates, 10% delete + recreate.
   - `db.ts` keeps `byName: Map<kindKey, Map<"ns/name", uid>>` and `byOwner: Map<ownerUid, Set<uid>>` in sync in `put`/`drop`.
 
-- [x] **Step 4: Run the tests and check the build time** _(Browser check on 2026-09-28, `pnpm dev:ui` at `?scale=l` in the desktop app's browser pane (pane hidden, `setTimeout` polling): `c-scale-l` connected 1.5 s after the click, and the pods table showed all 20 000 pods 0.77 s after opening Pods, 2.3 s in total. Earlier, the tests and typecheck passed. Headless (Vitest, fake timers): `c-scale-l` builds in ~0.25 s; the list arrives 150–350 ms after the watch, its 40 full batches go out at once (one macrotask each), and `synced` follows at the first 150 ms tick after them: at 450 ms under fake timers.)_
+- [x] **Step 4: Run the tests and check the build time** _(Browser check on 2026-09-28, `pnpm dev:ui` at `?scale=l` in the desktop app's browser pane (pane hidden, `setTimeout` polling): `c-scale-l` connected 1.5 s after the click, and the pods table showed all 20 000 pods 0.77 s after opening Pods, 2.3 s in total. Earlier, the tests and typecheck passed. Headless (Vitest, fake timers): `c-scale-l` builds in ~0.25 s; the list arrives 20–140 ms after the watch, its 40 full batches go out at once (one macrotask each), and `synced` follows at the first 150 ms tick after them: the list at 80 ms, its batches by 119 ms and `synced` at 150 ms under fake timers.)_
 
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck`
 Expected: PASS. Then open `pnpm dev:ui` at `http://localhost:1430/?scale=l`: the `c-scale-l` cluster connects and the pods table fills within 3 s.
@@ -498,7 +498,7 @@ git commit -m "perf(mock): scaled demo clusters (?scale=, &churn=) and backend-l
 **Files:**
 - Create: `apps/desktop/src/lib/perf/fixtures.ts`
 - Create: `apps/desktop/src/lib/kube/topology/topology.bench.ts`, `lib/kube/health/health.bench.ts`, `lib/kube/netpol/netpol.bench.ts`, `lib/logs/logs.bench.ts`, `components/workbench/table/tableModel.bench.ts`
-- Modify: `package.json` (root script `"perf:bench": "pnpm --filter @kubepit/desktop bench -- --outputJson ../../perf-results/frontend-bench.json"`), `.gitignore` (`perf-results/`)
+- Modify: `package.json` (root script `"perf:bench": "pnpm --filter @kubepit/desktop bench --outputJson ../../perf-results/frontend-bench.json"`; no `--`, which pnpm forwards to Vitest, so the flag was ignored), `.gitignore` (`perf-results/`)
 
 **Interfaces:**
 - Consumes: `generateScaleObjects` (Task 6).
@@ -520,14 +520,14 @@ git commit -m "perf(mock): scaled demo clusters (?scale=, &churn=) and backend-l
     - `logs/record_index_50k`: `new RecordIndex().ingest(50 000 mixed RawLine)`;
     - `table/filter_sort_20k`: `filterItems` + `sortItems` on `l` pods sorted by the default column.
 
-- [ ] **Step 1: Write the bench files** with `bench('<id>', fn, { time: 2000 })`. Build inputs once at module scope.
+- [x] **Step 1: Write the bench files** with `bench('<id>', fn, { time: 2000 })`. Build inputs once at module scope.
 
-- [ ] **Step 2: Run them**
+- [x] **Step 2: Run them**
 
 Run: `pnpm perf:bench && node -e "console.log(Object.keys(require('./perf-results/frontend-bench.json')).length > 0)"`
 Expected: every id appears in the bench output table; the JSON exists.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/desktop/src package.json .gitignore
@@ -541,7 +541,8 @@ git commit -m "perf(bench): Vitest benches for topology, health, netpol, logs an
 **Files:**
 - Create: `apps/desktop/src/lib/perf/stats.ts`, `apps/desktop/src/lib/perf/probe.ts`
 - Modify: `apps/desktop/src/main.tsx:15-17` (install the probe global)
-- Modify: `apps/desktop/src/components/workbench/table/ResourcePage.tsx` (marks), `components/workbench/data/watchCache.ts:108-145` (apply → flush duration), `components/workbench/topology/TopologyMap.tsx:98-120` (build/view/layout), `components/workbench/health/useHealthScan.ts:~226` (scan duration), `components/workbench/ViewPanes.tsx` (view switch)
+- Modify: `apps/desktop/src/components/workbench/table/ResourcePage.tsx` (marks), `components/workbench/data/watchCache.ts:108-145` (apply → commit: the batches' apply cost plus flush start → React commit), `components/workbench/topology/TopologyMap.tsx:98-120` (build/view/layout), `components/workbench/health/useHealthScan.ts:~226` (scan duration), `components/workbench/ViewPanes.tsx` (view switch)
+  - As built: the driver is `apps/desktop/src/lib/perf/driver.ts`, a lazy chunk that `main.tsx` loads only while the probe is on, and `installPerfGlobal` lives in `lib/perf/global.ts`, which only that chunk imports (the entry bundle never names the global); `map:build` is timed in `topology/useTopologyData.ts` (where the graph is built); the view switch is in `components/workbench/tabs/ViewPanes.tsx`.
 - Test: `apps/desktop/src/lib/perf/stats.test.ts`, `apps/desktop/src/lib/perf/probe.test.ts`
 
 **Interfaces:**
@@ -559,9 +560,9 @@ git commit -m "perf(bench): Vitest benches for topology, health, netpol, logs an
     - `heap(): number | null` (`performance.memory` when present), `domNodes()`;
     - `watchStats()` (watchCache entries: key, listeners, items), `mockWatchStats()`;
     - `report()`, `reset()`.
-  - Recorded ids: `table:ttfr` (navigate → first non-empty rows committed), `table:synced`, `watch:apply` (with `items`), `map:build`, `map:view`, `map:layout`, `health:scan`, `view:switch`.
+  - Recorded ids: `table:ttfr` (navigate → first non-empty rows committed), `table:synced`, `watch:apply` (applying the batches plus flush start → React commit, without the frame wait; meta `items`, `applyMs`, `flushMs`, `commitMs` and `latencyMs`, first batch → commit), `map:build`, `map:view`, `map:layout`, `health:scan`, `view:switch`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // apps/desktop/src/lib/perf/stats.test.ts
@@ -610,21 +611,21 @@ describe('probe', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm --filter @kubepit/desktop test -- src/lib/perf`
 Expected: FAIL (modules missing).
 
-- [ ] **Step 3: Implement the probe and the instrumentation.**
+- [x] **Step 3: Implement the probe and the instrumentation.**
   - Every instrumentation call is `if (perfEnabled()) …` or a no-op function, so disabled builds do no work beyond one boolean check.
   - `scrollTable` finds the active table's scroll container (`[role="rowgroup"]`'s scroll parent). It scrolls with `requestAnimationFrame` at 2 000 px/s and collects frame deltas and long tasks (`PerformanceObserver('longtask')`).
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck && pnpm --filter @kubepit/desktop build`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/src
@@ -638,6 +639,7 @@ git commit -m "perf(ui): dev-only in-app probe (?perf=1) for rows, scrolling, ma
 **Files:**
 - Modify: `package.json` (root devDependency `playwright` `^1.55.0`; script `"perf:ui": "node scripts/perf/ui-perf.mjs"`)
 - Create: `scripts/perf/lib.mjs`, `scripts/perf/ui-perf.mjs`
+- Create: `scripts/perf/index.js` (as built: Node 22 runs a directory argument of `node --test` as a module instead of searching it; this index loads every `*.test.mjs` beside it, so `node --test scripts/perf/` keeps working)
 - Test: `scripts/perf/lib.test.mjs`
 
 **Interfaces:**
@@ -650,8 +652,15 @@ git commit -m "perf(ui): dev-only in-app probe (?perf=1) for rows, scrolling, ma
     - `soakSummary(samples: Array<{ minute: number; heap: number; dom: number }>): { heapRatio: number; domDrift: number }`. The ratio is the last sample's heap ÷ the first sample at or after minute 5; drift is `(lastDom − firstDom) / firstDom`.
     - `resultIds(preset, measurements): Record<string, number>`. It maps to the `ui/*` ids in the spec budgets table (`ui/ttfr_pods_<preset>` and so on).
   - Safety: the driver aborts if `page.evaluate(() => '__TAURI_INTERNALS__' in window)` is true, and only navigates to `http://localhost:<port>`.
+  - As built:
+    - Every request outside the preview server is aborted (`isAllowedUrl`).
+    - The result file is `{ meta, results: { "<id>": { value, unit } }, raw }`.
+    - Besides the budget ids, it writes `ui/scroll_p95_frame_<p>`, `ui/scroll_long_task_max_<p>` and `ui/health_long_task_max_<p>`, the other parts of those budgets.
+    - Each scenario runs in a fresh page, so no scenario reuses another's cached watches.
+    - `connect` lands on a view without watches. The overview's health card would otherwise warm the pods cache.
+    - `ui/map_*` runs from opening the map to two frames after its synced view. `ui/map_leave` switches from the synced all-namespaces map to the overview.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```js
 // scripts/perf/lib.test.mjs
@@ -674,15 +683,15 @@ test('resultIds names results like the budgets', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `node --test scripts/perf/`
 Expected: FAIL (module missing).
 
-- [ ] **Step 3: Implement.** Each scenario calls the probe driver:
+- [x] **Step 3: Implement.** Each scenario calls the probe driver:
   - `ttfr`: `connect('c-scale-<p>')`, `openKind(…, 'pods')`, then poll `report()` for `table:ttfr` and `table:synced`.
   - `scroll`: `scrollTable(5000)`.
-  - `apply`: needs churn; run for 20 s and take the p95 of `watch:apply`.
+  - `apply`: needs churn; run for 20 s and take the p95 of `watch:apply` (the work per flush; the frame wait is only in its `latencyMs`).
   - `map`: `openView(…, 'resource-map')` scoped to `ns-0001`, then all namespaces on `m`.
   - `health`: `health:scan` plus the long tasks.
   - `leave`: `switchView` from the map to the overview.
@@ -690,12 +699,12 @@ Expected: FAIL (module missing).
 
   Write the JSON result file.
 
-- [ ] **Step 4: Run the tests and one real pass**
+- [x] **Step 4: Run the tests and one real pass**
 
 Run: `node --test scripts/perf/ && pnpm --filter @kubepit/desktop build && pnpm exec playwright install chromium && pnpm perf:ui -- --preset s --scenarios ttfr,scroll`
 Expected: the tests pass, and `perf-results/ui.json` holds `ui/ttfr_pods_s` and `ui/scroll_fps_s`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add package.json pnpm-lock.yaml scripts/perf
