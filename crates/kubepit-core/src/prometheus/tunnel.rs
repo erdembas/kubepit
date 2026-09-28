@@ -211,12 +211,17 @@ type Entries = Arc<Mutex<HashMap<String, Cached>>>;
 /// Secret values of each cluster's tunnel, per connection and access
 /// settings, for at most [`SECRETS_TTL`]: an entry is dropped when it expires
 /// (a timer, even if nothing asks again), when it no longer matches, and on
-/// disconnect, removal and access changes ([`TunnelCache::forget`]).
+/// disconnect, removal and access changes ([`TunnelCache::forget`]). A read
+/// still in flight when the cluster is forgotten answers its own request but
+/// is not kept (the cluster's epoch moved on).
 pub struct TunnelCache {
     entries: Entries,
     /// Serialise reads per cluster, so parallel queries read the Secret once
     /// and one hung cluster does not hold up the others.
     fills: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Per cluster, bumped by [`TunnelCache::forget`]: a read that started
+    /// in an older epoch is not cached. Locked after `entries`, never before.
+    epochs: Mutex<HashMap<String, u64>>,
     generation: AtomicU64,
     ttl: Duration,
     setup_timeout: Duration,
@@ -253,6 +258,7 @@ impl TunnelCache {
         Self {
             entries: Entries::default(),
             fills: Mutex::default(),
+            epochs: Mutex::default(),
             generation: AtomicU64::new(0),
             ttl,
             setup_timeout,
@@ -288,24 +294,38 @@ impl TunnelCache {
             .clone()
     }
 
+    /// The current epoch of `cluster_id` (see [`Self::forget`]).
+    fn epoch(&self, cluster_id: &str) -> u64 {
+        self.epochs.lock().get(cluster_id).copied().unwrap_or(0)
+    }
+
+    /// Cache values read in `epoch`; values of an older epoch (the cluster
+    /// was forgotten while they were read) are discarded.
     fn insert(
         &self,
         cluster_id: &str,
         connected_at: Option<i64>,
         access: &PrometheusAccess,
         secrets: Arc<TunnelSecrets>,
+        epoch: u64,
     ) {
         let generation = self.generation.fetch_add(1, Ordering::Relaxed);
-        self.entries.lock().insert(
-            cluster_id.to_string(),
-            Cached {
-                connected_at,
-                access: access.clone(),
-                secrets,
-                at: Instant::now(),
-                generation,
-            },
-        );
+        {
+            let mut entries = self.entries.lock();
+            if self.epoch(cluster_id) != epoch {
+                return;
+            }
+            entries.insert(
+                cluster_id.to_string(),
+                Cached {
+                    connected_at,
+                    access: access.clone(),
+                    secrets,
+                    at: Instant::now(),
+                    generation,
+                },
+            );
+        }
         // Values never outlive the TTL, even when nothing asks again.
         let (entries, ttl, id) = (
             Arc::downgrade(&self.entries),
@@ -358,6 +378,7 @@ impl TunnelCache {
         if let Some(hit) = self.get_at(cluster_id, connected_at, access, Instant::now()) {
             return Ok(hit);
         }
+        let epoch = self.epoch(cluster_id);
         let fill = self.fill_lock(cluster_id);
         let work = async {
             let _filling = fill.lock().await;
@@ -365,7 +386,7 @@ impl TunnelCache {
                 return Ok(hit);
             }
             let secrets = Arc::new(read.await?);
-            self.insert(cluster_id, connected_at, access, secrets.clone());
+            self.insert(cluster_id, connected_at, access, secrets.clone(), epoch);
             Ok(secrets)
         };
         tokio::time::timeout(self.setup_timeout, work)
@@ -387,9 +408,18 @@ impl TunnelCache {
             })?
     }
 
-    /// Drop the values of a cluster (disconnect, removal, access changes).
+    /// Drop the values of a cluster (disconnect, removal, access changes),
+    /// and start a new epoch so a read still in flight is not kept.
     pub fn forget(&self, cluster_id: &str) {
-        self.entries.lock().remove(cluster_id);
+        {
+            let mut entries = self.entries.lock();
+            entries.remove(cluster_id);
+            *self
+                .epochs
+                .lock()
+                .entry(cluster_id.to_string())
+                .or_default() += 1;
+        }
         self.fills.lock().remove(cluster_id);
     }
 
@@ -406,7 +436,7 @@ impl TunnelCache {
             credentials: Credentials("Bearer t0k".into()),
             ca: None,
         });
-        self.insert(cluster_id, None, access, secrets);
+        self.insert(cluster_id, None, access, secrets, self.epoch(cluster_id));
     }
 }
 
@@ -1016,6 +1046,51 @@ j6EzTBQKCIK44Ht1hGckQEbsh5M4xlh8CvAbHO7lGMeusAjsKyS4dyiR
             .await
             .unwrap();
         assert_eq!(reads.load(Ordering::SeqCst), 1, "cached after the read");
+    }
+
+    #[tokio::test]
+    async fn a_read_in_flight_during_forget_is_not_kept() {
+        // Disconnect or an access change forgets the cluster while its Secret
+        // is being read: the read still answers its own request, but its
+        // values must not be cached for the next one.
+        let cache = Arc::new(TunnelCache::default());
+        let access = secured("");
+        let (release, released) = tokio::sync::oneshot::channel::<()>();
+        let (started, reading) = tokio::sync::oneshot::channel::<()>();
+        let in_flight = {
+            let (cache, access) = (cache.clone(), access.clone());
+            tokio::spawn(async move {
+                let read = async {
+                    let _ = started.send(());
+                    let _ = released.await;
+                    read_ok().await
+                };
+                cache.secrets_with("c1", None, &access, read).await
+            })
+        };
+        reading.await.unwrap();
+        cache.forget("c1");
+        release.send(()).unwrap();
+        assert!(
+            in_flight.await.unwrap().is_ok(),
+            "its own request is answered"
+        );
+        assert!(!cache.holds("c1"), "a stale fill is discarded");
+
+        // The next request reads again, and that read is kept.
+        let reads = std::sync::atomic::AtomicUsize::new(0);
+        let counted = || async {
+            reads.fetch_add(1, Ordering::SeqCst);
+            read_ok().await
+        };
+        for _ in 0..2 {
+            cache
+                .secrets_with("c1", None, &access, counted())
+                .await
+                .unwrap();
+        }
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+        assert!(cache.holds("c1"));
     }
 
     #[tokio::test]
