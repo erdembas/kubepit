@@ -19,7 +19,8 @@
     "tauri:build:local": "pnpm --filter @kubepit/desktop tauri:build:local",
     "typecheck": "pnpm -r typecheck",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,css,html}\"",
-    "i18n:check": "node scripts/check-i18n.mjs"
+    "i18n:check": "node scripts/check-i18n.mjs",
+    "test:ui": "pnpm --filter @kubepit/desktop test"
   },
   "devDependencies": {
     "prettier": "^3.9.8",

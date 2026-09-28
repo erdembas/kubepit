@@ -10,7 +10,7 @@ import {
   type HealthScan,
   type HealthSummary,
 } from '@/lib/kube/health';
-import { useHealthIgnores, useHealthStore } from '@/store/useHealthStore';
+import { useHealthIgnores, useHealthOptIns, useHealthStore } from '@/store/useHealthStore';
 import type { ApiResourceInfo, Gvk } from '@/types';
 import { restartWatch, useWatch, type WatchSnapshot } from '../data/watchCache';
 import { useCostPrefs } from '../cost/prefs';
@@ -100,6 +100,7 @@ export function useHealthScan(
 ): HealthScanState {
   const locale = i18n.useLocale();
   const ignores = useHealthIgnores(clusterId);
+  const optIns = useHealthOptIns(clusterId);
   const key = scanKey(clusterId, namespaces);
 
   const gvks = useMemo(() => {
@@ -254,9 +255,9 @@ export function useHealthScan(
   }, [signature, ready, enabled, key]);
 
   const summary = useMemo(
-    () => (result ? summarize(result.scan, ignores) : null),
+    () => (result ? summarize(result.scan, ignores, optIns) : null),
     // Titles in groups are resolved at render time; the summary only needs the locale via the scan.
-    [result, ignores],
+    [result, ignores, optIns],
   );
 
   const issues: ListIssue[] = watched

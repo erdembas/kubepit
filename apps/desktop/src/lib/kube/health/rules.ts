@@ -16,6 +16,11 @@ export interface RuleDef {
   needs: readonly HealthKind[];
   /** Object-local rules can be evaluated from one object (details panel). */
   local: boolean;
+  /**
+   * Off by default: findings are computed but silenced (`isSilenced`) unless
+   * the cluster turned the rule on (`healthOptIns` in the workspace).
+   */
+  optIn: boolean;
   title: () => string;
   hint: () => string;
 }
@@ -30,8 +35,9 @@ function rule(
   local: boolean,
   title: () => string,
   hint: () => string,
+  opts: { optIn?: boolean } = {},
 ): RuleDef {
-  return { id, category, severity, needs, local, title, hint };
+  return { id, category, severity, needs, local, optIn: opts.optIn ?? false, title, hint };
 }
 
 export const RULES: readonly RuleDef[] = [
@@ -131,11 +137,21 @@ export const RULES: readonly RuleDef[] = [
   rule(
     'container-privilege-escalation',
     'security',
-    'info',
+    'warning',
     [],
     true,
     () => i18n.t('Privilege escalation allowed'),
     () => i18n.t('Set securityContext.allowPrivilegeEscalation: false on every container.'),
+  ),
+  rule(
+    'container-privilege-escalation-unset',
+    'security',
+    'info',
+    [],
+    true,
+    () => i18n.t('Containers that do not disable privilege escalation'),
+    () => i18n.t('Set securityContext.allowPrivilegeEscalation: false on every container.'),
+    { optIn: true },
   ),
   rule(
     'pod-host-path',

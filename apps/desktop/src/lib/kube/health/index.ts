@@ -2,6 +2,7 @@ export * from './types';
 export {
   gradeOf,
   isIgnored,
+  isSilenced,
   mergeFindings,
   objectFindings,
   scanHealth,
