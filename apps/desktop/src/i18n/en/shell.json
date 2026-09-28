@@ -212,6 +212,7 @@
   "Clear shown": "Clear shown",
   "Clear the audit log?": "Clear the audit log?",
   "Clear the filters or widen the time range.": "Clear the filters or widen the time range.",
+  "Clicking a desktop notification brings Kubepit to the front and opens the alert (within 10 seconds).": "Clicking a desktop notification brings Kubepit to the front and opens the alert (within 10 seconds).",
   "Close": "Close",
   "Close {label}": "Close {label}",
   "Close All": "Close All",

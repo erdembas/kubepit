@@ -1,10 +1,12 @@
 import * as i18n from '@/i18n';
 import { useEffect } from 'react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { openAlert } from '@/lib/alerts/actions';
+import { createClickThrough } from '@/lib/alerts/clickThrough';
 import { postNotification } from '@/lib/alerts/notify';
 import { alertSettingsOf, notifyDecision } from '@/lib/alerts/policy';
 import { alertBody, alertTitle } from '@/lib/alerts/text';
-import { events, ipc } from '@/lib/ipc';
+import { events, ipc, isTauri } from '@/lib/ipc';
 import { windowLabel } from '@/lib/windowSeed';
 import { useAlertStore } from '@/store/useAlertStore';
 import { useAppStore } from '@/store/useAppStore';
@@ -22,6 +24,9 @@ function clusterName(id: string) {
  * into notifications. Every window listens; only the window named by
  * `notice.notifier` posts OS notifications, and while Kubepit is in front
  * (with "only in the background" on) the focused window shows a toast.
+ * Desktop notifications report no clicks, so focusing this window shortly
+ * after one was posted in the background opens its alert
+ * (`lib/alerts/clickThrough.ts`).
  */
 export function useAlertNotifications() {
   useEffect(() => {
@@ -29,6 +34,7 @@ export function useAlertNotifications() {
     const unlisten: Array<() => void> = [];
     let queued: AlertNotice[] = [];
     let timer: number | undefined;
+    const clickThrough = createClickThrough();
 
     const deliver = async () => {
       const batch = queued;
@@ -73,7 +79,10 @@ export function useAlertNotifications() {
               onClick: () => useAppStore.setState({ rightPanel: 'alerts' }),
             };
       try {
-        await postNotification(notification);
+        const background = !document.hasFocus();
+        const posted = await postNotification(notification);
+        // Browser notifications open the alert themselves (`notify.ts`).
+        if (posted && isTauri && background) clickThrough.posted(notification.onClick, Date.now());
       } catch (e) {
         console.warn('alert notification failed', e);
       }
@@ -98,12 +107,21 @@ export function useAlertNotifications() {
             .catch(() => {});
         }),
       );
+      if (isTauri) {
+        // Clicking a desktop notification brings Kubepit to the front.
+        unlisten.push(
+          await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+            if (focused) clickThrough.focused(Date.now())?.();
+          }),
+        );
+      }
       if (disposed) unlisten.forEach((fn) => fn());
     })();
 
     return () => {
       disposed = true;
       window.clearTimeout(timer);
+      clickThrough.clear();
       unlisten.forEach((fn) => fn());
     };
   }, []);

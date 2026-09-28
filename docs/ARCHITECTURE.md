@@ -364,9 +364,15 @@ notifications and the notification center (status bar bell → right panel
   window instead while Kubepit is in front. Titles and bodies are built in
   the UI's current language (`lib/alerts/text.ts`); reasons, names and
   Kubernetes messages stay verbatim. Desktop notifications go through
-  `tauri-plugin-notification` (clicking one focuses Kubepit; the plugin
-  reports no clicks on desktop), browser previews use the web
-  Notification API and open the alert on click.
+  `tauri-plugin-notification`, which reports no clicks on desktop (actions
+  are mobile-only); clicking one focuses Kubepit. So the notifier window
+  remembers the target of the last notification it posted while not
+  focused (`lib/alerts/clickThrough.ts`: the alert, or the notification
+  center for a group) and opens it when the window gains focus within 10 s;
+  the target is one-shot and a newer notification replaces it. Limitation:
+  bringing that window to the front by other means within 10 s does the
+  same. Browser previews use the web Notification API and open the alert
+  on click.
 - **Settings** (`Settings.alerts`): master switch, disabled reasons,
   include/exclude namespace globs, disabled clusters (not watched), muted
   clusters (recorded, never notify; until a time or indefinitely), global
