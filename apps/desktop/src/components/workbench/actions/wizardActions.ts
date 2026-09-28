@@ -7,6 +7,7 @@ import { useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { ClusterDef, KubeObject } from '@/types';
 import { openWizard } from '../wizards/wizardStore';
 import type { ResourceAction } from './resourceActions';
+import { roleBindingAccess, roleBindingNamespace } from './roleBindingTarget';
 
 /**
  * Resource wizards started from an object: Expose (workloads and pods),
@@ -64,15 +65,16 @@ export function wizardActions({
         }),
     });
   if (obj.kind === 'Role' || obj.kind === 'ClusterRole') {
-    // A ClusterRole is bound in the namespace the workbench shows (or the cluster default).
+    // A ClusterRole is bound in the namespace the workbench shows (or the cluster default),
+    // so the permission check asks about that namespace, not cluster-wide.
     const selected = useWorkbenchStore.getState().namespaces[clusterId];
-    const namespace =
-      ns ?? (selected?.length === 1 ? selected[0]! : (cluster?.default_namespace ?? 'default'));
+    const namespace = roleBindingNamespace(ns, selected, cluster);
     out.push({
       id: 'add-rolebinding',
       label: i18n.t('Add RoleBinding…'),
       icon: ShieldCheck,
       mutating: true,
+      access: roleBindingAccess(namespace),
       run: () =>
         openWizard({
           kind: 'serviceaccount',

@@ -287,10 +287,13 @@ typed confirmations, `read_only` in the backend, RBAC all unchanged).
   applied in order.
 - Entry points: a Create menu on the resource page's "+" for kinds with
   wizards (`wizards/catalog.ts`), object actions Expose / Create Ingress /
-  Add RoleBinding (`actions/wizardActions.ts`, gated in `ACTION_ACCESS`),
-  the create editor's template picker and the palette (`create secret`,
-  `expose`, …; not on read-only clusters). "Job from a CronJob" lists the
-  namespace's CronJobs and runs their existing "Trigger now" action.
+  Add RoleBinding (`actions/wizardActions.ts`, gated in `ACTION_ACCESS`;
+  on a Role or ClusterRole, `actions/roleBindingTarget.ts` picks the
+  namespace the wizard binds in and checks `create rolebindings` there,
+  never cluster-wide), the create editor's template picker and the palette
+  (`create secret`, `expose`, …; not on read-only clusters). "Job from a
+  CronJob" lists the namespace's CronJobs and runs their existing "Trigger
+  now" action.
 - Local files: `local_file_read` (`local_files.rs`) reads a file picked in
   the open dialog — regular files up to 1 MiB, bytes as base64 plus a UTF-8
   flag, content never logged, errors name only path and sizes.

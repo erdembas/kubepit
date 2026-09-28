@@ -767,7 +767,7 @@ git commit -m "fix(cost): one money format across the cost view, overview, dashb
   - `roleBindingNamespace(objNamespace: string | null, selected: readonly string[] | undefined, cluster: Pick<ClusterDef, 'default_namespace'> | undefined): string`.
   - `roleBindingAccess(namespace: string): AccessCheck[]`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // apps/desktop/src/components/workbench/actions/roleBindingTarget.test.ts
@@ -789,19 +789,19 @@ describe('Add RoleBinding target', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `pnpm --filter @kubepit/desktop test -- src/components/workbench/actions/roleBindingTarget.test.ts`
 Expected: FAIL (module missing).
 
-- [ ] **Step 3: Implement.** `roleBindingAccess` returns `[accessCheck('create', toGvk(BUILTIN.RoleBinding), { namespace })]`. The Role/ClusterRole branch in `wizardActions` computes `namespace` with `roleBindingNamespace` and sets `access: roleBindingAccess(namespace)`, so `requiredAccess` no longer applies.
+- [x] **Step 3: Implement.** `roleBindingAccess` returns `[accessCheck('create', toGvk(BUILTIN.RoleBinding), { namespace })]`. The Role/ClusterRole branch in `wizardActions` computes `namespace` with `roleBindingNamespace` and sets `access: roleBindingAccess(namespace)`, so `requiredAccess` no longer applies.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/src
