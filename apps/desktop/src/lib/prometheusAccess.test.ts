@@ -6,7 +6,9 @@ import {
   accessFromDraft,
   accessKey,
   clusterMatchers,
+  credentialsAllowed,
   labelProblem,
+  withoutCredentials,
 } from './prometheusAccess';
 
 const auto: PrometheusConfig = { mode: 'auto' };
@@ -82,6 +84,22 @@ describe('prometheus access drafts', () => {
     );
   });
 
+  it('send credentials only to a chosen service', () => {
+    expect(credentialsAllowed(https)).toBe(true);
+    expect(credentialsAllowed(auto)).toBe(false);
+    expect(credentialsAllowed({ mode: 'off' })).toBe(false);
+    const draft = {
+      ...accessDraft(saved),
+      labels: [{ name: 'cluster', value: 'prod' }],
+    };
+    // Detection: tenant and labels stay, credentials and TLS are dropped.
+    expect(accessFromDraft(draft, auto)).toEqual({
+      access: { tenant: 'team-a', cluster_labels: { cluster: 'prod' }, auth: null, tls: null },
+    });
+    expect(withoutCredentials(saved)).toEqual({ ...saved, auth: null, tls: null });
+    expect(withoutCredentials(undefined)).toBeUndefined();
+  });
+
   it('keep TLS only where it can apply', () => {
     const draft = {
       ...accessDraft(undefined),
@@ -94,7 +112,7 @@ describe('prometheus access drafts', () => {
       return 'access' in result ? result.access.tls : 'error';
     };
     expect(tlsOf(https)).toEqual({ ca: null, insecure_skip_verify: true });
-    expect(tlsOf(auto)).toEqual({ ca: null, insecure_skip_verify: true });
+    expect(tlsOf(auto)).toBeNull();
     expect(tlsOf(http)).toBeNull();
     const noAuth = accessFromDraft({ ...draft, auth: 'none' }, https);
     expect('access' in noAuth && noAuth.access.tls).toBeNull();

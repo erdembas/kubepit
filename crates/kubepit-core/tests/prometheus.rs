@@ -855,3 +855,69 @@ async fn secret_values_stay_out_of_errors() {
     );
     assert_eq!(secret_reads(&server.log), 2, "new settings, new read");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn credentials_never_reach_a_detected_service() {
+    // Anyone who may create a Service named like a Prometheus is a detection
+    // candidate, so credentials must never follow detection.
+    let secured = secured_router();
+    let detection = stack_router(Arc::default());
+    let server = start(Arc::new(move |req: &Request, log: &Log| {
+        if req.path.contains("/secrets/") || req.path.contains("/pods") {
+            secured(req, log)
+        } else {
+            detection(req, log)
+        }
+    }))
+    .await;
+    let (dir, app, _recorder, id) = setup(&server.url, true);
+    // Validation refuses credentials without a chosen service…
+    let mut def = app.cluster_def(&id).unwrap();
+    def.prometheus_access.auth = Some(PrometheusAuth::Bearer {
+        namespace: "monitoring".into(),
+        secret: "prom-auth".into(),
+        token_key: "token".into(),
+    });
+    assert!(app.cluster_update(def.clone()).is_err());
+    // …but a clusters.json written by an older build may still hold them.
+    let paths = Paths::new(dir.path().join("home"));
+    drop(app);
+    let mut stored: Vec<Value> =
+        serde_json::from_str(&std::fs::read_to_string(paths.clusters_file()).unwrap()).unwrap();
+    stored[0]["prometheus_access"] = serde_json::to_value(&def.prometheus_access).unwrap();
+    std::fs::write(
+        paths.clusters_file(),
+        serde_json::to_string(&stored).unwrap(),
+    )
+    .unwrap();
+    let app = Kubepit::open(paths, Arc::new(NullSink)).unwrap();
+    assert_eq!(
+        app.cluster_def(&id).unwrap().prometheus,
+        PrometheusConfig::Auto
+    );
+    assert!(app
+        .cluster_def(&id)
+        .unwrap()
+        .prometheus_access
+        .auth
+        .is_some());
+
+    let st = app.prometheus_status(&id, false).await.unwrap();
+    assert_ne!(st.state, PrometheusState::Available, "{st:?}");
+    let err = st.error.unwrap_or_default();
+    assert!(err.contains("chosen in the cluster settings"), "{err}");
+    let err = app
+        .prometheus_query_range(&id, "up", &last_hour())
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("not reachable"), "{err}");
+    // Neither the Secret nor any candidate was touched.
+    let log = server.log.lock().clone();
+    assert!(log.iter().all(|r| !r.path.contains("/secrets/")));
+    assert!(log.iter().all(|r| !r.path.contains("/portforward")));
+    assert!(log.iter().all(|r| !r.path.contains("/proxy")));
+    assert!(log
+        .iter()
+        .all(|r| r.headers.iter().all(|(_, v)| !v.contains("s3cret"))));
+}

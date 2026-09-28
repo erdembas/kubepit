@@ -74,6 +74,9 @@ function blank(state: PrometheusStatus['state']): PrometheusStatus {
 function credentialsProblem(cluster: ClusterDef): string | null {
   const auth = cluster.prometheus_access?.auth;
   if (!auth) return null;
+  // Like the backend: never to a detected service.
+  if (cluster.prometheus?.mode !== 'service')
+    return 'Prometheus credentials are only sent to a service chosen in the cluster settings, never to a detected one: choose the service, or remove the credentials';
   const secret = find(getDb(cluster.id), 'secrets', auth.namespace, auth.secret);
   if (!secret)
     return `could not read Secret ${auth.namespace}/${auth.secret}: secrets "${auth.secret}" not found`;

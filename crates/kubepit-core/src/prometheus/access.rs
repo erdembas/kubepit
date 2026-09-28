@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use super::promql::quote;
 use crate::service_proxy::valid_name;
-use crate::types::PrometheusConfig;
+use crate::types::{PrometheusConfig, PrometheusService};
 
 /// Labels Kubepit's own queries select or group by. A cluster label with one
 /// of these names would change what the presets mean.
@@ -262,6 +262,29 @@ impl TunnelTls {
     }
 }
 
+/// Error when credentials would go to a service nobody chose.
+pub const CREDENTIALS_NEED_A_SERVICE: &str = "Prometheus credentials are only sent to a service \
+     chosen in the cluster settings, never to a detected one: choose the service, or remove the \
+     credentials";
+
+impl PrometheusAccess {
+    /// Credentials (and the tunnel) need an explicitly chosen service:
+    /// detection ranks services from a cluster-wide list, so anyone who may
+    /// create a Service named like a Prometheus could otherwise receive them.
+    pub fn ensure_source(&self, config: &PrometheusConfig) -> Result<()> {
+        if self.auth.is_some() && !matches!(config, PrometheusConfig::Service { .. }) {
+            bail!(CREDENTIALS_NEED_A_SERVICE);
+        }
+        Ok(())
+    }
+}
+
+/// May credentials go to `service`? Only when it is the service `config`
+/// names (never a detected candidate).
+pub fn credentials_allowed(config: &PrometheusConfig, service: &PrometheusService) -> bool {
+    config.service().as_ref() == Some(service)
+}
+
 /// Two selectors that can never match the same series: some shared label
 /// has different values.
 pub fn provably_disjoint(a: &PrometheusAccess, b: &PrometheusAccess) -> bool {
@@ -382,6 +405,44 @@ mod tests {
             PrometheusAccess::default().normalized().unwrap(),
             PrometheusAccess::default()
         );
+    }
+
+    #[test]
+    fn credentials_need_a_chosen_service() {
+        let svc = PrometheusConfig::Service {
+            namespace: "monitoring".into(),
+            service: "thanos-query".into(),
+            port: 9090,
+            scheme: PromScheme::Https,
+            path_prefix: String::new(),
+        };
+        let secured = PrometheusAccess {
+            auth: Some(bearer("monitoring", "prom-auth", "token")),
+            ..Default::default()
+        };
+        assert!(secured.ensure_source(&svc).is_ok());
+        for config in [PrometheusConfig::Auto, PrometheusConfig::Off] {
+            let err = secured.ensure_source(&config).unwrap_err().to_string();
+            assert!(err.contains("chosen in the cluster settings"), "{err}");
+        }
+        // Tenant and labels work with detection.
+        let shared = PrometheusAccess {
+            tenant: "team-a".into(),
+            ..access(&[("cluster", "prod")])
+        };
+        assert!(shared.ensure_source(&PrometheusConfig::Auto).is_ok());
+
+        // At runtime: only the configured service itself.
+        let configured = svc.service().unwrap();
+        assert!(credentials_allowed(&svc, &configured));
+        let detected = PrometheusService {
+            kind: crate::types::PrometheusKind::PrometheusOperator,
+            service: "prometheus-operated".into(),
+            ..configured.clone()
+        };
+        assert!(!credentials_allowed(&svc, &detected));
+        assert!(!credentials_allowed(&PrometheusConfig::Auto, &detected));
+        assert!(!credentials_allowed(&PrometheusConfig::Auto, &configured));
     }
 
     #[test]

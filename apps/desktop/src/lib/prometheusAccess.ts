@@ -84,11 +84,32 @@ export function accessConfigured(access: PrometheusAccess | undefined): boolean 
 }
 
 /**
- * Whether the tunnel's TLS settings apply: credentials are set and the
- * service may speak https (a configured `http` service never does).
+ * Credentials go only to a service chosen in the cluster settings, never to
+ * a detected one (anyone who may create a Service named like a Prometheus
+ * would be a candidate). The backend enforces the same rule.
+ */
+export function credentialsAllowed(config: PrometheusConfig): boolean {
+  return config.mode === 'service';
+}
+
+/** `access` without credentials and tunnel TLS (Prometheus off or detected). */
+export function withoutCredentials(
+  access: PrometheusAccess | undefined,
+): PrometheusAccess | undefined {
+  return access && { ...access, auth: null, tls: null };
+}
+
+/**
+ * Whether the tunnel's TLS settings apply: credentials are set for a chosen
+ * service that speaks https.
  */
 export function tlsApplies(draft: AccessDraft, config: PrometheusConfig): boolean {
-  return draft.auth !== 'none' && !(config.mode === 'service' && config.scheme === 'http');
+  return (
+    draft.auth !== 'none' &&
+    credentialsAllowed(config) &&
+    config.mode === 'service' &&
+    config.scheme === 'https'
+  );
 }
 
 const LABEL_NAME = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
@@ -158,7 +179,8 @@ export function accessFromDraft(
   }
   const key = (value: string) => value.trim();
   let auth: PrometheusAccess['auth'] = null;
-  if (draft.auth !== 'none') {
+  // Hidden and dropped unless a service is chosen (see `credentialsAllowed`).
+  if (draft.auth !== 'none' && credentialsAllowed(config)) {
     const namespace = key(draft.secretNamespace);
     const secret = key(draft.secretName);
     if (!validName(namespace))

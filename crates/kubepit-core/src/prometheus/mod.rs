@@ -169,6 +169,9 @@ pub(crate) struct Link<'a> {
     pub client: &'a Client,
     pub service: &'a PrometheusService,
     pub access: &'a PrometheusAccess,
+    /// `service` is the one the cluster settings name
+    /// ([`access::credentials_allowed`]); credentials go nowhere else.
+    pub credentials_allowed: bool,
     pub tunnels: &'a TunnelCache,
     pub cluster_id: &'a str,
     pub connected_at: Option<i64>,
@@ -185,6 +188,11 @@ impl Link<'_> {
         timeout: Duration,
     ) -> Result<PromData> {
         if self.access.auth.is_some() {
+            // Defence in depth: validation already refuses credentials
+            // without a chosen service (an older clusters.json may not).
+            if !self.credentials_allowed {
+                bail!(access::CREDENTIALS_NEED_A_SERVICE);
+            }
             let response = async {
                 let secrets = self
                     .tunnels
@@ -224,6 +232,8 @@ pub(crate) struct Source<'a> {
     pub service: PrometheusService,
     pub access: PrometheusAccess,
     pub tunnels: &'a TunnelCache,
+    /// See [`Link::credentials_allowed`].
+    pub credentials_allowed: bool,
 }
 
 impl Source<'_> {
@@ -232,6 +242,7 @@ impl Source<'_> {
             client: &self.client,
             service: &self.service,
             access: &self.access,
+            credentials_allowed: self.credentials_allowed,
             tunnels: self.tunnels,
             cluster_id: &self.cluster_id,
             connected_at: self.connected_at,
@@ -270,6 +281,8 @@ async fn detect_status(
         client,
         service,
         access: &cluster.prometheus_access,
+        // Detected candidates never qualify: only the configured service.
+        credentials_allowed: access::credentials_allowed(&cluster.prometheus, service),
         tunnels,
         cluster_id: &cluster.id,
         connected_at,
@@ -406,6 +419,7 @@ impl Kubepit {
                     cluster_id: cluster_id.to_string(),
                     client,
                     connected_at,
+                    credentials_allowed: access::credentials_allowed(&cluster.prometheus, &service),
                     service,
                     access: cluster.prometheus_access,
                     tunnels: &self.prometheus_tunnels,

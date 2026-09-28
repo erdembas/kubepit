@@ -459,7 +459,14 @@ An optional, richer metrics source next to the metrics-server history
   keys Kubernetes key names) and `tls` for an `https` service behind the
   tunnel (a CA from a ConfigMap or Secret key, else the system roots, or an
   explicit `insecure_skip_verify`). `cluster_add` and `cluster_update`
-  normalize it like `prometheus`. Two clusters that name the same
+  normalize it like `prometheus`. Credentials need an explicitly chosen
+  `service`: detection ranks services from a cluster-wide list, so anyone
+  who may create a Service named `prometheus-operated` (and a pod behind
+  it) would otherwise receive them. Validation refuses `auth` with `auto`
+  or `off`, and at runtime (`access::credentials_allowed`) only the
+  configured service itself gets them — with an older `clusters.json` that
+  still pairs `auto` with `auth`, requests fail instead. The cluster editor
+  shows the auth fields in service mode only. Two clusters that name the same
   hand-configured service with the same tenant and both declare cluster
   labels must have provably disjoint selectors (a shared label with
   different values); clusters without labels are not compared, since every
@@ -543,10 +550,10 @@ An optional, richer metrics source next to the metrics-server history
   line says "Cluster selector {…} is not added to your own queries." The
   cluster editor's Prometheus block has a collapsible "Shared or secured
   Prometheus" section (`cluster-editor/PrometheusAccessFields.tsx`,
-  container queries): the tenant, label pair rows, auth (none / bearer
-  token / basic auth with the Secret namespace, name and keys) and, where
-  the service may speak https, the CA reference and "Skip TLS
-  verification" with a warning badge. Inline checks
+  container queries): the tenant, label pair rows and, in service mode
+  only (a hint says why otherwise), auth (none / bearer token / basic auth
+  with the Secret namespace, name and keys) and, for an https service, the
+  CA reference and "Skip TLS verification" with a warning badge. Inline checks
   (`lib/prometheusAccess.ts`) mirror `PrometheusAccess::normalized`; the
   backend stays the final check. The status cache key of the UI includes
   the access settings, so a change re-reads the status. The demo backend

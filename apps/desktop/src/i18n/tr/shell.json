@@ -285,6 +285,7 @@
   "Create": "Oluştur",
   "Create & move": "Oluştur ve taşı",
   "Credential storage": "Kimlik bilgisi deposu",
+  "Credentials are only sent to a service chosen above, never to a detected one. Choose “Use a service” to add them.": "Kimlik bilgileri yalnızca yukarıda seçilen bir servise gönderilir, otomatik bulunan bir servise asla gönderilmez. Eklemek için “Bir servis kullan”ı seçin.",
   "Credentials stay in your kubeconfig files and are only sent to your clusters.": "Kimlik bilgileri kubeconfig dosyalarında kalır ve yalnızca kendi cluster'larına gönderilir.",
   "Currency": "Para birimi",
   "Current": "Geçerli",

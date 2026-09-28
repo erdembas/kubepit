@@ -114,7 +114,7 @@ Sources:
 | 19 | Exports (JSON, YAML fragment), lenses, summaries and risk scores are built in Rust | E | Kubepit has no TS test runner. Rust keeps KubeFit's export and lens test cases testable |
 | 20 | Background scans are opt-in per process (`Kubepit::set_recommendation_scans`) and per cluster (`Settings.recommendations.scan_clusters`). They run hourly by default, only while connected, one at a time per cluster and at most two at once | U-storage, O-background | Same pattern as alerts, the change journal and history persistence. Tests and headless tools never scan |
 | 21 | A source-config change invalidates the latest pointer: results are hidden with a note, and the next scheduled scan starts early | E (KubeFit behaviour 8) | Results from another Prometheus source must not pass as current |
-| 22 | Phase 7 (authenticated Prometheus) is optional: auth goes through an in-process port-forward stream, the tenant header through the proxy, and the label selector is injected into every preset | U3 | The API server's service proxy does not forward `Authorization` |
+| 22 | Phase 7 (authenticated Prometheus) is optional: auth goes through an in-process port-forward stream, the tenant header through the proxy, and the label selector is injected into every preset. Credentials are allowed only with an explicitly chosen `service`, never with `auto` detection | U3, review | The API server's service proxy does not forward `Authorization`. Detection ranks services from a cluster-wide list, so anyone who may create a Service named like a Prometheus (and a pod behind it) would otherwise receive the credentials |
 
 ## 5. Architecture
 
@@ -1021,6 +1021,10 @@ idle ─(due or Scan now)─► queued ─(global semaphore 2 acquired)─► ru
     only while a tunnel exists (at most 5 minutes cached).
   - They are never logged, persisted, returned to the UI or quoted in errors.
   - Only the Secret *reference* is stored in `clusters.json`.
+  - Credentials are sent only to the service chosen in the cluster settings
+    (`prometheus.mode = service`). `cluster_add` / `cluster_update` refuse `auth` with
+    `auto` or `off`, and at runtime a detected candidate never gets them (an older
+    `clusters.json` may still hold such a pair): the request fails instead.
   - The tunnel is an in-process port-forward stream with no local listener, so other
     local processes cannot use it.
   - The tenant is a header value: at most 200 visible ASCII characters (no spaces,
@@ -1031,8 +1035,9 @@ idle ─(due or Scan now)─► queued ─(global semaphore 2 acquired)─► ru
 
 Marked optional: drop it if it is overkill (user decision 3).
 
-**Configuration.** `ClusterDef.prometheus_access: PrometheusAccess`, which applies to both
-`auto` and `service` modes:
+**Configuration.** `ClusterDef.prometheus_access: PrometheusAccess`. The tenant and the
+cluster labels apply to both `auto` and `service` modes; `auth` (and so the tunnel and its
+TLS settings) only to `service`:
 
 ```rust
 pub struct PrometheusAccess {
@@ -1052,7 +1057,8 @@ pub enum PrometheusAuth {                      // serde tag "type"
   `owner_name`, `owner_kind`, `job`, `instance`, `replicaset`, `job_name`, `reason`;
 - values: non-empty;
 - tenant: at most 200 visible ASCII characters (a header value);
-- Secret and key names: DNS-1123;
+- Secret names: DNS-1123; Secret keys: Kubernetes key names (`[-._a-zA-Z0-9]`);
+- `auth` needs `prometheus.mode = service` (never detection, never off);
 - two clusters that resolve to the same configured service and tenant must have
   **provably disjoint** selectors, i.e. some shared key with different values (KubeFit's
   rule).
@@ -1085,8 +1091,8 @@ KubeFit.
 **Transport:**
 - *No auth:* the service proxy as today, plus `X-Scope-OrgID` when a tenant is set. The
   proxy forwards custom headers; Loki already does this.
-- *With auth:* `prometheus/tunnel.rs` opens `pods/portforward` to a ready pod behind the
-  service. It reuses `portforward::resolve_target` (made `pub(crate)`), which re-resolves
+- *With auth* (a configured service only): `prometheus/tunnel.rs` opens
+  `pods/portforward` to a ready pod behind the service. It reuses `portforward::resolve_target` (made `pub(crate)`), which re-resolves
   per connection and survives restarts. It speaks HTTP/1.1 over the stream (hyper client
   connection) with `Authorization: Bearer …` or `Basic …` and the tenant header.
   - `https` services use TLS over the stream (tokio-rustls) with server name

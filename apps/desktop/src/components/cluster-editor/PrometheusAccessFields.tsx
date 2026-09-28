@@ -8,6 +8,7 @@ import { Switch } from '@/components/ui/Switch';
 import { cn } from '@/lib/cn';
 import {
   accessFromDraft,
+  credentialsAllowed,
   labelProblem,
   tlsApplies,
   type AccessCaKind,
@@ -141,21 +142,30 @@ export function PrometheusAccessFields({
             </span>
           </div>
 
-          <div>
-            <span className={SECTION_LABEL}>{i18n.t('Authentication')}</span>
-            <div className="flex flex-wrap items-center gap-1">
-              <Chip active={value.auth === 'none'} onClick={() => set('auth', 'none')}>
-                {i18n.t('None')}
-              </Chip>
-              <Chip active={value.auth === 'bearer'} onClick={() => set('auth', 'bearer')}>
-                {i18n.t('Bearer token')}
-              </Chip>
-              <Chip active={value.auth === 'basic'} onClick={() => set('auth', 'basic')}>
-                {i18n.t('Basic auth')}
-              </Chip>
+          {!credentialsAllowed(config) && (
+            <p className="text-fg-dim text-[11px]">
+              {i18n.t(
+                'Credentials are only sent to a service chosen above, never to a detected one. Choose “Use a service” to add them.',
+              )}
+            </p>
+          )}
+          {credentialsAllowed(config) && (
+            <div>
+              <span className={SECTION_LABEL}>{i18n.t('Authentication')}</span>
+              <div className="flex flex-wrap items-center gap-1">
+                <Chip active={value.auth === 'none'} onClick={() => set('auth', 'none')}>
+                  {i18n.t('None')}
+                </Chip>
+                <Chip active={value.auth === 'bearer'} onClick={() => set('auth', 'bearer')}>
+                  {i18n.t('Bearer token')}
+                </Chip>
+                <Chip active={value.auth === 'basic'} onClick={() => set('auth', 'basic')}>
+                  {i18n.t('Basic auth')}
+                </Chip>
+              </div>
             </div>
-          </div>
-          {value.auth !== 'none' && (
+          )}
+          {credentialsAllowed(config) && value.auth !== 'none' && (
             <>
               <p className="text-fg-dim -mt-1.5 text-[11px]">
                 {i18n.t(

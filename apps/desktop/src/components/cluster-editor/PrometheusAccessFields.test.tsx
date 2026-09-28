@@ -47,6 +47,19 @@ describe('PrometheusAccessFields', () => {
     expect(html).toContain('Token key');
     expect(html).toContain('thanos-query.monitoring.svc');
     expect(html).toContain('Insecure');
+    // Detection never gets credentials: no auth fields, a hint instead.
+    const detected = render(
+      accessDraft({
+        tenant: '',
+        cluster_labels: { cluster: 'prod' },
+        auth: { type: 'bearer', namespace: 'monitoring', secret: 'prom-auth', token_key: 'token' },
+        tls: null,
+      }),
+      { mode: 'auto' },
+    );
+    expect(detected).not.toContain('Bearer token');
+    expect(detected).not.toContain('value="prom-auth"');
+    expect(detected).toContain('Credentials are only sent to a service chosen above');
     // No TLS settings for a plain-http service.
     const plain = render(accessDraft({ tenant: '', cluster_labels: {}, auth: null, tls: null }), {
       ...https,

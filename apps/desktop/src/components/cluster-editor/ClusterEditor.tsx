@@ -9,7 +9,7 @@ import { saveCluster } from '@/lib/clusterActions';
 import { guessEnvironment, prettyContextName } from '@/lib/clusterMeta';
 import { cn } from '@/lib/cn';
 import { ipc, isTauri } from '@/lib/ipc';
-import { accessDraft, accessFromDraft } from '@/lib/prometheusAccess';
+import { accessDraft, accessFromDraft, withoutCredentials } from '@/lib/prometheusAccess';
 import { useAppStore, type ClusterEditorState } from '@/store/useAppStore';
 import type { ClusterDef, ClusterInput, KubeconfigSource } from '@/types';
 import { ClusterFields, type ClusterFieldValues } from './ClusterFields';
@@ -144,10 +144,11 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
     if (proxyProblem) return setError(proxyProblem);
     const metrics = prometheusConfig(prometheus);
     if ('error' in metrics) return setError(metrics.error);
-    // Hidden while Prometheus is off: kept as saved.
+    // Hidden while Prometheus is off: kept as saved, without credentials
+    // (they need a chosen service).
     const secured =
       metrics.config.mode === 'off'
-        ? { access: editing?.prometheus_access }
+        ? { access: withoutCredentials(editing?.prometheus_access) }
         : accessFromDraft(access, metrics.config);
     if ('error' in secured) return setError(secured.error);
     const logs = lokiConfig(loki);

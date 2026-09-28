@@ -122,6 +122,10 @@ fn validate_input(index: usize, input: &ClusterInput) -> Result<(Origin, Sources
             .normalized()
             .with_context(|| label.clone())?,
     };
+    sources
+        .prometheus_access
+        .ensure_source(&sources.prometheus)
+        .with_context(|| label.clone())?;
     let origin = match (
         non_blank(&input.kubeconfig_path),
         non_blank(&input.kubeconfig_text),
@@ -289,6 +293,7 @@ impl Kubepit {
             loki: cluster.loki.normalized()?,
             proxy_url,
         };
+        next.prometheus_access.ensure_source(&next.prometheus)?;
         if target_changed {
             let kc = self.load_cluster_source(&next)?;
             kubeconfig::ensure_context(&kc, &next.context)?;
@@ -558,6 +563,61 @@ mod tests {
         assert!(!run.exists());
         assert!(file.exists(), "user kubeconfig must never be deleted");
         assert!(app.cluster_list().is_empty());
+    }
+
+    #[test]
+    fn prometheus_credentials_need_a_chosen_service() {
+        use crate::prometheus::access::{PrometheusAccess, PrometheusAuth};
+        use crate::types::PromScheme;
+
+        let (_dir, app, _) = setup();
+        let secured = PrometheusAccess {
+            auth: Some(PrometheusAuth::Bearer {
+                namespace: "monitoring".into(),
+                secret: "prom-auth".into(),
+                token_key: "token".into(),
+            }),
+            ..Default::default()
+        };
+        let service = PrometheusConfig::Service {
+            namespace: "monitoring".into(),
+            service: "thanos-query".into(),
+            port: 9090,
+            scheme: PromScheme::Https,
+            path_prefix: String::new(),
+        };
+        let add = |prometheus: PrometheusConfig| ClusterInput {
+            kubeconfig_text: Some(TWO_CONTEXTS.to_string()),
+            prometheus,
+            prometheus_access: secured.clone(),
+            ..input("dev")
+        };
+        // Detection (or nothing) with credentials is refused before anything is stored.
+        for config in [PrometheusConfig::Auto, PrometheusConfig::Off] {
+            let err = app.cluster_add(vec![add(config)]).unwrap_err();
+            assert!(
+                format!("{err:#}").contains("chosen in the cluster settings"),
+                "{err:#}"
+            );
+        }
+        assert!(app.cluster_list().is_empty());
+        let added = app.cluster_add(vec![add(service)]).unwrap().remove(0);
+        assert!(added.prometheus_access.auth.is_some());
+
+        // Switching back to detection keeps the credentials out.
+        let mut auto = added.clone();
+        auto.prometheus = PrometheusConfig::Auto;
+        let err = app.cluster_update(auto.clone()).unwrap_err();
+        assert!(
+            err.to_string().contains("chosen in the cluster settings"),
+            "{err}"
+        );
+        assert_eq!(
+            app.cluster_def(&added.id).unwrap().prometheus,
+            added.prometheus
+        );
+        auto.prometheus_access.auth = None;
+        app.cluster_update(auto).unwrap();
     }
 
     #[test]

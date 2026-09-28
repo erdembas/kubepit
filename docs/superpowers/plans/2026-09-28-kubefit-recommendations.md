@@ -2555,6 +2555,10 @@ git commit -m "feat(alerts): optional alert for new high-confidence savings"
     name, pub key }`.
   - `PrometheusAccess::normalized(self) -> Result<Self>`: spec §14 validation; the
     reserved keys are listed verbatim.
+  - `PrometheusAccess::ensure_source(&self, config: &PrometheusConfig) -> Result<()>`:
+    `auth` needs `PrometheusConfig::Service` (never `Auto` or `Off`); called by
+    `cluster_add` / `cluster_update`. `credentials_allowed(config, service)` is the
+    runtime check (only the configured service itself).
   - `pub fn matchers(&self) -> String`: `k="v"` pairs through `quote()`, sorted by key.
   - `pub fn provably_disjoint(a: &PrometheusAccess, b: &PrometheusAccess) -> bool`.
 
@@ -2681,7 +2685,8 @@ git commit -m "feat(prometheus): cluster-label selector on every preset and tena
     rustls, all already in `Cargo.lock`)
   - `crates/kubepit-core/src/portforward.rs:352` (`resolve_target` becomes `pub(crate)`)
   - `crates/kubepit-core/src/prometheus/mod.rs` (`prometheus_get` chooses the tunnel
-    when `auth` is set)
+    when `auth` is set, and only for the configured service: a detected candidate
+    never gets the credentials, the request fails with the validation message)
 - Test:
   - the tests module of `tunnel.rs`
   - `crates/kubepit-core/tests/recommendations.rs`
