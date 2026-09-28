@@ -32,8 +32,11 @@ export interface TopologyList {
 
 export interface TopologyInput {
   lists: readonly TopologyList[];
-  /** Namespaces the lists are scoped to ([] = all namespaces). */
-  namespaces: readonly string[];
+  /**
+   * Namespaces the lists are scoped to: `[]` = all namespaces, `null` = none
+   * (no placeholder is made for a namespaced reference).
+   */
+  namespaces: readonly string[] | null;
   apiResources: readonly ApiResourceInfo[] | null;
   /** Objects whose kind is not in `lists` (e.g. the details panel's own object). */
   extra?: ReadonlyArray<{ gvk: Gvk; obj: KubeObject }>;
@@ -88,7 +91,7 @@ export function buildTopology(input: TopologyInput): TopoGraph {
   const edges: TopoEdge[] = [];
   const edgeKeys = new Set<string>();
   const podsByNs = new Map<string, Array<{ id: string; labels: Record<string, string> }>>();
-  const scope = new Set(input.namespaces);
+  const scope = input.namespaces === null ? null : new Set(input.namespaces);
 
   const addObject = (gvk: Gvk, obj: KubeObject) => {
     const key = kindKey(gvk);
@@ -125,7 +128,7 @@ export function buildTopology(input: TopologyInput): TopoGraph {
   for (const { gvk, obj } of input.extra ?? []) addObject(gvk, obj);
 
   const inScope = (namespace: string | null) =>
-    namespace === null || scope.size === 0 || scope.has(namespace);
+    namespace === null || (scope !== null && (scope.size === 0 || scope.has(namespace)));
 
   const addEdge = (from: string, to: string, kind: EdgeKind) => {
     if (from === to) return;

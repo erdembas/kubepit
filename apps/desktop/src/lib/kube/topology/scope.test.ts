@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { topologySources } from './sources';
-import { planMapScope, scopeNamespaces } from './scope';
+import type { KubeObject } from '@/types';
 import { kindKey } from '@/lib/kube/catalog';
+import { buildTopology } from './build';
+import { nodeId } from './model';
+import { planMapScope, plannedGraphScope, scopeNamespaces, type SlotScope } from './scope';
+import { topologySources } from './sources';
+import { neighbourhood } from './view';
 
 const sources = topologySources(null);
 const slot = (plan: ReturnType<typeof planMapScope>, key: string) =>
@@ -10,8 +14,24 @@ const pod = (ns: string, node: string) => ({
   apiVersion: 'v1',
   kind: 'Pod',
   metadata: { name: `p-${ns}`, namespace: ns, uid: `${ns}-${node}` },
-  spec: { nodeName: node },
+  spec: { nodeName: node, volumes: [{ name: 'cfg', configMap: { name: `cm-${ns}` } }] },
 });
+
+/** The graph a Map tab builds from `objects` under `plan`, as `useTopologyData` does. */
+function mapGraph(plan: readonly SlotScope[], objects: readonly KubeObject[]) {
+  const graphScope = plannedGraphScope(plan);
+  const lists = sources.flatMap((gvk, i) => {
+    const scope = plan[i];
+    if (!gvk || scope == null) return [];
+    const watched = objects.filter(
+      (o) =>
+        o.kind === gvk.kind &&
+        (!gvk.namespaced || !scope.length || scope.includes(o.metadata.namespace ?? '')),
+    );
+    return [{ gvk, items: watched, synced: true }];
+  });
+  return buildTopology({ lists, namespaces: graphScope, apiResources: null });
+}
 
 describe('planMapScope', () => {
   it('scopes namespaced slots to the namespaces of pods on the node', () => {
@@ -30,9 +50,11 @@ describe('planMapScope', () => {
       items: [pod('a', 'n1')],
       synced: true,
     });
-    expect(slot(plan, 'pods')).toEqual([]);
-    expect(slot(plan, 'configmaps')).toBeNull();
-    expect(slot(plan, 'endpointslices.discovery.k8s.io')).toBeNull();
+    sources.forEach((gvk, i) => {
+      if (!gvk) return;
+      if (!gvk.namespaced || kindKey(gvk) === 'pods') expect(plan[i]).toEqual([]);
+      else expect(plan[i], kindKey(gvk)).toBeNull();
+    });
   });
   it('waits for the seed before scoping', () => {
     const plan = planMapScope({ kind: 'Node', name: 'n1' }, sources, { items: [], synced: false });
@@ -86,6 +108,133 @@ describe('planMapScope', () => {
     const plan = planMapScope({ kind: 'PriorityClass', name: 'high' }, sources, null);
     expect(slot(plan, 'pods')).toBeNull();
     expect(slot(plan, 'nodes')).toEqual([]);
+  });
+});
+
+describe('ClusterRole seeds', () => {
+  const role = {
+    apiVersion: 'rbac.authorization.k8s.io/v1',
+    kind: 'ClusterRole',
+    metadata: { name: 'operator', uid: 'cr' },
+  };
+  const opSa = {
+    apiVersion: 'v1',
+    kind: 'ServiceAccount',
+    metadata: { name: 'op-sa', namespace: 'operators', uid: 'sa' },
+  };
+  const crb = (roleName: string) => ({
+    apiVersion: 'rbac.authorization.k8s.io/v1',
+    kind: 'ClusterRoleBinding',
+    metadata: { name: `crb-${roleName}`, uid: `crb-${roleName}` },
+    roleRef: { apiGroup: 'rbac.authorization.k8s.io', kind: 'ClusterRole', name: roleName },
+    subjects: [
+      { kind: 'ServiceAccount', name: 'op-sa', namespace: 'operators' },
+      { kind: 'User', name: 'alice' },
+    ],
+  });
+
+  it('a ClusterRole bound only by a ClusterRoleBinding reaches its service accounts', () => {
+    const bindings = [crb('operator'), { ...crb('other'), subjects: [] }];
+    const plan = planMapScope({ kind: 'ClusterRole', name: 'operator' }, sources, {
+      items: bindings,
+      synced: true,
+    });
+    expect(slot(plan, 'serviceaccounts')).toEqual(['operators']);
+    expect(slot(plan, 'rolebindings.rbac.authorization.k8s.io')).toEqual([]);
+    expect(slot(plan, 'clusterrolebindings.rbac.authorization.k8s.io')).toEqual([]);
+    const graph = mapGraph(plan, [role, opSa, ...bindings]);
+    const rootId = nodeId('clusterroles.rbac.authorization.k8s.io', null, 'operator');
+    expect(
+      neighbourhood(graph, rootId, 2).has(nodeId('serviceaccounts', 'operators', 'op-sa')),
+    ).toBe(true);
+  });
+  it('RoleBindings add the namespaces of their service-account subjects', () => {
+    const rb = {
+      apiVersion: 'rbac.authorization.k8s.io/v1',
+      kind: 'RoleBinding',
+      metadata: { name: 'deploy', namespace: 'ops', uid: 'rb' },
+      roleRef: { kind: 'ClusterRole', name: 'edit' },
+      subjects: [
+        { kind: 'ServiceAccount', name: 'deployer', namespace: 'ci' },
+        { kind: 'ServiceAccount', name: 'local' },
+        { kind: 'User', name: 'bob', namespace: 'ignored' },
+      ],
+    };
+    const roleBinding = {
+      ...rb,
+      roleRef: { kind: 'Role', name: 'edit' },
+      metadata: { ...rb.metadata, namespace: 'x', uid: 'r2' },
+    };
+    const plan = planMapScope({ kind: 'ClusterRole', name: 'edit' }, sources, {
+      items: [rb, roleBinding],
+      synced: true,
+    });
+    expect(slot(plan, 'serviceaccounts')).toEqual(['ci', 'ops']);
+  });
+});
+
+describe('IngressClass seeds', () => {
+  const ing = (
+    ns: string,
+    spec: Record<string, unknown>,
+    annotations?: Record<string, string>,
+  ) => ({
+    apiVersion: 'networking.k8s.io/v1',
+    kind: 'Ingress',
+    metadata: { name: `i-${ns}`, namespace: ns, uid: ns, annotations },
+    spec,
+  });
+  const items = [
+    ing('named', { ingressClassName: 'nginx' }),
+    ing('legacy', {}, { 'kubernetes.io/ingress.class': 'nginx' }),
+    ing('classless', {}),
+    ing('other', { ingressClassName: 'traefik' }, { 'kubernetes.io/ingress.class': 'nginx' }),
+  ];
+
+  it('follows the builder: class name, then the legacy annotation', () => {
+    const plan = planMapScope({ kind: 'IngressClass', name: 'nginx' }, sources, {
+      items,
+      synced: true,
+    });
+    expect(slot(plan, 'services')).toEqual(['legacy', 'named']);
+  });
+  it('the default class also gets the Ingresses without a class', () => {
+    const root = {
+      kind: 'IngressClass',
+      name: 'nginx',
+      annotations: { 'ingressclass.kubernetes.io/is-default-class': 'true' },
+    };
+    const plan = planMapScope(root, sources, { items, synced: true });
+    expect(slot(plan, 'services')).toEqual(['classless', 'legacy', 'named']);
+  });
+});
+
+describe('Map tab graph scope', () => {
+  const placeholders = (graph: ReturnType<typeof mapGraph>) =>
+    [...graph.nodes.values()].filter((n) => n.namespace && n.uid === null).map((n) => n.id);
+
+  it('makes placeholders only in the namespaces the plan names', () => {
+    const objects = [pod('a', 'n1'), pod('c', 'n2')];
+    const plan = planMapScope({ kind: 'Node', name: 'n1' }, sources, {
+      items: objects,
+      synced: true,
+    });
+    expect(plannedGraphScope(plan)).toEqual(['a']);
+    // The pod of namespace c (on another node) references cm-c and its
+    // service account too; only namespace a's references become placeholders.
+    expect(placeholders(mapGraph(plan, objects)).sort()).toEqual([
+      nodeId('configmaps', 'a', 'cm-a'),
+      nodeId('serviceaccounts', 'a', 'default'),
+    ]);
+  });
+  it('an idle node makes no namespaced placeholder', () => {
+    const objects = [pod('a', 'n1'), pod('b', 'n1')];
+    const plan = planMapScope({ kind: 'Node', name: 'idle' }, sources, {
+      items: objects,
+      synced: true,
+    });
+    expect(plannedGraphScope(plan)).toBeNull();
+    expect(placeholders(mapGraph(plan, objects))).toEqual([]);
   });
 });
 

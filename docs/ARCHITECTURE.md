@@ -805,16 +805,22 @@ deterministic:
   for cluster-wide, `null` for not watched). The Resource Map and the Map tab
   of namespaced objects, Namespaces and bound PersistentVolumes use one list
   for every slot. Other cluster-scoped roots never watch namespaced kinds
-  cluster-wide: `mapSeed` names the one kind that ties the root to
-  namespaces (Node → pods by `spec.nodeName`, StorageClass → PVCs,
-  ClusterRole → RoleBindings whose `roleRef` names it, IngressClass →
-  Ingresses), which is watched cluster-wide, and `planMapScope` scopes every
-  other namespaced slot to the namespaces of the matching seed objects.
-  Until the seed syncs, when nothing matches, and for roots without a seed
+  cluster-wide: `mapSeed` names the kinds that tie the root to namespaces,
+  watched cluster-wide (keys other views share), and the namespaces each
+  seed object names for the root, mirroring how the builder links it: Node
+  → pods by `spec.nodeName`; StorageClass → PVCs; ClusterRole →
+  RoleBindings whose `roleRef` names it (their own namespace and their
+  ServiceAccount subjects') and ClusterRoleBindings (their ServiceAccount
+  subjects'); IngressClass → Ingresses by `ingressClassName`, else the
+  legacy `kubernetes.io/ingress.class` annotation, plus class-less Ingresses
+  when the root is the default class. `planMapScope` scopes every other
+  namespaced slot to the union of those namespaces. Until every seed kind
+  syncs (or fails), when nothing matches, and for roots without a seed
   (PriorityClass, ClusterRoleBinding, …) namespaced slots stay unwatched.
-  The graph is scoped to the union of the explicit lists
-  (`scopeNamespaces`). Subjects of ClusterRoleBindings in other namespaces
-  therefore stay out of a ClusterRole's map.
+  The graph is scoped to the union of the explicit lists (`scopeNamespaces`);
+  on those Map tabs `plannedGraphScope` makes "none" mean no namespace
+  (`buildTopology` `namespaces: null`), so the seed objects elsewhere make no
+  placeholders for what they reference.
 - `build.ts` + `refs.ts` — one node per object (id `kindKey|namespace|name`)
   and typed edges from referrer to referent: ownerReferences, Service /
   PodDisruptionBudget / NetworkPolicy selectors, Service → EndpointSlices,

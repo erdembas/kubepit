@@ -6,9 +6,11 @@ import { cn } from '@/lib/cn';
 import { asObject, asString } from '@/lib/kube/accessors';
 import { kindKey } from '@/lib/kube/catalog';
 import {
+  DEFAULT_INGRESS_CLASS_ANNOTATION,
   mapSeed,
   nodeId,
   planMapScope,
+  plannedGraphScope,
   topologySources,
   type SlotScope,
   type TopoNode,
@@ -64,29 +66,49 @@ export function MapTab({
   const sources = useMemo(() => topologySources(apiResources), [apiResources]);
   const watched = sources.some((g) => g && kindKey(g) === key);
   // A cluster-scoped root with no namespace of its own never watches
-  // namespaced kinds cluster-wide: its seed kind (pods of a Node, claims of
-  // a StorageClass, …) picks the namespaces the other slots watch.
+  // namespaced kinds cluster-wide: its seed kinds (pods of a Node, claims of
+  // a StorageClass, bindings of a ClusterRole, …) pick the namespaces the
+  // other slots watch. Both seed watches share the keys other views hold
+  // (the ClusterRoleBinding one is the cluster-scoped slot's own watch).
   const planned = !gvk.namespaced && !scopeKey;
   const seed = planned ? mapSeed(obj.kind) : null;
-  const seedGvk = seed ? (sources.find((g) => g && kindKey(g) === seed.gvkKey) ?? null) : null;
-  const seedSnap = useWatch(clusterId, seedGvk, [], isActive);
-  const seedItems = seedGvk ? seedSnap.items : null;
-  const seedSynced = seedSnap.synced;
+  const seedGvks = useMemo(
+    () => (seed?.gvkKeys ?? []).map((k) => sources.find((g) => g && kindKey(g) === k) ?? null),
+    [seed, sources],
+  );
+  const seedA = useWatch(clusterId, seedGvks[0] ?? null, [], isActive);
+  const seedB = useWatch(clusterId, seedGvks[1] ?? null, [], isActive);
+  // A failed seed (no access) counts as settled with no objects.
+  const settled = (i: number, s: typeof seedA) => !seedGvks[i] || s.synced || s.status === 'error';
+  const seedsSynced = settled(0, seedA) && settled(1, seedB);
+  const itemsA = seedGvks[0] ? seedA.items : null;
+  const itemsB = seedGvks[1] ? seedB.items : null;
   const rootName = obj.metadata.name;
   const rootKind = obj.kind;
+  const defaultClass = obj.metadata.annotations?.[DEFAULT_INGRESS_CLASS_ANNOTATION];
   const slotScopes = useMemo<SlotScope[]>(() => {
     if (!planned) {
       const scope = scopeKey ? scopeKey.split(',') : [];
       return sources.map(() => scope);
     }
+    const root = {
+      kind: rootKind,
+      name: rootName,
+      annotations: defaultClass ? { [DEFAULT_INGRESS_CLASS_ANNOTATION]: defaultClass } : undefined,
+    };
+    const seedItems = itemsA || itemsB ? [...(itemsA ?? []), ...(itemsB ?? [])] : null;
     return planMapScope(
-      { kind: rootKind, name: rootName },
+      root,
       sources,
-      seedItems ? { items: seedItems, synced: seedSynced } : null,
+      seedItems ? { items: seedItems, synced: seedsSynced } : null,
     );
-  }, [planned, scopeKey, sources, rootKind, rootName, seedItems, seedSynced]);
+  }, [planned, scopeKey, sources, rootKind, rootName, defaultClass, itemsA, itemsB, seedsSynced]);
+  const graphScope = useMemo(
+    () => (planned ? plannedGraphScope(slotScopes) : undefined),
+    [planned, slotScopes],
+  );
   const extra = watched || isNamespace ? null : { gvk, obj };
-  const data = useTopologyData(clusterId, slotScopes, isActive, apiResources, extra);
+  const data = useTopologyData(clusterId, slotScopes, isActive, apiResources, extra, graphScope);
   const rootId = isNamespace
     ? null
     : nodeId(key, gvk.namespaced ? obj.metadata.namespace : null, obj.metadata.name);

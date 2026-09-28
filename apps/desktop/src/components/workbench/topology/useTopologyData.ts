@@ -43,7 +43,10 @@ export interface TopologyData {
  * delivered batch. `slotScopes` holds one watch scope per topology source
  * (`[]` = cluster-wide, `null` = not watched); the graph is scoped to the
  * union of their namespace lists. `extra` adds objects whose kind is not
- * watched (the details panel's own object).
+ * watched (the details panel's own object). `graphScope` (Map tabs of
+ * cluster-scoped roots, see `plannedGraphScope`) scopes the graph to those
+ * namespaces instead, `null` to none, so the cluster-wide seed watches make
+ * no placeholders for what their objects elsewhere reference.
  *
  * Leaving the view is free: the rebuild key ignores the watch status (the
  * stops only flip it), and while `enabled` is false the previous model is
@@ -55,6 +58,7 @@ export function useTopologyData(
   enabled: boolean,
   apiResources: readonly ApiResourceInfo[] | null,
   extra?: { gvk: Gvk; obj: KubeObject } | null,
+  graphScope?: readonly string[] | null,
 ): TopologyData {
   const sources = useMemo(() => topologySources(apiResources), [apiResources]);
   const watched = (i: number) => sources[i] != null && slotScopes[i] != null;
@@ -68,7 +72,9 @@ export function useTopologyData(
     );
   }
 
-  const scopeKey = slotScopes.map((s) => (s === null ? '-' : s.join(','))).join(';');
+  const scopeKey = `${slotScopes.map((s) => (s === null ? '-' : s.join(','))).join(';')}>${
+    graphScope === undefined ? '*' : (graphScope?.join(',') ?? '-')
+  }`;
   const extraKey = extra
     ? `${extra.obj.metadata.uid}@${extra.obj.metadata.resourceVersion ?? ''}`
     : '';
@@ -85,11 +91,7 @@ export function useTopologyData(
     snaps.forEach((snap, i) => {
       const gvk = sources[i];
       if (!gvk || slotScopes[i] == null) return;
-      lists.push({
-        gvk,
-        items: snap.items,
-        synced: snap.synced && snap.status !== 'error',
-      });
+      lists.push({ gvk, items: snap.items, synced: snap.synced && snap.status !== 'error' });
       if (snap.status === 'error' && snap.error)
         errors.push({ kind: gvk.kind, forbidden: snap.forbidden, message: snap.error });
       const key = kindKey(gvk);
@@ -110,7 +112,7 @@ export function useTopologyData(
       );
     const graph = buildTopology({
       lists,
-      namespaces: scopeNamespaces(slotScopes),
+      namespaces: graphScope === undefined ? scopeNamespaces(slotScopes) : graphScope,
       apiResources,
       extra: extra ? [extra] : undefined,
     });
