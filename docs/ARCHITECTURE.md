@@ -1006,8 +1006,10 @@ applying a recommendation only reads, so read-only clusters get it all.
   and runs with the request's settings, else its effective ones; the
   window is collected for the strategy owner metrics would pick and
   collected again at the resolved strategy's window when a per-strategy
-  override differs. `progress` counts answered queries against 16 ×
-  planned batches. A CronJob is read at its job template and counts one
+  override differs; that first resolution is then kept (window, settings
+  and strategy agree), and both collections share the 32-batch budget,
+  one batch kept back for the second while it is possible. `progress`
+  counts answered queries against 16 × planned batches. A CronJob is read at its job template and counts one
   replica; its `cost_replicas` (and so its monthly amounts) is the largest
   duty cycle of its containers' evidence (average running pods), one
   without evidence (`math::cost_replicas`). Without Prometheus the last

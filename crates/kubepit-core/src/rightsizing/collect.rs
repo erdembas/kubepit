@@ -24,7 +24,11 @@
 //!    runs with the request's settings, else its effective ones
 //!    ([`effective_settings`]). The window is collected for the strategy
 //!    owner metrics would pick; if the resolved one's window differs (a
-//!    per-strategy override), it is collected again at that window.
+//!    per-strategy override), it is collected again at that window and
+//!    that first resolution is kept (the second collection cannot change
+//!    the strategy, so window and settings agree). Both collections share
+//!    one budget of [`MAX_BATCHES`], a batch kept back for the second while
+//!    one is possible.
 //!
 //! `progress` reports answered queries against `16 × planned batches` (the
 //! total grows when a batch splits). Everything goes through the one
@@ -70,8 +74,27 @@ use crate::recommendations::types::effective_settings;
 use crate::resources::object_api;
 use crate::types::PrometheusState;
 
-/// Batches one collection may run (at most 512 queries).
+/// Batches one report may run, re-collection included (at most 512
+/// queries).
 pub const MAX_BATCHES: usize = 32;
+
+/// Batches left for a report, and how many of them to keep back for a
+/// second collection.
+struct Budget {
+    left: usize,
+    reserve: usize,
+}
+
+impl Budget {
+    /// Take `n` batches for splits, keeping the reserve.
+    fn take(&mut self, n: usize) -> bool {
+        let ok = n <= self.left.saturating_sub(self.reserve);
+        if ok {
+            self.left -= n;
+        }
+        ok
+    }
+}
 
 /// How far a collection is.
 #[derive(Serialize, Deserialize, Clone, Copy, Default, Debug, PartialEq)]
@@ -337,18 +360,20 @@ impl Kubepit {
         )?])
     }
 
-    /// The batches of `plan` at `days`, folded (see the module docs).
+    /// The batches of `plan` at `days` within `budget` (its first batch
+    /// always runs), folded (see the module docs).
     async fn collect_usage(
         &self,
         cluster_id: &str,
         plan: &Plan<'_>,
         days: u32,
         progress: &Progress<'_>,
+        budget: &mut Budget,
     ) -> std::result::Result<Collected, SourceAbort> {
         let end_secs = window_end(now_millis());
         let on_answer = || progress.answered();
         let mut queue = VecDeque::from([plan.namespaces.to_vec()]);
-        let mut planned = 1usize;
+        budget.left = budget.left.saturating_sub(1);
         progress.plan(1);
         progress.emit();
         let mut merged = StatsBatch::default();
@@ -395,11 +420,10 @@ impl Kubepit {
                         continue;
                     }
                     let parts = split_down(&scope_namespaces);
-                    if planned + parts.len() > MAX_BATCHES {
+                    if !budget.take(parts.len()) {
                         left_over.extend(scope_namespaces);
                         continue;
                     }
-                    planned += parts.len();
                     progress.plan(parts.len());
                     queue.extend(parts);
                 }
@@ -488,8 +512,15 @@ impl Kubepit {
         let settings_of = |s: &dyn RecommendationStrategy| {
             own.clone().unwrap_or_else(|| effective_settings(&saved, s))
         };
-        // The window is collected for the strategy owner metrics would pick.
+        // The window is collected for the strategy owner metrics would pick;
+        // a second collection is possible only when the other candidate's
+        // window differs.
         let (likely, _) = strategy::resolve(requested, true)?;
+        let (other, _) = strategy::resolve(requested, false)?;
+        let mut budget = Budget {
+            left: MAX_BATCHES,
+            reserve: usize::from(settings_of(likely).days != settings_of(other).days),
+        };
 
         let workloads = self
             .requested_workloads(&client, &cluster.accessible_namespaces, request)
@@ -537,16 +568,23 @@ impl Kubepit {
                 .is_ok_and(|s| s.state == PrometheusState::Available);
         let mut collected: Option<(Collected, u32)> = None;
         let mut source_abort: Option<SourceAbort> = None;
+        let mut pinned: Option<(&'static dyn RecommendationStrategy, bool)> = None;
         if prometheus {
             let mut days = settings_of(likely).days;
-            let mut again = true;
             loop {
-                match self.collect_usage(cluster_id, &plan, days, &progress).await {
+                match self
+                    .collect_usage(cluster_id, &plan, days, &progress, &mut budget)
+                    .await
+                {
                     Ok(c) => {
-                        let (resolved, _) = strategy::resolve(requested, c.owner_metrics)?;
-                        let wanted = settings_of(resolved).days;
-                        if wanted != days && std::mem::take(&mut again) {
+                        let resolved = strategy::resolve(requested, c.owner_metrics)?;
+                        let wanted = settings_of(resolved.0).days;
+                        if pinned.is_none() && wanted != days {
+                            // Collected again at the resolved strategy's
+                            // window, which that strategy then keeps.
+                            pinned = Some(resolved);
                             days = wanted;
+                            budget.reserve = 0;
                             continue;
                         }
                         collected = Some((c, days));
@@ -618,7 +656,10 @@ impl Kubepit {
                 }
             }
         };
-        let (strategy, strategy_auto) = strategy::resolve(requested, owner_metrics)?;
+        let (strategy, strategy_auto) = match pinned {
+            Some(first) => first,
+            None => strategy::resolve(requested, owner_metrics)?,
+        };
         let settings = settings_of(strategy);
         let mut list: Vec<_> = workloads
             .iter()
@@ -661,6 +702,21 @@ mod tests {
 
     fn names(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn the_budget_keeps_a_batch_back_for_a_second_collection() {
+        let mut budget = Budget {
+            left: MAX_BATCHES,
+            reserve: 1,
+        };
+        budget.left -= 1; // the first batch
+        assert!(budget.take(30));
+        assert!(!budget.take(1), "the reserve stays");
+        budget.reserve = 0;
+        assert!(budget.take(1));
+        assert!(!budget.take(1));
+        assert_eq!(budget.left, 0);
     }
 
     #[test]

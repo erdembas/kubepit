@@ -60,6 +60,11 @@ struct Fixture {
     cpu_limit: Option<&'static str>,
     /// Q1 fails whenever its selector names this namespace (or none).
     fail_q1_for: Option<&'static str>,
+    /// Q1 fails whenever its selector names more than one namespace.
+    fail_q1_multi: bool,
+    /// kube-state-metrics answers only queries containing this (a window
+    /// such as `[3d`).
+    ksm_window: Option<&'static str>,
     /// Cluster-wide lists are forbidden.
     restricted: bool,
 }
@@ -79,6 +84,8 @@ fn base() -> Fixture {
         cpu_request: "500m",
         cpu_limit: None,
         fail_q1_for: None,
+        fail_q1_multi: false,
+        ksm_window: None,
         restricted: false,
     }
 }
@@ -159,7 +166,7 @@ fn objects(f: &Fixture, resource: &str, ns: &str) -> Vec<Value> {
 
 /// The series of statistics query `n` for the pods of `ns` (`None` = the
 /// query fails), evaluated at `end`.
-fn answer(n: u8, ns: &str, f: &Fixture, end: i64) -> Option<Vec<(Value, f64)>> {
+fn answer(n: u8, ns: &str, f: &Fixture, ksm: bool, end: i64) -> Option<Vec<(Value, f64)>> {
     let c = |pod: &str| json!({"namespace": ns, "pod": pod, "container": "api"});
     let p = |pod: &str| json!({"namespace": ns, "pod": pod});
     let owner = |pod: &str, kind: &str, name: &str| json!({"namespace": ns, "pod": pod, "owner_kind": kind, "owner_name": name});
@@ -174,7 +181,7 @@ fn answer(n: u8, ns: &str, f: &Fixture, end: i64) -> Option<Vec<(Value, f64)>> {
         5 => both(90.0 * MIB, 100.0 * MIB),
         6 => both(70.0 * MIB, 80.0 * MIB),
         7 => both(144.0, 144.0),
-        8..=14 if !f.ksm => Vec::new(),
+        8..=14 if !ksm => Vec::new(),
         8 => both(144.0, 144.0),
         9 => vec![
             (p(OLD), (end - DAY) as f64),
@@ -229,12 +236,16 @@ fn prometheus(f: &Fixture, req: &Request) -> Reply {
             return prom_error("query processing would load too many samples into memory");
         }
     }
+    if n == 1 && f.fail_q1_multi && scope.as_ref().is_none_or(|s| s.len() > 1) {
+        return prom_error("query processing would load too many samples into memory");
+    }
+    let ksm = f.ksm && f.ksm_window.is_none_or(|w| q.contains(w));
     let end: i64 = param(&req.path, "time")
         .and_then(|t| t.parse().ok())
         .unwrap_or(0);
     let mut series = Vec::new();
     for ns in f.namespaces.iter().filter(|ns| named(ns)) {
-        match answer(n, ns, f, end) {
+        match answer(n, ns, f, ksm, end) {
             Some(list) => series.extend(list),
             None => return prom_error("query timed out"),
         }
@@ -810,4 +821,92 @@ async fn usage_history_reads_four_range_queries() {
         .await
         .is_err());
     assert_eq!(server.log.lock().len(), sent);
+}
+
+/// A cluster whose owner series only exist in the last 3 days, with a
+/// saved 3-day window for percentile-headroom (workload-history keeps 7).
+async fn recollecting(f: Fixture) -> (RightsizingOutcomeScan, Log) {
+    let server = start(kubefit_router(f)).await;
+    let (_dir, app, _recorder, id) = setup(&server.url, true);
+    let mut settings = app.settings();
+    settings.recommendations = RecommendationSettings {
+        overrides: [(
+            "percentile-headroom".into(),
+            RightsizingSettings {
+                days: 3,
+                ..RightsizingSettings::default()
+            },
+        )]
+        .into(),
+        ..RecommendationSettings::default()
+    };
+    app.set_settings(settings).unwrap();
+    let progress = Mutex::new(Vec::new());
+    let record_progress = |p: ScanProgress| progress.lock().push(p);
+    let outcome = app
+        .compute_rightsizing(&id, &RightsizingRequest::default(), &record_progress)
+        .await
+        .unwrap();
+    (
+        RightsizingOutcomeScan {
+            report: outcome.report,
+            abort: outcome.source_abort.map(|a| a.kind),
+            progress: progress.into_inner(),
+        },
+        server.log,
+    )
+}
+
+struct RightsizingOutcomeScan {
+    report: RightsizingReport,
+    abort: Option<SourceAbortKind>,
+    progress: Vec<ScanProgress>,
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_re_collection_keeps_the_first_strategy() {
+    // 7 days: no owner series, so percentile-headroom and its 3 days; the
+    // 3-day collection now sees owners, but the strategy stays the one the
+    // window was collected for, so window, settings and strategy agree.
+    let (scan, _log) = recollecting(Fixture {
+        ksm_window: Some("[3d"),
+        ..base()
+    })
+    .await;
+    let report = scan.report;
+    assert_eq!(scan.abort, None, "{:?}", report.notes);
+    assert_eq!(
+        (report.strategy.as_str(), report.strategy_auto),
+        ("percentile-headroom", true)
+    );
+    assert_eq!((report.settings.days, report.window_secs), (3, 3 * 86_400));
+    assert_eq!(report.settings.cpu_headroom_percent, 15.0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn both_collections_share_one_budget() {
+    // 16 namespaces and Q1 failing for any batch naming more than one:
+    // the first collection splits down to single namespaces (31 batches,
+    // one kept back); the second gets the last batch and cannot split.
+    let namespaces: Vec<&'static str> = (0..16)
+        .map(|i| &*Box::leak(format!("ns{i:02}").into_boxed_str()))
+        .collect();
+    let (scan, log) = recollecting(Fixture {
+        namespaces,
+        ksm: false,
+        fail_q1_multi: true,
+        ..base()
+    })
+    .await;
+    let p95 = queries(&log)
+        .into_iter()
+        .filter(|q| q.starts_with("quantile_over_time"))
+        .count();
+    assert_eq!(p95, 32, "at most 32 batches for the whole report");
+    let last = *scan.progress.last().unwrap();
+    assert_eq!((last.total, last.completed), (32 * 16, 32 * 16));
+    // The second collection had nothing left: abandoned, typed, and the
+    // strategy is still the first pass's.
+    assert_eq!(scan.abort, Some(SourceAbortKind::AllBatchesFailed));
+    assert_eq!(scan.report.strategy, "percentile-headroom");
 }
