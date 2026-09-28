@@ -10,7 +10,7 @@ use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, Pt
 use tauri::ipc::Channel;
 
 use super::pipeline::{spawn_output_pipeline, OutputFlow};
-use super::shell::shell_for;
+use super::shell::{shell_command_for, shell_for};
 use super::TerminalOutput;
 
 /// How long the exit watcher waits for buffered output to reach the webview
@@ -142,6 +142,10 @@ impl TerminalManager {
         let (program, args) = match launch.program {
             LaunchProgram::LoginShell { override_path } => shell_for(override_path.as_deref()),
             LaunchProgram::Exec { program, args } => (program, args),
+            LaunchProgram::LoginShellCommand {
+                override_path,
+                script,
+            } => shell_command_for(override_path.as_deref(), &script),
         };
         let mut cmd = CommandBuilder::new(&program);
         for arg in args {

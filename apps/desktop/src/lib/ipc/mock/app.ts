@@ -174,6 +174,7 @@ let settings: Settings = {
   change_journal_disabled: [],
   // staging-gke keeps its events and changes on disk (demo persisted history).
   history: { ...DEFAULT_HISTORY_SETTINGS, persist_clusters: ['c-staging'] },
+  keyboard_mode: false,
 };
 
 const WORKSPACE_KEY = 'kubepit.demo.workspace';

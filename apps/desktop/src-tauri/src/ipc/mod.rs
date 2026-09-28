@@ -46,6 +46,8 @@ mod helm_preview;
 mod upgrade;
 // Persistent history: audit log, persisted events and changes.
 mod history;
+// Power user: custom actions (k9s-plugin style).
+mod custom_actions;
 
 pub use access::*;
 pub use alerts::*;
@@ -53,6 +55,7 @@ pub use app::*;
 pub use changes::*;
 pub use clusters::*;
 pub use connectivity::*;
+pub use custom_actions::*;
 pub use files::*;
 pub use fleet::*;
 pub use helm::*;

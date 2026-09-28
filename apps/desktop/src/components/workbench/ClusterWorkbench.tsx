@@ -57,6 +57,7 @@ export function ClusterWorkbench({
     <div
       className="bg-surface flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
       aria-label={i18n.t('Cluster workbench')}
+      data-workbench=""
     >
       {connected && (
         <WorkbenchHeader

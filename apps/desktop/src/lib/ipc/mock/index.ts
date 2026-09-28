@@ -25,6 +25,8 @@ import './wizards';
 // Upgrade readiness scan, Helm values schemas and upgrade preview.
 import './upgrade';
 import './helmPreview';
+// Wraps `terminal_create` for custom actions (after logsDebug's wrap).
+import './customActions';
 // Registered last: it wraps every mutating command to derive the demo audit log.
 import './history';
 

@@ -29,6 +29,12 @@ pub enum LaunchProgram {
     LoginShell { override_path: Option<String> },
     /// A specific program with literal arguments.
     Exec { program: PathBuf, args: Vec<String> },
+    /// The login shell running `script` (`<shell> <login args> -c <script>`);
+    /// custom actions in terminal mode.
+    LoginShellCommand {
+        override_path: Option<String>,
+        script: String,
+    },
 }
 
 /// Everything the PTY manager needs to start a terminal.
@@ -194,6 +200,11 @@ impl Kubepit {
                     cleanup: None,
                 })
             }
+            TerminalSpec::CustomAction {
+                cluster_id,
+                action_id,
+                target,
+            } => self.prepare_custom_action_terminal(cluster_id, action_id, target),
             TerminalSpec::NodeShell { cluster_id, node } => {
                 let cluster = self.ensure_writable(cluster_id, "opening a node shell")?;
                 // Check kubectl before creating anything on the cluster.

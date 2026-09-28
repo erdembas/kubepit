@@ -58,6 +58,8 @@ pub struct Kubepit {
     pub(crate) change_journals: ChangeJournals,
     // Persistent history: audit log, persisted events and changes.
     pub(crate) history: History,
+    // Power user: custom actions (`actions.json`).
+    pub(crate) custom_actions: crate::custom_actions::CustomActionsStore,
 }
 
 impl Kubepit {
@@ -79,6 +81,8 @@ impl Kubepit {
         let alerts = AlertCenter::new(store.settings().alerts);
         let saved_forwards = SavedForwards::open(store.paths().port_forwards_file())?;
         let history = History::new(store.paths().history_db());
+        let custom_actions =
+            crate::custom_actions::CustomActionsStore::open(store.paths().custom_actions_file())?;
         let app = Self {
             store,
             sink,
@@ -98,6 +102,7 @@ impl Kubepit {
             kubeconfig_watch: parking_lot::Mutex::new(None),
             change_journals: ChangeJournals::default(),
             history,
+            custom_actions,
         };
         // Left behind by a crash while in keychain mode.
         app.remove_transient_run_kubeconfigs();

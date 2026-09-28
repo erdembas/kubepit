@@ -37,6 +37,8 @@ import { withGitOpsWarning } from '../gitops/owner';
 import { MERGED_LOG_KINDS, openPodDebug, openPodFiles, openWorkloadLogs } from './logsDebugActions';
 import { workloadActions } from './workloadActions';
 import { wizardActions } from './wizardActions';
+// Power user: user-defined custom actions (k9s-plugin style).
+import { customResourceActions } from './custom/customActions';
 
 import {
   openPodLogs,
@@ -327,6 +329,8 @@ export function resourceActions({
     mutating: false,
     run: () => dock.compare(clusterId, gvk, ns, name, 'drift'),
   });
+  // Custom actions that apply to this object (never primary: they live in "More").
+  customResourceActions({ clusterId, cluster, gvk, obj }).forEach(add);
   add({
     id: 'delete',
     label: i18n.t('Delete'),

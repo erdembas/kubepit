@@ -12,6 +12,7 @@
 //! | `run/<id>.kubeconfig`   | generated single-context kubeconfig, mode 0600    |
 //! | `port_forwards.json`    | saved port forwards (`SavedPortForward[]`)        |
 //! | `history.db`            | audit log, persisted events / changes (SQLite)    |
+//! | `actions.json`          | custom actions (`CustomActionsFile`)              |
 //!
 //! All writes go through [`atomic_write`] so a crash mid-write can never leave
 //! a truncated `clusters.json` behind.
@@ -87,6 +88,11 @@ impl Paths {
     /// Persistent history (SQLite, WAL mode; `-wal` / `-shm` next to it).
     pub fn history_db(&self) -> PathBuf {
         self.root.join("history.db")
+    }
+
+    /// Custom actions (power user).
+    pub fn custom_actions_file(&self) -> PathBuf {
+        self.root.join("actions.json")
     }
 
     pub fn kubeconfigs_dir(&self) -> PathBuf {

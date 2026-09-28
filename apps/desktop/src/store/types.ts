@@ -37,7 +37,16 @@ export type SidebarGroupBy = 'none' | 'environment' | 'status' | 'tag';
 export type SidebarStatusFilter = 'all' | 'connected' | 'disconnected';
 export type RightPanel = 'events' | 'forwards' | 'alerts';
 export type SettingsCategory =
-  'general' | 'kubeconfig' | 'terminal' | 'notifications' | 'history' | 'tools' | 'about';
+  | 'general'
+  | 'kubeconfig'
+  | 'terminal'
+  | 'notifications'
+  | 'history'
+  // Power user: custom actions and keyboard mode.
+  | 'custom-actions'
+  | 'keyboard'
+  | 'tools'
+  | 'about';
 
 export type ClusterEditorState = { mode: 'add' } | { mode: 'edit'; cluster: ClusterDef } | null;
 

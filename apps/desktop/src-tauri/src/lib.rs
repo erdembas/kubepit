@@ -188,6 +188,12 @@ pub fn run() {
             ipc::helm_release_values_schema,
             ipc::helm_chart_values_schema,
             ipc::helm_upgrade_preview,
+            // Custom actions (k9s-plugin style)
+            ipc::custom_actions_list,
+            ipc::custom_actions_save,
+            ipc::custom_actions_import,
+            ipc::custom_action_resolve,
+            ipc::custom_action_run,
             // Alerts
             ipc::alerts_list,
             ipc::alerts_mark_read,

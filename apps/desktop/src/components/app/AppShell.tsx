@@ -12,6 +12,9 @@ import { DiscoverDialog } from '@/components/discover/DiscoverDialog';
 import { CommandPalette } from '@/components/palette/CommandPalette';
 import { ConfirmHost } from '@/components/app/ConfirmHost';
 import { Toasts } from '@/components/app/Toasts';
+// Power user: custom actions (confirmations, runs) and keyboard mode.
+import { CustomActionHost } from '@/components/workbench/actions/custom/CustomActionHost';
+import { KeyboardHost } from '@/components/workbench/keyboard/KeyboardHost';
 import { GlobalTooltip } from '@/components/ui/GlobalTooltip';
 import { useAppStore } from '@/store/useAppStore';
 import { useStartupUpdateCheck } from '@/store/useUpdaterStore';
@@ -59,6 +62,8 @@ function AppOverlays() {
       {paletteOpen && <CommandPalette />}
       <ConfirmHost />
       <ConnectivityHost />
+      <CustomActionHost />
+      <KeyboardHost />
       <Toasts />
     </>
   );

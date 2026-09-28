@@ -38,7 +38,7 @@ single source of truth for the frontend ⇄ backend boundary.
   `{ alert, fresh, notifier, app_focused }`), `alerts://changed` (`null`;
   alerts were marked read or cleared, refetch `alerts_list`),
   `portforward://saved` (SavedPortForward[]), `kubeconfig://changed`
-  (KubeconfigChanged).
+  (KubeconfigChanged), `customactions://changed` (CustomAction[]).
 
 ## Windows
 
@@ -62,6 +62,7 @@ that created them (`src-tauri/src/windows.rs`).
 | `run/<id>.kubeconfig`   | backend  | single-context kubeconfig for kubectl/helm/terminal |
 | `port_forwards.json`    | backend  | `SavedPortForward[]` (saved port forwards)          |
 | `history.db`            | backend  | audit log, persisted events / changes (SQLite)      |
+| `actions.json`          | backend  | `CustomActionsFile` (custom actions, see below)     |
 
 With `settings.keychain_kubeconfigs` the pasted kubeconfigs live in the OS
 credential store instead of `kubeconfigs/` (see Connectivity).
@@ -879,3 +880,99 @@ v3, so CRDs work like builtins.
   `run/<id>.kubeconfig` of managed clusters is written on connect (or when
   a terminal or helm needs it) and deleted on disconnect, on exit and at
   the next start.
+
+## Custom actions
+
+k9s-style plugins: user-defined commands for an object, a multi-selection
+or a cluster (`crates/kubepit-core/src/custom_actions/`, settings under
+Custom actions).
+
+- **Definitions** (`model.rs`, `actions.json`, backend-owned): name,
+  description, icon (fixed lucide set), scopes (`Kind`, `group/Kind`,
+  `group/*`, `core/Kind`, `*`, `cluster`), namespace globs, cluster tags,
+  command template, mode (`terminal`, `background`, `open-url`), `confirm`,
+  `mutating`, shortcut (canonical chord, `lib/keymap.ts`), background
+  timeout (≤ 600 s). `custom_actions_save` validates and replaces the whole
+  list (order included) and broadcasts `customactions://changed`. A fresh
+  data folder reports `initialized: false`; the UI then seeds the built-in
+  examples (`lib/customActionExamples.ts`, disabled) in the user's language.
+- **Placeholders** (`template.rs`): `{cluster}`, `{context}`,
+  `{kubeconfig}`, `{namespace}`, `{name}`, `{kind}`, `{group}`, `{version}`,
+  `{resource}`, `{container}`, `{labels.<key>}`, `{annotations.<key>}`,
+  `{selection.names}`; any other `{…}` stays literal (jsonpath, go
+  templates). Substitution tracks the POSIX `sh` context of each
+  placeholder: unquoted and `$( … )` values are single-quoted, values inside
+  `"…"` / `'…'` close and reopen the quote around a quoted value, comments
+  and `\{…}` / `${…}` stay literal, and backticks, `${…}`, `$'…'` and heredoc
+  bodies refuse values that need quoting. Values made of
+  `[A-Za-z0-9_.,:=@%+/-]` are inserted bare. URLs percent-encode values and
+  must start with `http(s)://` in the template. Tests run hostile values
+  (`$(…)`, backticks, quotes, `;`, newlines) through `/bin/sh`.
+- **Runs** always resolve the *saved* definition by id in the backend, so
+  disabled, out-of-scope and — for `mutating` actions — read-only runs are
+  refused whatever the UI sends. `KUBECONFIG` is the cluster's
+  `run/<id>.kubeconfig` (`KUBEPIT_CLUSTER`, `KUBEPIT_CONTEXT`,
+  `KUBEPIT_NAMESPACE`, `KUBEPIT_ACTION` too). Terminal mode is
+  `TerminalSpec::CustomAction`: the login shell runs
+  `/bin/sh -c "$KUBEPIT_ACTION_COMMAND"` (POSIX quoting whatever the user's
+  shell is) after echoing the command. Background mode
+  (`custom_action_run`, `runner.rs`) runs `sh -c` in its own process group
+  with a timeout (the whole group is killed) and 256 KiB of stdout / stderr.
+  Open-url mode returns the URL for the UI to open. `custom_action_resolve`
+  previews a possibly unsaved definition (sample cluster values without a
+  cluster) and reports missing and misspelled placeholders.
+- **Import** (`import.rs`, `custom_actions_import`): a file the user picked
+  (path) or its text (browser previews). Kubepit's JSON export or a k9s
+  `plugins.yaml` / single-plugin file: resource-name scopes become kinds,
+  `sh -c` scripts are unwrapped and `$NAMESPACE`, `$NAME`, `$POD`,
+  `$CONTEXT`, … become placeholders quote-aware, `background`, `confirm`,
+  `dangerous` (→ `mutating`) and `shortCut` map directly. Unmappable
+  fields, scopes (`helm`, …) and variables (`$FILTER`, `$COL-*`) come back
+  as coded notes the UI translates. Nothing is saved until the user adds
+  the actions.
+- **UI**: `components/workbench/actions/custom/` turns applicable actions
+  into `ResourceAction`s (context menus, details toolbar "More", GitOps
+  menus) and multi-select actions (`{selection.names}`) into
+  `BulkAction`s, so read-only gating works as for built-ins (ids
+  `custom:<id>`, no RBAC needs). `runCustomAction` asks for a container
+  when a pod has several, shows the resolved command when `confirm` is set
+  (and for mutating actions on production clusters, with the typed name),
+  then opens a dock terminal, starts a background run (panel bottom left,
+  output dialog, toast) or opens the URL. The palette lists actions for the
+  focused table's object, its checked rows and the cluster
+  (`palette/customActionItems.ts`). Scope matching in the UI mirrors the
+  backend (`lib/customActions.ts`).
+- The demo backend (`lib/ipc/mock/customActions.ts`) keeps the list in
+  memory, resolves with POSIX quoting, fakes plausible output
+  (`kubectl top`, `-o wide`, `neat`, `annotate`) and plays terminal runs.
+
+## Keyboard mode
+
+`Settings.keyboard_mode` (off by default) enables vim / k9s-style keys in
+the workbench; the key map is data in `lib/keymap.ts` and shown in the `?`
+overlay and Settings → Keyboard.
+
+- `KeyboardHost` (`components/workbench/keyboard/`, mounted once) listens
+  on `window` and ignores typing targets (inputs, Monaco, xterm, the dock),
+  open dialogs / menus / the palette and the app's global shortcuts. The
+  resource table active in the focused pane registers a `TableController`
+  (`tableKeyboard.ts`, one line in `ResourcePage`) with a keyboard cursor
+  (rendered by `ResourceTable` only in keyboard mode) and a ref to its
+  filter.
+- Keys: `j`/`k` move (the details follow when open), `g`/`G`, `Enter`
+  opens details, `Esc` clears the filter once the details panel and the
+  selection bar had their turn, `/` focuses the filter, `l` `s` `e` `r`
+  `S` `f` `Ctrl-d` run the existing actions of that row (same RBAC gating,
+  read-only and confirmations, `keyCommands.ts`), `y` / `d` open the YAML /
+  details tabs, `Ctrl-k` (macOS; `Ctrl-Shift-k` elsewhere, where Ctrl+K is
+  the palette) kills a pod (grace period 0, normal confirmation). On macOS
+  the global shortcuts now answer to ⌘ only, so ⌃K / ⌃D reach terminals and
+  keyboard mode.
+- `:` opens the command bar (`commandBarModel.ts`): kinds by name, plural
+  or short name (`resolveKindName`) optionally with a namespace, `:ns`,
+  `:ctx`, `:q` and pages (`:overview`, `:health`, …), with completion.
+- Custom action shortcuts work with keyboard mode off too; the first
+  enabled action whose scope matches the current row, the checked rows or
+  the cluster runs. Conflicts with global shortcuts, keyboard mode keys and
+  other actions are listed in the editor, Settings → Keyboard and the
+  overlay; the app and keyboard mode win.

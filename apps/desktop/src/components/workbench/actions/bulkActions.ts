@@ -21,6 +21,8 @@ import { copyText, errorText } from '../util';
 import { bulkAccess } from './access';
 import { confirmDestructive } from './guard';
 import { RESTARTABLE } from './resourceActions';
+// Power user: multi-select custom actions (`{selection.names}`).
+import { customBulkActions } from './custom/customActions';
 
 export interface BulkAction {
   id: string;
@@ -244,6 +246,8 @@ export function bulkActions({
       mutating: false,
       run: onExport,
     });
+
+  customBulkActions({ clusterId, cluster, gvk, targets }).forEach(add);
 
   add({
     id: 'delete',

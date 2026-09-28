@@ -15,6 +15,17 @@ pub(super) fn shell_for(override_path: Option<&str>) -> (PathBuf, Vec<String>) {
     default_shell()
 }
 
+/// The login shell running `script`: `<shell> <login args> -c <script>`.
+pub(super) fn shell_command_for(
+    override_path: Option<&str>,
+    script: &str,
+) -> (PathBuf, Vec<String>) {
+    let (program, mut args) = shell_for(override_path);
+    args.push("-c".to_string());
+    args.push(script.to_string());
+    (program, args)
+}
+
 pub(super) fn default_shell() -> (PathBuf, Vec<String>) {
     if let Some(custom) = std::env::var_os("SHELL")
         .map(PathBuf::from)
@@ -128,6 +139,14 @@ mod tests {
         let (path, args) = shell_for(Some("/bin/sh"));
         assert_eq!(path, PathBuf::from("/bin/sh"));
         assert_eq!(args, vec!["-l".to_string()]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shell_command_appends_the_script() {
+        let (path, args) = shell_command_for(Some("/bin/sh"), "echo hi");
+        assert_eq!(path, PathBuf::from("/bin/sh"));
+        assert_eq!(args, vec!["-l", "-c", "echo hi"]);
     }
 
     #[test]
