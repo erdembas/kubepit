@@ -1422,7 +1422,7 @@ git commit -m "feat(history): blocking scan writes and re-evaluation of stored s
       - the complete resulting `resources` block.
     - Raised limits carry `# raised with the request (limit ÷ request ×{ratio})`, where
       the ratio has at most 2 decimals and no trailing zeros.
-    - Fragments are separated by a blank line.
+    - Fragments are separate YAML documents, separated by a blank line and `---`.
     - With nothing changed, the output is `# No changes to export.\n`.
 
 Steps:

@@ -11,8 +11,10 @@
 //! - **YAML** ([`export_yaml`]): one fragment per changed container with the
 //!   complete resulting `resources` block (recommended values where they
 //!   change, current values where they stay, unset fields omitted), in
-//!   `patch::format_cpu` / `patch::format_memory` quantities. The comments
-//!   are fixed English, never translated.
+//!   `patch::format_cpu` / `patch::format_memory` quantities. Every fragment
+//!   is its own YAML document (a blank line and `---` between them), so the
+//!   export stays valid YAML: one document cannot repeat `resources:`. The
+//!   comments are fixed English, never translated.
 
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -29,6 +31,9 @@ use super::types::{
 pub const EXPORT_FORMAT: &str = "kubepit.recommendations/v1";
 /// The YAML export when no selected container changes.
 const NO_CHANGES: &str = "# No changes to export.\n";
+/// Between two fragments (each ends with a newline): a blank line and the
+/// start of the next YAML document.
+const DOCUMENT_SEPARATOR: &str = "\n---\n";
 
 /// The workloads of `report` that `selection` names (every one when empty).
 fn selected<'a>(
@@ -144,8 +149,9 @@ fn fragment(w: &WorkloadRecommendation, c: &ContainerRecommendation) -> String {
 }
 
 /// Container `resources` fragments of the selected workloads (`selection`
-/// empty = every workload), one per changed container, separated by a
-/// blank line; `# No changes to export.` when nothing changes.
+/// empty = every workload), one YAML document per changed container,
+/// separated by a blank line and `---`; `# No changes to export.` when
+/// nothing changes.
 pub fn export_yaml(report: &RightsizingReport, selection: &[WorkloadRef]) -> String {
     let fragments: Vec<String> = selected(report, selection)
         .flat_map(|w| {
@@ -158,7 +164,7 @@ pub fn export_yaml(report: &RightsizingReport, selection: &[WorkloadRef]) -> Str
     if fragments.is_empty() {
         return NO_CHANGES.to_string();
     }
-    fragments.join("\n")
+    fragments.join(DOCUMENT_SEPARATOR)
 }
 
 #[cfg(test)]
@@ -168,7 +174,7 @@ mod tests {
     use crate::rightsizing::math::{change_of, GIB, MIB};
     use crate::rightsizing::strategy;
     use crate::rightsizing::types::{
-        Confidence, ContainerRecommendation, RecommendationWarning, ResourceValues,
+        Change, Confidence, ContainerRecommendation, RecommendationWarning, ResourceValues,
         RightsizingNote, RightsizingNoteKind, RightsizingSource, UsageStats, Verdict,
     };
     use crate::rightsizing::workload_history::WorkloadHistory;
@@ -396,8 +402,8 @@ mod tests {
         let all = export_yaml(&both, &[]);
         assert!(all.contains("shop/web ·") && all.contains("shop/api ·"));
         assert!(
-            all.contains("\n\n# Deployment shop/api"),
-            "fragments are separated by a blank line"
+            all.contains("\n\n---\n# Deployment shop/api"),
+            "a blank line and a new document between fragments"
         );
         let one = export_yaml(&both, std::slice::from_ref(&api_ref));
         assert!(one.contains("shop/api ·") && !one.contains("shop/web ·"));
@@ -411,6 +417,35 @@ mod tests {
             name: "web".into(),
         };
         assert_eq!(export_yaml(&both, &[other]), "# No changes to export.\n");
+    }
+
+    #[test]
+    fn multi_workload_yaml_parses_as_one_document_per_fragment() {
+        use serde::Deserialize;
+        let mut report = raised_report();
+        let mut api = report.workloads[0].clone();
+        api.name = "api".into();
+        // Two changed containers in one workload, one in the other.
+        api.containers[1].recommended.memory_request = Some(64.0 * MIB);
+        api.containers[1].memory = Change::Decrease;
+        report.workloads.push(api);
+        let y = export_yaml(&report, &[]);
+        assert!(
+            serde_yaml::from_str::<Value>(&y).is_err(),
+            "not one document"
+        );
+        let documents: Vec<Value> = serde_yaml::Deserializer::from_str(&y)
+            .map(|document| Value::deserialize(document).unwrap())
+            .collect();
+        assert_eq!(documents.len(), 3);
+        for document in &documents {
+            assert!(document["resources"]["requests"].is_object(), "{document}");
+        }
+        assert_eq!(documents[0]["resources"]["limits"]["cpu"], json!("4800m"));
+        assert_eq!(
+            documents[2]["resources"]["requests"]["memory"],
+            json!("64Mi")
+        );
     }
 
     /// The report of a cluster whose Prometheus is a configured service
