@@ -47,6 +47,10 @@ tempfile = "3"
 # Benchmarks (`benches/`, large-cluster performance harness); dev-only.
 criterion = { version = "0.7", features = ["async_tokio"] }
 
+[target.'cfg(unix)'.dev-dependencies]
+# Peak RSS of the e2e bench (`getrusage`); already in the tree through tokio.
+libc = "0.2"
+
 [[bench]]
 name = "watch"
 harness = false

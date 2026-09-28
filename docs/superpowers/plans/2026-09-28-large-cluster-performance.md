@@ -389,14 +389,18 @@ git commit -m "perf(bench): alerts, change journal and history writer benches"
   - `{ "e2e/max_rss_l_all_watchers": <bytes> }`: `getrusage(RUSAGE_SELF).ru_maxrss` (KiB on Linux, bytes on macOS; normalize to bytes). It is measured after connecting to `l` with every opt-in switch on, one pods watch, and a 5 s settle.
   - `"structural/list_requests_without_limit"`: the Task 2 `unpaged_lists` count at `l`.
 
-- [ ] **Step 1: Write the benches.** e2e benches build a `tokio::runtime::Runtime` and use the fixture router from Task 1. They never touch `~/.kube`: `Paths` points at a temp dir.
+- [x] **Step 1: Write the benches.** e2e benches build a `tokio::runtime::Runtime` and use the fixture router from Task 1. They never touch `~/.kube`: `Paths` points at a temp dir.
+  _(Done, with three choices worth knowing:_
+  - _`e2e/max_rss_l_all_watchers` is measured in a child process (the bench binary re-run with `KUBEPIT_PERF_RSS_CHILD_URL`), so the in-process fixture's own memory is not counted. The report is written only under `cargo bench`: it needs `--bench` and skips `--list`._
+  - _`e2e/fleet_search_l` sets `limit_per_kind` to 20 000, so every page is read: 40 pod pages, 80 lists in all. The UI's 200 would stop after about two pages per kind at `l`._
+  - _`e2e/prometheus_query` detects `prometheus-operated` once, untimed. The service is added to the last page of the fixture's Services list.)_
 
-- [ ] **Step 2: Run them**
+- [x] **Step 2: Run them**
 
 Run: `cargo bench -p kubepit-core --bench search_proxies --bench e2e -- --quick --noplot && cat target/perf/backend-e2e.json`
 Expected: every id prints a time, and the JSON file holds both keys.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add crates/kubepit-core
