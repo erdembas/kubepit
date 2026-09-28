@@ -38,7 +38,9 @@ import type {
   HelmRepoUpdateResult,
   HelmRevisionDetail,
   HelmSearchOptions,
+  HelmUpgradePreview,
   HelmUpgradeRequest,
+  JsonSchema,
   KubeconfigChanged,
   KubeconfigSource,
   KubeObject,
@@ -78,6 +80,8 @@ import type {
   UpdateInfo,
   UpdateProgress,
   UpdaterStatus,
+  UpgradeReport,
+  UpgradeScanOptions,
   WatchBatch,
   WhoAmI,
   WorkloadLogBatch,
@@ -477,6 +481,30 @@ export const ipc = {
   ) => call<HelmInstallResult>('helm_upgrade', { clusterId, namespace, name, request }),
   helmReleaseRevision: (clusterId: ClusterId, namespace: string, name: string, revision: number) =>
     call<HelmRevisionDetail>('helm_release_revision', { clusterId, namespace, name, revision }),
+  /** `values.schema.json` the running revision was installed with (null = none). */
+  helmReleaseValuesSchema: (clusterId: ClusterId, namespace: string, name: string) =>
+    call<JsonSchema | null>('helm_release_values_schema', { clusterId, namespace, name }),
+  /** `values.schema.json` of a repository / OCI chart version (pulled, cached; null = none). */
+  helmChartValuesSchema: (chartRef: string, version: string | null) =>
+    call<JsonSchema | null>('helm_chart_values_schema', { chartRef, version }),
+  /**
+   * Dry-run upgrade split into added / changed / removed objects versus the
+   * running revision; `live` also dry-runs them against the live objects.
+   * Never changes the cluster (allowed on read-only clusters).
+   */
+  helmUpgradePreview: (
+    clusterId: ClusterId,
+    namespace: string,
+    name: string,
+    request: HelmUpgradeRequest,
+    live: boolean,
+  ) =>
+    call<HelmUpgradePreview>('helm_upgrade_preview', { clusterId, namespace, name, request, live }),
+
+  // -- Upgrade readiness (read-only; allowed on read-only clusters) ---------
+  /** Deprecated / removed API usage for an upgrade to `options.target_version`. */
+  upgradeReadinessScan: (clusterId: ClusterId, options: UpgradeScanOptions) =>
+    call<UpgradeReport>('upgrade_readiness_scan', { clusterId, options }),
 
   // -- Alerts (read-only observations; allowed on read-only clusters) -------
   /** Every alert of this session, newest activity first. */

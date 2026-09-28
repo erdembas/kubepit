@@ -14,6 +14,7 @@ import { Checkbox } from '@/components/ui/Choice';
 import { ClusterAvatar } from '@/components/workbench/ClusterAvatar';
 import { clusterColor } from '@/lib/clusterMeta';
 import { cn } from '@/lib/cn';
+import { deprecatedApi, deprecationMessage } from '@/lib/kube/deprecations';
 import { useAppStore } from '@/store/useAppStore';
 import type { ClusterDef } from '@/types';
 import { DiffView } from '../../common/DiffView';
@@ -340,6 +341,7 @@ export function FleetReviewPane({
                         <span className="text-fg min-w-0 truncate font-mono text-[11.5px]">
                           {doc.name || '—'}
                         </span>
+                        <DeprecatedApiIcon apiVersion={doc.apiVersion} kind={doc.kind} />
                         {doc.namespace && (
                           <span className="text-fg-dim min-w-0 shrink truncate font-mono text-[10px]">
                             {doc.namespace}
@@ -660,6 +662,7 @@ function Detail({
           </span>
         )}
       </div>
+      <DeprecatedApiNote apiVersion={doc.apiVersion} kind={doc.kind} />
       {stale && review && (
         <DetailNote tone="warning">
           {i18n.t('The manifests changed after this diff. Run the diff again before applying.')}
@@ -680,6 +683,24 @@ function Detail({
       {content}
     </>
   );
+}
+
+/** Documents whose apiVersion is deprecated or removed (`lib/kube/deprecations.ts`). */
+function DeprecatedApiIcon({ apiVersion, kind }: { apiVersion: string; kind: string }) {
+  const entry = deprecatedApi(apiVersion, kind);
+  if (!entry) return null;
+  const message = deprecationMessage(entry);
+  return (
+    <span className="self-center" title={message}>
+      <AlertTriangle className="text-tone-warning-fg h-3 w-3 shrink-0" aria-label={message} />
+    </span>
+  );
+}
+
+function DeprecatedApiNote({ apiVersion, kind }: { apiVersion: string; kind: string }) {
+  const entry = deprecatedApi(apiVersion, kind);
+  if (!entry) return null;
+  return <DetailNote tone="warning">{deprecationMessage(entry)}</DetailNote>;
 }
 
 function DetailNote({

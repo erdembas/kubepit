@@ -22,6 +22,9 @@ import './connectivity';
 import './changes';
 // Resource wizards: fixture content for picked local files.
 import './wizards';
+// Upgrade readiness scan, Helm values schemas and upgrade preview.
+import './upgrade';
+import './helmPreview';
 
 export { mockListen } from './bus';
 

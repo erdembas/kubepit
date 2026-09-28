@@ -12,11 +12,13 @@ import {
   valueSuggestions,
   type Suggestion,
 } from './complete';
+import { deprecatedApi, deprecationMessage } from '@/lib/kube/deprecations';
 import { fieldMarkdown, kindMarkdown } from './describe';
 import { fieldInfo, fieldPathOf, schemaAt, type PathSegment } from './fields';
 import { loadIndex, resolveKind, servedResources, type KindResolution } from './loader';
 import { isArrayNode, isObjectNode } from './openapi';
 import { validateManifest } from './validate';
+import { valuesIssues, type ValuesSchema } from './values';
 import {
   documentAtOffset,
   parseDocuments,
@@ -35,6 +37,11 @@ import { contextAt, documentAt, documentHeader, keyPathAt, parseLine } from './y
  * `attachKubeYaml` (the model → cluster mapping), so Helm values and other
  * YAML editors are unaffected. Everything fails soft: without a schema
  * there are no suggestions or markers, and nothing ever blocks editing.
+ *
+ * Helm values editors bind a chart's `values.schema.json` instead
+ * (`attachValuesSchema`): the same providers answer from that JSON Schema
+ * with no apiVersion / kind involved. Manifests using a deprecated or
+ * removed apiVersion get a warning on it (`lib/kube/deprecations.ts`).
  */
 
 type MonacoApi = typeof Monaco;
@@ -46,9 +53,10 @@ export const EXPLAIN_ACTION_ID = 'kubepit.yaml.explain';
 export const EXPLAIN_SHORTCUT = IS_MAC ? '⌘⇧E' : 'Ctrl+Shift+E';
 const DIAGNOSTICS_DELAY = 450;
 
-interface Binding {
-  clusterId: ClusterId;
-}
+type Binding =
+  | { clusterId: ClusterId; values?: undefined }
+  /** A Helm values editor bound to its chart's JSON Schema. */
+  | { clusterId?: undefined; values: ValuesSchema };
 
 const bindings = new Map<string, Binding>();
 let registered = false;
@@ -164,7 +172,20 @@ async function computeMarkers(
     if (doc.errors.length || !doc.contents) continue;
     const { apiVersion, kind } = parsedHeader(doc);
     if (!apiVersion || !kind) continue;
+    const deprecated = deprecatedApi(apiVersion, kind);
+    if (deprecated) {
+      const range = topLevelValueRange(doc, 'apiVersion');
+      if (range)
+        found.push({
+          severity: 'warning',
+          message: deprecationMessage(deprecated),
+          start: range[0],
+          end: range[1],
+        });
+    }
     const resolution = await resolveKind(clusterId, apiVersion, kind);
+    // A removed apiVersion already has its marker (with the replacement).
+    if (resolution.status === 'unknown-version' && deprecated) continue;
     if (resolution.status === 'unknown-version') {
       const range = topLevelValueRange(doc, 'apiVersion');
       if (range)
@@ -398,6 +419,113 @@ async function explainAtCursor(editor: Monaco.editor.ICodeEditor, clusterId: Clu
   openExplain(clusterId, { apiVersion: header.apiVersion, kind: header.kind }, fieldPath);
 }
 
+// -- Helm values (JSON Schema) --------------------------------------------------
+
+async function valuesSuggestionsAt(
+  model: Model,
+  position: Monaco.Position,
+  schema: ValuesSchema,
+  triggeredBySpace: boolean,
+): Promise<{ items: Suggestion[]; prefix: string; suffix: string; docStart: number } | null> {
+  const lines = model.getLinesContent();
+  const line = position.lineNumber - 1;
+  const ctx = contextAt(lines, line, position.column - 1);
+  if (!ctx) return null;
+  const after = lines[line]!.slice(position.column - 1);
+  const suffix = (ctx.type === 'key' ? /^[\w.\-/]*/ : /^[^\s#]*/).exec(after)?.[0] ?? '';
+  const result = (items: Suggestion[]) => ({ items, prefix: ctx.prefix, suffix, docStart: 0 });
+  const at = schemaAt(schema.set, schema.root, ctx.path);
+  if (!at) return null;
+  if (ctx.type === 'value') return result(valueSuggestions(at.node));
+  if (triggeredBySpace) return null;
+  if (at.node.enum?.length && !isObjectNode(at.node) && !isArrayNode(at.node))
+    return result(valueSuggestions(at.node));
+  const bare = /^[\w.\-/]*\s*:/.test(after);
+  return result(propertySuggestions(schema.set, at.node, ctx.siblings, bare));
+}
+
+function valuesHoverAt(
+  model: Model,
+  position: Monaco.Position,
+  schema: ValuesSchema,
+): Monaco.languages.Hover | null {
+  const target = targetAt(model, position);
+  if (!target) return null;
+  const path = [...target.path];
+  while (typeof path[path.length - 1] === 'number') path.pop();
+  const at = schemaAt(schema.set, schema.root, path);
+  if (!at?.name) return null;
+  const info = fieldInfo(schema.set, at.name, at.node, at.required, at.fieldPath);
+  return { range: target.range ?? undefined, contents: [{ value: fieldMarkdown(info) }] };
+}
+
+/**
+ * Bind a Helm values editor's model to a chart's `values.schema.json`:
+ * completion, hovers and (debounced) markers. Returns a disposable that
+ * removes the binding and the markers.
+ */
+export function attachValuesSchema(
+  monaco: MonacoApi,
+  editor: Monaco.editor.IStandaloneCodeEditor,
+  schema: ValuesSchema,
+): Monaco.IDisposable {
+  registerProviders(monaco);
+  let modelKey: string | null = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const run = () => {
+    const model = editor.getModel();
+    if (!model || model.isDisposed()) return;
+    const issues = valuesIssues(model.getValue(), schema, docsOf(model));
+    monaco.editor.setModelMarkers(
+      model,
+      SCHEMA_MARKER_OWNER,
+      issues.map((issue) => {
+        const start = model.getPositionAt(issue.start);
+        const end = model.getPositionAt(Math.max(issue.end, issue.start + 1));
+        return {
+          severity:
+            issue.severity === 'error'
+              ? monaco.MarkerSeverity.Error
+              : monaco.MarkerSeverity.Warning,
+          message: issue.message,
+          source: 'values.schema.json',
+          startLineNumber: start.lineNumber,
+          startColumn: start.column,
+          endLineNumber: end.lineNumber,
+          endColumn: end.column,
+        };
+      }),
+    );
+  };
+  const schedule = (delay = DIAGNOSTICS_DELAY) => {
+    clearTimeout(timer);
+    timer = setTimeout(run, delay);
+  };
+  const bind = () => {
+    if (modelKey) bindings.delete(modelKey);
+    const model = editor.getModel();
+    modelKey = model?.uri.toString() ?? null;
+    if (modelKey) bindings.set(modelKey, { values: schema });
+    schedule(0);
+  };
+  const subscriptions = [
+    editor.onDidChangeModelContent(() => schedule()),
+    editor.onDidChangeModel(bind),
+  ];
+  bind();
+  return {
+    dispose() {
+      clearTimeout(timer);
+      subscriptions.forEach((d) => d.dispose());
+      if (modelKey) bindings.delete(modelKey);
+      const model = editor.getModel();
+      if (model && !model.isDisposed())
+        monaco.editor.setModelMarkers(model, SCHEMA_MARKER_OWNER, []);
+    },
+  };
+}
+
 // -- Registration -------------------------------------------------------------
 
 function registerProviders(monaco: MonacoApi) {
@@ -412,9 +540,11 @@ function registerProviders(monaco: MonacoApi) {
       const bySpace =
         context.triggerKind === monaco.languages.CompletionTriggerKind.TriggerCharacter &&
         context.triggerCharacter === ' ';
-      const found = await suggestionsAt(model, position, binding.clusterId, bySpace).catch(
-        () => null,
-      );
+      const found = await (
+        binding.values
+          ? valuesSuggestionsAt(model, position, binding.values, bySpace)
+          : suggestionsAt(model, position, binding.clusterId, bySpace)
+      ).catch(() => null);
       if (!found || model.isDisposed()) return { suggestions: [] };
       const range = {
         startLineNumber: position.lineNumber,
@@ -458,6 +588,7 @@ function registerProviders(monaco: MonacoApi) {
     async provideHover(model, position) {
       const binding = bindingOf(model);
       if (!binding) return null;
+      if (binding.values) return valuesHoverAt(model, position, binding.values);
       return hoverAt(model, position, binding.clusterId).catch(() => null);
     },
   });

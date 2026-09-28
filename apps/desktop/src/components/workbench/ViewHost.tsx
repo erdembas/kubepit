@@ -18,6 +18,7 @@ import { PortForwardsPage } from './portforward/PortForwardsPage';
 import { ResourcePage } from './table/ResourcePage';
 import { ResourceMapPage } from './topology/ResourceMapPage';
 import { NetpolPage } from './netpol/NetpolPage';
+import { UpgradeReadinessPage } from './upgrade/UpgradeReadinessPage';
 
 /**
  * Renders the page of one view tab. Hidden tabs stay mounted with
@@ -107,6 +108,10 @@ export const ViewHost = memo(function ViewHost({
         isActive={isActive}
         apiResources={apiResources}
       />
+    );
+  if (activeKind === VIEW.upgradeReadiness)
+    return (
+      <UpgradeReadinessPage clusterId={clusterId} isActive={isActive} apiResources={apiResources} />
     );
   if (activeKind === VIEW.gitops)
     return (

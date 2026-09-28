@@ -775,6 +775,7 @@ fn cache_chart(key: String, detail: HelmChartDetail) {
 
 fn clear_chart_cache() {
     CHART_CACHE.lock().clear();
+    crate::helm_preview::clear_schema_cache();
 }
 
 /// A private values file for one helm invocation, removed when dropped.

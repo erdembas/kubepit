@@ -29,6 +29,7 @@ export const VIEW_KEYS = {
   gitops: '@gitops',
   changes: '@changes',
   netpolSimulator: '@netpol',
+  upgradeReadiness: '@upgrade',
 } as const;
 
 export interface NavItem {
@@ -105,6 +106,7 @@ export function viewLabel(key: string, apiResources?: readonly ApiResourceInfo[]
   if (key === VIEW_KEYS.gitops) return i18n.t('GitOps Overview');
   if (key === VIEW_KEYS.changes) return i18n.t('Changes');
   if (key === VIEW_KEYS.netpolSimulator) return i18n.t('Network Policy Simulator');
+  if (key === VIEW_KEYS.upgradeReadiness) return i18n.t('Upgrade Readiness');
   const builtin = Object.values(BUILTIN).find((k) => k.key === key);
   if (builtin)
     return builtin.key === BUILTIN.CustomResourceDefinition.key
@@ -180,6 +182,11 @@ export function buildNav(apiResources: readonly ApiResourceInfo[] | null): NavGr
           VIEW_KEYS.changes,
           i18n.t('Changes'),
           'changes timeline history audit diff what changed incident',
+        ),
+        viewItem(
+          VIEW_KEYS.upgradeReadiness,
+          i18n.t('Upgrade readiness'),
+          'upgrade readiness deprecated removed api versions kubernetes kubent pluto',
         ),
         ...items('cluster'),
         viewItem(
