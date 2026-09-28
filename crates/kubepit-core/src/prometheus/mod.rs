@@ -9,8 +9,9 @@
 //!   with the cluster's own client: no port-forward, RBAC applies.
 //! - [`access`] holds the settings of a shared or secured source (tenant,
 //!   cluster labels, Secret-backed credentials); [`matchers`] injects the
-//!   cluster-label selector into every preset. [`Kubepit::prometheus_get`]
-//!   is the one transport every caller uses; with credentials it goes
+//!   cluster-label selector into every preset. `Kubepit::prometheus_send`
+//!   (after `prometheus_source`) is the one transport every caller uses,
+//!   `prometheus_get` its single-request form; with credentials it goes
 //!   through an in-process port-forward tunnel (`tunnel`) instead of the
 //!   service proxy, which does not forward `Authorization`.
 //! - [`promql`] holds the preset queries (cluster, node, namespace,
@@ -448,10 +449,12 @@ impl Kubepit {
         }
     }
 
-    /// One request to `source`: the query of a preset gets the cluster-label
-    /// selector, and a proxy or tunnel failure (the service vanished, no
-    /// ready pod, unreadable credentials) makes the next status request
-    /// detect again.
+    /// The one Prometheus transport: one request to `source` (resolved once
+    /// per command by `prometheus_source`). Every request carries the tenant
+    /// and goes through the proxy or, with credentials, the tunnel; the query
+    /// of a preset gets the cluster-label selector; a proxy or tunnel failure
+    /// (the service vanished, no ready pod, unreadable credentials) makes the
+    /// next status request detect again.
     pub(crate) async fn prometheus_send(
         &self,
         source: &Source<'_>,
@@ -478,12 +481,9 @@ impl Kubepit {
             })
     }
 
-    /// The single Prometheus transport: GET `endpoint` of the cluster's
-    /// Prometheus with `params`. `Preset` queries get the cluster-label
-    /// selector; every request carries the tenant. Callers that send several
-    /// queries resolve the source once (`prometheus_source`) and use
-    /// `prometheus_send`, the same path.
-    pub async fn prometheus_get(
+    /// One request without a resolved source: `prometheus_source`, then
+    /// `prometheus_send`.
+    pub(crate) async fn prometheus_get(
         &self,
         cluster_id: &str,
         endpoint: &str,

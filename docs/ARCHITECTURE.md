@@ -478,10 +478,12 @@ An optional, richer metrics source next to the metrics-server history
   with the cluster's credentials — no port-forward, RBAC applies
   (`services/proxy`). A second client per connection without kube's
   default retry keeps a 503 ("no endpoints available") from backing off
-  for minutes. `Kubepit::prometheus_get` (with `prometheus_source` +
-  `prometheus_send` for callers that send several queries) is the one
-  transport of every caller — chart presets, cost usage and trend,
-  right-sizing, upgrade readiness and the PromQL tab: it sends
+  for minutes. `Kubepit::prometheus_source` (the service, client and
+  access settings of the connection, resolved once per command) +
+  `prometheus_send` is the one transport of every caller — chart presets,
+  cost usage and trend, right-sizing, the statistics batches, upgrade
+  readiness and the PromQL tab (`prometheus_get` is its single-request
+  form, used by `prometheus_instant_at`): it sends
   `X-Scope-OrgID` when a tenant is set (the detection probe too), injects
   the cluster-label selector into `Origin::Preset` queries and makes the
   next status request detect again after a proxy or tunnel failure.
