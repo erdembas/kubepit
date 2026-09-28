@@ -239,6 +239,7 @@ impl Kubepit {
                 };
                 let sampler_client = est.client.clone();
                 let journal_client = est.client.clone();
+                let history_client = est.client.clone();
                 if !self.pool.commit(est.client, status.clone(), epoch) {
                     // Disconnected (or removed) while we were connecting.
                     return Ok(self
@@ -252,6 +253,7 @@ impl Kubepit {
                 self.autostart_saved_forwards(id, sampler_client.clone());
                 self.start_metrics_sampler(id, sampler_client);
                 self.start_change_journal(id, journal_client);
+                self.start_history_persistence(id, history_client);
                 tracing::info!(cluster = %cluster.name, "connected");
                 Ok(status)
             }
@@ -373,6 +375,7 @@ impl Kubepit {
     pub(crate) fn forget_connection(&self, id: &str) {
         self.stop_cluster_work(id);
         self.forget_alerts(id);
+        self.history.forget_cluster(id);
         self.pool.forget(id);
     }
 
@@ -383,6 +386,7 @@ impl Kubepit {
         self.stop_alert_monitor(id);
         self.prometheus.forget(id);
         self.change_journals.stop_cluster(id);
+        self.history.stop_cluster(id);
         self.forwards.stop_cluster(id, self.sink.as_ref());
         self.openapi.forget(id);
     }

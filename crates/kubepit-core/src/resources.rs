@@ -267,7 +267,7 @@ impl Kubepit {
     /// - `create`: POST.
     ///
     /// `namespace` fills namespaced objects that omit `metadata.namespace`.
-    pub async fn resource_apply_yaml(
+    pub(crate) async fn resource_apply_yaml_unaudited(
         &self,
         cluster_id: &str,
         yaml: &str,
@@ -413,8 +413,8 @@ impl Kubepit {
         Ok(to_kube_object(result.map_err(kube_error)?, &target.ar))
     }
 
-    /// `resource_delete`.
-    pub async fn resource_delete(
+    /// `resource_delete` (audited in `history/audited.rs`).
+    pub(crate) async fn resource_delete_unaudited(
         &self,
         cluster_id: &str,
         gvk: &Gvk,
@@ -444,7 +444,7 @@ impl Kubepit {
     }
 
     /// `resource_patch` (merge / RFC 6902 json / strategic).
-    pub async fn resource_patch(
+    pub(crate) async fn resource_patch_unaudited(
         &self,
         cluster_id: &str,
         gvk: &Gvk,
@@ -474,7 +474,7 @@ impl Kubepit {
 
     /// `resource_scale`: through the `scale` subresource when served, else a
     /// merge patch of `spec.replicas`.
-    pub async fn resource_scale(
+    pub(crate) async fn resource_scale_unaudited(
         &self,
         cluster_id: &str,
         gvk: &Gvk,
@@ -510,7 +510,7 @@ impl Kubepit {
 
     /// `resource_restart`: `kubectl rollout restart` — bump the pod template
     /// annotation so the controller rolls every pod.
-    pub async fn resource_restart(
+    pub(crate) async fn resource_restart_unaudited(
         &self,
         cluster_id: &str,
         gvk: &Gvk,
@@ -564,7 +564,7 @@ impl Kubepit {
 
     /// `cronjob_trigger`: create a Job from the CronJob's template (like
     /// `kubectl create job --from=cronjob/<name>`); returns the Job name.
-    pub async fn cronjob_trigger(
+    pub(crate) async fn cronjob_trigger_unaudited(
         &self,
         cluster_id: &str,
         namespace: &str,

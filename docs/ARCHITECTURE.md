@@ -61,6 +61,7 @@ that created them (`src-tauri/src/windows.rs`).
 | `kubeconfigs/<id>.yaml` | backend  | pasted kubeconfigs (`managed: true`), mode 0600     |
 | `run/<id>.kubeconfig`   | backend  | single-context kubeconfig for kubectl/helm/terminal |
 | `port_forwards.json`    | backend  | `SavedPortForward[]` (saved port forwards)          |
+| `history.db`            | backend  | audit log, persisted events / changes (SQLite)      |
 
 With `settings.keychain_kubeconfigs` the pasted kubeconfigs live in the OS
 credential store instead of `kubeconfigs/` (see Connectivity).
@@ -487,6 +488,102 @@ shell enables it, tests and headless tools do not.
   rollouts; journaled kinds get a Changes tab in the details panel.
 - Tests keep the journal off (`tests/support` setup) unless they enable
   it; `tests/change_journal.rs` drives it through the fake API server.
+
+## Persistent history (audit log, events, changes)
+
+`history.rs` (+ `history/`) keeps what must outlive the process in
+`~/.kubepit/history.db` — a local SQLite database (`rusqlite`, bundled)
+that never leaves the machine.
+
+- **Storage** (`history/db.rs`): WAL mode, `synchronous = NORMAL`,
+  incremental auto-vacuum, versioned migrations recorded in
+  `schema_version` (a database from a newer Kubepit is refused, never
+  migrated backwards), file mode 0600. Tables: `audit` + `audit_objects`
+  (before/after per target, cascade-deleted), `events` (upserted by
+  cluster + uid) and `changes` (idempotent per journal start + entry id).
+- **One writer** (`history/writer.rs`): a dedicated thread behind a bounded
+  queue (1 024 operations). Producers only `try_send`; a full queue drops
+  the write and counts it (`HistoryStatus.dropped`), so a command never
+  waits for the disk and recording never fails the user's action.
+  Operations apply in queue order; consecutive data writes share one
+  transaction; clear, prune and flush are barriers. Queries use their own
+  read connection on the blocking pool at the IPC edge.
+- **Audit log** (on by default, `Settings.history.audit`): every mutating
+  command's public entry point lives in `history/audited.rs` and wraps the
+  unaudited implementation in its domain module (`*_unaudited` in
+  `resources.rs`, `nodes.rs`, `rollout.rs`, `images.rs`, `helm.rs`,
+  `helm_charts.rs`, `manifests/apply.rs`, `debug_container.rs`,
+  `pod_fs.rs`, `node_shell.rs`), so every entry point is covered: apply /
+  create / replace, patch, delete, scale, restart, set image, rollout undo,
+  CronJob trigger, cordon / uncordon, drain (one entry, its own cordon is
+  not separate), Helm install / upgrade / rollback / uninstall, manifests
+  apply (one entry, one target per document, failed when any document
+  failed), debug containers, file upload and node-shell helper pods. An
+  entry holds cluster id / name / context, the identity of the cluster's
+  last `access_whoami` (else unknown), action, targets, a redacted
+  request, the dry-run flag, outcome and error, duration, a result (Job,
+  container, helper pod, Helm revision) and — where a GET or the response
+  gives it cheaply — normalized before/after objects (≤ 20 documents,
+  5 s per GET, 128 KiB per target). Refusals by the `read_only` guard are
+  **not** recorded (nothing reached the cluster; the wrapper does not even
+  send its GET); dry runs, which read-only clusters allow, are recorded
+  with `dry_run: true`. Validation and API errors are recorded as errors.
+- **Secrets**: objects go through the change journal's `normalize`
+  (Secret `data` / `stringData` become keyed-hash markers, bookkeeping and
+  `status` dropped); patch bodies to secret-like kinds (`*Secret`), custom
+  `*Secret` kinds' `spec` / `data` and Helm values keep their keys only —
+  every value becomes a marker (one random key per process). File contents
+  are never stored (name and destination only). `tests/history.rs` checks
+  the raw database, WAL and exports for the secret values.
+- **Revert**: an object is revertible when the action is apply / replace /
+  patch / scale / set image, succeeded, was not a dry run, has a changed
+  before-state without redaction markers and is not secret-like. The UI
+  (`lib/history/revert.ts`) turns after → before into an RFC 7386 merge
+  patch, applies it to the _live_ object (later changes by others stay)
+  and sends it as a `replace` with the live resourceVersion — reviewed by
+  a server-side dry run first (`components/activity/RevertDialog.tsx`),
+  blocked on read-only clusters.
+- **Persistent events and changes** (opt-in per cluster,
+  `Settings.history.persist_clusters`): while connected, `history/persist.rs`
+  watches core/v1 Events cluster-wide (falling back to
+  `accessible_namespaces` on 403) and upserts them once a second —
+  deletions are ignored, so events outlive the one-hour TTL — and copies
+  new change-journal entries every 3 s through `ChangeJournals::reader`
+  (a journal restart is detected by its start time). Changes need the
+  change timeline to be on.
+- **Retention**: every ten minutes (first after one minute) and after a
+  settings change: audit entries older than `audit_retention_days`
+  (default 90), events and changes older than `retention_days` (default
+  7), then the size cap `max_size_mb` (default 512: the oldest events and
+  changes go first, the audit log only when nothing else is left), then
+  incremental vacuum (full `VACUUM` after a clear or when most of the file
+  is free) and a WAL checkpoint.
+- **Opt-in per process** (`Kubepit::set_history_recording`, enabled in
+  `src-tauri/src/setup.rs`): tests and headless tools record nothing, send
+  no audit GETs and start no watchers, so fake-API-server logs stay
+  deterministic; queries and clears work either way (the database opens
+  lazily).
+- **Commands**: `history_status`, `history_audit_list` (filters: clusters,
+  actions, outcome, text, time; `"<ts>:<id>"` cursor, total),
+  `history_audit_get`, `history_audit_export` (JSON lines),
+  `history_events_list`, `history_changes_list` (a `ChangeFilter`; ids are
+  the database's), `history_changes_get`, `history_clear` (audit / events /
+  changes / all, optionally one cluster).
+- **UI**: the global Activity main tab (`components/activity/`, sidebar
+  utility row and palette): filters, day groups, expandable entries with
+  targets, the redacted request and a DiffView of before/after, links to
+  the objects, Revert, export. Settings → History
+  (`components/settings/HistoryCategory.tsx`): audit on/off, retention,
+  per-cluster persistence, size cap, database path and size, clear
+  buttons. Clusters that persist history get 7d / 30d ranges in the
+  Changes view, whose timeline then adds persisted entries older than the
+  live journal and persisted Warning events; the details Changes and
+  Events tabs offer "Load older … from history". Without persistence the
+  in-memory paths are unchanged.
+- The demo backend (`mock/history.ts`, registered last) wraps every
+  mutating demo command to derive the audit log from what you do in
+  `pnpm dev:ui`, seeds a few older entries, and ships persisted events and
+  changes for `staging-gke`.
 
 ## Access (RBAC)
 

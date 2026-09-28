@@ -18,13 +18,16 @@ export type MainTab =
   | { kind: 'settings' }
   | { kind: 'port-forwards' }
   /** Fleet search across every connected cluster. */
-  | { kind: 'search' };
+  | { kind: 'search' }
+  /** Own-action audit log across every cluster (persistent history). */
+  | { kind: 'activity' };
 
 export const DASHBOARD_TAB: MainTab = { kind: 'dashboard' };
 export const DASHBOARD_TAB_KEY = 'dashboard:dashboard';
 export const SETTINGS_TAB_KEY = 'settings:settings';
 export const PORT_FORWARDS_TAB_KEY = 'port-forwards:port-forwards';
 export const SEARCH_TAB_KEY = 'search:search';
+export const ACTIVITY_TAB_KEY = 'activity:activity';
 
 export function mainTabKey(tab: MainTab): string {
   return tab.kind === 'cluster' ? `cluster:${tab.refId}` : `${tab.kind}:${tab.kind}`;
@@ -34,7 +37,7 @@ export type SidebarGroupBy = 'none' | 'environment' | 'status' | 'tag';
 export type SidebarStatusFilter = 'all' | 'connected' | 'disconnected';
 export type RightPanel = 'events' | 'forwards' | 'alerts';
 export type SettingsCategory =
-  'general' | 'kubeconfig' | 'terminal' | 'notifications' | 'tools' | 'about';
+  'general' | 'kubeconfig' | 'terminal' | 'notifications' | 'history' | 'tools' | 'about';
 
 export type ClusterEditorState = { mode: 'add' } | { mode: 'edit'; cluster: ClusterDef } | null;
 

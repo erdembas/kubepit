@@ -1,10 +1,16 @@
 import * as i18n from '@/i18n';
 import { useEffect, useState } from 'react';
 import { FileDiff, Loader2, RefreshCw } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
 import { IconButton } from '@/components/ui/IconButton';
 import type { KubeObject } from '@/types';
 import { ChangeRow } from '../changes/TimelineRows';
 import { useJournal } from '../changes/useChanges';
+import {
+  journalCoverageStart,
+  useHistoryChanges,
+  usePersistedHistory,
+} from '../changes/useHistory';
 import { useNow } from '../util';
 import { requestFor, useDetailsTabRequest } from './detailsTabs';
 
@@ -38,15 +44,36 @@ export function ChangesTab({
     isActive,
     10_000,
   );
-  const [expanded, setExpanded] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const entries = journal.data?.entries ?? [];
   const status = journal.data?.status;
+  // Persistent history: older entries on demand ("Load older").
+  const persisted = usePersistedHistory(clusterId);
+  const [olderLimit, setOlderLimit] = useState(0);
+  const older = useHistoryChanges(
+    clusterId,
+    {
+      namespaces: namespace ? [namespace] : [],
+      kinds: [obj.kind],
+      name: obj.metadata.name,
+      text: null,
+      limit: Math.max(1, olderLimit),
+    },
+    null,
+    journalCoverageStart(status),
+    isActive && persisted && olderLimit > 0 && !!journal.data,
+    null,
+  );
+  const olderEntries = olderLimit > 0 ? (older.data?.entries ?? []) : [];
+  const canLoadOlder =
+    persisted && !!journal.data && (olderLimit === 0 || older.data?.next_cursor != null);
 
   // A timeline click opened this tab: open the newest entry right away.
   const request = useDetailsTabRequest((s) => requestFor(s.request, clusterId, obj.metadata.uid));
   useEffect(() => {
     if (!request || request.tab !== 'changes' || !journal.data) return;
-    setExpanded(journal.data.entries[0]?.id ?? null);
+    const newest = journal.data.entries[0];
+    setExpanded(newest ? `c:${newest.id}` : null);
     useDetailsTabRequest.getState().clear();
   }, [request, journal.data]);
 
@@ -90,7 +117,7 @@ export function ChangesTab({
             </>
           )}
         </div>
-      ) : !entries.length ? (
+      ) : !entries.length && !olderEntries.length ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
           <span className="bg-fg/5 text-fg-dim flex h-9 w-9 items-center justify-center rounded-xl">
             <FileDiff className="h-4.5 w-4.5" />
@@ -105,6 +132,17 @@ export function ChangesTab({
                   })
                 : i18n.t('Kubepit records changes while the cluster is connected.')}
           </p>
+          {canLoadOlder && (
+            <Button
+              size="xs"
+              variant="secondary"
+              className="mt-2"
+              disabled={older.loading}
+              onClick={() => setOlderLimit((l) => l + 100)}
+            >
+              {i18n.t('Load older changes from history')}
+            </Button>
+          )}
         </div>
       ) : (
         <ol className="overlay-scroll min-h-0 flex-1 overflow-auto py-1">
@@ -114,12 +152,41 @@ export function ChangesTab({
               entry={entry}
               now={now}
               first={i === 0}
-              last={i === entries.length - 1}
-              expanded={expanded === entry.id}
-              onToggle={() => setExpanded((id) => (id === entry.id ? null : entry.id))}
+              last={i === entries.length - 1 && !olderEntries.length}
+              expanded={expanded === `c:${entry.id}`}
+              onToggle={() =>
+                setExpanded((key) => (key === `c:${entry.id}` ? null : `c:${entry.id}`))
+              }
               compact
             />
           ))}
+          {olderEntries.map((entry, i) => (
+            <ChangeRow
+              key={`h${entry.id}`}
+              entry={entry}
+              now={now}
+              first={i === 0 && !entries.length}
+              last={i === olderEntries.length - 1}
+              expanded={expanded === `h:${entry.id}`}
+              onToggle={() =>
+                setExpanded((key) => (key === `h:${entry.id}` ? null : `h:${entry.id}`))
+              }
+              compact
+              historic
+            />
+          ))}
+          {canLoadOlder && (
+            <li className="flex justify-center py-3">
+              <Button
+                size="xs"
+                variant="secondary"
+                disabled={older.loading}
+                onClick={() => setOlderLimit((l) => l + 100)}
+              >
+                {i18n.t('Load older changes from history')}
+              </Button>
+            </li>
+          )}
         </ol>
       )}
     </div>

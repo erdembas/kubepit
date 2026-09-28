@@ -8,13 +8,23 @@ import { changesKeyPrefix } from './useChanges';
 
 /**
  * Before/after of one journal entry (normalized YAML). Entries never change
- * once recorded, so the detail is fetched once and cached.
+ * once recorded, so the detail is fetched once and cached. `historic`
+ * entries come from the persistent history (their ids are the database's).
  */
-export function ChangeDiff({ entry }: { entry: ChangeSummary }) {
+export function ChangeDiff({
+  entry,
+  historic = false,
+}: {
+  entry: ChangeSummary;
+  historic?: boolean;
+}) {
   i18n.useLocale();
   const detail = usePolled<ChangeDetail>(
-    `${changesKeyPrefix(entry.cluster_id)}detail|${entry.id}`,
-    () => ipc.changesGet(entry.cluster_id, entry.id),
+    `${changesKeyPrefix(entry.cluster_id)}${historic ? 'history-detail' : 'detail'}|${entry.id}`,
+    () =>
+      historic
+        ? ipc.historyChangesGet(entry.cluster_id, entry.id)
+        : ipc.changesGet(entry.cluster_id, entry.id),
     null,
   );
   const d = detail.data;

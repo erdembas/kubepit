@@ -36,6 +36,10 @@ const FleetSearchView = lazy(() =>
   })),
 );
 
+const ActivityView = lazy(() =>
+  import('@/components/activity/ActivityView').then((m) => ({ default: m.ActivityView })),
+);
+
 const MIN_PANE = { row: 360, column: 200 } as const;
 
 /**
@@ -214,6 +218,7 @@ const MainTabPanel = memo(function MainTabPanel({
           {tab.kind === 'settings' && <SettingsView />}
           {tab.kind === 'port-forwards' && <PortForwardsView />}
           {tab.kind === 'search' && <FleetSearchView visible={visible} />}
+          {tab.kind === 'activity' && <ActivityView visible={visible} />}
         </Suspense>
       </div>
     </PaneFocusContext.Provider>

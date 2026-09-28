@@ -146,7 +146,7 @@ impl Kubepit {
 
     /// `manifests_apply`: server-side apply of every document (see module
     /// docs); one result per document, in input order.
-    pub async fn manifests_apply(
+    pub(crate) async fn manifests_apply_unaudited(
         &self,
         cluster_id: &str,
         documents: &[String],

@@ -1,11 +1,14 @@
 import * as i18n from '@/i18n';
-import { Loader2 } from 'lucide-react';
+import { useState } from 'react';
+import { HardDrive, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
 import { ipc } from '@/lib/ipc';
 import { asNumber, asObject, asString, field, lastTimestamp } from '@/lib/kube/accessors';
 import type { ColumnContext } from '@/lib/kube/columns';
 import { cn } from '@/lib/cn';
 import { formatAge } from '@/lib/format';
 import type { KubeObject } from '@/types';
+import { mergeEvents, useHistoryObjectEvents, usePersistedHistory } from '../changes/useHistory';
 import { usePolled } from '../data/polled';
 
 export function EventList({
@@ -94,6 +97,21 @@ export function EventsTab({
     10_000,
     isActive,
   );
+  // Persistent history: events Kubernetes already expired, on demand.
+  const persisted = usePersistedHistory(clusterId);
+  const [olderLimit, setOlderLimit] = useState(0);
+  const older = useHistoryObjectEvents(
+    clusterId,
+    obj,
+    Math.max(1, olderLimit),
+    isActive && persisted && olderLimit > 0,
+  );
+  const olderOnly =
+    olderLimit > 0 && events.data
+      ? mergeEvents(events.data, older.data?.events ?? []).slice(events.data.length)
+      : [];
+  const canLoadOlder =
+    persisted && !!events.data && (olderLimit === 0 || older.data?.next_cursor != null);
   return (
     <div className="overlay-scroll min-h-0 flex-1 overflow-auto">
       {events.error && !events.data ? (
@@ -104,7 +122,37 @@ export function EventsTab({
           {i18n.t('Loading…')}
         </div>
       ) : (
-        <EventList events={events.data} ctx={ctx} />
+        <>
+          {(events.data.length > 0 || !olderOnly.length) && (
+            <EventList events={events.data} ctx={ctx} />
+          )}
+          {olderOnly.length > 0 && (
+            <>
+              <h4 className="border-border/50 text-fg-dim flex h-8 items-center gap-1.5 border-y px-4 text-[10.5px] font-semibold tracking-[0.08em] uppercase">
+                <HardDrive className="h-3 w-3" />
+                {i18n.t('From history')}
+              </h4>
+              <EventList events={olderOnly} ctx={ctx} />
+            </>
+          )}
+          {olderLimit > 0 && older.data && !olderOnly.length && (
+            <p className="text-fg-dim px-4 py-3 text-center text-[11.5px]">
+              {i18n.t('No older events in the history.')}
+            </p>
+          )}
+          {canLoadOlder && (
+            <div className="flex justify-center py-3">
+              <Button
+                size="xs"
+                variant="secondary"
+                disabled={older.loading}
+                onClick={() => setOlderLimit((l) => l + 100)}
+              >
+                {i18n.t('Load older events from history')}
+              </Button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

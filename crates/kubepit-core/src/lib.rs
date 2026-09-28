@@ -48,6 +48,7 @@
 //! | [`local_files`] | bounded reads of user-picked files (resource wizards)  |
 //! | [`upgrade`]     | upgrade readiness: deprecated / removed API usage      |
 //! | [`helm_preview`] | Helm values schemas, upgrade preview (helm-diff)      |
+//! | [`history`]     | SQLite audit log, persisted events and changes         |
 //!
 //! Push notifications to the UI go through [`EventSink`]; streams take plain
 //! `Fn(T) -> bool` callbacks (return `false` to stop) that the desktop shell
@@ -117,6 +118,8 @@ pub mod local_files;
 // Upgrade readiness (deprecated APIs), Helm values schemas and upgrade preview.
 pub mod helm_preview;
 pub mod upgrade;
+// Persistent history: own-action audit log, persisted events and changes.
+pub mod history;
 
 pub use app::Kubepit;
 pub use events::{EventSink, NullSink};

@@ -352,7 +352,7 @@ impl Kubepit {
     }
 
     /// `helm_rollback`.
-    pub async fn helm_rollback(
+    pub(crate) async fn helm_rollback_unaudited(
         &self,
         cluster_id: &str,
         namespace: &str,
@@ -374,7 +374,7 @@ impl Kubepit {
     }
 
     /// `helm_uninstall`.
-    pub async fn helm_uninstall(
+    pub(crate) async fn helm_uninstall_unaudited(
         &self,
         cluster_id: &str,
         namespace: &str,
@@ -395,7 +395,7 @@ impl Kubepit {
     /// user values. The release secret does not record where the chart came
     /// from, so this only works when a configured helm repository serves
     /// exactly that chart version.
-    pub async fn helm_upgrade_values(
+    pub(crate) async fn helm_upgrade_values_unaudited(
         &self,
         cluster_id: &str,
         namespace: &str,

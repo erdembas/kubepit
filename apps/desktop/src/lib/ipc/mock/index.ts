@@ -25,6 +25,8 @@ import './wizards';
 // Upgrade readiness scan, Helm values schemas and upgrade preview.
 import './upgrade';
 import './helmPreview';
+// Registered last: it wraps every mutating command to derive the demo audit log.
+import './history';
 
 export { mockListen } from './bus';
 

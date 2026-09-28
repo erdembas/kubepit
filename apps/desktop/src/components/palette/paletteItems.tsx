@@ -7,6 +7,7 @@ import {
   FileSearch,
   FolderGit2,
   FolderPlus,
+  History,
   Languages,
   LayoutDashboard,
   Moon,
@@ -273,6 +274,14 @@ export function appActions(): PaletteItem[] {
       icon: Network,
       group: 'actions',
       run: () => store.openMainTab({ kind: 'port-forwards' }),
+    },
+    {
+      type: 'action',
+      id: 'activity',
+      label: i18n.t('Activity: your actions on every cluster'),
+      icon: History,
+      group: 'actions',
+      run: () => store.openMainTab({ kind: 'activity' }),
     },
     {
       type: 'action',

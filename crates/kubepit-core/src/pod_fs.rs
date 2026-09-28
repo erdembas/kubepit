@@ -661,7 +661,7 @@ impl Kubepit {
 
     /// `pod_fs_upload`: copy one local file into `remote_dir` (replacing a
     /// file of the same name). Mutating: refused on read-only clusters.
-    pub async fn pod_fs_upload(
+    pub(crate) async fn pod_fs_upload_unaudited(
         &self,
         cluster_id: &str,
         namespace: &str,

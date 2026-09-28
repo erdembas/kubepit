@@ -234,7 +234,10 @@ impl Kubepit {
                 }
             }
         };
-        Ok(whoami_from_user(user))
+        let who = whoami_from_user(user);
+        // The audit log names this user for later actions on the cluster.
+        self.history.remember_identity(cluster_id, &who.username);
+        Ok(who)
     }
 }
 

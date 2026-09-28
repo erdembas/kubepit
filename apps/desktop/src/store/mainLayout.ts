@@ -1,5 +1,11 @@
 import { createLayoutOps } from './splitLayout';
-import { DASHBOARD_TAB, DASHBOARD_TAB_KEY, SEARCH_TAB_KEY, type MainTab } from './types';
+import {
+  ACTIVITY_TAB_KEY,
+  DASHBOARD_TAB,
+  DASHBOARD_TAB_KEY,
+  SEARCH_TAB_KEY,
+  type MainTab,
+} from './types';
 
 /**
  * The main area's split layout of app tabs (dashboard, clusters, settings,
@@ -19,6 +25,7 @@ export function tabFromKey(key: string): MainTab | null {
   if (key === 'settings:settings') return { kind: 'settings' };
   if (key === 'port-forwards:port-forwards') return { kind: 'port-forwards' };
   if (key === SEARCH_TAB_KEY) return { kind: 'search' };
+  if (key === ACTIVITY_TAB_KEY) return { kind: 'activity' };
   return null;
 }
 

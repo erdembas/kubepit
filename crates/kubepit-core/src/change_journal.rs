@@ -260,6 +260,37 @@ impl ChangeJournals {
     }
 }
 
+/// Read access to every journal for background tasks (history persistence
+/// copies new entries to disk).
+#[derive(Clone)]
+pub struct JournalReader {
+    journals: Journals,
+}
+
+impl JournalReader {
+    /// The journal's start time and up to `limit` entries newer than
+    /// `after` (oldest first); `None` while `cluster_id` is not recording.
+    pub fn details_after(
+        &self,
+        cluster_id: &str,
+        after: u64,
+        limit: usize,
+    ) -> Option<(i64, Vec<ChangeDetail>)> {
+        let journals = self.journals.lock();
+        let journal = &journals.get(cluster_id)?.journal;
+        let started = journal.started_at();
+        Some((started, journal.details_after(after, limit)))
+    }
+}
+
+impl ChangeJournals {
+    pub fn reader(&self) -> JournalReader {
+        JournalReader {
+            journals: self.journals.clone(),
+        }
+    }
+}
+
 /// What one recorder task needs; shared by its watcher tasks.
 struct Recorder {
     cluster_id: String,

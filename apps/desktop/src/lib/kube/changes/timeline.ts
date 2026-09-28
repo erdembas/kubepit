@@ -57,14 +57,33 @@ export type TimelineItem =
       images: string[];
     };
 
-export type TimeRange = '15m' | '1h' | '6h' | '24h';
+export type TimeRange = '15m' | '1h' | '6h' | '24h' | '7d' | '30d';
 
 export const TIME_RANGES: Record<TimeRange, number> = {
   '15m': 15 * 60_000,
   '1h': 60 * 60_000,
   '6h': 6 * 60 * 60_000,
   '24h': 24 * 60 * 60_000,
+  '7d': 7 * 24 * 60 * 60_000,
+  '30d': 30 * 24 * 60 * 60_000,
 };
+
+/** Ranges the in-memory journal covers. */
+export const LIVE_RANGES: readonly TimeRange[] = ['15m', '1h', '6h', '24h'];
+/** Ranges only clusters with persistent history offer. */
+export const HISTORY_RANGES: readonly TimeRange[] = ['7d', '30d'];
+
+/** Journal entries from the persistent history (keys distinct from live ones). */
+export function historyChangeItems(
+  entries: readonly ChangeSummary[],
+  w: TimelineWindow,
+): TimelineItem[] {
+  return changeItems(entries, w).map((item) => ({ ...item, key: `hc:${item.key.slice(2)}` }));
+}
+
+export function isHistoryItem(item: TimelineItem): boolean {
+  return item.key.startsWith('hc:');
+}
 
 export interface TimelineWindow {
   since: number;
