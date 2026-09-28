@@ -900,7 +900,7 @@ that never leaves the machine.
   (default 512, applied until it is reached: the oldest events and
   changes go first, 10 % but at least 100 rows a round, then the rows of
   the oldest recommendation runs, the audit log only when nothing else is
-  left), then incremental vacuum (full `VACUUM` after a clear or when most of the file
+  left, 10 % a round with no such minimum), then incremental vacuum (full `VACUUM` after a clear or when most of the file
   is free) and a WAL checkpoint.
 - **Opt-in per process** (`Kubepit::set_history_recording`, enabled in
   `src-tauri/src/setup.rs`): tests and headless tools record nothing, send
