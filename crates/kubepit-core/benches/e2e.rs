@@ -6,21 +6,25 @@
 //! - `e2e/watch_pods_synced_l`: a cluster-wide pods `resource_watch` until
 //!   its first `synced` batch, one freshly connected app per iteration.
 //! - `e2e/fleet_search_l`: `fleet_search` for `api` over pods, Deployments,
-//!   Services and ConfigMaps until the cluster's final event. The per-kind
-//!   limit is above every kind's match count, so every page is read (the
-//!   UI's 200 would stop after two pages per kind).
+//!   Services and ConfigMaps until the cluster's final event. Discovery is
+//!   cached first (`api_resources`, as the UI does after connecting), so a
+//!   search is exactly its 80 list requests. The per-kind limit (20 000) is
+//!   above every kind's match count, so every page is read: the spec's risk
+//!   is the many-page path, which the UI's 200 would cut after about two
+//!   pages per kind.
 //! - `e2e/prometheus_query`: `prometheus_query_range` through the service
 //!   proxy of a detected `prometheus-operated` answering 100 series.
 //!
 //! Before the benches, under `cargo bench` only, it writes
 //! `target/perf/backend-e2e.json`:
 //!
-//! - `e2e/max_rss_l_all_watchers`: peak RSS in bytes of a child process
-//!   (this binary again, so the fixture's own memory is not counted) that
-//!   connects to `l` with every opt-in background watcher on, syncs one
-//!   pods watch and settles for 5 s;
-//! - `structural/list_requests_without_limit`: the collections that child
-//!   listed without `limit=` (`support::perf::unpaged_lists`).
+//! - `e2e/max_rss_l_all_watchers` (unix only; missing elsewhere, so the
+//!   compare fails rather than passes): peak RSS in bytes of a child
+//!   process (this binary again, so the fixture's own memory is not
+//!   counted) that connects to `l` with every opt-in background watcher on,
+//!   syncs one pods watch and settles for 5 s;
+//! - `structural/list_requests_without_limit`: the list-shaped paths that
+//!   child requested without `limit=` (`support::perf::unpaged_lists`).
 
 #[path = "../tests/support/mod.rs"]
 mod support;
@@ -65,25 +69,34 @@ async fn connected(url: &str) -> (tempfile::TempDir, Arc<Kubepit>, String) {
 
 /// `getrusage(RUSAGE_SELF).ru_maxrss` in bytes (it is KiB on Linux).
 #[cfg(unix)]
-fn max_rss_bytes() -> u64 {
+fn max_rss_bytes() -> Option<u64> {
     // SAFETY: getrusage only writes the zero-initialised struct we pass.
     let usage = unsafe {
         let mut usage: libc::rusage = std::mem::zeroed();
         assert_eq!(libc::getrusage(libc::RUSAGE_SELF, &mut usage), 0);
         usage
     };
-    let raw = u64::try_from(usage.ru_maxrss).unwrap_or(0);
-    if cfg!(any(target_os = "macos", target_os = "ios")) {
+    let raw = u64::try_from(usage.ru_maxrss).ok()?;
+    Some(if cfg!(any(target_os = "macos", target_os = "ios")) {
         raw
     } else {
         raw * 1024
-    }
+    })
+}
+
+#[cfg(not(unix))]
+fn max_rss_bytes() -> Option<u64> {
+    None
 }
 
 /// The measured child: connect with every opt-in switch on, one pods
-/// watch, a 5 s settle; print the peak RSS in bytes.
-#[cfg(unix)]
+/// watch, a 5 s settle; print `rss=<bytes>` (`rss=none` off unix). Only
+/// ever the parent's fake server on the loopback interface.
 fn rss_child(url: &str) -> ! {
+    assert!(
+        url.starts_with("http://127.0.0.1:"),
+        "{RSS_CHILD} must be the loopback fake server, not {url:?}"
+    );
     runtime().block_on(async {
         let (_dir, app, id) = scale_setup(url);
         app.set_alert_monitoring(true);
@@ -94,7 +107,10 @@ fn rss_child(url: &str) -> ! {
         app.cluster_connect(&id).await.unwrap();
         wait_synced(&app, &id, &pods()).await;
         tokio::time::sleep(Duration::from_secs(5)).await;
-        println!("{}", max_rss_bytes());
+        match max_rss_bytes() {
+            Some(bytes) => println!("rss={bytes}"),
+            None => println!("rss=none"),
+        }
     });
     std::process::exit(0)
 }
@@ -113,25 +129,24 @@ fn target_dir() -> PathBuf {
 
 fn backend_report(rt: &Runtime, cluster: &Arc<ScaleCluster>) {
     let server = rt.block_on(start(cluster.clone().router(ScaleServe::default())));
+    let output = Command::new(std::env::current_exe().unwrap())
+        .env(RSS_CHILD, &server.url)
+        .stdin(Stdio::null())
+        .stderr(Stdio::inherit())
+        .output()
+        .expect("the RSS child runs");
+    assert!(output.status.success(), "the RSS child failed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let rss = stdout
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("rss="))
+        .unwrap_or_else(|| panic!("the RSS child printed no rss= line: {stdout:?}"));
     let mut report = serde_json::Map::new();
-    #[cfg(unix)]
-    {
-        let output = Command::new(std::env::current_exe().unwrap())
-            .env(RSS_CHILD, &server.url)
-            .stdin(Stdio::null())
-            .stderr(Stdio::inherit())
-            .output()
-            .expect("the RSS child runs");
-        assert!(output.status.success(), "the RSS child failed");
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let bytes: u64 = stdout
-            .lines()
-            .last()
-            .and_then(|line| line.trim().parse().ok())
-            .unwrap_or_else(|| panic!("the RSS child printed no byte count: {stdout:?}"));
+    if rss != "none" {
+        let bytes: u64 = rss.parse().expect("rss= carries a byte count");
         report.insert("e2e/max_rss_l_all_watchers".into(), json!(bytes));
     }
-    let unpaged = unpaged_lists(&server.log, cluster);
+    let unpaged = unpaged_lists(&server.log);
     report.insert(
         "structural/list_requests_without_limit".into(),
         json!(unpaged.len()),
@@ -199,6 +214,9 @@ async fn search_once(app: &Kubepit, query: FleetSearchQuery) -> (Duration, usize
 
 fn fleet_search(c: &mut Criterion, rt: &Runtime, server: &FakeServer, cluster: &ScaleCluster) {
     let (_dir, app, id) = rt.block_on(connected(&server.url));
+    // Cache discovery like the UI does after connecting; otherwise every
+    // search re-discovers 200 CRD groups.
+    rt.block_on(app.api_resources(&id)).unwrap();
     let query = FleetSearchQuery {
         text: "api".into(),
         kinds: vec![
@@ -210,10 +228,18 @@ fn fleet_search(c: &mut Criterion, rt: &Runtime, server: &FakeServer, cluster: &
         cluster_ids: vec![id],
         namespace: None,
         label_selector: None,
+        // Every page is read (a deliberate choice, see the module docs).
         limit_per_kind: cluster.count("/api/v1/pods").unwrap() as u32,
     };
+    let before = server.log.lock().len();
     let (_, hits) = rt.block_on(search_once(&app, query.clone()));
     assert_eq!(hits, 4_000 + 1_000 + 1_000 + 2_000, "every api object");
+    let requests = server.log.lock().len() - before;
+    assert_eq!(
+        requests,
+        40 + 10 + 10 + 20,
+        "only the list pages, no discovery"
+    );
     c.benchmark_group("e2e")
         .sample_size(10)
         .sampling_mode(SamplingMode::Flat)
@@ -314,7 +340,6 @@ fn prometheus_query(c: &mut Criterion, rt: &Runtime, cluster: &Arc<ScaleCluster>
 }
 
 fn main() {
-    #[cfg(unix)]
     if let Ok(url) = std::env::var(RSS_CHILD) {
         rss_child(&url);
     }

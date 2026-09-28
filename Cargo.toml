@@ -25,3 +25,5 @@ strip = true
 lto = "thin"
 codegen-units = 16
 debug = "line-tables-only"
+# Release strips symbols; keep the line tables for profiling benches.
+strip = "none"

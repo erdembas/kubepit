@@ -412,16 +412,6 @@ impl ScaleCluster {
         self.collections.keys().cloned().collect()
     }
 
-    /// Whether `path` (without its query) is a collection this cluster
-    /// serves, cluster-wide or in one namespace.
-    pub fn serves_collection(&self, path: &str) -> bool {
-        resolve(path).is_some_and(|(key, namespace)| {
-            self.collections
-                .get(&key)
-                .is_some_and(|c| namespace.is_none() || c.namespaced)
-        })
-    }
-
     pub fn router(self: Arc<Self>, serve: ScaleServe) -> Router {
         Arc::new(move |req: &Request, _log: &Log| self.reply(req, &serve))
     }
@@ -630,6 +620,13 @@ fn not_found(path: &str) -> Reply {
             &format!("the server could not find the requested resource ({path})"),
         ),
     )
+}
+
+/// Whether `path` (without its query) has the shape of a list or watch
+/// request (`/api/{v}/{plural}`, `/apis/{g}/{v}/{plural}` or their
+/// `namespaces/{ns}/…` variants), whether or not the fixture serves it.
+pub fn is_list_path(path: &str) -> bool {
+    resolve(path).is_some()
 }
 
 /// A list/watch path → (cluster-wide collection path, namespace).

@@ -271,7 +271,7 @@ Where the counts come from:
 - secrets and configmaps = journal;
 - events = history persistence.
 
-The helpers `scale_setup`, `persist_history`, `wait_synced` and `gvk` live in this file. _(Done: they, `watch_streams_per_path` and `unpaged_lists` live in `tests/support/perf.rs` instead, so `benches/e2e.rs` shares them. Every other path is also pinned at one stream. An ignored test repeats the snapshot at `m` and `l`: `cargo test -p kubepit-core --test perf_probe -- --ignored`. The counts matched at all three presets.)_
+The helpers `scale_setup`, `persist_history`, `wait_synced` and `gvk` live in this file. _(Done: they, `watch_streams_per_path` and `unpaged_lists` live in `tests/support/perf.rs` instead, so `benches/e2e.rs` shares them. `unpaged_lists(log)` counts every list-shaped path, including ones the fixture answers 404, so it takes no cluster. The whole fan-out map, all 20 paths, is pinned. An ignored test repeats the snapshot at `m` and `l`: `cargo test -p kubepit-core --test perf_probe -- --ignored`. The counts matched at all three presets.)_
 
 - [x] **Step 2: Run the test**
 
@@ -392,7 +392,7 @@ git commit -m "perf(bench): alerts, change journal and history writer benches"
 - [x] **Step 1: Write the benches.** e2e benches build a `tokio::runtime::Runtime` and use the fixture router from Task 1. They never touch `~/.kube`: `Paths` points at a temp dir.
   _(Done, with three choices worth knowing:_
   - _`e2e/max_rss_l_all_watchers` is measured in a child process (the bench binary re-run with `KUBEPIT_PERF_RSS_CHILD_URL`), so the in-process fixture's own memory is not counted. The report is written only under `cargo bench`: it needs `--bench` and skips `--list`._
-  - _`e2e/fleet_search_l` sets `limit_per_kind` to 20 000, so every page is read: 40 pod pages, 80 lists in all. The UI's 200 would stop after about two pages per kind at `l`._
+  - _`e2e/fleet_search_l` sets `limit_per_kind` to 20 000, so every page is read: 40 pod pages, 80 lists in all. The UI's 200 would stop after about two pages per kind at `l`. The coordinator decided to keep 20 000, because the spec's risk is the many-page path. Discovery is cached first with `api_resources`, as the UI does, so each search makes exactly its 80 list requests. The bench asserts that count._
   - _`e2e/prometheus_query` detects `prometheus-operated` once, untimed. The service is added to the last page of the fixture's Services list.)_
 
 - [x] **Step 2: Run them**

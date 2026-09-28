@@ -14,7 +14,7 @@ use kubepit_core::history::HistorySettings;
 use kubepit_core::types::{ClusterInput, Gvk, Settings, WatchBatch};
 use kubepit_core::{Kubepit, NullSink, Paths};
 
-use super::scale::ScaleCluster;
+use super::scale::is_list_path;
 use super::{kubeconfig_for, Log};
 
 /// A `Kubepit` in a temp dir with one cluster pointing at `url`, with the
@@ -100,15 +100,16 @@ pub fn watch_streams_per_path(log: &Log) -> BTreeMap<String, usize> {
     out
 }
 
-/// Collection paths listed without `limit=` (and not as a watch): the
-/// unpaged lists, keyed by the path without the query.
-pub fn unpaged_lists(log: &Log, cluster: &ScaleCluster) -> BTreeSet<String> {
+/// List-shaped paths requested without `limit=` (and not as a watch): the
+/// unpaged lists, keyed by the path without the query. Paths the fixture
+/// does not serve (answered 404) count too.
+pub fn unpaged_lists(log: &Log) -> BTreeSet<String> {
     log.lock()
         .iter()
         .filter(|req| req.method == "GET")
         .filter(|req| !query_has(&req.path, "watch", Some("true")))
         .filter(|req| !query_has(&req.path, "limit", None))
-        .filter(|req| cluster.serves_collection(req.path_only()))
+        .filter(|req| is_list_path(req.path_only()))
         .map(|req| req.path_only().to_string())
         .collect()
 }

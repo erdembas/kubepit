@@ -5,9 +5,11 @@
 //!
 //! Where the stream counts come from: pods = the UI watch + alerts; nodes
 //! and deployments = alerts + change journal; jobs = alerts; secrets and
-//! configmaps = journal; events = history persistence. The unpaged lists are
-//! the metrics sampler's NodeMetrics and PodMetrics. H1 (shared informers)
-//! and H4 (paging) update these expectations.
+//! configmaps = journal; events = history persistence; every other path is
+//! one of the journal's kinds. The unpaged lists (any list-shaped path, even
+//! one the fixture does not serve) are the metrics sampler's NodeMetrics and
+//! PodMetrics. H1 (shared informers) and H4 (paging) update these
+//! expectations.
 //!
 //! `s` runs with the normal tests (~3 s). The same snapshot at `m` and `l`:
 //! `cargo test -p kubepit-core --test perf_probe -- --ignored --nocapture`.
@@ -40,13 +42,16 @@ async fn snapshot(name: &str) -> (BTreeMap<String, usize>, BTreeSet<String>) {
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     let fanout = watch_streams_per_path(&server.log);
-    let unpaged = unpaged_lists(&server.log, &cluster);
+    let unpaged = unpaged_lists(&server.log);
     println!("[{name}] watch streams per path: {fanout:#?}\n[{name}] unpaged lists: {unpaged:#?}");
     (fanout, unpaged)
 }
 
 fn assert_snapshot(name: &str, fanout: &BTreeMap<String, usize>, unpaged: &BTreeSet<String>) {
-    let pinned = [
+    // Every watched path, so a missing or an extra stream fails too. The
+    // single-stream paths other than jobs, secrets, configmaps and events
+    // are the change journal's remaining kinds.
+    let expected: BTreeMap<String, usize> = [
         ("/api/v1/pods", 2),
         ("/api/v1/nodes", 2),
         ("/apis/apps/v1/deployments", 2),
@@ -54,27 +59,31 @@ fn assert_snapshot(name: &str, fanout: &BTreeMap<String, usize>, unpaged: &BTree
         ("/api/v1/secrets", 1),
         ("/api/v1/configmaps", 1),
         ("/api/v1/events", 1),
-    ];
-    for (path, streams) in pinned {
-        assert_eq!(
-            fanout.get(path),
-            Some(&streams),
-            "[{name}] {path}: {fanout:#?}"
-        );
-    }
-    // Every other path (the journal's remaining kinds) has one stream.
-    for (path, streams) in fanout {
-        if !pinned.iter().any(|(p, _)| p == path) {
-            assert_eq!(*streams, 1, "[{name}] {path}: {fanout:#?}");
-        }
-    }
+        ("/api/v1/namespaces", 1),
+        ("/api/v1/services", 1),
+        ("/apis/apps/v1/daemonsets", 1),
+        ("/apis/apps/v1/statefulsets", 1),
+        ("/apis/autoscaling/v2/horizontalpodautoscalers", 1),
+        ("/apis/batch/v1/cronjobs", 1),
+        ("/apis/networking.k8s.io/v1/ingresses", 1),
+        ("/apis/networking.k8s.io/v1/networkpolicies", 1),
+        ("/apis/policy/v1/poddisruptionbudgets", 1),
+        ("/apis/rbac.authorization.k8s.io/v1/clusterrolebindings", 1),
+        ("/apis/rbac.authorization.k8s.io/v1/clusterroles", 1),
+        ("/apis/rbac.authorization.k8s.io/v1/rolebindings", 1),
+        ("/apis/rbac.authorization.k8s.io/v1/roles", 1),
+    ]
+    .into_iter()
+    .map(|(path, streams)| (path.to_string(), streams))
+    .collect();
+    assert_eq!(*fanout, expected, "[{name}] watch streams per path");
     assert_eq!(
         *unpaged,
         BTreeSet::from([
             "/apis/metrics.k8s.io/v1beta1/nodes".to_string(),
             "/apis/metrics.k8s.io/v1beta1/pods".to_string(),
         ]),
-        "[{name}]"
+        "[{name}] unpaged lists"
     );
 }
 
