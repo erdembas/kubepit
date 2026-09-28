@@ -40,6 +40,14 @@ describe('droppedPaths', () => {
         { volumeMounts: mounts('/var/run', '/etc/b', '/etc/a'), nodeSelector: { disk: 'ssd' } },
       ),
     ).toEqual(['nodeSelector', 'volumeMounts[/etc/b]']);
+    // Matched by key, not position: live has two items, but not `/etc/b`.
+    expect(
+      droppedPaths(
+        { volumeMounts: mounts('/etc/a', '/etc/b') },
+        { volumeMounts: mounts('/etc/a') },
+        { volumeMounts: mounts('/var/run', '/etc/a') },
+      ),
+    ).toEqual([]);
     expect(
       droppedPaths(
         { spec: { replicas: 2, paused: true } },
@@ -47,6 +55,17 @@ describe('droppedPaths', () => {
         { spec: { replicas: 2, paused: null } },
       ),
     ).toEqual([]);
+  });
+
+  it('skips empty maps and lists', () => {
+    // The API server keeps `resources: {}`; only the env list really goes.
+    const before = {
+      containers: [
+        { name: 'api', image: 'a', resources: {}, args: [], env: [{ name: 'DEBUG', value: '1' }] },
+      ],
+    };
+    const after = { containers: [{ name: 'api', image: 'a' }] };
+    expect(droppedPaths(before, after, before)).toEqual(['containers[api].env']);
   });
 
   it('quotes keys that are not plain', () => {

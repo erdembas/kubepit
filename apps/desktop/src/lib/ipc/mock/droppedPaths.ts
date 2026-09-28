@@ -32,10 +32,14 @@ function itemKey(a: unknown[], b: unknown[]): string | null {
   return ITEM_KEYS.find((field) => unique(a, field) && unique(b, field)) ?? null;
 }
 
-/** Nodes `before` has and `after` lacks, in `changed_paths` order. */
+/** An empty map or list (`resources: {}`): the API server keeps it anyway. */
+const isEmpty = (v: unknown) =>
+  Array.isArray(v) ? v.length === 0 : isMap(v) && Object.keys(v).length === 0;
+
+/** Nodes `before` has and `after` lacks (never empty ones), in `changed_paths` order. */
 function removals(before: unknown, after: unknown, path: Segment[], out: Segment[][]) {
   if (after === undefined) {
-    out.push(path);
+    if (!isEmpty(before)) out.push(path);
     return;
   }
   if (same(before, after)) return;

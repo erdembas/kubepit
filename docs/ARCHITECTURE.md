@@ -146,7 +146,8 @@ monaco.ts`, `values.ts`): completion, hovers and markers from the same
   most 300) for a live → after diff. That dry run never removes fields a
   chart stops setting; helm's three-way merge does, so each changed object
   with a live object also gets `dropped_fields`: the paths the old render
-  has, the new render lacks and the live object still carries
+  has, the new render lacks and the live object still carries, except
+  empty maps and lists, which the API server keeps
   (`change_journal::diff::dropped_paths`, the change journal's keyed-list
   walker and path syntax). The dialog makes this a review step: "Upgrade"
   first renders the review (`helm/UpgradeChanges.tsx`: filterable object

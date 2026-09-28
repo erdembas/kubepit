@@ -176,7 +176,14 @@ impl Walker {
 
     fn leaf(&mut self, before: Option<&Value>, after: Option<&Value>) {
         if let Some(removals) = &mut self.removals {
-            if before.is_some() && after.is_none() {
+            // An empty map or list (`resources: {}`) is kept by the API
+            // server, so dropping it from the render removes nothing.
+            let empty = match before {
+                Some(Value::Object(map)) => map.is_empty(),
+                Some(Value::Array(items)) => items.is_empty(),
+                _ => false,
+            };
+            if before.is_some() && after.is_none() && !empty {
                 removals.push(self.segments.clone());
             }
             return;
@@ -272,6 +279,7 @@ fn lookup<'a>(value: &'a Value, segments: &[Segment]) -> Option<&'a Value> {
 /// whole subtrees) present in `before` (the old render), absent from
 /// `after` (the new render) and still present in `live`. Helm's three-way
 /// merge deletes exactly those; a server-side apply dry run never does.
+/// Empty maps and lists are skipped: the API server keeps them anyway.
 /// Paths use [`changed_paths`]'s syntax and order.
 pub fn dropped_paths(before: &Value, after: &Value, live: &Value) -> Vec<String> {
     let mut walker = Walker::new(&[]);
@@ -474,6 +482,9 @@ mod tests {
             dropped_paths(&before, &after, &live),
             vec!["nodeSelector", "volumeMounts[/etc/b]"]
         );
+        // Matched by key, not position: live has two items, but not `/etc/b`.
+        let without_b = json!({"volumeMounts": mounts(&["/var/run", "/etc/a"])});
+        assert!(dropped_paths(&before, &after, &without_b).is_empty());
         // Changed values are not drops, and neither is a null left live.
         let changed = dropped_paths(
             &json!({"spec": {"replicas": 2, "paused": true}}),
@@ -481,6 +492,18 @@ mod tests {
             &json!({"spec": {"replicas": 2, "paused": null}}),
         );
         assert!(changed.is_empty(), "{changed:?}");
+    }
+
+    #[test]
+    fn dropped_paths_skip_empty_maps_and_lists() {
+        // The API server keeps `resources: {}`; only the env list really goes.
+        let before = json!({"containers": [{"name": "api", "image": "a", "resources": {}, "args": [],
+            "env": [{"name": "DEBUG", "value": "1"}]}]});
+        let after = json!({"containers": [{"name": "api", "image": "a"}]});
+        assert_eq!(
+            dropped_paths(&before, &after, &before),
+            vec!["containers[api].env"]
+        );
     }
 
     #[test]
