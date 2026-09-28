@@ -13,11 +13,12 @@ use kubepit_core::cost::{
 use kubepit_core::history::{AuditAction, AuditFilter, AuditOutcome};
 use kubepit_core::recommendations::RecommendationSettings;
 use kubepit_core::rightsizing::{
-    Change, Confidence, ContainerResourceChange, RightsizingNoteKind, RightsizingRequest,
-    RightsizingSettings, RightsizingSource, Verdict, WorkloadRef,
+    Change, Confidence, ContainerResourceChange, EvidenceIdentity, RightsizingNoteKind,
+    RightsizingRequest, RightsizingSettings, RightsizingSource, Verdict, WorkloadRef,
 };
 use kubepit_core::types::{DryRunOperation, PromScheme};
 use serde_json::{json, Value};
+use support::stats::stat_query;
 use support::{proxy_forbidden, setup, start, status, Log, Reply, Request, Router};
 
 const OPENCOST: &str = "/api/v1/namespaces/opencost/services/http:opencost:9003/proxy";
@@ -451,6 +452,13 @@ fn deployment(replicas: u64, cpu: &str, memory: &str) -> Value {
     })
 }
 
+fn empty_vector() -> Reply {
+    Reply::Json(
+        200,
+        json!({"status": "success", "data": {"resultType": "vector", "result": []}}),
+    )
+}
+
 fn vector(labels: Value, value: &str) -> Reply {
     Reply::Json(
         200,
@@ -485,16 +493,16 @@ fn rightsizing_router(prometheus: bool) -> Router {
                         200,
                         json!({"status": "success", "data": {"resultType": "scalar", "result": [1, "1"]}}),
                     )
-                } else if q.starts_with("quantile_over_time(0.95") {
-                    vector(key, "120")
-                } else if q.starts_with("max_over_time((sum") {
-                    vector(key, "300")
-                } else if q.contains("max_over_time(container_memory_working_set_bytes") {
-                    vector(key, "314572800")
-                } else if q.starts_with("count_over_time") {
-                    vector(key, "168")
                 } else {
-                    vector(json!({}), "0")
+                    // Q1 = 120, Q2 = 300, Q5 = 300 MiB, Q7 = 2016 samples
+                    // (a week of one pod); no kube-state-metrics.
+                    match stat_query(&q) {
+                        Some(1) => vector(key, "120"),
+                        Some(2) => vector(key, "300"),
+                        Some(5) => vector(key, "314572800"),
+                        Some(7) => vector(key, "2016"),
+                        _ => empty_vector(),
+                    }
                 }
             }
             (_, "/apis/apps/v1/deployments") => {
@@ -532,15 +540,22 @@ async fn right_sizing_recommends_from_prometheus_history() {
         report.notes
     );
     assert_eq!(report.window_secs, 7 * 86_400);
-    assert_eq!(report.strategy, "percentile-headroom");
+    // No kube-state-metrics: chosen automatically, pods matched by name.
+    assert_eq!(
+        (report.strategy.as_str(), report.strategy_auto),
+        ("percentile-headroom", true)
+    );
     assert_eq!(report.strategies[0].id, report.strategy);
+    assert!(report
+        .notes
+        .iter()
+        .any(|n| n.kind == RightsizingNoteKind::OwnershipUnavailable));
     assert_eq!(report.workloads.len(), 1);
     let web = &report.workloads[0];
     assert_eq!(
         (web.kind.as_str(), web.name.as_str()),
         ("Deployment", "web")
     );
-    assert_eq!(web.confidence, Confidence::High);
     assert_eq!(web.verdict, Verdict::Over);
     assert!(web.changed && web.monthly_delta < 0.0);
     let app_rec = &web.containers[0];
@@ -549,9 +564,17 @@ async fn right_sizing_recommends_from_prometheus_history() {
     assert_eq!(app_rec.recommended.memory_request, Some(368.0 * MIB));
     let usage = app_rec.usage.unwrap();
     assert_eq!((usage.cpu_p95, usage.cpu_max), (120.0, 300.0));
-    assert_eq!(usage.hours, 84.0, "168 hours of one pod over two replicas");
-
-    assert_eq!(app_rec.confidence, Confidence::High);
+    assert_eq!(
+        usage.hours, 84.0,
+        "2016 five-minute samples of one pod over two replicas"
+    );
+    // Tied by name: at most medium confidence.
+    assert!(app_rec
+        .warnings
+        .iter()
+        .any(|w| w.code == "identity-by-name"));
+    assert_eq!(app_rec.confidence, Confidence::Medium);
+    assert_eq!(web.confidence, Confidence::Medium);
     assert!(!app_rec.memory_limit_raised, "368 MiB fits the 1 GiB limit");
     let unknown = RightsizingRequest {
         strategy: Some("nope".into()),
@@ -559,14 +582,14 @@ async fn right_sizing_recommends_from_prometheus_history() {
     };
     assert!(app.rightsizing_report(&id, &unknown).await.is_err());
 
-    // The whole cluster was covered: no namespace matcher in the presets.
+    // The batch names the namespaces of the workloads in scope.
     let log = server.log.lock().clone();
     let p95 = log
         .iter()
         .filter_map(|r| param(&r.path, "query"))
         .find(|q| q.starts_with("quantile_over_time"))
         .unwrap();
-    assert!(!p95.contains("namespace=~"), "{p95}");
+    assert!(p95.contains(r#"namespace=~"shop""#), "{p95}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -825,12 +848,43 @@ fn cron_changes() -> Vec<ContainerResourceChange> {
     }]
 }
 
-/// A cluster whose only workload is the CronJob `shop/nightly`; its pods
-/// (`nightly-<scheduled time>-<suffix>`) ran for a day.
+/// Pod of the CronJob's Job `nightly-28765432`.
+const NIGHTLY_POD: &str = "nightly-28765432-abcde";
+
+/// Statistics query `n` of the CronJob's pod at `end`: it ran 72 of the
+/// day's 288 five-minute steps (six hours ending two hours ago), and
+/// kube-state-metrics ties it to its Job and the Job to the CronJob.
+fn nightly_answer(n: u8, end: i64) -> Reply {
+    let key = json!({"namespace": "shop", "pod": NIGHTLY_POD, "container": "job"});
+    let pod = json!({"namespace": "shop", "pod": NIGHTLY_POD});
+    let value = |labels: Value, v: f64| vector(labels, &v.to_string());
+    match n {
+        1 => value(key, 120.0),
+        2 => value(key, 300.0),
+        3 => value(key, 60.0),
+        4 | 7 | 8 => value(key, 72.0),
+        5 => value(key, 314_572_800.0),
+        6 => value(key, 209_715_200.0),
+        9 => value(pod, (end - 8 * 3600) as f64),
+        10 => value(pod, (end - 2 * 3600 - 300) as f64),
+        11 => value(
+            json!({"namespace": "shop", "pod": NIGHTLY_POD, "owner_kind": "Job",
+                   "owner_name": "nightly-28765432"}),
+            1.0,
+        ),
+        13 => value(
+            json!({"namespace": "shop", "job_name": "nightly-28765432", "owner_kind": "CronJob",
+                   "owner_name": "nightly"}),
+            1.0,
+        ),
+        _ => empty_vector(),
+    }
+}
+
+/// A cluster whose only workload is the CronJob `shop/nightly`.
 fn cronjob_router(prometheus: bool) -> Router {
-    Arc::new(move |req: &Request, _log: &Log| {
-        let key = json!({"namespace": "shop", "pod": "nightly-28765432-abcde", "container": "job"});
-        match (req.method.as_str(), bare(&req.path)) {
+    Arc::new(
+        move |req: &Request, _log: &Log| match (req.method.as_str(), bare(&req.path)) {
             (_, "/version") => version(),
             (_, "/api/v1/services") => list(
                 "ServiceList",
@@ -852,16 +906,11 @@ fn cronjob_router(prometheus: bool) -> Router {
                         200,
                         json!({"status": "success", "data": {"resultType": "scalar", "result": [1, "1"]}}),
                     )
-                } else if q.starts_with("quantile_over_time(0.95") {
-                    vector(key, "120")
-                } else if q.starts_with("max_over_time((sum") {
-                    vector(key, "300")
-                } else if q.contains("max_over_time(container_memory_working_set_bytes") {
-                    vector(key, "314572800")
-                } else if q.starts_with("count_over_time") {
-                    vector(key, "24")
                 } else {
-                    vector(json!({}), "0")
+                    let end = param(&req.path, "time")
+                        .and_then(|t| t.parse().ok())
+                        .unwrap_or(0);
+                    stat_query(&q).map_or_else(empty_vector, |n| nightly_answer(n, end))
                 }
             }
             (_, "/apis/apps/v1/deployments") => list("DeploymentList", vec![]),
@@ -876,8 +925,8 @@ fn cronjob_router(prometheus: bool) -> Router {
                 Reply::Json(200, obj)
             }
             _ => not_found(),
-        }
-    })
+        },
+    )
 }
 
 fn patches(log: &Log) -> Vec<Request> {
@@ -892,16 +941,27 @@ fn patches(log: &Log) -> Vec<Request> {
 async fn cronjobs_are_recommended_and_dry_run_patched() {
     let server = start(cronjob_router(true)).await;
     let (_dir, app, _recorder, id) = setup(&server.url, true);
+    // One day with workload-history's 20 % headroom.
+    let one_day = RightsizingRequest {
+        settings: Some(RightsizingSettings {
+            days: 1,
+            cpu_headroom_percent: 20.0,
+            memory_headroom_percent: 20.0,
+            ..RightsizingSettings::default()
+        }),
+        ..Default::default()
+    };
 
-    let report = app
-        .rightsizing_report(&id, &RightsizingRequest::default())
-        .await
-        .unwrap();
+    let report = app.rightsizing_report(&id, &one_day).await.unwrap();
     assert_eq!(
         report.source,
         RightsizingSource::Prometheus,
         "{:?}",
         report.notes
+    );
+    assert_eq!(
+        (report.strategy.as_str(), report.strategy_auto),
+        ("workload-history", true)
     );
     let nightly = report
         .workloads
@@ -913,22 +973,34 @@ async fn cronjobs_are_recommended_and_dry_run_patched() {
         ("shop", "nightly")
     );
     assert_eq!(nightly.replicas, 1);
+    assert_eq!(nightly.pods, vec![NIGHTLY_POD]);
     let job = &nightly.containers[0];
     assert_eq!(job.name, "job");
-    assert_eq!(job.usage.unwrap().cpu_p95, 120.0, "pods matched by name");
-    assert_eq!(job.recommended.cpu_request, Some(140.0));
-    assert_eq!(job.recommended.memory_request, Some(368.0 * MIB));
+    // Pod → Job → CronJob through the owner series.
+    assert_eq!(job.usage.unwrap().cpu_p95, 120.0);
+    let evidence = job.evidence.as_ref().unwrap();
+    assert_eq!(evidence.identity, EvidenceIdentity::OwnerMetrics);
+    assert_eq!(job.recommended.cpu_request, Some(144.0));
+    assert_eq!(job.recommended.memory_request, Some(360.0 * MIB));
     assert!(nightly.changed && nightly.monthly_delta < 0.0);
-    // The name-matched presets carry no duty cycle: one replica.
-    assert_eq!(nightly.cost_replicas, 1.0);
+    // 72 of the day's 288 steps: a quarter of a replica, in the money too.
+    assert_eq!(evidence.duty, Some(0.25));
+    assert_eq!(nightly.cost_replicas, 0.25);
+    let per_replica = kubepit_core::rightsizing::math::monthly_requests(
+        &nightly.containers,
+        1.0,
+        &report.pricing,
+        false,
+    );
+    assert!((nightly.monthly_current - per_replica * 0.25).abs() < 1e-9);
 
-    // One CronJob is read at its own path.
+    // One CronJob is read at its own path, and only its pods are queried.
     let one = app
         .rightsizing_report(
             &id,
             &RightsizingRequest {
                 workload: Some(cron_ref()),
-                ..Default::default()
+                ..one_day.clone()
             },
         )
         .await
@@ -936,8 +1008,14 @@ async fn cronjobs_are_recommended_and_dry_run_patched() {
     assert_eq!(one.workloads.len(), 1);
     assert_eq!(
         one.workloads[0].containers[0].recommended.cpu_request,
-        Some(140.0)
+        Some(144.0)
     );
+    assert!(server
+        .log
+        .lock()
+        .iter()
+        .filter_map(|r| param(&r.path, "query"))
+        .any(|q| q.contains(r#"pod=~"nightly-[0-9]+-[a-z0-9]+""#)));
 
     // Read-only: the dry run patches the job template…
     let review = app

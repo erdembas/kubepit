@@ -15,10 +15,11 @@
 //! Every aggregation is `max by (…)`, which collapses duplicate scrapes.
 //! Q1 and Q5 are required: when either fails (or answers more than
 //! [`MAX_SCAN_SERIES`] series) the batch is [`BatchFailure::Splittable`]
-//! and the caller retries smaller scopes. The others only refine: their
-//! failures are recorded in [`StatsBatch::failed`]. A proxy or tunnel
-//! failure means Prometheus is gone ([`BatchFailure::Proxy`]). Read-only
-//! like the rest.
+//! and the caller retries smaller scopes. On a shared Prometheus (cluster
+//! labels set) Q11 is required too, since its answer is what proves the
+//! batch belongs to this cluster. The others only refine: their failures
+//! are recorded in [`StatsBatch::failed`]. A proxy or tunnel failure means
+//! Prometheus is gone ([`BatchFailure::Proxy`]). Read-only like the rest.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -399,7 +400,17 @@ pub fn owners_mismatch(
 /// failed or oversized required answer makes the batch splittable; other
 /// failures are recorded in `failed`.
 pub fn merge(
+    answers: Vec<(StatQuery, anyhow::Result<PromData>)>,
+) -> Result<StatsBatch, BatchFailure> {
+    merge_with(answers, false)
+}
+
+/// [`merge`], with the pod owners (Q11) required too when `owners_required`
+/// (a shared Prometheus: without that answer the batch cannot be checked
+/// against the cluster labels, so it is not used).
+pub fn merge_with(
     mut answers: Vec<(StatQuery, anyhow::Result<PromData>)>,
+    owners_required: bool,
 ) -> Result<StatsBatch, BatchFailure> {
     if let Some(e) = answers
         .iter()
@@ -422,7 +433,7 @@ pub fn merge(
             }
             Err(e) => format!("{e:#}"),
         };
-        if q.is_required() {
+        if q.is_required() || (owners_required && q == StatQuery::PodOwners) {
             return Err(BatchFailure::Splittable {
                 query: q.name(),
                 message: problem,
@@ -478,8 +489,9 @@ impl Kubepit {
     /// all at `scope.end_secs`) and merge them. `on_answer` fires once per
     /// answer (progress). A proxy or tunnel failure re-detects Prometheus
     /// next time. On a shared Prometheus every query carries the cluster
-    /// selector, and Q11 answering for another cluster fails the batch with
-    /// [`CLUSTER_LABEL_MISMATCH`] (consumed by the collection pipeline,
+    /// selector, Q11 answering for another cluster fails the batch with
+    /// [`CLUSTER_LABEL_MISMATCH`], and Q11 failing makes it splittable like
+    /// a required query (fail closed; consumed by the collection pipeline,
     /// `rightsizing/collect.rs`).
     pub async fn prometheus_stats_batch(
         &self,
@@ -521,7 +533,7 @@ impl Kubepit {
         if let Some(mismatch) = owners_mismatch(&answers, labels) {
             return Err(mismatch);
         }
-        let result = merge(answers);
+        let result = merge_with(answers, !labels.is_empty());
         if matches!(result, Err(BatchFailure::Proxy(_))) {
             self.prometheus.invalidate(cluster_id);
         }
@@ -688,6 +700,43 @@ mod tests {
             owners_mismatch(&answers(Err(anyhow!("timeout"))), &labels),
             None
         );
+    }
+
+    #[test]
+    fn a_shared_source_cannot_skip_the_pod_owners() {
+        let answers = || {
+            vec![
+                (StatQuery::CpuP95, Ok(data(vec![series(&WEB, 1.0)]))),
+                (StatQuery::MemoryMax, Ok(data(vec![series(&WEB, 1.0)]))),
+                (StatQuery::PodOwners, Err(anyhow!("timeout"))),
+            ]
+        };
+        // Without cluster labels a failed Q11 only refines…
+        assert_eq!(
+            merge_with(answers(), false).unwrap().failed,
+            vec![StatQuery::PodOwners]
+        );
+        // …with them its answer is what proves the batch belongs to this
+        // cluster: no answer, no batch (fail closed; smaller scopes may pass).
+        assert_eq!(
+            merge_with(answers(), true),
+            Err(BatchFailure::Splittable {
+                query: "pod_owners",
+                message: "timeout".into()
+            })
+        );
+        let oversized = vec![
+            (StatQuery::CpuP95, Ok(data(vec![series(&WEB, 1.0)]))),
+            (StatQuery::MemoryMax, Ok(data(vec![series(&WEB, 1.0)]))),
+            (StatQuery::PodOwners, Ok(data_with(MAX_SCAN_SERIES + 1))),
+        ];
+        assert!(matches!(
+            merge_with(oversized, true),
+            Err(BatchFailure::Splittable {
+                query: "pod_owners",
+                ..
+            })
+        ));
     }
 
     #[test]

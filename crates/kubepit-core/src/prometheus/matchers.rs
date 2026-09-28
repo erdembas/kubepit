@@ -303,18 +303,13 @@ mod tests {
             .collect()
     }
 
-    /// Every other query Kubepit builds: right-sizing and cost usage, the
-    /// 16 statistics queries (cluster-wide, namespace and single-workload
+    /// Every other query Kubepit builds: cost usage, the 16 statistics
+    /// queries of right-sizing (cluster-wide, namespace and single-workload
     /// scopes, with the kept cluster labels too) and upgrade readiness.
     fn other_presets() -> Vec<String> {
         use crate::prometheus::workload_stats::{query, StatQuery, StatScope};
         let scope = vec!["shop".to_string(), "a.b".to_string()];
         let mut out = vec![
-            usage::container_cpu_p95(&scope, 7),
-            usage::container_cpu_max(&[], 7),
-            usage::container_memory_max(&scope, 7, ""),
-            usage::container_memory_max(&[], 7, ", cluster"),
-            usage::container_hours(&scope, 7),
             usage::pod_cpu_avg(604_800),
             usage::pod_memory_avg(3_600),
             crate::upgrade::METRIC_QUERY.to_string(),
@@ -337,7 +332,7 @@ mod tests {
         for scope in [&cluster_wide, &namespaces, &workload] {
             out.extend(StatQuery::ALL.iter().map(|q| query(*q, scope)));
         }
-        assert_eq!(out.len(), 8 + 3 * 16);
+        assert_eq!(out.len(), 3 + 3 * 16);
         out
     }
 

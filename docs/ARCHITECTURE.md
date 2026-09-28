@@ -896,7 +896,8 @@ that never leaves the machine.
 
 What a cluster costs per month, where the money goes and which requests to
 change (`crates/kubepit-core/src/cost/`, `rightsizing/`,
-`prometheus/usage.rs`; UI in `components/workbench/cost/`). Everything but
+`prometheus/usage.rs`, `prometheus/workload_stats.rs`; UI in
+`components/workbench/cost/`). Everything but
 applying a recommendation only reads, so read-only clusters get it all.
 
 - **Sources** (`ClusterDef.cost.source`: `auto`, an `opencost` or
@@ -941,17 +942,36 @@ applying a recommendation only reads, so read-only clusters get it all.
 - **Commands**: `cost_status`, `cost_report` (window 7d/30d, aggregate,
   label; cached five minutes, `refresh` bypasses), `cost_summary` (the
   7-day namespace totals for the dashboard).
-- **Right-sizing**: usage fetching and math are separate.
-  `prometheus/usage.rs` presets return, per container over `days` (default
-  7), the p95 and max of 5-minute CPU rates, the max working set and the
-  hours with samples; pods map to Deployments / StatefulSets / DaemonSets
-  / CronJobs by the pod names their kind generates (longest name wins),
-  worst replica wins, hours are per replica. A CronJob is read at its job
-  template and counts one replica; its `cost_replicas` (and so its
-  monthly amounts) is the largest duty cycle of its containers' evidence
-  (average running pods), one without evidence (`math::cost_replicas`). Without Prometheus the last metrics-server
-  hour is used, split per container by the current snapshot (always low
-  confidence). Ownership-aware collection is built from
+- **Right-sizing**: usage fetching and math are separate. One collection
+  pipeline, `rightsizing/collect.rs` (`Kubepit::compute_rightsizing(cluster,
+  request, progress)`, behind `rightsizing_report` and the background
+  scans), feeds every strategy: it lists the Deployments, StatefulSets,
+  DaemonSets and CronJobs in scope (every readable namespace, else the
+  accessible ones; one workload is read at its own path and its queries
+  get `pod=~` its pod regex) and the `autoscaling/v2` HPAs (an HPA without
+  metrics scales on 80 % CPU; unlistable HPAs add `hpa-unavailable`), then
+  runs one batch of the 16 statistics queries over the namespaces of those
+  workloads at one aligned window end. A batch whose required query fails
+  is split in sorted halves (halves above 40 namespaces, which would be
+  cluster-wide again, are halved on the spot) down to single namespaces,
+  within 32 batches: a namespace that still fails gets `namespace-failed`,
+  namespaces left over `query-budget-exceeded`, and refining queries that
+  failed or warned `partial-data` (naming them). A proxy or tunnel failure
+  or a shared Prometheus answering for another cluster falls back to
+  metrics-server with `prometheus-failed`; when no batch succeeds the
+  report fails with the first error. The batches are folded (below), the
+  strategy is resolved (automatic = `workload-history` when owner series
+  resolved pods, else `percentile-headroom` with `ownership-unavailable`)
+  and runs with the request's settings, else its effective ones; the
+  window is collected for the strategy owner metrics would pick and
+  collected again at the resolved strategy's window when a per-strategy
+  override differs. `progress` counts answered queries against 16 ×
+  planned batches. A CronJob is read at its job template and counts one
+  replica; its `cost_replicas` (and so its monthly amounts) is the largest
+  duty cycle of its containers' evidence (average running pods), one
+  without evidence (`math::cost_replicas`). Without Prometheus the last
+  metrics-server hour is used, split per container by the current snapshot
+  (always low confidence). Ownership comes from
   `rightsizing/ownership.rs`: kube-state-metrics owner series
   (`kube_pod_owner`, `kube_replicaset_owner`, `kube_job_owner`) index pod
   names per namespace; `<none>`, empty and non-controller owners are
@@ -974,8 +994,10 @@ applying a recommendation only reads, so read-only clusters get it all.
   listed as failed queries. Every query goes through the one Prometheus
   transport as a preset (tenant, tunnel, cluster-label selector); on a
   shared Prometheus Q11 keeps the configured label names in its `by (…)`,
-  and an owner series without them (or with another value) fails the batch
-  with `cluster-label-mismatch`. `rightsizing/evidence.rs` folds a batch into
+  an owner series without them (or with another value) fails the batch
+  with `cluster-label-mismatch`, and Q11 itself is required there (no
+  owners answer, no batch: nothing would prove the data is this
+  cluster's). `rightsizing/evidence.rs` folds a batch into
   per-(workload, container) usage (`ContainerUsage`: `UsageStats` plus
   `UsageEvidence`): pods resolve through the owner index (or, without
   owner series, by name with identity `name-match`), only containers of
@@ -991,8 +1013,11 @@ applying a recommendation only reads, so read-only clusters get it all.
   (`OwnerIndex::missing_parent_series`), pods owned by a ReplicaSet / Job
   there are matched by name among Deployments / CronJobs instead, with
   identity `name-match` and partial data. Rows keep at most 50 sorted pod names and the HPA whose
-  `scaleTargetRef` names the workload. The metrics-server and legacy Prometheus paths produce
-  `ContainerUsage` without evidence. The math sits behind `rightsizing::strategy::RecommendationStrategy`
+  `scaleTargetRef` names the workload; `recommend_workload` copies them
+  to the row and passes the HPA and each container's evidence to the
+  strategy (an ambiguous identity flags every container, with usage or
+  not). The metrics-server path produces `ContainerUsage` without
+  evidence. The math sits behind `rightsizing::strategy::RecommendationStrategy`
   (`fn info() -> RightsizingStrategyInfo`, `fn recommend(&ContainerInput) ->
   StrategyOutput`; input = name, current requests/limits, `UsageStats`,
   source, settings, optional `UsageEvidence` and `HpaInfo`; output =

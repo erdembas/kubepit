@@ -822,7 +822,7 @@ git commit -m "feat(rightsizing): workload-history strategy (KubeFit logic)"
 
 Steps:
 
-- [ ] **Step 1: Write the failing end-to-end tests**
+- [x] **Step 1: Write the failing end-to-end tests**
 
 The router `kubefit_router(fixture)` routes `/api/v1/query` by these markers, in this
 order:
@@ -911,21 +911,26 @@ It then asserts:
 - `report.strategy == "percentile-headroom" && report.strategy_auto`;
 - `usage.hours == 84.0` (2016 × 300 s ÷ 2 replicas).
 
-- [ ] **Step 2: Run the tests to verify they fail**
+Also update Task 8's `tests/cost.rs::cronjob_router` to answer the markers and resolve
+pod → Job → CronJob through the owner series (Q11, Q13); with one day of history,
+`cronjobs_are_recommended_and_dry_run_patched` then asserts `cost_replicas == 0.25`
+(72 of 288 running slots), as Task 8 originally wanted.
+
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core --test recommendations --test cost`
 
 Expected: FAIL (`compute_rightsizing` not found).
 
-- [ ] **Step 3: Implement `collect.rs` and the `mod.rs` / `usage.rs` changes listed under Interfaces**
+- [x] **Step 3: Implement `collect.rs` and the `mod.rs` / `usage.rs` changes listed under Interfaces**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core`
 
 Expected: PASS, the whole crate.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core
