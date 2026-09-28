@@ -5,9 +5,11 @@
 //! `pods/portforward` instead:
 //!
 //! 1. the credentials are read from the referenced Secret (`get secrets`,
-//!    the user's RBAC) and kept in memory for at most five minutes per
-//!    connection ([`TunnelCache`]); they are never logged, stored, returned
-//!    to the UI or quoted in errors (errors name the Secret and key only);
+//!    the user's RBAC; one read per cluster at a time, given up after
+//!    [`SETUP_TIMEOUT`]) and kept in memory for at most five minutes per
+//!    connection and settings ([`TunnelCache`]); they are never logged,
+//!    stored, returned to the UI or quoted in errors (errors name the Secret
+//!    and key only);
 //! 2. a ready pod behind the service is resolved per request
 //!    ([`crate::portforward::resolve_target`], so restarts are survived) and
 //!    a port-forward stream is opened to it — no local listener, so no other
@@ -20,6 +22,8 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
+use std::future::Future;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -198,18 +202,65 @@ struct Cached {
     access: PrometheusAccess,
     secrets: Arc<TunnelSecrets>,
     at: Instant,
+    /// Tells this entry apart from a later one of the same cluster (expiry).
+    generation: u64,
 }
 
-/// Secret values of each cluster's tunnel, per connection, for at most
-/// [`SECRETS_TTL`]; dropped on disconnect and removal.
-#[derive(Default)]
+type Entries = Arc<Mutex<HashMap<String, Cached>>>;
+
+/// Secret values of each cluster's tunnel, per connection and access
+/// settings, for at most [`SECRETS_TTL`]: an entry is dropped when it expires
+/// (a timer, even if nothing asks again), when it no longer matches, and on
+/// disconnect, removal and access changes ([`TunnelCache::forget`]).
 pub struct TunnelCache {
-    entries: Mutex<HashMap<String, Cached>>,
-    /// Serialises reads, so parallel queries read the Secret once.
-    fill: tokio::sync::Mutex<()>,
+    entries: Entries,
+    /// Serialise reads per cluster, so parallel queries read the Secret once
+    /// and one hung cluster does not hold up the others.
+    fills: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    generation: AtomicU64,
+    ttl: Duration,
+    setup_timeout: Duration,
+}
+
+impl Default for TunnelCache {
+    fn default() -> Self {
+        Self::with_limits(SECRETS_TTL, SETUP_TIMEOUT)
+    }
+}
+
+/// Read what `access` needs from the cluster: the credentials and, for TLS
+/// with a configured CA, that CA.
+async fn read_secrets(client: &Client, access: &PrometheusAccess) -> Result<TunnelSecrets> {
+    let auth = access
+        .auth
+        .as_ref()
+        .ok_or_else(|| anyhow!("no credentials are configured"))?;
+    let credentials = read_credentials(client, auth).await?;
+    let ca = match access.tls.as_ref() {
+        Some(tls) if !tls.insecure_skip_verify => match &tls.ca {
+            Some(key) => Some(read_ca(client, key).await?),
+            None => None,
+        },
+        _ => None,
+    };
+    Ok(TunnelSecrets { credentials, ca })
 }
 
 impl TunnelCache {
+    /// A cache keeping values for `ttl` and giving up reading them after
+    /// `setup_timeout`.
+    pub(crate) fn with_limits(ttl: Duration, setup_timeout: Duration) -> Self {
+        Self {
+            entries: Entries::default(),
+            fills: Mutex::default(),
+            generation: AtomicU64::new(0),
+            ttl,
+            setup_timeout,
+        }
+    }
+
+    /// The cached values when they belong to this connection and these
+    /// settings and have not expired; anything else is dropped right away.
     fn get_at(
         &self,
         cluster_id: &str,
@@ -217,15 +268,66 @@ impl TunnelCache {
         access: &PrometheusAccess,
         now: Instant,
     ) -> Option<Arc<TunnelSecrets>> {
-        let entries = self.entries.lock();
+        let mut entries = self.entries.lock();
         let entry = entries.get(cluster_id)?;
-        (entry.connected_at == connected_at
+        if entry.connected_at == connected_at
             && &entry.access == access
-            && now.duration_since(entry.at) < SECRETS_TTL)
-            .then(|| entry.secrets.clone())
+            && now.duration_since(entry.at) < self.ttl
+        {
+            return Some(entry.secrets.clone());
+        }
+        entries.remove(cluster_id);
+        None
     }
 
-    /// The Secret values of `access`, read when not cached.
+    fn fill_lock(&self, cluster_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+        self.fills
+            .lock()
+            .entry(cluster_id.to_string())
+            .or_default()
+            .clone()
+    }
+
+    fn insert(
+        &self,
+        cluster_id: &str,
+        connected_at: Option<i64>,
+        access: &PrometheusAccess,
+        secrets: Arc<TunnelSecrets>,
+    ) {
+        let generation = self.generation.fetch_add(1, Ordering::Relaxed);
+        self.entries.lock().insert(
+            cluster_id.to_string(),
+            Cached {
+                connected_at,
+                access: access.clone(),
+                secrets,
+                at: Instant::now(),
+                generation,
+            },
+        );
+        // Values never outlive the TTL, even when nothing asks again.
+        let (entries, ttl, id) = (
+            Arc::downgrade(&self.entries),
+            self.ttl,
+            cluster_id.to_string(),
+        );
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(async move {
+                tokio::time::sleep(ttl).await;
+                if let Some(entries) = entries.upgrade() {
+                    let mut entries = entries.lock();
+                    if entries.get(&id).is_some_and(|e| e.generation == generation) {
+                        entries.remove(&id);
+                    }
+                }
+            });
+        }
+    }
+
+    /// The Secret values of `access`, read when not cached, within
+    /// [`SETUP_TIMEOUT`] (waiting for another read of the same cluster
+    /// included).
     pub(crate) async fn secrets(
         &self,
         cluster_id: &str,
@@ -233,41 +335,78 @@ impl TunnelCache {
         client: &Client,
         access: &PrometheusAccess,
     ) -> Result<Arc<TunnelSecrets>> {
-        if let Some(hit) = self.get_at(cluster_id, connected_at, access, Instant::now()) {
-            return Ok(hit);
-        }
-        let _filling = self.fill.lock().await;
-        if let Some(hit) = self.get_at(cluster_id, connected_at, access, Instant::now()) {
-            return Ok(hit);
-        }
-        let auth = access
-            .auth
-            .as_ref()
-            .ok_or_else(|| anyhow!("no credentials are configured"))?;
-        let credentials = read_credentials(client, auth).await?;
-        let ca = match access.tls.as_ref() {
-            Some(tls) if !tls.insecure_skip_verify => match &tls.ca {
-                Some(key) => Some(read_ca(client, key).await?),
-                None => None,
-            },
-            _ => None,
-        };
-        let secrets = Arc::new(TunnelSecrets { credentials, ca });
-        self.entries.lock().insert(
-            cluster_id.to_string(),
-            Cached {
-                connected_at,
-                access: access.clone(),
-                secrets: secrets.clone(),
-                at: Instant::now(),
-            },
-        );
-        Ok(secrets)
+        self.secrets_with(
+            cluster_id,
+            connected_at,
+            access,
+            read_secrets(client, access),
+        )
+        .await
     }
 
-    /// Drop the values of a cluster (disconnect, removal).
+    /// [`Self::secrets`] with the read as a future.
+    async fn secrets_with<F>(
+        &self,
+        cluster_id: &str,
+        connected_at: Option<i64>,
+        access: &PrometheusAccess,
+        read: F,
+    ) -> Result<Arc<TunnelSecrets>>
+    where
+        F: Future<Output = Result<TunnelSecrets>>,
+    {
+        if let Some(hit) = self.get_at(cluster_id, connected_at, access, Instant::now()) {
+            return Ok(hit);
+        }
+        let fill = self.fill_lock(cluster_id);
+        let work = async {
+            let _filling = fill.lock().await;
+            if let Some(hit) = self.get_at(cluster_id, connected_at, access, Instant::now()) {
+                return Ok(hit);
+            }
+            let secrets = Arc::new(read.await?);
+            self.insert(cluster_id, connected_at, access, secrets.clone());
+            Ok(secrets)
+        };
+        tokio::time::timeout(self.setup_timeout, work)
+            .await
+            .map_err(|_| {
+                let what = match &access.auth {
+                    Some(PrometheusAuth::Bearer {
+                        namespace, secret, ..
+                    })
+                    | Some(PrometheusAuth::Basic {
+                        namespace, secret, ..
+                    }) => format!("Secret {namespace}/{secret}"),
+                    None => "the Prometheus credentials".to_string(),
+                };
+                anyhow!(
+                    "{what} could not be read within {}s",
+                    self.setup_timeout.as_secs_f32()
+                )
+            })?
+    }
+
+    /// Drop the values of a cluster (disconnect, removal, access changes).
     pub fn forget(&self, cluster_id: &str) {
         self.entries.lock().remove(cluster_id);
+        self.fills.lock().remove(cluster_id);
+    }
+
+    /// Whether values of `cluster_id` are held (tests).
+    #[cfg(test)]
+    pub(crate) fn holds(&self, cluster_id: &str) -> bool {
+        self.entries.lock().contains_key(cluster_id)
+    }
+
+    /// Hold test values for `cluster_id` (tests).
+    #[cfg(test)]
+    pub(crate) fn seed(&self, cluster_id: &str, access: &PrometheusAccess) {
+        let secrets = Arc::new(TunnelSecrets {
+            credentials: Credentials("Bearer t0k".into()),
+            ca: None,
+        });
+        self.insert(cluster_id, None, access, secrets);
     }
 }
 
@@ -734,10 +873,19 @@ j6EzTBQKCIK44Ht1hGckQEbsh5M4xlh8CvAbHO7lGMeusAjsKyS4dyiR
     }
 
     async fn https_get(skip_verify: bool, ca: Option<&[u8]>) -> Result<RawResponse> {
+        https_get_as("prometheus.monitoring.svc", skip_verify, ca).await
+    }
+
+    /// An https GET to the test server, expecting it to be `server_name`.
+    async fn https_get_as(
+        server_name: &str,
+        skip_verify: bool,
+        ca: Option<&[u8]>,
+    ) -> Result<RawResponse> {
         let (client, server) = tokio::io::duplex(64 * 1024);
         let served = serve_tls(server);
         let result = async {
-            let tls = tls_connect(client, "prometheus.monitoring.svc", skip_verify, ca).await?;
+            let tls = tls_connect(client, server_name, skip_verify, ca).await?;
             request_over(
                 tls,
                 "prometheus.monitoring.svc:9090",
@@ -768,6 +916,119 @@ j6EzTBQKCIK44Ht1hGckQEbsh5M4xlh8CvAbHO7lGMeusAjsKyS4dyiR
         // A CA bundle without certificates is refused up front.
         let err = https_get(false, Some(b"not a pem")).await.unwrap_err();
         assert!(err.to_string().contains("CA bundle"), "{err}");
+    }
+
+    fn secured(tenant: &str) -> PrometheusAccess {
+        PrometheusAccess {
+            tenant: tenant.into(),
+            auth: Some(PrometheusAuth::Bearer {
+                namespace: "monitoring".into(),
+                secret: "prom-auth".into(),
+                token_key: "token".into(),
+            }),
+            ..Default::default()
+        }
+    }
+
+    async fn read_ok() -> Result<TunnelSecrets> {
+        Ok(TunnelSecrets {
+            credentials: Credentials("Bearer t0k".into()),
+            ca: None,
+        })
+    }
+
+    #[tokio::test]
+    async fn cached_values_expire_and_stale_ones_are_dropped() {
+        let cache = TunnelCache::with_limits(Duration::from_millis(80), SETUP_TIMEOUT);
+        let access = secured("a");
+        cache
+            .secrets_with("c1", Some(1), &access, read_ok())
+            .await
+            .unwrap();
+        assert!(cache.holds("c1"));
+        let now = Instant::now();
+        assert!(cache.get_at("c1", Some(1), &access, now).is_some(), "fresh");
+        // Another connection or other settings drop the entry at once.
+        assert!(cache.get_at("c1", Some(2), &access, now).is_none());
+        assert!(!cache.holds("c1"), "another connection");
+        cache
+            .secrets_with("c1", Some(1), &access, read_ok())
+            .await
+            .unwrap();
+        assert!(cache.get_at("c1", Some(1), &secured("b"), now).is_none());
+        assert!(!cache.holds("c1"), "other settings");
+        // Expired: dropped on the next look…
+        cache
+            .secrets_with("c1", Some(1), &access, read_ok())
+            .await
+            .unwrap();
+        let later = Instant::now() + Duration::from_millis(100);
+        assert!(cache.get_at("c1", Some(1), &access, later).is_none());
+        assert!(!cache.holds("c1"), "expired");
+        // …and by the timer when nothing looks again.
+        cache
+            .secrets_with("c1", Some(1), &access, read_ok())
+            .await
+            .unwrap();
+        assert!(cache.holds("c1"));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!cache.holds("c1"), "the timer dropped it");
+    }
+
+    #[tokio::test]
+    async fn forget_drops_a_cluster_only() {
+        let cache = TunnelCache::default();
+        let access = secured("");
+        cache.seed("c1", &access);
+        cache.seed("c2", &access);
+        cache.forget("c1");
+        assert!(!cache.holds("c1") && cache.holds("c2"));
+        // A later read is a fresh one.
+        let reads = std::sync::atomic::AtomicUsize::new(0);
+        let counted = || async {
+            reads.fetch_add(1, Ordering::SeqCst);
+            read_ok().await
+        };
+        cache
+            .secrets_with("c1", None, &access, counted())
+            .await
+            .unwrap();
+        cache
+            .secrets_with("c1", None, &access, counted())
+            .await
+            .unwrap();
+        assert_eq!(reads.load(Ordering::SeqCst), 1, "cached after the read");
+    }
+
+    #[tokio::test]
+    async fn a_hung_read_times_out_without_holding_up_other_clusters() {
+        let cache = Arc::new(TunnelCache::with_limits(
+            SECRETS_TTL,
+            Duration::from_millis(300),
+        ));
+        let access = secured("");
+        let hung = {
+            let (cache, access) = (cache.clone(), access.clone());
+            tokio::spawn(async move {
+                cache
+                    .secrets_with("hung", None, &access, std::future::pending())
+                    .await
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        // Another cluster is served while the first one hangs.
+        let started = Instant::now();
+        cache
+            .secrets_with("ok", None, &access, read_ok())
+            .await
+            .unwrap();
+        assert!(started.elapsed() < Duration::from_millis(200));
+        let err = hung.await.unwrap().unwrap_err().to_string();
+        assert!(
+            err.contains("Secret monitoring/prom-auth could not be read within"),
+            "{err}"
+        );
+        assert!(!cache.holds("hung"));
     }
 
     #[test]

@@ -490,8 +490,12 @@ An optional, richer metrics source next to the metrics-server history
   through an in-process port-forward instead — no local listener, so no
   other local process can use it. The credentials are read from the
   referenced Secret (`get secrets`, the user's RBAC; a bearer token or
-  `Basic base64(user:password)`) and kept in memory for at most five
-  minutes per connection (`TunnelCache`, dropped on disconnect); they are
+  `Basic base64(user:password)`; one read per cluster at a time, given up
+  after 15 s so a hung cluster holds up nothing else) and kept in memory for
+  at most five minutes per connection and settings (`TunnelCache`: a timer
+  drops an entry when it expires even if nothing asks again, a mismatching
+  entry is dropped on sight, and disconnect, removal and access changes
+  drop it at once); they are
   never logged, stored, returned or quoted in errors, which name the Secret
   and key only (`Credentials` prints as `<redacted>`). Each request
   re-resolves a ready pod behind the service

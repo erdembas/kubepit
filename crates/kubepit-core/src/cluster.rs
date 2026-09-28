@@ -311,6 +311,12 @@ impl Kubepit {
         if connection_changed {
             self.cluster_disconnect(&next.id);
         }
+        // Secret values read for the old settings must not outlive them.
+        if next.prometheus != existing.prometheus
+            || next.prometheus_access != existing.prometheus_access
+        {
+            self.prometheus_tunnels.forget(&next.id);
+        }
         if !self.run_kubeconfig_is_transient(&next) {
             if let Err(e) = self.write_run_kubeconfig(&next) {
                 tracing::warn!(cluster = %next.name, "could not write run kubeconfig: {e:#}");
@@ -618,6 +624,44 @@ mod tests {
         );
         auto.prometheus_access.auth = None;
         app.cluster_update(auto).unwrap();
+    }
+
+    #[test]
+    fn access_changes_drop_cached_secret_values() {
+        use crate::prometheus::access::PrometheusAccess;
+
+        let (_dir, app, _) = setup();
+        let added = app
+            .cluster_add(vec![ClusterInput {
+                kubeconfig_text: Some(TWO_CONTEXTS.to_string()),
+                ..input("dev")
+            }])
+            .unwrap()
+            .remove(0);
+        let tunnels = &app.prometheus_tunnels;
+        tunnels.seed(&added.id, &added.prometheus_access);
+        // Other edits keep them…
+        let mut renamed = added.clone();
+        renamed.name = "Renamed".into();
+        let renamed = app.cluster_update(renamed).unwrap();
+        assert!(tunnels.holds(&added.id));
+        // …new access settings or another source drop them at once.
+        let mut tenant = renamed.clone();
+        tenant.prometheus_access = PrometheusAccess {
+            tenant: "team-a".into(),
+            ..Default::default()
+        };
+        let tenant = app.cluster_update(tenant).unwrap();
+        assert!(!tunnels.holds(&added.id));
+        tunnels.seed(&added.id, &tenant.prometheus_access);
+        let mut off = tenant.clone();
+        off.prometheus = PrometheusConfig::Off;
+        app.cluster_update(off).unwrap();
+        assert!(!tunnels.holds(&added.id));
+        // Disconnect and removal drop them too.
+        tunnels.seed(&added.id, &tenant.prometheus_access);
+        app.cluster_disconnect(&added.id);
+        assert!(!tunnels.holds(&added.id));
     }
 
     #[test]
