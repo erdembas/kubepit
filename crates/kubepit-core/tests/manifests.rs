@@ -8,9 +8,11 @@ mod support;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use kubepit_core::types::{
-    DryRunOperation, ManifestHelmOptions, ManifestSource, ManifestSourceKind, Settings,
+    DryRunOperation, ManifestHelmOptions, ManifestSource, ManifestSourceKind, ManifestsWatchEvent,
+    Settings,
 };
 use kubepit_core::{Kubepit, NullSink, Paths};
 use serde_json::{json, Value};
@@ -86,15 +88,17 @@ async fn plain_folders_render_with_sources_and_are_remembered() {
     assert_eq!(render.nested[0].relative, "overlays/prod");
     assert_eq!(render.nested[0].kind, ManifestSourceKind::Kustomize);
 
-    // The fingerprint command agrees until a file changes.
+    // The fingerprint stays the same until a file changes.
     let src = source(&project, ManifestSourceKind::Auto);
-    assert_eq!(app.manifests_fingerprint(&src).unwrap(), render.fingerprint);
+    let again = app.manifests_render(&src).await.unwrap();
+    assert_eq!(again.fingerprint, render.fingerprint);
     write(
         &project,
         "base/extra.yml",
         "apiVersion: v1\nkind: Secret\nmetadata: {name: s}\n",
     );
-    assert_ne!(app.manifests_fingerprint(&src).unwrap(), render.fingerprint);
+    let edited = app.manifests_render(&src).await.unwrap();
+    assert_ne!(edited.fingerprint, render.fingerprint);
 
     // Successful renders are remembered, newest first.
     let recent = app.manifests_recent_list();
@@ -254,9 +258,9 @@ async fn helm_charts_render_with_release_values_and_template_sources() {
         ]
     );
     // The values file is part of the fingerprint.
-    let before = app.manifests_fingerprint(&src).unwrap();
     write(&chart, "values-prod.yaml", "replicas: 5\n");
-    assert_ne!(before, app.manifests_fingerprint(&src).unwrap());
+    let edited = app.manifests_render(&src).await.unwrap();
+    assert_ne!(edited.fingerprint, render.fingerprint);
 
     // Missing chart dependencies get a hint; a missing helm names the fix.
     let failing = script(
@@ -462,4 +466,84 @@ async fn manifests_apply_orders_dependencies_and_keeps_going_after_failures() {
         assert!(path.contains("fieldManager=kubepit"), "{path}");
         assert!(path.contains("force=true"), "{path}");
     }
+}
+
+// ---------------------------------------------------------------------------
+// Watch (notify): each test opts in by starting one, on temp dirs only
+// ---------------------------------------------------------------------------
+
+const CONFIGMAP_A: &str = "apiVersion: v1\nkind: ConfigMap\nmetadata: {name: a}\n";
+const CONFIGMAP_B: &str =
+    "apiVersion: v1\nkind: ConfigMap\nmetadata: {name: b}\ndata: {key: value}\n";
+
+/// A temp folder holding `files`, and an app whose data directory is a
+/// hidden folder inside it (walks skip hidden folders, so the app's own
+/// files never change the source's fingerprint).
+fn app_with_folder(files: &[(&str, &str)]) -> (tempfile::TempDir, Kubepit) {
+    let dir = tempfile::tempdir().unwrap();
+    for (rel, content) in files {
+        write(dir.path(), rel, content);
+    }
+    let app = Kubepit::open(Paths::new(dir.path().join(".kubepit")), Arc::new(NullSink)).unwrap();
+    (dir, app)
+}
+
+fn folder_source(path: &Path) -> ManifestSource {
+    source(path, ManifestSourceKind::Auto)
+}
+
+async fn next_event(
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<ManifestsWatchEvent>,
+    within: Duration,
+) -> Option<ManifestsWatchEvent> {
+    tokio::time::timeout(within, rx.recv()).await.ok().flatten()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn manifests_watch_reports_edits_after_debounce() {
+    let (dir, app) = app_with_folder(&[("a.yaml", CONFIGMAP_A)]);
+    let source = folder_source(dir.path());
+    let initial = app.manifests_render(&source).await.unwrap().fingerprint;
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let id = app
+        .manifests_watch(&source, move |e| tx.send(e).is_ok())
+        .unwrap();
+    std::fs::write(dir.path().join("b.yaml"), CONFIGMAP_B).unwrap();
+    let event = next_event(&mut rx, Duration::from_secs(3))
+        .await
+        .expect("an event");
+    assert_eq!(event.watch_id, id);
+    assert_ne!(event.fingerprint, initial);
+    assert!(
+        next_event(&mut rx, Duration::from_millis(800))
+            .await
+            .is_none(),
+        "one event per burst"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn manifests_watch_sees_atomic_rename_saves() {
+    let (dir, app) = app_with_folder(&[("a.yaml", CONFIGMAP_A)]);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    app.manifests_watch(&folder_source(dir.path()), move |e| tx.send(e).is_ok())
+        .unwrap();
+    std::fs::write(dir.path().join(".a.yaml.swp"), CONFIGMAP_B).unwrap();
+    std::fs::rename(dir.path().join(".a.yaml.swp"), dir.path().join("a.yaml")).unwrap();
+    assert!(next_event(&mut rx, Duration::from_secs(3)).await.is_some());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn manifests_watch_ignores_skipped_files_and_stops_on_unwatch() {
+    let (dir, app) = app_with_folder(&[("a.yaml", CONFIGMAP_A)]);
+    std::fs::create_dir(dir.path().join("node_modules")).unwrap();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let id = app
+        .manifests_watch(&folder_source(dir.path()), move |e| tx.send(e).is_ok())
+        .unwrap();
+    std::fs::write(dir.path().join("node_modules/x.yaml"), CONFIGMAP_B).unwrap();
+    assert!(next_event(&mut rx, Duration::from_secs(1)).await.is_none());
+    app.manifests_unwatch(&id);
+    std::fs::write(dir.path().join("c.yaml"), CONFIGMAP_B).unwrap();
+    assert!(next_event(&mut rx, Duration::from_secs(1)).await.is_none());
 }

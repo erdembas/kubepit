@@ -914,7 +914,7 @@ git commit -m "fix(manifests): gate apply per cell on RBAC"
   - Tauri: `manifests_watch(source, on_event: Channel<ManifestsWatchEvent>) -> String` and `manifests_unwatch(watch_id)`.
   - TS: `ipc.manifestsWatch(source, onEvent): Promise<string>` and `ipc.manifestsUnwatch(watchId): Promise<void>`. `ipc.manifestsFingerprint` is removed.
 
-- [ ] **Step 1: Write the failing tests** (add to `tests/manifests.rs`; reuse its existing app setup helper)
+- [x] **Step 1: Write the failing tests** (add to `tests/manifests.rs`; reuse its existing app setup helper)
 
 ```rust
 async fn next_event(rx: &mut tokio::sync::mpsc::UnboundedReceiver<ManifestsWatchEvent>, within: Duration) -> Option<ManifestsWatchEvent> {
@@ -961,12 +961,12 @@ async fn manifests_watch_ignores_skipped_files_and_stops_on_unwatch() {
 
 `app_with_folder`, `folder_source`, `CONFIGMAP_A` and `CONFIGMAP_B` are small helpers in the test file. They create a temp dir with the files and open `Kubepit` with `Paths` under the temp dir.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core --test manifests manifests_watch`
 Expected: FAIL (`manifests_watch` not found).
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
   - `resolve(source)` and `helm_values(...)` give the root and the extra files.
   - A `notify::RecommendedWatcher` watches the root `Recursive` and each extra file's parent directory `NonRecursive`. Its callback sends into a `tokio::sync::mpsc::unbounded_channel`.
   - The task owns the watcher. After the first event it waits for `WATCH_DEBOUNCE` of quiet, recomputes `discover::fingerprint`, and calls `on_event` only when the fingerprint changed; it returns when `on_event` returns false.
@@ -974,12 +974,12 @@ Expected: FAIL (`manifests_watch` not found).
   - `ManifestsView` starts a watch when `watch && active && source`, reloads when `event.fingerprint !== fingerprint`, and stops the watch on cleanup, including when the id arrives after unmount (pattern: `useLogStream.ts:46-90`).
   - The mock returns an id, never emits, and ignores unwatch.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core --test manifests && pnpm typecheck && cargo clippy --workspace --all-targets -- -D warnings`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates apps/desktop docs/ARCHITECTURE.md

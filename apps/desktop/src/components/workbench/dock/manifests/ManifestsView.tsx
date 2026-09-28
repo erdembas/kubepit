@@ -32,9 +32,6 @@ type RenderState =
   | { status: 'ready'; data: ManifestRender }
   | { status: 'error'; message: string; previous: ManifestRender | null };
 
-/** How often "Watch" checks the files for changes while the tab is visible. */
-const WATCH_INTERVAL_MS = 2000;
-
 function lastData(state: RenderState): ManifestRender | null {
   if (state.status === 'ready') return state.data;
   if (state.status === 'idle') return null;
@@ -123,26 +120,33 @@ export const ManifestsView = memo(function ManifestsView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // "Watch": re-render when a file the source depends on changes.
+  // "Watch": a backend file watch (`manifests_watch`) runs while the tab is
+  // visible; re-render when the files' fingerprint differs from the render's.
   const fingerprint = render.status === 'ready' ? render.data.fingerprint : null;
+  const fingerprintRef = useRef(fingerprint);
+  fingerprintRef.current = fingerprint;
+  // Keyed by content: re-rendering the same source keeps the watch.
+  const watchKey = watch && active && source ? JSON.stringify(source) : null;
   useEffect(() => {
-    if (!watch || !active || !source || !fingerprint) return;
-    let busy = false;
-    const timer = window.setInterval(() => {
-      if (busy) return;
-      busy = true;
-      ipc
-        .manifestsFingerprint(source)
-        .then((now) => {
-          if (now !== fingerprint) void load(source);
-        })
-        .catch(() => undefined)
-        .finally(() => {
-          busy = false;
-        });
-    }, WATCH_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [watch, active, source, fingerprint, load]);
+    if (!watchKey) return;
+    const watched = JSON.parse(watchKey) as ManifestSource;
+    let alive = true;
+    let watchId: string | null = null;
+    ipc
+      .manifestsWatch(watched, (event) => {
+        if (alive && event.fingerprint !== fingerprintRef.current) void load(watched);
+      })
+      .then((id) => {
+        // Unmounted (or the source changed) before the watch started.
+        if (!alive) return void ipc.manifestsUnwatch(id).catch(() => undefined);
+        watchId = id;
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+      if (watchId) void ipc.manifestsUnwatch(watchId).catch(() => undefined);
+    };
+  }, [watchKey, load]);
 
   const pickedTargets = useMemo(
     () =>

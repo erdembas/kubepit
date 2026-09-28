@@ -9,6 +9,7 @@
 //! | [`render`]   | `kubectl kustomize` / `kustomize build` / `helm template` |
 //! | [`recent`]   | recently opened sources (`manifests.json`)                |
 //! | [`apply`]    | per-document dry run and apply against one cluster        |
+//! | [`watch`]    | `notify` watch of a source's files ("Watch" in the UI)    |
 //!
 //! Rendering never touches a cluster: plain folders are read directly and
 //! both tools render locally. The multi-cluster part lives in the UI, which
@@ -20,6 +21,7 @@ pub mod discover;
 pub mod parse;
 pub mod recent;
 pub mod render;
+pub mod watch;
 
 use std::path::PathBuf;
 
@@ -132,14 +134,6 @@ impl Kubepit {
             fingerprint,
             rendered_at: now,
         })
-    }
-
-    /// `manifests_fingerprint`: compare with [`ManifestRender::fingerprint`]
-    /// to detect edits (the UI polls it while "watch" is on). Blocking.
-    pub fn manifests_fingerprint(&self, source: &ManifestSource) -> Result<String> {
-        let resolved = resolve(source)?;
-        let values = helm_values(&resolved, source);
-        Ok(fingerprint(&resolved, &values))
     }
 
     /// `manifests_recent_list`, newest first. Blocking.

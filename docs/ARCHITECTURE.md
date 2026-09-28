@@ -525,8 +525,21 @@ or more clusters like `kubectl diff`, then applies the selected changes.
   and values files (`# Source:` comments name the template). Nothing touches a
   cluster. Kustomize folders and charts inside a plain folder are listed as
   `nested` instead of being read as YAML; skipped files come back as
-  `problems`. `manifests_fingerprint` hashes path/size/mtime so "Watch" can
-  poll for edits; successful renders land in `manifests.json`.
+  `problems`. Each render carries a fingerprint (path/size/mtime of every
+  file the source depends on); successful renders land in `manifests.json`.
+- "Watch" (`manifests/watch.rs`): `manifests_watch(source, onEvent)`
+  returns an id and watches with `notify` the source's folders
+  recursively (a chart's or Kustomize directory's root, a plain source's
+  picked folders) plus, non-recursively, the folders of picked files and
+  Helm values files, so rename-based editor saves are seen. After 300 ms
+  of quiet it recomputes the fingerprint and sends `ManifestsWatchEvent {
+  watch_id, fingerprint }` only when it changed (edits of hidden folders
+  or `node_modules` stay silent); the tab re-renders when it differs from
+  the render's. Each watch is a `manifest_watches` task under cluster id
+  `""` that owns the watcher; it runs only while a visible Manifests tab
+  has Watch on (`manifests_unwatch` on toggle-off, hide or unmount) and is
+  stopped at shutdown. Kustomize bases outside the root are not watched.
+  The demo backend hands out an id and never fires.
 - `manifests_dry_run` sends each document with `dryRun=All` (same request
   as `resource_apply_yaml`, concurrently, allowed on read-only clusters).
   `manifests_apply` refuses read-only clusters, applies in dependency order

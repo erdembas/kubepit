@@ -345,7 +345,9 @@ register({
     remember(source as ManifestSource);
     return structuredClone(out);
   },
-  manifests_fingerprint: async ({ source }: MockArgs) => fingerprintOf(source as ManifestSource),
+  // Demo files never change: a watch gets an id and never fires.
+  manifests_watch: async () => `manifests-watch-${crypto.randomUUID().slice(0, 8)}`,
+  manifests_unwatch: async () => undefined,
   manifests_recent_list: async () => structuredClone(recent),
   manifests_recent_remove: async ({ paths }: MockArgs) => {
     const key = (list: string[]) => [...list].sort().join('\0');

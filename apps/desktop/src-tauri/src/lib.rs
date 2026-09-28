@@ -105,7 +105,8 @@ pub fn run() {
             ipc::resource_dry_run_yaml,
             // Local manifests
             ipc::manifests_render,
-            ipc::manifests_fingerprint,
+            ipc::manifests_watch,
+            ipc::manifests_unwatch,
             ipc::manifests_recent_list,
             ipc::manifests_recent_remove,
             ipc::manifests_dry_run,

@@ -73,6 +73,7 @@ import type {
   ManifestRecent,
   ManifestRender,
   ManifestSource,
+  ManifestsWatchEvent,
   MetricsHistoryQuery,
   MetricsResult,
   MetricsSeries,
@@ -289,9 +290,14 @@ export const ipc = {
   // -- Local manifests (render locally; diff / apply per cluster) -----------
   /** Reads a plain folder or runs `kubectl kustomize` / `helm template`; never touches a cluster. */
   manifestsRender: (source: ManifestSource) => call<ManifestRender>('manifests_render', { source }),
-  /** Changes whenever a file the source depends on changes. */
-  manifestsFingerprint: (source: ManifestSource) =>
-    call<string>('manifests_fingerprint', { source }),
+  /**
+   * Watches the source's files (`notify`, debounced); `onEvent` fires when
+   * their fingerprint changes. Resolves to the watch id; stop it with
+   * `manifestsUnwatch`.
+   */
+  manifestsWatch: (source: ManifestSource, onEvent: (event: ManifestsWatchEvent) => void) =>
+    callWithChannel<string, ManifestsWatchEvent>('manifests_watch', { source }, 'onEvent', onEvent),
+  manifestsUnwatch: (watchId: string) => call<void>('manifests_unwatch', { watchId }),
   manifestsRecentList: () => call<ManifestRecent[]>('manifests_recent_list'),
   manifestsRecentRemove: (paths: string[]) =>
     call<ManifestRecent[]>('manifests_recent_remove', { paths }),
