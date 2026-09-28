@@ -10,6 +10,7 @@ import {
   type TopoGraph,
   type TopologyList,
 } from '@/lib/kube/topology';
+import { perfNow, recordSince } from '@/lib/perf/probe';
 import type { ApiResourceInfo, ClusterId, Gvk, KubeObject } from '@/types';
 import { hasListError, isListComplete } from '../data/listState';
 import { useWatch, type WatchSnapshot } from '../data/watchCache';
@@ -86,6 +87,7 @@ export function useTopologyData(
   // `key` captures every snapshot's data, the scope and the extra object.
   const memo = useRef<PausedMemo<Built> | null>(null);
   memo.current = pausedMemo(memo.current, [key, sources, apiResources], enabled, () => {
+    const start = perfNow();
     const lists: TopologyList[] = [];
     const errors: TopologyWatchError[] = [];
     const byId = new Map<string, KubeObject>();
@@ -122,6 +124,7 @@ export function useTopologyData(
       apiResources,
       extra: extra ? [extra] : undefined,
     });
+    recordSince('map:build', start);
     return { graph, errors, byId };
   });
   const built = memo.current.value;

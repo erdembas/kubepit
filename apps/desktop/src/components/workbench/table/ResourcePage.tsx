@@ -18,6 +18,7 @@ import { kindIcon } from '@/lib/kube/icons';
 import { viewLabel } from '@/lib/kube/nav';
 import { templateFor } from '@/lib/kube/templates';
 import { cn } from '@/lib/cn';
+import { perfTableRendered } from '@/lib/perf/probe';
 import { useCan } from '@/store/useAccessStore';
 import { sameObject, useBookmarksStore } from '@/store/useBookmarksStore';
 import { dock } from '@/store/useDockStore';
@@ -240,6 +241,7 @@ export function ResourcePage({
   const scopeNs =
     namespaces.length === 1 ? namespaces[0]! : (cluster?.default_namespace ?? 'default');
   const { status, error, forbidden, synced } = t.snapshot;
+  perfTableRendered(kindKey, t.items.length, synced);
   const loading = !synced && status !== 'error';
   const createCheck = useMemo(
     () => (readOnly ? null : accessCheck('create', gvk, { namespace: scopeNs })),

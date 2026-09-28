@@ -10,6 +10,7 @@ import {
   type HealthScan,
   type HealthSummary,
 } from '@/lib/kube/health';
+import { perfNow, recordSince } from '@/lib/perf/probe';
 import { useHealthIgnores, useHealthOptIns, useHealthStore } from '@/store/useHealthStore';
 import type { ApiResourceInfo, Gvk } from '@/types';
 import { restartWatch, useWatch, type WatchSnapshot } from '../data/watchCache';
@@ -262,8 +263,10 @@ export function useHealthScan(
         rightsizing: rightsizingRef.current ?? null,
       };
       setScanning(true);
+      const start = perfNow();
       scanHealthAsync(input, signal)
         .then((scan) => {
+          recordSince('health:scan', start);
           const cached = { signature, scan };
           scans.set(key, cached);
           if (signal?.aborted) return;

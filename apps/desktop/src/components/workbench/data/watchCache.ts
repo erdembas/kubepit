@@ -1,6 +1,7 @@
 import { useCallback, useSyncExternalStore } from 'react';
 import { ipc } from '@/lib/ipc';
 import { kindKey } from '@/lib/kube/catalog';
+import { perfNow, recordDuration } from '@/lib/perf/probe';
 import type { ClusterId, Gvk, KubeObject, WatchBatch } from '@/types';
 import { applyBatch, batchFlush, isForbidden } from './watchBatch';
 
@@ -53,6 +54,8 @@ class WatchEntry {
   private watchId: string | null = null;
   private frame: number | null = null;
   private version = 0;
+  /** Perf probe: when the first batch since the last flush arrived (0 while off). */
+  private applyStart = 0;
   snapshot: WatchSnapshot = EMPTY;
 
   constructor(
@@ -60,6 +63,10 @@ class WatchEntry {
     readonly gvk: Gvk,
     readonly namespaces: string[],
   ) {}
+
+  get listenerCount() {
+    return this.listeners.size;
+  }
 
   subscribe(listener: () => void) {
     this.listeners.add(listener);
@@ -99,6 +106,7 @@ class WatchEntry {
       cancelAnimationFrame(this.frame);
       this.frame = null;
     }
+    this.applyStart = 0;
     const id = this.watchId;
     this.watchId = null;
     if (id) void ipc.resourceUnwatch(id).catch(() => undefined);
@@ -109,6 +117,7 @@ class WatchEntry {
   private apply(batch: WatchBatch) {
     // Error-only batches (a forbidden watch retrying) change no rows: no new
     // version, so consumers keyed on it (the health scan) do not recompute.
+    if (!this.applyStart) this.applyStart = perfNow();
     const changed = applyBatch(this.map, batch);
     if (changed) this.version++;
     const patch = batchFlush(this.snapshot, batch, this.map.size);
@@ -125,6 +134,7 @@ class WatchEntry {
   }
 
   private flush(patch: Partial<WatchSnapshot>) {
+    const flushStart = this.applyStart && performance.now();
     if (this.frame !== null) {
       cancelAnimationFrame(this.frame);
       this.frame = null;
@@ -138,6 +148,17 @@ class WatchEntry {
       version: this.version,
     };
     this.emit();
+    if (this.applyStart) this.recordApply(flushStart);
+  }
+
+  /** Perf probe: first batch → snapshot flushed to subscribers, plus the flush's own cost. */
+  private recordApply(flushStart: number) {
+    const end = performance.now();
+    recordDuration('watch:apply', end - this.applyStart, {
+      items: this.map.size,
+      flushMs: end - flushStart,
+    });
+    this.applyStart = 0;
   }
 
   private update(patch: Partial<WatchSnapshot>) {
@@ -165,6 +186,15 @@ function entryFor(clusterId: ClusterId, gvk: Gvk, namespaces: readonly string[])
     entries.set(key, entry);
   }
   return entry;
+}
+
+/** Every cached watch (perf probe): key, subscribers and items. */
+export function watchCacheStats() {
+  return [...entries].map(([key, entry]) => ({
+    key,
+    listeners: entry.listenerCount,
+    items: entry.snapshot.items.length,
+  }));
 }
 
 /** Restart every watch of a kind (retry button). */

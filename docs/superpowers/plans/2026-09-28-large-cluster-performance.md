@@ -536,6 +536,7 @@ git commit -m "perf(bench): Vitest benches for topology, health, netpol, logs an
 - Create: `apps/desktop/src/lib/perf/stats.ts`, `apps/desktop/src/lib/perf/probe.ts`
 - Modify: `apps/desktop/src/main.tsx:15-17` (install the probe global)
 - Modify: `apps/desktop/src/components/workbench/table/ResourcePage.tsx` (marks), `components/workbench/data/watchCache.ts:108-145` (apply → flush duration), `components/workbench/topology/TopologyMap.tsx:98-120` (build/view/layout), `components/workbench/health/useHealthScan.ts:~226` (scan duration), `components/workbench/ViewPanes.tsx` (view switch)
+  - As built: the driver is `apps/desktop/src/lib/perf/driver.ts`, a lazy chunk that `main.tsx` loads only while the probe is on; `map:build` is timed in `topology/useTopologyData.ts` (where the graph is built); the view switch is in `components/workbench/tabs/ViewPanes.tsx`.
 - Test: `apps/desktop/src/lib/perf/stats.test.ts`, `apps/desktop/src/lib/perf/probe.test.ts`
 
 **Interfaces:**
@@ -555,7 +556,7 @@ git commit -m "perf(bench): Vitest benches for topology, health, netpol, logs an
     - `report()`, `reset()`.
   - Recorded ids: `table:ttfr` (navigate → first non-empty rows committed), `table:synced`, `watch:apply` (with `items`), `map:build`, `map:view`, `map:layout`, `health:scan`, `view:switch`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // apps/desktop/src/lib/perf/stats.test.ts
@@ -604,21 +605,21 @@ describe('probe', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm --filter @kubepit/desktop test -- src/lib/perf`
 Expected: FAIL (modules missing).
 
-- [ ] **Step 3: Implement the probe and the instrumentation.**
+- [x] **Step 3: Implement the probe and the instrumentation.**
   - Every instrumentation call is `if (perfEnabled()) …` or a no-op function, so disabled builds do no work beyond one boolean check.
   - `scrollTable` finds the active table's scroll container (`[role="rowgroup"]`'s scroll parent). It scrolls with `requestAnimationFrame` at 2 000 px/s and collects frame deltas and long tasks (`PerformanceObserver('longtask')`).
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck && pnpm --filter @kubepit/desktop build`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/src
