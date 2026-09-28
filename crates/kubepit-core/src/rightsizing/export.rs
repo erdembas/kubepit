@@ -171,6 +171,9 @@ pub fn export_yaml(report: &RightsizingReport, selection: &[WorkloadRef]) -> Str
 mod tests {
     use super::*;
     use crate::cost::CostPricing;
+    use crate::prometheus::access::{
+        KeyRef, KeyRefKind, PrometheusAccess, PrometheusAuth, TunnelTls,
+    };
     use crate::rightsizing::math::{change_of, GIB, MIB};
     use crate::rightsizing::strategy;
     use crate::rightsizing::types::{
@@ -484,8 +487,9 @@ mod tests {
         r
     }
 
-    /// What the store keeps as the run's `source_config` once access
-    /// settings exist (phase 7): the service, the tenant and the Secret.
+    /// What the store keeps as the run's `source_config`: the cluster's
+    /// Prometheus service and its access settings (tenant, cluster labels,
+    /// Bearer credentials from a Secret, a CA from a ConfigMap).
     fn source_config() -> String {
         let prometheus = PrometheusConfig::Service {
             namespace: "monitoring".into(),
@@ -494,15 +498,25 @@ mod tests {
             scheme: PromScheme::Https,
             path_prefix: "/select/0/prometheus".into(),
         };
-        json!({
-            "prometheus": prometheus,
-            "prometheus_access": {
-                "tenant": "team-a",
-                "secret": {"namespace": "monitoring", "name": "prom-auth", "key": "token"},
-                "selector": {"cluster": "prod-eu"}
-            }
-        })
-        .to_string()
+        let access = PrometheusAccess {
+            tenant: "team-a".into(),
+            cluster_labels: [("cluster".to_string(), "prod-eu".to_string())].into(),
+            auth: Some(PrometheusAuth::Bearer {
+                namespace: "monitoring".into(),
+                secret: "prom-auth".into(),
+                token_key: "token".into(),
+            }),
+            tls: Some(TunnelTls {
+                ca: Some(KeyRef {
+                    kind: KeyRefKind::ConfigMap,
+                    namespace: "monitoring".into(),
+                    name: "prom-ca".into(),
+                    key: "ca.crt".into(),
+                }),
+                insecure_skip_verify: false,
+            }),
+        };
+        json!({"prometheus": prometheus, "prometheus_access": access}).to_string()
     }
 
     #[test]
@@ -567,13 +581,20 @@ mod tests {
                 "source_config",
                 "tenant",
                 "team-a",
+                "cluster_labels",
+                "prod-eu",
+                "auth",
+                "Bearer",
+                "bearer",
+                "token_key",
                 "secret",
                 "Secret",
                 "prom-auth",
-                "selector",
-                "prod-eu",
+                "tls",
+                "prom-ca",
+                "ca.crt",
+                "insecure_skip_verify",
                 "credential",
-                "bearer",
                 "path_prefix",
                 "/select/0/prometheus",
                 "9090",
