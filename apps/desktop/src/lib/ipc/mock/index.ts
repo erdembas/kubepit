@@ -20,6 +20,8 @@ import './openapi';
 // Registered after './app': it wraps `port_forward_start` and `cluster_connect`.
 import './connectivity';
 import './changes';
+// Registered last: it wraps every mutating command to derive the demo audit log.
+import './history';
 
 export { mockListen } from './bus';
 

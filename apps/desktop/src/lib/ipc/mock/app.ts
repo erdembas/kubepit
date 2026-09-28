@@ -11,6 +11,7 @@ import type {
   WorkspaceSnapshot,
 } from '@/types';
 import { DEFAULT_ALERT_SETTINGS } from '@/lib/alerts/policy';
+import { DEFAULT_HISTORY_SETTINGS } from '@/lib/history/audit';
 import { windowLabel } from '@/lib/windowSeed';
 import { mockEmit, mockEmitAllWindows, sleep } from './bus';
 import { register, type MockArgs } from './registry';
@@ -171,6 +172,8 @@ let settings: Settings = {
   keychain_kubeconfigs: false,
   change_journal: true,
   change_journal_disabled: [],
+  // staging-gke keeps its events and changes on disk (demo persisted history).
+  history: { ...DEFAULT_HISTORY_SETTINGS, persist_clusters: ['c-staging'] },
 };
 
 const WORKSPACE_KEY = 'kubepit.demo.workspace';

@@ -1,7 +1,7 @@
 import * as i18n from '@/i18n';
 import { useCallback, useEffect, useState } from 'react';
-import { Network, Search, Settings as SettingsIcon, X } from 'lucide-react';
-import { useAppStore, PORT_FORWARDS_TAB_KEY } from '@/store/useAppStore';
+import { History, Network, Search, Settings as SettingsIcon, X } from 'lucide-react';
+import { useAppStore, ACTIVITY_TAB_KEY, PORT_FORWARDS_TAB_KEY } from '@/store/useAppStore';
 import { openAndConnect, requestRemoveCluster } from '@/lib/clusterActions';
 import { cn } from '@/lib/cn';
 import type { ClusterDef } from '@/types';
@@ -240,7 +240,7 @@ export function SidebarRail() {
   );
 }
 
-/** Bottom utility row (RunHQ's WorkbenchUtilities): global port forwards and settings. */
+/** Bottom utility row (RunHQ's WorkbenchUtilities): port forwards, activity and settings. */
 function WorkspaceUtilities({ expanded }: { expanded: boolean }) {
   i18n.useLocale();
   const forwards = useAppStore((s) => s.portForwards.length);
@@ -271,6 +271,16 @@ function WorkspaceUtilities({ expanded }: { expanded: boolean }) {
             {forwards}
           </span>
         )}
+      </button>
+      <button
+        type="button"
+        onClick={() => openMainTab({ kind: 'activity' })}
+        title={i18n.t('Activity')}
+        aria-label={i18n.t('Activity')}
+        className={cn(item, activeKey === ACTIVITY_TAB_KEY && 'text-accent')}
+      >
+        <History className="h-3.5 w-3.5" />
+        {expanded && i18n.t('Activity')}
       </button>
       <button
         type="button"

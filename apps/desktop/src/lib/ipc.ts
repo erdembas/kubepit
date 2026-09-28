@@ -9,6 +9,9 @@ import type {
   ApiResourceInfo,
   AppInfo,
   ApplyMode,
+  AuditDetail,
+  AuditFilter,
+  AuditPage,
   ClientCertificate,
   ChangeDetail,
   ChangeFilter,
@@ -39,6 +42,11 @@ import type {
   HelmRevisionDetail,
   HelmSearchOptions,
   HelmUpgradeRequest,
+  HistoryChangePage,
+  HistoryEventFilter,
+  HistoryEventPage,
+  HistoryKind,
+  HistoryStatus,
   KubeconfigChanged,
   KubeconfigSource,
   KubeObject,
@@ -448,6 +456,25 @@ export const ipc = {
   /** One change with its normalized before/after YAML (Secret values are never kept). */
   changesGet: (clusterId: ClusterId, id: number) =>
     call<ChangeDetail>('changes_get', { clusterId, id }),
+  // -- Persistent history (history.db on this machine) ----------------------
+  historyStatus: () => call<HistoryStatus>('history_status'),
+  /** Own actions (every cluster), newest first. */
+  historyAuditList: (filter: AuditFilter) => call<AuditPage>('history_audit_list', { filter }),
+  /** One action with the redacted before/after of its targets. */
+  historyAuditGet: (id: number) => call<AuditDetail>('history_audit_get', { id }),
+  /** The filtered actions as JSON lines (bodies left out). */
+  historyAuditExport: (filter: AuditFilter) => call<string>('history_audit_export', { filter }),
+  /** Persisted Events of an opted-in cluster, newest occurrence first. */
+  historyEventsList: (clusterId: ClusterId, filter: HistoryEventFilter) =>
+    call<HistoryEventPage>('history_events_list', { clusterId, filter }),
+  /** Persisted change-journal entries (ids of the database, not the live journal). */
+  historyChangesList: (clusterId: ClusterId, filter: ChangeFilter) =>
+    call<HistoryChangePage>('history_changes_list', { clusterId, filter }),
+  historyChangesGet: (clusterId: ClusterId, id: number) =>
+    call<ChangeDetail>('history_changes_get', { clusterId, id }),
+  /** `clusterId: null` clears every cluster; compacts the database. */
+  historyClear: (kind: HistoryKind, clusterId: ClusterId | null) =>
+    call<HistoryStatus>('history_clear', { kind, clusterId }),
   // -- Helm charts (repositories and catalog are local helm commands) -------
   helmRepoList: () => call<HelmRepo[]>('helm_repo_list'),
   helmRepoAdd: (name: string, url: string, options: HelmRepoAddOptions) =>

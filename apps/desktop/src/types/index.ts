@@ -669,6 +669,173 @@ export interface ChangeDetail {
 }
 
 // ---------------------------------------------------------------------------
+// Persistent history (`history.rs`): audit log, persisted events and changes
+// ---------------------------------------------------------------------------
+
+/** `Settings.history`. Everything stays in `history.db` on this machine. */
+export interface HistorySettings {
+  /** Record every mutation Kubepit performs (on by default). */
+  audit: boolean;
+  audit_retention_days: number;
+  /** Clusters whose Events and change-journal entries are kept on disk (opt-in). */
+  persist_clusters: ClusterId[];
+  /** Retention of persisted events and changes. */
+  retention_days: number;
+  /** Upper bound of the database; the oldest events and changes go first. */
+  max_size_mb: number;
+}
+
+export type AuditAction =
+  | 'apply'
+  | 'create'
+  | 'replace'
+  | 'patch'
+  | 'delete'
+  | 'scale'
+  | 'restart'
+  | 'set-image'
+  | 'rollout-undo'
+  | 'cronjob-trigger'
+  | 'cordon'
+  | 'uncordon'
+  | 'drain'
+  | 'helm-install'
+  | 'helm-upgrade'
+  | 'helm-rollback'
+  | 'helm-uninstall'
+  | 'manifests-apply'
+  | 'pod-debug'
+  | 'file-upload'
+  | 'node-shell';
+
+export type AuditOutcome = 'ok' | 'error';
+
+/** One object an action addressed. Helm releases: `api_version: 'helm.sh/v3'`, `kind: 'Release'`. */
+export interface AuditTarget {
+  api_version: string;
+  kind: string;
+  /** Known when the command was addressed by it or discovery resolved it. */
+  gvk: Gvk | null;
+  namespace: string | null;
+  name: string;
+  /** This target failed while others succeeded (manifests apply). */
+  error: string | null;
+}
+
+/** One audit entry without object bodies. */
+export interface AuditEntry {
+  id: number;
+  /** Epoch ms when the action started. */
+  ts: number;
+  cluster_id: ClusterId;
+  cluster_name: string;
+  context: string;
+  /** From the cluster's last `accessWhoami`; `null` = unknown. */
+  identity: string | null;
+  action: AuditAction;
+  dry_run: boolean;
+  outcome: AuditOutcome;
+  error: string | null;
+  duration_ms: number;
+  targets: AuditTarget[];
+  /** Action parameters; Secret data and Helm values are redacted (keys kept). */
+  request: Record<string, unknown> | null;
+  /** What the action produced (Job, debug container, helper pod, revision). */
+  result: string | null;
+  has_diff: boolean;
+  /** A target's before-state can be re-applied (Revert). */
+  revertible: boolean;
+}
+
+/** Normalized before/after YAML of one target. */
+export interface AuditObject {
+  /** Index into `AuditEntry.targets`. */
+  target: number;
+  before_yaml: string | null;
+  after_yaml: string | null;
+  omitted: boolean;
+  revertible: boolean;
+}
+
+export interface AuditDetail {
+  entry: AuditEntry;
+  objects: AuditObject[];
+}
+
+/** `historyAuditList` filter; empty lists match everything. */
+export interface AuditFilter {
+  cluster_ids: ClusterId[];
+  actions: AuditAction[];
+  outcome: AuditOutcome | null;
+  text: string | null;
+  /** Epoch ms, inclusive. */
+  since: number | null;
+  until: number | null;
+  limit: number;
+  /** `next_cursor` of the previous page. */
+  cursor: string | null;
+}
+
+export interface AuditPage {
+  entries: AuditEntry[];
+  next_cursor: string | null;
+  /** Entries matching the filter across all pages. */
+  total: number;
+}
+
+/** `historyEventsList` filter; empty lists match everything. */
+export interface HistoryEventFilter {
+  namespaces: string[];
+  involved_uid: string | null;
+  /** With the uid: also earlier incarnations (same kind and name). */
+  involved_kind: string | null;
+  involved_name: string | null;
+  types: string[];
+  text: string | null;
+  since: number | null;
+  until: number | null;
+  limit: number;
+  cursor: string | null;
+}
+
+/** Persisted Events (raw Kubernetes JSON), newest occurrence first. */
+export interface HistoryEventPage {
+  events: KubeObject[];
+  next_cursor: string | null;
+}
+
+/** Persisted journal entries; ids belong to the database (`historyChangesGet`). */
+export interface HistoryChangePage {
+  entries: ChangeSummary[];
+  next_cursor: number | null;
+}
+
+export type HistoryKind = 'audit' | 'events' | 'changes' | 'all';
+
+export interface HistoryTableStatus {
+  rows: number;
+  oldest_ts: number | null;
+}
+
+export interface HistoryStatus {
+  /** `~/.kubepit/history.db`. */
+  path: string;
+  /** Database + write-ahead log on disk. */
+  size_bytes: number;
+  available: boolean;
+  error: string | null;
+  /** This process records (the desktop app). */
+  recording: boolean;
+  audit: HistoryTableStatus;
+  events: HistoryTableStatus;
+  changes: HistoryTableStatus;
+  /** Writes dropped because the writer queue was full. */
+  dropped: number;
+  /** Connected clusters whose events and changes are persisted right now. */
+  persisting: ClusterId[];
+}
+
+// ---------------------------------------------------------------------------
 // Metrics & overview
 // ---------------------------------------------------------------------------
 
@@ -1013,6 +1180,8 @@ export interface Settings {
   change_journal: boolean;
   /** Cluster ids that opted out of the change timeline. */
   change_journal_disabled: ClusterId[];
+  /** Persistent history: audit log, persisted events and changes. */
+  history: HistorySettings;
 }
 
 // ---------------------------------------------------------------------------

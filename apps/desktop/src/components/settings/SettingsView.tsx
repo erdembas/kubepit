@@ -3,6 +3,7 @@ import { type ReactNode } from 'react';
 import {
   Bell,
   FileCode2,
+  History,
   Info,
   Settings as SettingsIcon,
   SquareTerminal,
@@ -18,6 +19,7 @@ import {
   TerminalCategory,
   ToolsCategory,
 } from './categories';
+import { HistoryCategory } from './HistoryCategory';
 import { NotificationsCategory } from './NotificationsCategory';
 
 interface CategoryDef {
@@ -71,6 +73,19 @@ const CATEGORIES: ReadonlyArray<CategoryDef> = [
       return i18n.t('Alerts from connected clusters, desktop notifications and filters.');
     },
     icon: Bell,
+    group: 'workspace',
+  },
+  {
+    id: 'history',
+    get label() {
+      return i18n.t('History');
+    },
+    get description() {
+      return i18n.t(
+        'Audit log of your actions, persistent events and changes, retention and storage.',
+      );
+    },
+    icon: History,
     group: 'workspace',
   },
   {
@@ -171,6 +186,7 @@ export function SettingsView() {
           {active === 'notifications' && (
             <NotificationsCategory description={current.description} />
           )}
+          {active === 'history' && <HistoryCategory description={current.description} />}
           {active === 'tools' && <ToolsCategory description={current.description} />}
           {active === 'about' && <AboutCategory description={current.description} />}
         </section>
