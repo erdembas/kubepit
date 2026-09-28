@@ -622,7 +622,7 @@ git commit -m "feat(rightsizing): fold per-pod statistics into workload evidence
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn evidence_caps_confidence_and_adds_flags() {
@@ -647,21 +647,21 @@ Steps:
 #[test] fn oom_makes_the_verdict_under() { assert_eq!(verdict(&[oom_container], 10.0, 5.0), Verdict::Under); }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core -- rightsizing::strategy rightsizing::math`
 
 Expected: FAIL (`apply_evidence` not found).
 
-- [ ] **Step 3: Implement `apply_evidence`, wire it into `recommend`, and add the verdict rule**
+- [x] **Step 3: Implement `apply_evidence`, wire it into `recommend`, and add the verdict rule**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core rightsizing`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/src/rightsizing

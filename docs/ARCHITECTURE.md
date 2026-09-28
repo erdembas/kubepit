@@ -887,12 +887,22 @@ applying a recommendation only reads, so read-only clusters get it all.
   never lowered (CPU limits are never invented) —, minimums, rounding up
   to sane steps, never below the observed peak, no churn under 10 % /
   10 m / 16 MiB; confidence high from 3 days, medium from 12 hours.
+  Between the strategy and `finalize`, the shared `strategy::apply_evidence`
+  turns the usage evidence and the HPA into flags that only cap the
+  confidence and never change a value (a recommendation is always
+  computed): `identity-unclear`, `insufficient-history` (< `min_hours`,
+  detail whole hours) and `low-coverage` (< `min_coverage`, detail whole
+  %) cap it at low; `partial-data`, `hpa-target` (detail the HPA name),
+  `hpa-utilization` (a Utilization target on a request that changes,
+  detail `cpu 70%`), `oom-killed`, `cpu-throttled` (throttled ÷ CFS
+  periods ≥ the threshold, detail one decimal %) and `identity-by-name`
+  cap it at medium; the final confidence is the lowest cap.
   `strategy::finalize` is shared by all strategies: values a strategy left
   alone stay, and a limit a new request would exceed rises proportionally
   (current limit ÷ request ratio kept, flagged `*_limit_raised` with a
-  warning). Workloads get a verdict (over / under / balanced / no data),
-  the monthly cost delta of their requests and the weakest container's
-  confidence.
+  warning). Workloads get a verdict (over / under / balanced / no data;
+  any `oom-killed` container makes it under), the monthly cost delta of
+  their requests and the weakest container's confidence.
 - **Apply** (`rightsizing_apply`): a strategic merge patch of the named
   containers' resources at the pod template plus a
   `kubernetes.io/change-cause`; `dryRun: true` returns live vs. result like

@@ -8,6 +8,7 @@
 //!   value, so recommendations do not churn — unless the current value is
 //!   below the observed peak.
 
+use super::strategy::WARN_OOM_KILLED;
 use super::types::{Change, ContainerRecommendation, RightsizingSettings, UsageStats, Verdict};
 use crate::cost::CostPricing;
 
@@ -194,7 +195,14 @@ pub fn monthly_requests(
 }
 
 /// Over- or under-provisioned, from the containers' usage and requests.
+/// An OOM kill (the `oom-killed` warning) always means under-provisioned.
 pub fn verdict(containers: &[ContainerRecommendation], current: f64, recommended: f64) -> Verdict {
+    let oom_killed = containers
+        .iter()
+        .any(|c| c.warnings.iter().any(|w| w.code == WARN_OOM_KILLED));
+    if oom_killed {
+        return Verdict::Under;
+    }
     if containers.iter().all(|c| c.usage.is_none()) {
         return Verdict::NoData;
     }
@@ -264,7 +272,7 @@ mod tests {
     use super::*;
     use crate::rightsizing::strategy::{recommend, DEFAULT_STRATEGY_ID};
     use crate::rightsizing::strategy::{strategy, ContainerInput};
-    use crate::rightsizing::types::{ResourceValues, RightsizingSource};
+    use crate::rightsizing::types::{RecommendationWarning, ResourceValues, RightsizingSource};
 
     fn settings() -> RightsizingSettings {
         RightsizingSettings::default()
@@ -408,6 +416,27 @@ mod tests {
         assert_eq!(verdict(&[under], 1.0, 2.0), Verdict::Under);
         let none = rec(ResourceValues::default(), None);
         assert_eq!(verdict(&[none], 0.0, 0.0), Verdict::NoData);
+    }
+
+    #[test]
+    fn oom_makes_the_verdict_under() {
+        let mut oom_container = rec(
+            ResourceValues {
+                cpu_request: Some(1000.0),
+                memory_request: Some(GIB),
+                ..Default::default()
+            },
+            Some(usage(100.0, 200.0 * MIB)),
+        );
+        // Without the OOM kill the halved requests make it over-provisioned.
+        assert_eq!(
+            verdict(std::slice::from_ref(&oom_container), 10.0, 5.0),
+            Verdict::Over
+        );
+        oom_container
+            .warnings
+            .push(RecommendationWarning::new(WARN_OOM_KILLED));
+        assert_eq!(verdict(&[oom_container], 10.0, 5.0), Verdict::Under);
     }
 
     #[test]
