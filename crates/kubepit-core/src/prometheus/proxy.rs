@@ -17,7 +17,7 @@ use kube::Client;
 
 use super::parse::{error_message, parse_response, PromData};
 use crate::error::ApiError;
-use crate::service_proxy::{self, Endpoint};
+use crate::service_proxy::{self, Endpoint, RawResponse};
 use crate::types::PrometheusService;
 
 pub use crate::service_proxy::{encode_component, PROXY_REASON};
@@ -66,7 +66,12 @@ pub async fn get(
     headers: &[(&str, &str)],
     timeout: Duration,
 ) -> Result<PromData> {
-    let response = service_proxy::get(client, path, headers, timeout, "Prometheus").await?;
+    answer(service_proxy::get(client, path, headers, timeout, "Prometheus").await?)
+}
+
+/// The Prometheus envelope of an answer, or the error of a non-2xx one
+/// (service proxy and tunnel alike).
+pub fn answer(response: RawResponse) -> Result<PromData> {
     if response.is_success() {
         return parse_response(&response.body);
     }

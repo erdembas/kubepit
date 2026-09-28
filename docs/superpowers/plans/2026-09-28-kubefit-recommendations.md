@@ -2706,7 +2706,7 @@ git commit -m "feat(prometheus): cluster-label selector on every preset and tena
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[tokio::test] async fn tunnel_requests_carry_auth_and_tenant() {
@@ -2728,21 +2728,21 @@ async fn secret_values_stay_out_of_errors() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core prometheus::tunnel && cargo test -p kubepit-core --test recommendations secret_values`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement the tunnel and the transport choice**
+- [x] **Step 3: Implement the tunnel and the transport choice**
 
-- [ ] **Step 4: Run the tests and checks**
+- [x] **Step 4: Run the tests and checks**
 
 Run: `cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core Cargo.lock

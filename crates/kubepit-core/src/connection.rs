@@ -385,6 +385,7 @@ impl Kubepit {
         self.metrics_history.stop_cluster(id);
         self.stop_alert_monitor(id);
         self.prometheus.forget(id);
+        self.prometheus_tunnels.forget(id);
         self.loki.forget(id);
         self.proxy_clients.forget(id);
         self.cost.forget(id);

@@ -25,6 +25,7 @@ use crate::node_shell::NodeShells;
 use crate::openapi::OpenApiCache;
 use crate::paths::Paths;
 use crate::portforward::PortForwards;
+use crate::prometheus::tunnel::TunnelCache;
 use crate::prometheus::PrometheusCache;
 use crate::saved_forwards::SavedForwards;
 use crate::secrets::{DisabledSecretStore, SecretStore};
@@ -50,8 +51,10 @@ pub struct Kubepit {
     pub(crate) manifest_watches: TaskRegistry,
     // Alerts: per-cluster monitors and the notification center's history.
     pub(crate) alerts: AlertCenter,
-    // Prometheus: detection result per connection.
+    // Prometheus: detection result per connection, and the Secret values of
+    // authenticated tunnels (at most five minutes).
     pub(crate) prometheus: PrometheusCache,
+    pub(crate) prometheus_tunnels: TunnelCache,
     // Service proxy (Prometheus, Loki): retry-free client per connection.
     pub(crate) proxy_clients: ProxyClients,
     // Loki: detection result per connection.
@@ -107,6 +110,7 @@ impl Kubepit {
             manifest_watches: TaskRegistry::default(),
             alerts,
             prometheus: PrometheusCache::default(),
+            prometheus_tunnels: TunnelCache::default(),
             proxy_clients: ProxyClients::default(),
             loki: LokiCache::default(),
             openapi: OpenApiCache::default(),

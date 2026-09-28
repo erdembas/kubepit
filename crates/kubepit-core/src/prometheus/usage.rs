@@ -175,7 +175,7 @@ pub fn merge_pod_usage(cpu: &PromData, memory: &PromData) -> UsageMap {
 
 impl Kubepit {
     /// One instant preset query against `source`.
-    async fn prometheus_instant(&self, source: &Source, query: &str) -> Result<PromData> {
+    async fn prometheus_instant(&self, source: &Source<'_>, query: &str) -> Result<PromData> {
         self.prometheus_send(
             source,
             "/api/v1/query",

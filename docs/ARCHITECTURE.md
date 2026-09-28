@@ -476,7 +476,25 @@ An optional, richer metrics source next to the metrics-server history
   right-sizing, upgrade readiness and the PromQL tab: it sends
   `X-Scope-OrgID` when a tenant is set (the detection probe too), injects
   the cluster-label selector into `Origin::Preset` queries and makes the
-  next status request detect again after a proxy failure.
+  next status request detect again after a proxy or tunnel failure.
+- **Tunnel** (`tunnel.rs`): the service proxy does not forward
+  `Authorization`, so with `auth` set every request (the probe too) goes
+  through an in-process port-forward instead — no local listener, so no
+  other local process can use it. The credentials are read from the
+  referenced Secret (`get secrets`, the user's RBAC; a bearer token or
+  `Basic base64(user:password)`) and kept in memory for at most five
+  minutes per connection (`TunnelCache`, dropped on disconnect); they are
+  never logged, stored, returned or quoted in errors, which name the Secret
+  and key only (`Credentials` prints as `<redacted>`). Each request
+  re-resolves a ready pod behind the service
+  (`portforward::resolve_target`, so restarts are survived), opens
+  `pods/portforward` to it and speaks HTTP/1.1 over the stream (hyper's
+  `client::conn::http1`) with `Authorization`, the tenant and
+  `Host: <service>.<namespace>.svc:<port>`. `https` services get TLS over
+  the stream (tokio-rustls, ring) with the server name
+  `<service>.<namespace>.svc`, trusting the CA of `tls.ca` (a ConfigMap or
+  Secret key), else the system roots, or nothing with
+  `insecure_skip_verify`.
 - **Cluster-label selector** (`matchers.rs`): `with_matchers` is a small
   PromQL lexer that adds `,k="v"` to every vector selector (a bare metric
   name, a `{…}` block, `{__name__=~…}`) and skips string literals,

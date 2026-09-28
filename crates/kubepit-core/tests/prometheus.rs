@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use kubepit_core::cost::{CostConfig, CostSourceConfig};
-use kubepit_core::prometheus::access::PrometheusAccess;
+use kubepit_core::prometheus::access::{PrometheusAccess, PrometheusAuth};
 use kubepit_core::rightsizing::{RightsizingNoteKind, RightsizingRequest, RightsizingSource};
 use kubepit_core::types::{
     ClusterInput, LokiConfig, PromScheme, PrometheusConfig, PrometheusKind, PrometheusMetric,
@@ -748,4 +748,110 @@ async fn every_preset_query_carries_the_cluster_label_and_mismatches_fail() {
         .find(|n| n.kind == RightsizingNoteKind::PrometheusFailed)
         .expect("Prometheus refused");
     assert_eq!(note.detail.as_deref(), Some("cluster-label-mismatch"));
+}
+
+/// A Prometheus that needs a bearer token: the Secret, the service and its
+/// ready pod exist, but the fake server serves no port-forward upgrade.
+fn secured_router() -> Router {
+    Arc::new(|req: &Request, _log: &Log| match req.path_only() {
+        "/version" => version(),
+        "/api/v1/namespaces/monitoring/secrets/prom-auth" => Reply::Json(
+            200,
+            json!({"apiVersion": "v1", "kind": "Secret",
+                   "metadata": {"name": "prom-auth", "namespace": "monitoring"},
+                   // base64("s3cret")
+                   "data": {"token": "czNjcmV0"}}),
+        ),
+        "/api/v1/namespaces/monitoring/services/prometheus-operated" => Reply::Json(
+            200,
+            json!({"apiVersion": "v1", "kind": "Service",
+                   "metadata": {"name": "prometheus-operated", "namespace": "monitoring"},
+                   "spec": {"selector": {"app": "prometheus"},
+                            "ports": [{"name": "web", "port": 9090, "targetPort": 9090}]}}),
+        ),
+        "/api/v1/namespaces/monitoring/pods" => list_of(
+            "PodList",
+            vec![
+                json!({"metadata": {"name": "prometheus-0", "namespace": "monitoring"},
+                        "status": {"phase": "Running",
+                                   "conditions": [{"type": "Ready", "status": "True"}]}}),
+            ],
+        ),
+        _ => Reply::Json(404, status(404, "NotFound", "not found")),
+    })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn secret_values_stay_out_of_errors() {
+    let server = start(secured_router()).await;
+    let (_dir, app, _recorder, id) = setup(&server.url, true);
+    let mut def = app.cluster_def(&id).unwrap();
+    def.prometheus = PrometheusConfig::Service {
+        namespace: "monitoring".into(),
+        service: "prometheus-operated".into(),
+        port: 9090,
+        scheme: PromScheme::Http,
+        path_prefix: String::new(),
+    };
+    def.prometheus_access = PrometheusAccess {
+        tenant: "team-a".into(),
+        auth: Some(PrometheusAuth::Bearer {
+            namespace: "monitoring".into(),
+            secret: "prom-auth".into(),
+            token_key: "token".into(),
+        }),
+        ..Default::default()
+    };
+    app.cluster_update(def.clone()).unwrap();
+
+    let st = app.prometheus_status(&id, false).await.unwrap();
+    assert_eq!(st.state, PrometheusState::Unreachable, "{st:?}");
+    let err = st.error.unwrap();
+    assert!(
+        !err.contains("s3cret") && err.contains("port-forward"),
+        "{err}"
+    );
+    let err = app
+        .prometheus_query_range(&id, "up", &last_hour())
+        .await
+        .unwrap_err();
+    let err = format!("{err:#}");
+    assert!(
+        !err.contains("s3cret") && err.contains("port-forward"),
+        "{err}"
+    );
+
+    // The tunnel went to the ready pod behind the service; nothing went
+    // through the service proxy, and the token never reached the API server.
+    app.prometheus_status(&id, true).await.unwrap();
+    let log = server.log.lock().clone();
+    assert!(log
+        .iter()
+        .any(|r| r.path_only() == "/api/v1/namespaces/monitoring/pods/prometheus-0/portforward"));
+    assert!(log.iter().all(|r| !r.path.contains("/proxy")));
+    assert!(log
+        .iter()
+        .all(|r| r.headers.iter().all(|(_, v)| !v.contains("s3cret"))));
+    // Credentials are read once per connection (cached for five minutes).
+    let secret_reads = |log: &Log| count(log, "/api/v1/namespaces/monitoring/secrets/prom-auth");
+    assert_eq!(secret_reads(&server.log), 1);
+
+    // A missing key names the Secret and the key, never a value.
+    def.prometheus_access.auth = Some(PrometheusAuth::Bearer {
+        namespace: "monitoring".into(),
+        secret: "prom-auth".into(),
+        token_key: "nope".into(),
+    });
+    app.cluster_update(def).unwrap();
+    let err = app
+        .prometheus_status(&id, false)
+        .await
+        .unwrap()
+        .error
+        .unwrap();
+    assert!(
+        err.contains("monitoring/prom-auth") && err.contains("\"nope\"") && !err.contains("s3cret"),
+        "{err}"
+    );
+    assert_eq!(secret_reads(&server.log), 2, "new settings, new read");
 }
