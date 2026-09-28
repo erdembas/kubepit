@@ -959,8 +959,9 @@ feed are described in `docs/RELEASING.md`.
   the cluster has not turned on. Opt-in findings are still computed, so
   turning a rule on is instant and the engine stays pure.
 - `components/workbench/health/useHealthScan.ts` feeds the engine from the
-  shared watch cache (the tables' keys, so watches are shared) with 15
-  built-in lists plus cert-manager `Certificate`s when served. A scan runs
+  shared watch cache (the tables' keys, so watches are shared) with 20
+  built-in lists plus cert-manager `Certificate`s and 11 controller
+  reference lists when served (see `secret-unused` below). A scan runs
   once every list synced or failed (10 s timeout), at most every 3 s, and is
   never cancelled by newer data; rules whose lists could not be read (RBAC)
   are skipped instead of guessing. The last scan per cluster is published
@@ -980,6 +981,24 @@ feed are described in `docs/RELEASING.md`.
   `container-privilege-escalation-unset` (info: `allowPrivilegeEscalation`
   not set, the Kubernetes default); an explicit `true` stays the warning
   `container-privilege-escalation`, so its existing ignores keep working.
+- `secret-unused` (`config.ts#unusedSecretFindings`) runs only when all
+  its lists loaded. Besides pod specs, service accounts, Ingress TLS and
+  `Certificate.spec.secretName`, it counts the Secrets that controllers
+  read through the API (`secretRefs.ts#controllerSecretRefs`): cert-manager
+  `Issuer`/`ClusterIssuer`, Gateway API `Gateway`, Validating/Mutating
+  webhook configurations (`cert-manager.io/inject-ca-from-secret`) and Flux
+  `GitRepository`, `HelmRepository`, `OCIRepository`, `Kustomization`,
+  `HelmRelease` and notification `Provider`. A generic walker reads
+  `secretRef`, `certSecretRef`, `privateKeySecretRef`, `secretName`,
+  `certificateRefs[]` (kind Secret or unset) and `kind: Secret` entries of
+  `valuesFrom[]`/`substituteFrom[]`; a cluster-scoped referrer without a
+  namespace matches the name in any namespace. Each list is watched only
+  when its kind is served; an unserved kind counts as loaded and empty.
+  cert-manager output (`cert-manager.io/certificate-name`,
+  `cert-manager.io/allow-direct-injection`) and Argo CD's own secrets
+  (`app.kubernetes.io/part-of=argocd`, `argocd-secret`,
+  `argocd-initial-admin-secret`, `argocd-redis`,
+  `argocd-notifications-secret`) are skipped outright.
 - Tests: Vitest in the node environment
   (`pnpm --filter @kubepit/desktop test`, `src/**/*.test.ts(x)`;
   benchmarks `src/**/*.bench.ts` with `bench`). `health/testing.ts`

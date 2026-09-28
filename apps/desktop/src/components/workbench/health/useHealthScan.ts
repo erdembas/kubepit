@@ -49,6 +49,31 @@ const KINDS: ReadonlyArray<[HealthKind, KindDef]> = [
   ['clusterRoleBindings', BUILTIN.ClusterRoleBinding],
 ];
 
+/**
+ * Optional lists of controllers that read Secrets through the API
+ * (`secret-unused`). Resolved from the served API resources like
+ * `certificates`: an unserved kind watches nothing and counts as loaded.
+ */
+const REFERENCE_KINDS: ReadonlyArray<[HealthKind, { group: string; kind: string }]> = [
+  ['issuers', { group: 'cert-manager.io', kind: 'Issuer' }],
+  ['clusterIssuers', { group: 'cert-manager.io', kind: 'ClusterIssuer' }],
+  ['gateways', { group: 'gateway.networking.k8s.io', kind: 'Gateway' }],
+  [
+    'validatingWebhooks',
+    { group: 'admissionregistration.k8s.io', kind: 'ValidatingWebhookConfiguration' },
+  ],
+  [
+    'mutatingWebhooks',
+    { group: 'admissionregistration.k8s.io', kind: 'MutatingWebhookConfiguration' },
+  ],
+  ['gitRepositories', { group: 'source.toolkit.fluxcd.io', kind: 'GitRepository' }],
+  ['helmRepositories', { group: 'source.toolkit.fluxcd.io', kind: 'HelmRepository' }],
+  ['ociRepositories', { group: 'source.toolkit.fluxcd.io', kind: 'OCIRepository' }],
+  ['kustomizations', { group: 'kustomize.toolkit.fluxcd.io', kind: 'Kustomization' }],
+  ['helmReleases', { group: 'helm.toolkit.fluxcd.io', kind: 'HelmRelease' }],
+  ['fluxProviders', { group: 'notification.toolkit.fluxcd.io', kind: 'Provider' }],
+];
+
 const THROTTLE_MS = 3_000;
 /** Scan with whatever loaded when a list never syncs (slow or huge cluster). */
 const SYNC_TIMEOUT_MS = 10_000;
@@ -110,6 +135,10 @@ export function useHealthScan(
       (r) => r.group === 'cert-manager.io' && r.kind === 'Certificate',
     );
     out.certificates = cert ? gvkFromApiResource(cert) : null;
+    for (const [kind, ref] of REFERENCE_KINDS) {
+      const r = apiResources?.find((a) => a.group === ref.group && a.kind === ref.kind);
+      out[kind] = r ? gvkFromApiResource(r) : null;
+    }
     return out;
   }, [apiResources]);
 
@@ -136,6 +165,17 @@ export function useHealthScan(
     clusterRoles: useWatch(clusterId, gvks.clusterRoles, namespaces, enabled),
     roleBindings: useWatch(clusterId, gvks.roleBindings, namespaces, enabled),
     clusterRoleBindings: useWatch(clusterId, gvks.clusterRoleBindings, namespaces, enabled),
+    issuers: useWatch(clusterId, gvks.issuers, namespaces, enabled),
+    clusterIssuers: useWatch(clusterId, gvks.clusterIssuers, namespaces, enabled),
+    gateways: useWatch(clusterId, gvks.gateways, namespaces, enabled),
+    validatingWebhooks: useWatch(clusterId, gvks.validatingWebhooks, namespaces, enabled),
+    mutatingWebhooks: useWatch(clusterId, gvks.mutatingWebhooks, namespaces, enabled),
+    gitRepositories: useWatch(clusterId, gvks.gitRepositories, namespaces, enabled),
+    helmRepositories: useWatch(clusterId, gvks.helmRepositories, namespaces, enabled),
+    ociRepositories: useWatch(clusterId, gvks.ociRepositories, namespaces, enabled),
+    kustomizations: useWatch(clusterId, gvks.kustomizations, namespaces, enabled),
+    helmReleases: useWatch(clusterId, gvks.helmReleases, namespaces, enabled),
+    fluxProviders: useWatch(clusterId, gvks.fluxProviders, namespaces, enabled),
   };
   // Cost insight: right-sizing findings (efficiency) when a report is available.
   const rightsizing = useRightsizing(

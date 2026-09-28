@@ -1601,7 +1601,7 @@
   "Not recorded: {kinds}": "Kaydedilmiyor: {kinds}",
   "Not recording": "Kayıt yapılmıyor",
   "Not referenced by any pod or workload": "Hiçbir pod veya iş yükü tarafından başvurulmuyor",
-  "Not referenced by any pod, workload, service account or ingress": "Hiçbir pod, iş yükü, service account veya ingress tarafından başvurulmuyor",
+  "Not referenced by any workload, service account, ingress or controller": "Hiçbir iş yükü, service account, ingress veya controller tarafından başvurulmuyor",
   "Not scanned yet": "Henüz taranmadı",
   "Not scheduled": "Zamanlanmadı",
   "Not served": "Sunulmuyor",

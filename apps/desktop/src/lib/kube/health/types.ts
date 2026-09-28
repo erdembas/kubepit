@@ -37,7 +37,19 @@ export type HealthKind =
   | 'roles'
   | 'clusterRoles'
   | 'roleBindings'
-  | 'clusterRoleBindings';
+  | 'clusterRoleBindings'
+  // Controllers that read Secrets through the API (secret-unused references).
+  | 'issuers'
+  | 'clusterIssuers'
+  | 'gateways'
+  | 'validatingWebhooks'
+  | 'mutatingWebhooks'
+  | 'gitRepositories'
+  | 'helmRepositories'
+  | 'ociRepositories'
+  | 'kustomizations'
+  | 'helmReleases'
+  | 'fluxProviders';
 
 export type HealthLists = Record<HealthKind, readonly KubeObject[]>;
 

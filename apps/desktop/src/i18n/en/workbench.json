@@ -1601,7 +1601,7 @@
   "Not recorded: {kinds}": "Not recorded: {kinds}",
   "Not recording": "Not recording",
   "Not referenced by any pod or workload": "Not referenced by any pod or workload",
-  "Not referenced by any pod, workload, service account or ingress": "Not referenced by any pod, workload, service account or ingress",
+  "Not referenced by any workload, service account, ingress or controller": "Not referenced by any workload, service account, ingress or controller",
   "Not scanned yet": "Not scanned yet",
   "Not scheduled": "Not scheduled",
   "Not served": "Not served",

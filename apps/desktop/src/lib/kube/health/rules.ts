@@ -1,4 +1,5 @@
 import * as i18n from '@/i18n/core';
+import { SECRET_REFERRERS } from './secretRefs';
 import { SECURITY_RULES } from './securityRules';
 import type { Category, HealthKind, Severity } from './types';
 
@@ -339,7 +340,7 @@ export const RULES: readonly RuleDef[] = [
     'secret-unused',
     'hygiene',
     'info',
-    ['pods', 'serviceAccounts', 'ingresses', ...WORKLOADS],
+    ['pods', 'serviceAccounts', 'ingresses', ...WORKLOADS, ...SECRET_REFERRERS],
     false,
     () => i18n.t('Secrets not referenced by any workload'),
     () =>
