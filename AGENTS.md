@@ -41,6 +41,7 @@ Mutating backend commands must honour `ClusterDef.read_only`.
 ```bash
 pnpm typecheck
 pnpm i18n:check
+pnpm test:ui        # Vitest: pure TS modules and stores (`*.test.ts` next to the code)
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
