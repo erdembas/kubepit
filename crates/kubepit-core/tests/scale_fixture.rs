@@ -110,6 +110,44 @@ async fn metadata_only_lists_and_selectors() {
     assert!(!one["items"].as_array().unwrap().is_empty());
 }
 
+/// Field selectors match on any field path (events by `involvedObject.uid`,
+/// Helm's Secrets by `type`), like the API server's field labels.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn field_selectors_match_any_path() {
+    let cluster = Arc::new(ScaleCluster::generate(&preset("s")));
+    let pod_uid = cluster.objects("/api/v1/pods")[0]["metadata"]["uid"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let server = start(cluster.router(ScaleServe::default())).await;
+    let path = format!("/api/v1/events?fieldSelector=involvedObject.uid%3D{pod_uid}");
+    let (code, events) = get_json(&server.url, &path, &[]).await;
+    assert_eq!(code, 200);
+    let events = events["items"].as_array().unwrap();
+    assert_eq!(events.len(), 2, "s has two events per pod");
+    assert!(events
+        .iter()
+        .all(|e| e["involvedObject"]["uid"] == pod_uid.as_str()));
+    let helm = "/api/v1/secrets?fieldSelector=type%3Dhelm.sh%2Frelease.v1";
+    let (code, none) = get_json(&server.url, helm, &[]).await;
+    assert_eq!(code, 200);
+    assert!(none["items"].as_array().unwrap().is_empty());
+    let (_, opaque) = get_json(
+        &server.url,
+        "/api/v1/secrets?fieldSelector=type%3DOpaque",
+        &[],
+    )
+    .await;
+    assert_eq!(opaque["items"].as_array().unwrap().len(), 250);
+    let (_, running) = get_json(
+        &server.url,
+        "/api/v1/pods?fieldSelector=status.phase%21%3DRunning",
+        &[],
+    )
+    .await;
+    assert!(running["items"].as_array().unwrap().is_empty());
+}
+
 /// `scale.test.ts` pins the same names: the demo backend's generator mirrors
 /// this one, so backend and UI numbers stay comparable.
 #[test]

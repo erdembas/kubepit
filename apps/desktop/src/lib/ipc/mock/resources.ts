@@ -13,19 +13,17 @@ import { sleep } from './bus';
 import './fixtures/build';
 import {
   addWatcher,
+  deliverList,
   getDb,
   helmDetail,
   helmKey,
   inScope,
-  isWatching,
   list,
-  releaseWatcher,
   removeWatcher,
 } from './fixtures/db';
 import { apiResources, nodeMetrics, podMetrics } from './fixtures/discovery';
 import { warningEvents } from './fixtures/events';
 import { ensureLiveness } from './fixtures/live';
-import { chunkBatches, WATCH_BATCH_INTERVAL_MS } from './fixtures/scale';
 import {
   applyYaml,
   cordonNode,
@@ -142,18 +140,9 @@ register({
           removeWatcher(id);
           return;
         }
-        // The backend's batch contract: at most 500 objects per batch, one
-        // batch per flush interval, `synced` on the last. Changes made
-        // meanwhile follow once the list is delivered.
-        const batches = chunkBatches(id, listFor(clusterId, gvk, nss));
-        const send = (i: number) => {
-          if (!isWatching(id)) return;
-          const batch = batches[i]!;
-          emit({ ...batch, upserts: structuredClone(batch.upserts) });
-          if (i + 1 < batches.length) window.setTimeout(() => send(i + 1), WATCH_BATCH_INTERVAL_MS);
-          else releaseWatcher(id);
-        };
-        send(0);
+        // The list arrived: full chunks of 500 at once, the rest with
+        // `synced` at the next tick, then the changes made meanwhile.
+        deliverList(id, listFor(clusterId, gvk, nss));
       },
       150 + Math.random() * 200,
     );

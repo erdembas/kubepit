@@ -58,9 +58,10 @@ export function scalePreset(preset: ScalePresetName): ScalePreset {
 }
 
 /**
- * The initial list of a watch as the backend delivers it: batches of at most
- * `max` objects, `reset` only on the first and `synced` only on the last. An
- * empty list is one reset + synced batch.
+ * An initial list cut into backend-sized batches: at most `max` objects,
+ * `reset` only on the first and `synced` only on the last. An empty list is
+ * one reset + synced batch. `deliverList` (`./db.ts`) paces them like the
+ * backend: full batches at once, the rest with `synced` at the next flush tick.
  */
 export function chunkBatches(
   watchId: string,

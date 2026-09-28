@@ -411,7 +411,7 @@ git commit -m "perf(bench): fleet search, proxy parsing and end-to-end benches w
 - Modify: `apps/desktop/src/lib/ipc/mock/app.ts:44-103,298-301` (cluster definition when `scaleParams().scale`; `window_open` keeps the params)
 - Modify: `apps/desktop/src/lib/ipc/mock/fixtures/db.ts:92-160` (name and owner indexes for `find` / `ownedBy`)
 - Modify: `apps/desktop/src/lib/ipc/mock/fixtures/build.ts:29` (scale clusters use `generateScaleObjects` instead of `buildCluster`)
-- Modify: `apps/desktop/src/lib/ipc/mock/resources.ts:121-146` (emit `chunkBatches`, one batch per 150 ms)
+- Modify: `apps/desktop/src/lib/ipc/mock/resources.ts:121-146` (emit `chunkBatches` with the backend's flush rule: full chunks of 500 at once, the remainder with `synced` at the next 150 ms tick)
 - Modify: `apps/desktop/src/lib/ipc/mock/fixtures/live.ts:64-76` (churn)
 - Test: `apps/desktop/src/lib/ipc/mock/fixtures/scale.test.ts`
 
@@ -473,7 +473,7 @@ Expected: FAIL (module missing).
   - With `churn > 0`, the liveness timer ticks every 100 ms and applies `churn / 10` pod changes per tick round-robin: 90% status/label updates, 10% delete + recreate.
   - `db.ts` keeps `byName: Map<kindKey, Map<"ns/name", uid>>` and `byOwner: Map<ownerUid, Set<uid>>` in sync in `put`/`drop`.
 
-- [ ] **Step 4: Run the tests and check the build time** _(Partly verified on 2026-09-28: the tests and typecheck pass; the browser check below was not run, no browser was available. Headless (Vitest, fake timers): `c-scale-l` builds in ~0.25 s, the first pods batch arrives 150–350 ms after the watch, and the list is synced after 40 batches × 150 ms ≈ 6 s.)_
+- [ ] **Step 4: Run the tests and check the build time** _(Partly verified on 2026-09-28: the tests and typecheck pass; the browser check below was not run, no browser was available. Headless (Vitest, fake timers): `c-scale-l` builds in ~0.25 s; the list arrives 150–350 ms after the watch, its 40 full batches go out at once (one macrotask each), and `synced` follows at the first 150 ms tick after them: at 450 ms under fake timers.)_
 
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck`
 Expected: PASS. Then open `pnpm dev:ui` at `http://localhost:1430/?scale=l`: the `c-scale-l` cluster connects and the pods table fills within 3 s.

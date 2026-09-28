@@ -5,8 +5,9 @@
 //!
 //! The router answers discovery, paged lists (`limit` / `continue`, `410
 //! Expired` for an unknown token), namespaced list variants, metadata-only
-//! lists (`Accept: …;as=PartialObjectMetadataList`), `fieldSelector` and
-//! equality `labelSelector`, and quiet watches or a burst of MODIFIED pod
+//! lists (`Accept: …;as=PartialObjectMetadataList`), `fieldSelector` on any
+//! field path and `labelSelector` (`=`, `==` and `!=` terms; other
+//! expressions answer 400), and quiet watches or a burst of MODIFIED pod
 //! events. Kinds nothing generates (StatefulSets, Jobs, RBAC, networking…)
 //! answer empty lists, so the alert and change-journal watchers sync.
 //!
@@ -747,25 +748,25 @@ struct Filter {
 }
 
 impl Filter {
+    /// Any field path matches by equality on the object's value there
+    /// (`spec.nodeName`, `metadata.namespace`, `involvedObject.uid`, `type`,
+    /// `status.phase`…); a missing field is the empty string.
     fn parse(query: &Query) -> Result<Self, String> {
         let fields = parse_terms(query.get("fieldSelector").unwrap_or(""))?
             .into_iter()
-            .map(|term| match term.key.as_str() {
-                "spec.nodeName" | "metadata.namespace" | "metadata.name" => {
-                    Ok((format!("/{}", term.key.replace('.', "/")), term))
-                }
-                other => Err(format!(
-                    "field label not supported by the scale fixture: {other}"
-                )),
-            })
-            .collect::<Result<_, _>>()?;
+            .map(|term| (format!("/{}", term.key.replace('.', "/")), term))
+            .collect();
         let labels = parse_terms(query.get("labelSelector").unwrap_or(""))?;
         Ok(Filter { fields, labels })
     }
 
     fn matches(&self, obj: &Value) -> bool {
         self.fields.iter().all(|(pointer, term)| {
-            let value = obj.pointer(pointer).and_then(Value::as_str).unwrap_or("");
+            let value = match obj.pointer(pointer) {
+                Some(Value::String(s)) => s.clone(),
+                Some(Value::Null) | None => String::new(),
+                Some(other) => other.to_string(),
+            };
             (value == term.value) == term.equal
         }) && self.labels.iter().all(|term| {
             let value = obj["metadata"]["labels"][&term.key].as_str();
