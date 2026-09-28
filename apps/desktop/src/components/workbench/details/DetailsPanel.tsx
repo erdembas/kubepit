@@ -161,6 +161,14 @@ export function DetailsPanel({
     [obj, clusterId, cluster, gvk],
   ); // eslint-disable-line react-hooks/exhaustive-deps
   const Icon = kindIcon(kindKey);
+  // Kind · namespace · age; also the tooltip when a narrow header truncates it.
+  const subtitle = [
+    gvk.kind,
+    selection.namespace,
+    obj?.metadata.creationTimestamp ? formatAge(obj.metadata.creationTimestamp, now) : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
   const tabs: Array<{ id: Tab; label: string; icon: typeof Info }> = [
     { id: 'details', label: i18n.t('Details'), icon: Info },
     { id: 'yaml', label: 'YAML', icon: FileCode2 },
@@ -213,37 +221,40 @@ export function DetailsPanel({
         className="focus-visible:bg-accent/15 absolute inset-y-0 -left-1 w-2 touch-none focus-visible:outline-none"
         title={i18n.t('Resize details · drag or use ←/→ · double-click to reset')}
       />
-      <header className="border-border/60 flex min-h-12 shrink-0 items-center gap-2.5 border-b px-3 py-2">
+      {/*
+       * The header is a size container: below 32rem the actions move to their
+       * own row under the name (`order-last basis-full`), so the name keeps the
+       * whole first row beside the icon and the close button.
+       */}
+      <header className="border-border/60 @container flex min-h-12 shrink-0 flex-wrap items-center gap-x-2.5 gap-y-1 border-b px-3 py-2">
         <span className="bg-accent/10 text-accent flex h-7 w-7 shrink-0 items-center justify-center rounded-lg">
           <Icon className="h-3.5 w-3.5" />
         </span>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 basis-32">
           <h2 className="text-fg truncate text-[13px] font-semibold" title={selection.name}>
             {selection.name}
           </h2>
-          <p className="text-fg-dim truncate text-[11px]">
-            {gvk.kind}
-            {selection.namespace && <> · {selection.namespace}</>}
-            {obj?.metadata.creationTimestamp && (
-              <> · {formatAge(obj.metadata.creationTimestamp, now)}</>
-            )}
+          <p className="text-fg-dim truncate text-[11px]" title={subtitle}>
+            {subtitle}
           </p>
           {obj && <GitOpsBadge clusterId={clusterId} obj={obj} isActive={isActive} />}
         </div>
-        <BookmarkButton
-          clusterId={clusterId}
-          gvk={gvk}
-          namespace={selection.namespace}
-          name={selection.name}
-        />
-        {obj && <DetailsToolbar clusterId={clusterId} actions={actions} readOnly={readOnly} />}
-        <span className="bg-border/80 mx-0.5 h-5 w-px shrink-0" aria-hidden />
+        <div className="order-last flex basis-full flex-wrap items-center gap-0.5 pl-8 @lg:order-none @lg:basis-auto @lg:pl-0">
+          <BookmarkButton
+            clusterId={clusterId}
+            gvk={gvk}
+            namespace={selection.namespace}
+            name={selection.name}
+          />
+          {obj && <DetailsToolbar clusterId={clusterId} actions={actions} readOnly={readOnly} />}
+        </div>
+        <span className="bg-border/80 mx-0.5 hidden h-5 w-px shrink-0 @lg:block" aria-hidden />
         <button
           type="button"
           onClick={close}
           aria-label={i18n.t('Close details')}
           title={i18n.t('Close (Esc)')}
-          className="text-fg-dim hover:bg-fg/5 hover:text-fg rounded-md p-1.5"
+          className="text-fg-dim hover:bg-fg/5 hover:text-fg shrink-0 rounded-md p-1.5"
         >
           <X className="h-3.5 w-3.5" />
         </button>
