@@ -1420,7 +1420,7 @@ git commit -m "feat(helm): show fields the new chart drops from live objects in 
   - `Request::header(&self, name: &str) -> Option<&str>` (case-insensitive).
   - `Request::path_only(&self) -> &str` (the path without the query).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 // tests/fake_apiserver.rs
@@ -1462,19 +1462,19 @@ async fn detected_loki_sends_no_tenant() {
 
 `configure_gateway`, `labels_query` and `query` reuse the builders already in `tests/loki.rs` (see `configured_service_off_and_not_found`); take the call signatures from that file.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core --test fake_apiserver request_headers && cargo test -p kubepit-core --test loki tenant`
 Expected: FAIL (`header` not found).
 
-- [ ] **Step 3: Implement.** In `handle`, parse every `name: value` line of the request head into `headers`, with trimmed values and lowercase names.
+- [x] **Step 3: Implement.** In `handle`, parse every `name: value` line of the request head into `headers`, with trimmed values and lowercase names.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/tests

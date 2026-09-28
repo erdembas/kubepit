@@ -485,7 +485,9 @@ read-only, over the same transport as Prometheus.
   and `loki_label_values` (optionally narrowed by a selector) for the
   query builder. A vanished service (proxy 404/502/503) marks the
   detection stale. Loki's own errors (bad LogQL, missing tenant, limits)
-  come back verbatim.
+  come back verbatim. A configured tenant rides on every proxied Loki
+  request and on nothing else; `tests/loki.rs` checks the header end to end
+  (the fake API server in `tests/support` records request headers).
 - **UI** (`dock/loki/`, dock tab kind `loki`): a query builder
   (namespace, workload, pod and container pickers fed by Loki's label
   values — label names follow what the Loki uses, e.g.
