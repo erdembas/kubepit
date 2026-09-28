@@ -633,6 +633,7 @@ git commit -m "perf(ui): dev-only in-app probe (?perf=1) for rows, scrolling, ma
 **Files:**
 - Modify: `package.json` (root devDependency `playwright` `^1.55.0`; script `"perf:ui": "node scripts/perf/ui-perf.mjs"`)
 - Create: `scripts/perf/lib.mjs`, `scripts/perf/ui-perf.mjs`
+- Create: `scripts/perf/index.js` (as built: Node 22 runs a directory argument of `node --test` as a module instead of searching it; this index loads every `*.test.mjs` beside it, so `node --test scripts/perf/` keeps working)
 - Test: `scripts/perf/lib.test.mjs`
 
 **Interfaces:**
@@ -645,8 +646,15 @@ git commit -m "perf(ui): dev-only in-app probe (?perf=1) for rows, scrolling, ma
     - `soakSummary(samples: Array<{ minute: number; heap: number; dom: number }>): { heapRatio: number; domDrift: number }`. The ratio is the last sample's heap ÷ the first sample at or after minute 5; drift is `(lastDom − firstDom) / firstDom`.
     - `resultIds(preset, measurements): Record<string, number>`. It maps to the `ui/*` ids in the spec budgets table (`ui/ttfr_pods_<preset>` and so on).
   - Safety: the driver aborts if `page.evaluate(() => '__TAURI_INTERNALS__' in window)` is true, and only navigates to `http://localhost:<port>`.
+  - As built:
+    - Every request outside the preview server is aborted (`isAllowedUrl`).
+    - The result file is `{ meta, results: { "<id>": { value, unit } }, raw }`.
+    - Besides the budget ids, it writes `ui/scroll_p95_frame_<p>`, `ui/scroll_long_task_max_<p>` and `ui/health_long_task_max_<p>`, the other parts of those budgets.
+    - Each scenario runs in a fresh page, so no scenario reuses another's cached watches.
+    - `connect` lands on a view without watches. The overview's health card would otherwise warm the pods cache.
+    - `ui/map_*` runs from opening the map to two frames after its synced view. `ui/map_leave` switches from the synced all-namespaces map to the overview.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```js
 // scripts/perf/lib.test.mjs
@@ -669,12 +677,12 @@ test('resultIds names results like the budgets', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `node --test scripts/perf/`
 Expected: FAIL (module missing).
 
-- [ ] **Step 3: Implement.** Each scenario calls the probe driver:
+- [x] **Step 3: Implement.** Each scenario calls the probe driver:
   - `ttfr`: `connect('c-scale-<p>')`, `openKind(…, 'pods')`, then poll `report()` for `table:ttfr` and `table:synced`.
   - `scroll`: `scrollTable(5000)`.
   - `apply`: needs churn; run for 20 s and take the p95 of `watch:apply`.
@@ -685,12 +693,12 @@ Expected: FAIL (module missing).
 
   Write the JSON result file.
 
-- [ ] **Step 4: Run the tests and one real pass**
+- [x] **Step 4: Run the tests and one real pass**
 
 Run: `node --test scripts/perf/ && pnpm --filter @kubepit/desktop build && pnpm exec playwright install chromium && pnpm perf:ui -- --preset s --scenarios ttfr,scroll`
 Expected: the tests pass, and `perf-results/ui.json` holds `ui/ttfr_pods_s` and `ui/scroll_fps_s`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add package.json pnpm-lock.yaml scripts/perf
