@@ -797,6 +797,20 @@ deterministic:
 
 - `sources.ts` — the kinds read (a fixed list of built-ins plus Gateway API
   `Gateway`/`HTTPRoute`/`GRPCRoute` when served), one watch slot each.
+- `scope.ts` — one watch scope per slot (`SlotScope`: a namespace list, `[]`
+  for cluster-wide, `null` for not watched). The Resource Map and the Map tab
+  of namespaced objects, Namespaces and bound PersistentVolumes use one list
+  for every slot. Other cluster-scoped roots never watch namespaced kinds
+  cluster-wide: `mapSeed` names the one kind that ties the root to
+  namespaces (Node → pods by `spec.nodeName`, StorageClass → PVCs,
+  ClusterRole → RoleBindings whose `roleRef` names it, IngressClass →
+  Ingresses), which is watched cluster-wide, and `planMapScope` scopes every
+  other namespaced slot to the namespaces of the matching seed objects.
+  Until the seed syncs, when nothing matches, and for roots without a seed
+  (PriorityClass, ClusterRoleBinding, …) namespaced slots stay unwatched.
+  The graph is scoped to the union of the explicit lists
+  (`scopeNamespaces`). Subjects of ClusterRoleBindings in other namespaces
+  therefore stay out of a ClusterRole's map.
 - `build.ts` + `refs.ts` — one node per object (id `kindKey|namespace|name`)
   and typed edges from referrer to referent: ownerReferences, Service /
   PodDisruptionBudget / NetworkPolicy selectors, Service → EndpointSlices,

@@ -5,15 +5,27 @@ import { IconButton } from '@/components/ui/IconButton';
 import { cn } from '@/lib/cn';
 import { asObject, asString } from '@/lib/kube/accessors';
 import { kindKey } from '@/lib/kube/catalog';
-import { nodeId, topologySources, type TopoNode } from '@/lib/kube/topology';
+import {
+  mapSeed,
+  nodeId,
+  planMapScope,
+  topologySources,
+  type SlotScope,
+  type TopoNode,
+} from '@/lib/kube/topology';
 import type { ApiResourceInfo, Gvk, KubeObject } from '@/types';
+import { useWatch } from '../data/watchCache';
 import { useDetailsTabRequest } from '../details/detailsTabs';
 import { openInResourceMap, openNodeDetails } from './mapNavigation';
 import { isHops, usePersistentJson } from './persist';
 import { TopologyMap } from './TopologyMap';
 import { useTopologyData } from './useTopologyData';
 
-/** Namespaces a neighbourhood needs: the object's own, all for cluster-scoped roots. */
+/**
+ * Namespaces a neighbourhood needs: the object's own, the whole namespace for
+ * a Namespace, the claim's for a bound PersistentVolume. `[]` for other
+ * cluster-scoped roots, whose slots `planMapScope` scopes instead.
+ */
 function scopeFor(gvk: Gvk, obj: KubeObject): string[] {
   if (obj.kind === 'Namespace') return [obj.metadata.name];
   if (gvk.namespaced) return obj.metadata.namespace ? [obj.metadata.namespace] : [];
@@ -48,14 +60,33 @@ export function MapTab({
   const [hops, setHops] = usePersistentJson<number>('kubepit.topology.hops', 2, isHops);
   const isNamespace = obj.kind === 'Namespace';
   const scopeKey = scopeFor(gvk, obj).join(',');
-  const scope = useMemo(() => (scopeKey ? scopeKey.split(',') : []), [scopeKey]);
   const key = kindKey(gvk);
-  const watched = useMemo(
-    () => topologySources(apiResources).some((g) => g && kindKey(g) === key),
-    [apiResources, key],
-  );
+  const sources = useMemo(() => topologySources(apiResources), [apiResources]);
+  const watched = sources.some((g) => g && kindKey(g) === key);
+  // A cluster-scoped root with no namespace of its own never watches
+  // namespaced kinds cluster-wide: its seed kind (pods of a Node, claims of
+  // a StorageClass, …) picks the namespaces the other slots watch.
+  const planned = !gvk.namespaced && !scopeKey;
+  const seed = planned ? mapSeed(obj.kind) : null;
+  const seedGvk = seed ? (sources.find((g) => g && kindKey(g) === seed.gvkKey) ?? null) : null;
+  const seedSnap = useWatch(clusterId, seedGvk, [], isActive);
+  const seedItems = seedGvk ? seedSnap.items : null;
+  const seedSynced = seedSnap.synced;
+  const rootName = obj.metadata.name;
+  const rootKind = obj.kind;
+  const slotScopes = useMemo<SlotScope[]>(() => {
+    if (!planned) {
+      const scope = scopeKey ? scopeKey.split(',') : [];
+      return sources.map(() => scope);
+    }
+    return planMapScope(
+      { kind: rootKind, name: rootName },
+      sources,
+      seedItems ? { items: seedItems, synced: seedSynced } : null,
+    );
+  }, [planned, scopeKey, sources, rootKind, rootName, seedItems, seedSynced]);
   const extra = watched || isNamespace ? null : { gvk, obj };
-  const data = useTopologyData(clusterId, scope, isActive, apiResources, extra);
+  const data = useTopologyData(clusterId, slotScopes, isActive, apiResources, extra);
   const rootId = isNamespace
     ? null
     : nodeId(key, gvk.namespaced ? obj.metadata.namespace : null, obj.metadata.name);

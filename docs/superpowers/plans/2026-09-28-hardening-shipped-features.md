@@ -420,7 +420,7 @@ git commit -m "fix(watch): keep the objects of a batch that also reports an erro
   - `planMapScope(root: { kind: string; name: string }, sources: ReadonlyArray<Gvk | null>, seed: { items: readonly KubeObject[]; synced: boolean } | null): SlotScope[]`.
   - `useTopologyData(clusterId, slotScopes: ReadonlyArray<SlotScope>, enabled, apiResources, extra)`. It replaces the single `namespaces` argument. `buildTopology` receives the union of the non-null namespace lists.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // apps/desktop/src/lib/kube/topology/scope.test.ts
@@ -471,12 +471,12 @@ describe('planMapScope', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `pnpm --filter @kubepit/desktop test -- src/lib/kube/topology/scope.test.ts`
 Expected: FAIL with "Cannot find module './scope'".
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
   - The seed slot gets `[]`.
   - Other namespaced slots get the sorted unique namespaces of the matching seed items, or `null` when there are none or the seed is not synced.
   - Cluster-scoped slots get `[]`.
@@ -484,14 +484,14 @@ Expected: FAIL with "Cannot find module './scope'".
   - `MapTab`, for a cluster-scoped root with a seed, watches the seed gvk cluster-wide and passes `planMapScope(...)`. Namespaced roots keep `scopeFor` for every slot.
   - `ResourceMapPage` passes `sources.map(() => namespaces)`.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck`
 Expected: PASS.
 
-- [ ] **Step 5: Verify in the demo.** In `pnpm dev:ui` on c-prod-us, open a Node's details and its Map tab. It shows the node, its pods and their owners exactly as before. Opening a Namespace's or Pod's Map tab is unchanged.
+- [x] **Step 5: Verify in the demo.** In `pnpm dev:ui` on c-prod-us, open a Node's details and its Map tab. It shows the node, its pods and their owners exactly as before. Opening a Namespace's or Pod's Map tab is unchanged.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/desktop/src docs/ARCHITECTURE.md

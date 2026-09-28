@@ -3,8 +3,10 @@ import { kindKey } from '@/lib/kube/catalog';
 import {
   buildTopology,
   nodeId,
+  scopeNamespaces,
   topologySources,
   TOPOLOGY_SOURCE_COUNT,
+  type SlotScope,
   type TopoGraph,
   type TopologyList,
 } from '@/lib/kube/topology';
@@ -31,39 +33,50 @@ export interface TopologyData {
 /**
  * Live data for the relationship map: one shared watch per kind (the same
  * ref-counted watches the tables use), rebuilt into a graph at most once per
- * delivered batch. `extra` adds objects whose kind is not watched (the
- * details panel's own object).
+ * delivered batch. `slotScopes` holds one watch scope per topology source
+ * (`[]` = cluster-wide, `null` = not watched); the graph is scoped to the
+ * union of their namespace lists. `extra` adds objects whose kind is not
+ * watched (the details panel's own object).
  */
 export function useTopologyData(
   clusterId: ClusterId,
-  namespaces: readonly string[],
+  slotScopes: ReadonlyArray<SlotScope>,
   enabled: boolean,
   apiResources: readonly ApiResourceInfo[] | null,
   extra?: { gvk: Gvk; obj: KubeObject } | null,
 ): TopologyData {
   const sources = useMemo(() => topologySources(apiResources), [apiResources]);
+  const watched = (i: number) => sources[i] != null && slotScopes[i] != null;
   const snaps: WatchSnapshot[] = [];
   // The source list has a fixed length, so the hook order never changes.
-  for (let i = 0; i < TOPOLOGY_SOURCE_COUNT; i++)
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    snaps.push(useWatch(clusterId, sources[i] ?? null, namespaces, enabled));
+  for (let i = 0; i < TOPOLOGY_SOURCE_COUNT; i++) {
+    const scope = slotScopes[i] ?? null;
+    snaps.push(
+      // eslint-disable-next-line react-hooks/rules-of-hooks
+      useWatch(clusterId, scope === null ? null : (sources[i] ?? null), scope ?? [], enabled),
+    );
+  }
 
   const snapsRef = useRef(snaps);
   snapsRef.current = snaps;
+  const scopeKey = slotScopes.map((s) => (s === null ? '-' : s.join(','))).join(';');
+  const scopeRef = useRef(slotScopes);
+  scopeRef.current = slotScopes;
   const extraKey = extra
     ? `${extra.obj.metadata.uid}@${extra.obj.metadata.resourceVersion ?? ''}`
     : '';
-  const key = `${namespaces.join(',')}#${extraKey}#${snaps
-    .map((s, i) => (sources[i] ? `${s.version}:${s.status}` : '-'))
+  const key = `${scopeKey}#${extraKey}#${snaps
+    .map((s, i) => (watched(i) ? `${s.version}:${s.status}` : '-'))
     .join(',')}`;
 
   const built = useMemo(() => {
     const lists: TopologyList[] = [];
     const errors: TopologyWatchError[] = [];
     const byId = new Map<string, KubeObject>();
+    const scopes = scopeRef.current;
     snapsRef.current.forEach((snap, i) => {
       const gvk = sources[i];
-      if (!gvk) return;
+      if (!gvk || scopes[i] == null) return;
       lists.push({
         gvk,
         items: snap.items,
@@ -89,7 +102,7 @@ export function useTopologyData(
       );
     const graph = buildTopology({
       lists,
-      namespaces,
+      namespaces: scopeNamespaces(scopes),
       apiResources,
       extra: extra ? [extra] : undefined,
     });
@@ -98,7 +111,7 @@ export function useTopologyData(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, sources, apiResources]);
 
-  const active = snaps.filter((_, i) => sources[i]);
+  const active = snaps.filter((_, i) => watched(i));
   const synced = active.every((s) => s.synced || s.status === 'error');
   const loading = active.some((s) => s.status === 'loading');
   const objectFor = useMemo(() => {
