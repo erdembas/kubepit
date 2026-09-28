@@ -930,6 +930,17 @@ applying a recommendation only reads, so read-only clusters get it all.
   monthly current / savings / increases, and `top` — at most five
   under-provisioned workloads (confidence ≥ medium) by risk, then at most
   five high-confidence savings, ties by namespace and name.
+- **Recommendation settings** live in the backend
+  (`Settings.recommendations`, `recommendations/types.rs`) so background
+  scans and the UI agree: `scan_clusters` (opt-in per cluster),
+  `interval_minutes` (60, 15–1440), `retention_days` (30, 1–90),
+  `strategy` (`None` = automatic), `overrides` per strategy id and
+  `alerts` (off). `settings_set` normalizes them (clamps, sorted and
+  deduplicated clusters without blanks, blank strategy = automatic, every
+  override normalized). `rightsizing_report` takes the request's strategy,
+  else the saved one, else resolves automatically, and the request's
+  settings, else `effective_settings` (the strategy's override, else its
+  `info().defaults`).
 - **Apply** (`rightsizing_apply`): a strategic merge patch of the named
   containers' resources at the pod template plus a
   `kubernetes.io/change-cause`; `dryRun: true` returns live vs. result like

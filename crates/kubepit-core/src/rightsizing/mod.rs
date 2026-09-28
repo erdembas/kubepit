@@ -345,12 +345,22 @@ impl Kubepit {
     ) -> Result<RightsizingReport> {
         let cluster = self.cluster_def(cluster_id)?;
         let client = self.client(cluster_id).await?;
-        let strategy = strategy::strategy(request.strategy.as_deref())?;
-        let settings = request
-            .settings
-            .clone()
-            .unwrap_or_else(|| strategy.info().defaults)
-            .normalized();
+        // The request's strategy, else the saved one, else automatic. Owner
+        // metrics come with the collection pipeline; name-matched presets
+        // never resolve pods through them.
+        let recommendations = self.settings().recommendations;
+        let requested = request
+            .strategy
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .or(recommendations.strategy.as_deref());
+        let (strategy, strategy_auto) = strategy::resolve(requested, false)?;
+        // The request's own settings, else the strategy's effective ones.
+        let settings = match &request.settings {
+            Some(s) => s.clone().normalized(),
+            None => crate::recommendations::effective_settings(&recommendations, strategy),
+        };
         let workloads = match &request.workload {
             Some(target) => {
                 if patch::template_path(&target.kind).is_none() {
@@ -456,7 +466,7 @@ impl Kubepit {
             workloads: list,
             notes,
             computed_at: now,
-            strategy_auto: false,
+            strategy_auto,
             window_end: now,
         })
     }

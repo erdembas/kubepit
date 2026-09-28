@@ -55,6 +55,7 @@
 //! | [`pod_security`] | Pod Security enforce dry run ("what would break")     |
 //! | [`cost`]        | cost insight: OpenCost / Kubecost / estimates           |
 //! | [`rightsizing`] | request recommendations and their patches              |
+//! | [`recommendations`] | recommendation settings, stored and scheduled scans |
 //!
 //! Push notifications to the UI go through [`EventSink`]; streams take plain
 //! `Fn(T) -> bool` callbacks (return `false` to stop) that the desktop shell
@@ -136,6 +137,8 @@ pub mod pod_security;
 // Cost insight and right-sizing recommendations.
 pub mod cost;
 pub mod rightsizing;
+// Stored, scheduled right-sizing scans (recommendations).
+pub mod recommendations;
 
 pub use app::Kubepit;
 pub use events::{EventSink, NullSink};

@@ -176,6 +176,14 @@ const defaultSettings: Settings = {
   // staging-gke keeps its events and changes on disk (demo persisted history).
   history: { ...DEFAULT_HISTORY_SETTINGS, persist_clusters: ['c-staging'] },
   keyboard_mode: false,
+  recommendations: {
+    scan_clusters: [],
+    interval_minutes: 60,
+    retention_days: 30,
+    strategy: null,
+    overrides: {},
+    alerts: false,
+  },
 };
 
 // Saved like the demo workspace, so a demo window opened later starts from

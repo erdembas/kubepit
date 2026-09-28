@@ -1286,6 +1286,24 @@ export interface Settings {
   history: HistorySettings;
   /** Power user: vim / k9s-style keys in the workbench. */
   keyboard_mode: boolean;
+  /** Recommendations: background scans, strategy and per-strategy settings. */
+  recommendations: RecommendationSettings;
+}
+
+/** `Settings.recommendations` (normalized by `settings_set`). */
+export interface RecommendationSettings {
+  /** Clusters scanned in the background while connected (opt-in per cluster). */
+  scan_clusters: ClusterId[];
+  /** Minutes between background scans: 60 (15–1440). */
+  interval_minutes: number;
+  /** Days scan runs are kept: 30 (1–90). */
+  retention_days: number;
+  /** Strategy id; null = chosen automatically. */
+  strategy: string | null;
+  /** Settings per strategy id; a strategy without one uses its defaults. */
+  overrides: Record<string, RightsizingSettings>;
+  /** Alert on new high-confidence savings (off by default). */
+  alerts: boolean;
 }
 
 // ---------------------------------------------------------------------------

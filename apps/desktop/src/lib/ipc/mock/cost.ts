@@ -13,6 +13,7 @@ import type {
   RightsizingReport,
   RightsizingRequest,
   RightsizingSource,
+  Settings,
   WorkloadRef,
 } from '@/types';
 import { sleep } from './bus';
@@ -192,10 +193,17 @@ async function report(clusterId: string, query: CostQuery): Promise<CostReport> 
 async function rightsizing(clusterId: string, request: RightsizingRequest) {
   const cluster = clusterDef(clusterId);
   const conn = connection(clusterId);
-  const strategy = request.strategy?.trim() || STRATEGIES[0]!.id;
+  // Like the backend: the request's strategy, else the saved one, else automatic;
+  // the request's settings, else the saved override, else the strategy's defaults.
+  const saved = (handlers.settings_get?.({}) as Settings | undefined)?.recommendations;
+  const requested = request.strategy?.trim() || saved?.strategy?.trim() || null;
+  const strategy = requested ?? STRATEGIES[0]!.id;
   const info = STRATEGIES.find((s) => s.id === strategy);
   if (!info) throw new Error(`unknown right-sizing strategy "${strategy}"`);
-  const settings = { ...DEFAULT_SETTINGS, ...(request.settings ?? info.defaults) };
+  const settings = {
+    ...DEFAULT_SETTINGS,
+    ...(request.settings ?? saved?.overrides[strategy] ?? info.defaults),
+  };
   settings.days = Math.min(30, Math.max(1, Math.round(settings.days)));
   const pricing = cluster.cost?.pricing ?? defaultPricing(platformOf(conn.platform));
   const prometheus = await prometheusAvailable(clusterId);
@@ -220,7 +228,7 @@ async function rightsizing(clusterId: string, request: RightsizingRequest) {
     strategy,
     strategies: STRATEGIES,
     computed_at: Date.now(),
-    strategy_auto: false,
+    strategy_auto: requested == null,
     window_end: Date.now(),
   };
   return result;

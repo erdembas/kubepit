@@ -1123,7 +1123,7 @@ git commit -m "feat(rightsizing): lenses, risk score and run summaries"
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn recommendation_settings_default_and_normalize() {
@@ -1144,21 +1144,21 @@ Steps:
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core recommendations`
 
 Expected: FAIL to compile.
 
-- [ ] **Step 3: Implement the settings, normalization and wiring, and mirror them in TS and the demo**
+- [x] **Step 3: Implement the settings, normalization and wiring, and mirror them in TS and the demo**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core && pnpm typecheck`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core apps/desktop/src/types/index.ts apps/desktop/src/lib/ipc/mock/app.ts
