@@ -167,7 +167,8 @@ const NOT_MUTATING: &[&str] = &[
     "access_review",
     // Local manifests, files and Helm repositories (local state).
     "manifests_render",
-    "manifests_fingerprint",
+    "manifests_watch",
+    "manifests_unwatch",
     "manifests_recent_list",
     "manifests_recent_remove",
     "local_file_read",
