@@ -874,7 +874,8 @@ applying a recommendation only reads, so read-only clusters get it all.
   Job → CronJob, StatefulSet / DaemonSet directly) and reports bare pods,
   orphan ReplicaSets and standalone Jobs as unowned, other parents
   (`Node`, `Rollout`) as unsupported, and a pod name with several owners
-  as ambiguous with its sorted candidates. `prometheus/workload_stats.rs`
+  as ambiguous with its sorted candidates (several owners that resolve to
+  one workload are that workload). `prometheus/workload_stats.rs`
   builds the 16 instant queries of one batch (Q1–Q16: CPU p95 / max /
   average / samples, memory max / average / samples, running samples,
   first / last running step, pod / ReplicaSet / Job owners, OOM kills, CFS
@@ -895,9 +896,13 @@ applying a recommendation only reads, so read-only clusters get it all.
   pods' running spans (without them, memory samples per replica, capped at
   the window), coverage is samples ÷ running samples, duty the average
   running pods, the throttling ratio needs 600 CFS periods, and an
-  ambiguous pod name adds nothing but flags every live candidate. Rows keep
-  at most 50 sorted pod names and the HPA whose `scaleTargetRef` names the
-  workload. The metrics-server and legacy Prometheus paths produce
+  ambiguous pod name adds nothing but flags every live candidate
+  (`WorkloadExtras.identity`, even for rows left without usage). When the
+  ReplicaSet or Job owner query failed or answered nothing for a namespace
+  (`OwnerIndex::missing_parent_series`), pods owned by a ReplicaSet / Job
+  there are matched by name instead, with identity `name-match` and partial
+  data. Rows keep at most 50 sorted pod names and the HPA whose
+  `scaleTargetRef` names the workload. The metrics-server and legacy Prometheus paths produce
   `ContainerUsage` without evidence. The math sits behind `rightsizing::strategy::RecommendationStrategy`
   (`fn info() -> RightsizingStrategyInfo`, `fn recommend(&ContainerInput) ->
   StrategyOutput`; input = name, current requests/limits, `UsageStats`,

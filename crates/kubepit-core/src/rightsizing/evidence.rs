@@ -18,7 +18,11 @@
 //!   the pods were attributed.
 //!
 //! An ambiguous pod name contributes nothing; every live candidate is
-//! flagged instead.
+//! flagged instead ([`WorkloadExtras::identity`], even without evidence).
+//! A pod whose ReplicaSet or Job has no owner series because
+//! `replicaset_owners` / `job_owners` failed or answered nothing for its
+//! namespace ([`OwnerIndex::missing_parent_series`]) is matched by name
+//! instead, and its workload's rows are partial.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -51,6 +55,9 @@ pub struct WorkloadExtras {
     pub pods_truncated: bool,
     /// The HPA scaling the workload.
     pub hpa: Option<HpaInfo>,
+    /// How the workload's pods were attributed; `Ambiguous` even when no
+    /// clean pod is left (and so no container has evidence).
+    pub identity: EvidenceIdentity,
 }
 
 /// A live HPA and the workload its `spec.scaleTargetRef` names.
@@ -165,9 +172,11 @@ pub fn fold(input: &FoldInput<'_>) -> Folded {
     // Pod name → workload index.
     let mut assigned: HashMap<(&str, &str), usize> = HashMap::new();
     let mut ambiguous = vec![false; workloads.len()];
+    // Pods matched by name because their ReplicaSet / Job owners are missing.
+    let mut by_name = vec![false; workloads.len()];
+    let matcher = PodMatcher::new(workloads);
     if batch.owners.is_empty() {
         report.name_matched = true;
-        let matcher = PodMatcher::new(workloads);
         for (ns, pod) in pod_names {
             if let Some(i) = matcher.find(ns, pod) {
                 assigned.insert((ns, pod), i);
@@ -187,7 +196,23 @@ pub fn fold(input: &FoldInput<'_>) -> Folded {
                         assigned.insert((ns, pod), i);
                     }
                 }
-                Owner::Unowned => report.unowned_pods += 1,
+                Owner::Unowned => {
+                    // The pod's ReplicaSet / Job has no owner series because
+                    // that query failed or answered nothing here: fall back
+                    // to its name (a partial row) instead of dropping it.
+                    let fallback = batch
+                        .owners
+                        .missing_parent_series(ns, pod)
+                        .then(|| matcher.find(ns, pod))
+                        .flatten();
+                    match fallback {
+                        Some(i) => {
+                            assigned.insert((ns, pod), i);
+                            by_name[i] = true;
+                        }
+                        None => report.unowned_pods += 1,
+                    }
+                }
                 Owner::Unsupported(_) => report.unsupported_pods += 1,
                 Owner::Ambiguous(candidates) => {
                     report.ambiguous_pods += 1;
@@ -203,7 +228,7 @@ pub fn fold(input: &FoldInput<'_>) -> Folded {
     let identity_of = |i: usize| {
         if ambiguous[i] {
             EvidenceIdentity::Ambiguous
-        } else if report.name_matched {
+        } else if report.name_matched || by_name[i] {
             EvidenceIdentity::NameMatch
         } else {
             EvidenceIdentity::OwnerMetrics
@@ -294,7 +319,7 @@ pub fn fold(input: &FoldInput<'_>) -> Folded {
                 throttle_ratio: (periods >= MIN_THROTTLE_PERIODS)
                     .then(|| sum(|s| s.throttled) / periods),
                 oom_killed: list.iter().any(|s| s.oom),
-                partial: input.partial_namespaces.contains(&w.namespace),
+                partial: by_name[i] || input.partial_namespaces.contains(&w.namespace),
                 identity: identity_of(i),
             };
             let stats = UsageStats {
@@ -325,6 +350,7 @@ pub fn fold(input: &FoldInput<'_>) -> Folded {
                 .iter()
                 .find(|h| h.namespace == w.namespace && h.kind == w.kind && h.name == w.name)
                 .map(|h| h.info.clone()),
+            identity: identity_of(i),
         });
     }
     Folded {
@@ -338,7 +364,7 @@ pub fn fold(input: &FoldInput<'_>) -> Folded {
 mod tests {
     use super::*;
     use crate::prometheus::parse::PromData;
-    use crate::prometheus::workload_stats::PodContainerStats;
+    use crate::prometheus::workload_stats::{PodContainerStats, StatQuery};
     use crate::rightsizing::ownership::OwnerIndex;
     use crate::rightsizing::types::{HpaMetric, HpaResource, ResourceValues};
     use crate::types::PromQuerySeries;
@@ -397,6 +423,15 @@ mod tests {
 
     /// Owner indexes of `(ns, pod, kind, owner)` and `(ns, replicaset, deployment)`.
     fn owners(pods: &[(&str, &str, &str, &str)], replicasets: &[(&str, &str, &str)]) -> OwnerIndex {
+        owners_with_jobs(pods, replicasets, &[])
+    }
+
+    /// … and `(ns, job, cronjob)`.
+    fn owners_with_jobs(
+        pods: &[(&str, &str, &str, &str)],
+        replicasets: &[(&str, &str, &str)],
+        jobs: &[(&str, &str, &str)],
+    ) -> OwnerIndex {
         OwnerIndex::from_data(
             &data(
                 pods.iter()
@@ -423,7 +458,18 @@ mod tests {
                     })
                     .collect(),
             ),
-            &data(vec![]),
+            &data(
+                jobs.iter()
+                    .map(|(ns, job, cronjob)| {
+                        series(&[
+                            ("namespace", ns),
+                            ("job_name", job),
+                            ("owner_kind", "CronJob"),
+                            ("owner_name", cronjob),
+                        ])
+                    })
+                    .collect(),
+            ),
         )
     }
 
@@ -522,6 +568,7 @@ mod tests {
         assert_eq!(f.extras.len(), 1);
         assert_eq!(f.extras[0].pods, vec!["api-new", "api-old"]);
         assert!(!f.extras[0].pods_truncated);
+        assert_eq!(f.extras[0].identity, EvidenceIdentity::OwnerMetrics);
         assert_eq!(f.report, FoldReport::default());
     }
 
@@ -617,9 +664,12 @@ mod tests {
         );
         assert_eq!(app.evidence.as_ref().unwrap().cpu_samples, 144.0);
         assert_eq!(f.extras[0].pods, vec!["app-new"]);
-        // The other candidate has no clean pod left: no usage at all.
+        // The other candidate has no clean pod left: no usage at all, but
+        // it is still flagged.
         assert!(!f.usage.contains_key(&(1, "app".into())));
         assert!(f.extras[1].pods.is_empty());
+        assert_eq!(f.extras[0].identity, EvidenceIdentity::Ambiguous);
+        assert_eq!(f.extras[1].identity, EvidenceIdentity::Ambiguous);
         assert_eq!(f.report.ambiguous_pods, 1);
         assert_eq!(
             f.report,
@@ -805,6 +855,7 @@ mod tests {
         f.put("apps", "db-0", "db", stats(10.0, 10.0 * MIB, 4032.0, 0.0));
         let f = f.fold();
         assert!(f.report.name_matched);
+        assert_eq!(f.extras[0].identity, EvidenceIdentity::NameMatch);
         let web = &f.usage[&(0, "app".into())];
         let e = web.evidence.as_ref().unwrap();
         assert_eq!(e.identity, EvidenceIdentity::NameMatch);
@@ -816,6 +867,7 @@ mod tests {
         // Without running data: no coverage, no duty; hours from samples
         // (576 × 300 s over 2 replicas).
         assert_eq!((e.cpu_coverage, e.duty), (None, None));
+        assert!(!e.partial, "matching every pod by name is not partial data");
         assert_eq!((e.observed_hours, web.stats.hours), (24.0, 24.0));
         // … capped at the window (4032 samples = 336 h > 7 days).
         let db = &f.usage[&(1, "db".into())];
@@ -855,6 +907,118 @@ mod tests {
         assert_eq!(f.extras[0].hpa.as_ref().unwrap().name, "api");
         assert_eq!(f.extras[0].hpa, Some(info("api")));
         assert_eq!(f.extras[1].hpa, None, "same name, another kind");
+    }
+
+    #[test]
+    fn missing_replicaset_owners_fall_back_to_name_matching() {
+        // pod_owners answered, replicaset_owners failed (or an allowlist drops it).
+        let mut f = Fixture {
+            workloads: vec![
+                workload("Deployment", "apps", "api", 2, &["api"]),
+                workload("StatefulSet", "apps", "db", 1, &["db"]),
+            ],
+            ..Default::default()
+        };
+        f.batch.failed = vec![StatQuery::ReplicasetOwners];
+        f.put(
+            "apps",
+            "api-5d8f7-aaaaa",
+            "api",
+            stats(100.0, 100.0 * MIB, 288.0, 288.0),
+        );
+        f.put(
+            "apps",
+            "api-5d8f7-bbbbb",
+            "api",
+            stats(80.0, 90.0 * MIB, 288.0, 288.0),
+        );
+        f.put("apps", "db-0", "db", stats(10.0, 10.0 * MIB, 288.0, 288.0));
+        // An orphan whose name matches no live workload stays unowned.
+        f.put("apps", "loose-7c8d9-ccccc", "x", stats(1.0, MIB, 1.0, 1.0));
+        f.batch.owners = owners(
+            &[
+                ("apps", "api-5d8f7-aaaaa", "ReplicaSet", "api-5d8f7"),
+                ("apps", "api-5d8f7-bbbbb", "ReplicaSet", "api-5d8f7"),
+                ("apps", "db-0", "StatefulSet", "db"),
+                ("apps", "loose-7c8d9-ccccc", "ReplicaSet", "loose-7c8d9"),
+            ],
+            &[],
+        );
+        let f = f.fold();
+        let api = &f.usage[&(0, "api".into())];
+        assert_eq!(api.stats.cpu_p95, 100.0);
+        let e = api.evidence.as_ref().unwrap();
+        assert_eq!(
+            (e.identity, e.partial, e.pods),
+            (EvidenceIdentity::NameMatch, true, 2)
+        );
+        assert_eq!(f.extras[0].identity, EvidenceIdentity::NameMatch);
+        assert_eq!(f.extras[0].pods, vec!["api-5d8f7-aaaaa", "api-5d8f7-bbbbb"]);
+        // Pods with a direct owner keep their owner-metrics identity.
+        let db = f.usage[&(1, "db".into())].evidence.clone().unwrap();
+        assert_eq!(
+            (db.identity, db.partial),
+            (EvidenceIdentity::OwnerMetrics, false)
+        );
+        assert_eq!(
+            f.report,
+            FoldReport {
+                unowned_pods: 1,
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn missing_job_owners_fall_back_to_name_matching() {
+        // job_owners answered nothing for the namespace (no failure recorded).
+        let mut f = Fixture {
+            workloads: vec![
+                workload("CronJob", "apps", "nightly", 1, &["job"]),
+                workload("CronJob", "batch", "report", 1, &["job"]),
+            ],
+            ..Default::default()
+        };
+        f.put(
+            "apps",
+            "nightly-28765432-abcde",
+            "job",
+            stats(500.0, 200.0 * MIB, 24.0, 24.0),
+        );
+        f.put("apps", "manual-kq8xz", "job", stats(1.0, MIB, 1.0, 1.0));
+        f.put(
+            "batch",
+            "report-28765432-fghij",
+            "job",
+            stats(50.0, 20.0 * MIB, 12.0, 12.0),
+        );
+        f.put("batch", "adhoc-x1y2z", "job", stats(1.0, MIB, 1.0, 1.0));
+        f.batch.owners = owners_with_jobs(
+            &[
+                ("apps", "nightly-28765432-abcde", "Job", "nightly-28765432"),
+                ("apps", "manual-kq8xz", "Job", "manual"),
+                ("batch", "report-28765432-fghij", "Job", "report-28765432"),
+                ("batch", "adhoc-x1y2z", "Job", "adhoc"),
+            ],
+            &[],
+            // Job owners answered for "batch" only.
+            &[("batch", "report-28765432", "report")],
+        );
+        let f = f.fold();
+        let nightly = f.usage[&(0, "job".into())].evidence.clone().unwrap();
+        assert_eq!(
+            (nightly.identity, nightly.partial),
+            (EvidenceIdentity::NameMatch, true)
+        );
+        assert_eq!(f.extras[0].pods, vec!["nightly-28765432-abcde"]);
+        let report = f.usage[&(1, "job".into())].evidence.clone().unwrap();
+        assert_eq!(
+            (report.identity, report.partial),
+            (EvidenceIdentity::OwnerMetrics, false)
+        );
+        // manual matches no live CronJob; adhoc is a standalone Job where job
+        // owners did answer.
+        assert_eq!(f.report.unowned_pods, 2);
     }
 
     #[test]

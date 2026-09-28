@@ -14,8 +14,13 @@
 //! `Rollout`, custom controllers) is unsupported. A pod name owned by more
 //! than one owner within the window is ambiguous: its samples cannot be
 //! attributed, so the caller flags every candidate instead of mixing them.
+//!
+//! The index also remembers which namespaces the ReplicaSet and Job owner
+//! queries answered for at all (`<none>` owners included), so a missing
+//! parent can be told apart from a missing answer
+//! ([`OwnerIndex::missing_parent_series`]).
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::prometheus::parse::PromData;
 
@@ -43,6 +48,9 @@ pub struct OwnerIndex {
     pods: HashMap<Key, Owners>,
     replicasets: HashMap<Key, Owners>,
     jobs: HashMap<Key, Owners>,
+    /// Namespaces with any `kube_replicaset_owner` / `kube_job_owner` series.
+    replicaset_namespaces: HashSet<String>,
+    job_namespaces: HashSet<String>,
 }
 
 /// kube-state-metrics' "no owner": an empty kind or name, or `<none>`.
@@ -54,35 +62,41 @@ pub fn is_none_owner(kind: &str, name: &str) -> bool {
     none(kind) || none(name)
 }
 
-/// `(namespace, subject)` → controller owners of one owner series vector.
-fn index(data: &PromData, subject: &str) -> HashMap<Key, Owners> {
+/// `(namespace, subject)` → controller owners of one owner series vector,
+/// and the namespaces it has any series for.
+fn index(data: &PromData, subject: &str) -> (HashMap<Key, Owners>, HashSet<String>) {
     let mut out: HashMap<Key, Owners> = HashMap::new();
+    let mut namespaces = HashSet::new();
     for series in &data.series {
         let label = |key: &str| series.labels.get(key).map(String::as_str).unwrap_or("");
         let (namespace, name) = (label("namespace"), label(subject));
         let (kind, owner) = (label("owner_kind"), label("owner_name"));
-        if namespace.is_empty()
-            || name.is_empty()
-            || is_none_owner(kind, owner)
-            || label("owner_is_controller") == "false"
-        {
+        if namespace.is_empty() || name.is_empty() {
+            continue;
+        }
+        namespaces.insert(namespace.to_string());
+        if is_none_owner(kind, owner) || label("owner_is_controller") == "false" {
             continue;
         }
         out.entry((namespace.to_string(), name.to_string()))
             .or_default()
             .insert((kind.to_string(), owner.to_string()));
     }
-    out
+    (out, namespaces)
 }
 
 impl OwnerIndex {
     /// The indexes of the `pod_owners`, `replicaset_owners` and `job_owners`
     /// answers of one batch (an empty vector for a failed query).
     pub fn from_data(pods: &PromData, replicasets: &PromData, jobs: &PromData) -> Self {
+        let (replicasets, replicaset_namespaces) = index(replicasets, "replicaset");
+        let (jobs, job_namespaces) = index(jobs, "job_name");
         Self {
-            pods: index(pods, "pod"),
-            replicasets: index(replicasets, "replicaset"),
-            jobs: index(jobs, "job_name"),
+            pods: index(pods, "pod").0,
+            replicasets,
+            jobs,
+            replicaset_namespaces,
+            job_namespaces,
         }
     }
 
@@ -97,12 +111,36 @@ impl OwnerIndex {
                 mine.entry(key).or_default().extend(owners);
             }
         }
+        self.replicaset_namespaces
+            .extend(other.replicaset_namespaces);
+        self.job_namespaces.extend(other.job_namespaces);
     }
 
     /// No pod has an owner: kube-state-metrics is missing (or its owner
     /// series are), so pods must be matched by name instead.
     pub fn is_empty(&self) -> bool {
         self.pods.is_empty()
+    }
+
+    /// The pod's only owner is a ReplicaSet or Job without owner series,
+    /// and the matching owner query (`replicaset_owners` / `job_owners`)
+    /// answered nothing for the namespace: it failed or its metric is not
+    /// collected. [`resolve`](Self::resolve) says `Unowned`, but the parent
+    /// is unknown rather than absent, so the caller may match by name.
+    pub fn missing_parent_series(&self, namespace: &str, pod: &str) -> bool {
+        let Some(owners) = self.pods.get(&(namespace.to_string(), pod.to_string())) else {
+            return false;
+        };
+        let [(kind, name)] = owners.iter().collect::<Vec<_>>()[..] else {
+            return false;
+        };
+        let (parents, answered) = match kind.as_str() {
+            "ReplicaSet" => (&self.replicasets, &self.replicaset_namespaces),
+            "Job" => (&self.jobs, &self.job_namespaces),
+            _ => return false,
+        };
+        !answered.contains(namespace)
+            && !parents.contains_key(&(namespace.to_string(), name.clone()))
     }
 
     /// The owner of pod name `pod` in `namespace`.
@@ -112,14 +150,23 @@ impl OwnerIndex {
             _ => return Owner::Unowned,
         };
         if owners.len() > 1 {
-            let candidates: BTreeSet<(String, String)> = owners
+            let resolved: Vec<(&(String, String), Owner)> = owners
                 .iter()
-                .map(
-                    |(kind, name)| match self.resolve_owner(namespace, kind, name) {
-                        Owner::Workload { kind, name } => (kind, name),
-                        _ => (kind.clone(), name.clone()),
-                    },
-                )
+                .map(|owner @ (kind, name)| (owner, self.resolve_owner(namespace, kind, name)))
+                .collect();
+            // Several owners of one workload (two ReplicaSets of one
+            // Deployment) are no ambiguity.
+            if let [(_, first @ Owner::Workload { .. }), rest @ ..] = &resolved[..] {
+                if rest.iter().all(|(_, other)| other == first) {
+                    return first.clone();
+                }
+            }
+            let candidates: BTreeSet<(String, String)> = resolved
+                .into_iter()
+                .map(|((kind, name), owner)| match owner {
+                    Owner::Workload { kind, name } => (kind, name),
+                    _ => (kind.clone(), name.clone()),
+                })
                 .collect();
             return Owner::Ambiguous(candidates.into_iter().collect());
         }
@@ -380,5 +427,68 @@ mod tests {
             workload("Deployment", "api")
         );
         assert_eq!(merged.resolve("b", "db-0"), workload("StatefulSet", "db"));
+    }
+
+    #[test]
+    fn parent_series_are_missing_only_where_their_query_answered_nothing() {
+        let pods = || {
+            data(vec![
+                pod("apps", "api-5d8f7-aaaaa", "ReplicaSet", "api-5d8f7"),
+                pod("apps", "nightly-28765432-abcde", "Job", "nightly-28765432"),
+                pod("apps", "db-0", "StatefulSet", "db"),
+                pod("apps", "bare", "<none>", "<none>"),
+            ])
+        };
+        // replicaset_owners and job_owners failed or were dropped (an allowlist).
+        let none = OwnerIndex::from_data(&pods(), &data(vec![]), &data(vec![]));
+        assert_eq!(none.resolve("apps", "api-5d8f7-aaaaa"), Owner::Unowned);
+        assert!(none.missing_parent_series("apps", "api-5d8f7-aaaaa"));
+        assert!(none.missing_parent_series("apps", "nightly-28765432-abcde"));
+        assert!(
+            !none.missing_parent_series("apps", "db-0"),
+            "no parent needed"
+        );
+        assert!(!none.missing_parent_series("apps", "bare"));
+        assert!(!none.missing_parent_series("apps", "never-seen"));
+
+        // The queries answered for the namespace, if only with `<none>` owners:
+        // a missing parent is a real orphan.
+        let orphans = OwnerIndex::from_data(
+            &pods(),
+            &data(vec![rs("apps", "other-rs", "<none>", "<none>")]),
+            &data(vec![job("apps", "other-job", "<none>", "<none>")]),
+        );
+        assert!(!orphans.missing_parent_series("apps", "api-5d8f7-aaaaa"));
+        assert!(!orphans.missing_parent_series("apps", "nightly-28765432-abcde"));
+
+        // Answers for other namespaces say nothing about this one.
+        let elsewhere = OwnerIndex::from_data(
+            &pods(),
+            &data(vec![rs("shop", "web-5d8f7", "Deployment", "web")]),
+            &data(vec![]),
+        );
+        assert!(elsewhere.missing_parent_series("apps", "api-5d8f7-aaaaa"));
+        let mut merged = elsewhere.clone();
+        merged.merge(orphans);
+        assert!(!merged.missing_parent_series("apps", "api-5d8f7-aaaaa"));
+    }
+
+    #[test]
+    fn owners_that_collapse_to_one_workload_are_not_ambiguous() {
+        let index = OwnerIndex::from_data(
+            &data(vec![
+                pod("apps", "web-x", "ReplicaSet", "web-5d8f7"),
+                pod("apps", "web-x", "ReplicaSet", "web-6c9d4"),
+            ]),
+            &data(vec![
+                rs("apps", "web-5d8f7", "Deployment", "web"),
+                rs("apps", "web-6c9d4", "Deployment", "web"),
+            ]),
+            &data(vec![]),
+        );
+        assert_eq!(
+            index.resolve("apps", "web-x"),
+            workload("Deployment", "web")
+        );
     }
 }
