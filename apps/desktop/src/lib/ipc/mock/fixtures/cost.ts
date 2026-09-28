@@ -17,11 +17,12 @@ import type {
   RightsizingSource,
   RightsizingStrategyInfo,
   RightsizingVerdict,
+  UsageEvidence,
   UsageStats,
   WorkloadRecommendation,
 } from '@/types';
 import { buildDeployment } from './builders';
-import { list, type ClusterDb } from './db';
+import { list, ownedBy, type ClusterDb } from './db';
 import { buildService } from './network';
 import { tpl } from './template';
 import { DAY, hashString } from './util';
@@ -122,6 +123,18 @@ const unit = (seed: string) => hashString(seed) / 4294967296;
 
 function containers(spec: unknown) {
   return asArray(asObject(spec).containers).filter(isObject);
+}
+
+/**
+ * The pod spec right-sizing reads and patches: `spec.template.spec`, or a
+ * CronJob's `spec.jobTemplate.spec.template.spec` (like the backend's
+ * `patch::template_path`). The live nested object, so it can be edited.
+ */
+export function podSpecOf(obj: KubeObject): Record<string, unknown> {
+  const spec = asObject(obj.spec);
+  const template =
+    obj.kind === 'CronJob' ? asObject(asObject(spec.jobTemplate).spec).template : spec.template;
+  return asObject(asObject(template).spec);
 }
 
 function resourcesOf(c: Record<string, unknown>): ResourceValues {
@@ -694,6 +707,42 @@ function syntheticUsage(seed: string, current: ResourceValues, hours: number): U
   };
 }
 
+/** Like the backend's `math::cost_replicas`: a CronJob costs its largest duty cycle, else 1. */
+function costReplicas(kind: string, replicas: number, list: ContainerRecommendation[]): number {
+  if (kind !== 'CronJob') return replicas;
+  const duties = list.flatMap((c) => (c.evidence?.duty != null ? [c.evidence.duty] : []));
+  return duties.length ? Math.max(...duties) : 1;
+}
+
+/**
+ * A CronJob's usage evidence: the demo's jobs run 15–45 % of the time
+ * (average running pods), so a week of observed hours stays above `min_hours`.
+ */
+function cronEvidence(
+  seed: string,
+  windowHours: number,
+  pods: number,
+): { duty: number; evidence: (hours: number) => UsageEvidence } {
+  const duty = Math.round((0.15 + unit(`${seed}#duty`) * 0.3) * 100) / 100;
+  const samples = Math.round(windowHours * duty * 12);
+  return {
+    duty,
+    evidence: (hours) => ({
+      observed_hours: hours,
+      cpu_coverage: 1,
+      memory_coverage: 1,
+      cpu_samples: samples,
+      memory_samples: samples,
+      pods,
+      duty,
+      throttle_ratio: null,
+      oom_killed: false,
+      partial: false,
+      identity: 'owner-metrics',
+    }),
+  };
+}
+
 function monthlyRequests(
   list: ContainerRecommendation[],
   replicas: number,
@@ -740,6 +789,7 @@ const WORKLOAD_KEYS: Array<[string, string]> = [
   ['Deployment', 'deployments.apps'],
   ['StatefulSet', 'statefulsets.apps'],
   ['DaemonSet', 'daemonsets.apps'],
+  ['CronJob', 'cronjobs.batch'],
 ];
 
 export function workloadRecommendations(
@@ -769,24 +819,34 @@ export function workloadRecommendations(
       const replicas =
         kind === 'DaemonSet'
           ? Number(asObject(w.status).desiredNumberScheduled ?? 0)
-          : Number(spec.replicas ?? 1);
+          : kind === 'CronJob'
+            ? 1
+            : Number(spec.replicas ?? 1);
       const age = (now - Date.parse(w.metadata.creationTimestamp ?? '')) / 3_600_000;
       const window = source === 'prometheus' ? settings.days * 24 : 1;
+      const seed = `${db.id}/${ns}/${w.metadata.name}`;
+      // With Prometheus a CronJob's pods resolve through their Job (owner
+      // metrics): evidence with its duty cycle, observed hours only while
+      // they ran.
+      const cron =
+        kind === 'CronJob' && source === 'prometheus'
+          ? cronEvidence(seed, window, Math.max(1, ownedBy(db, 'jobs.batch', w).length))
+          : null;
       const hours =
         source === 'none'
           ? 0
-          : Math.max(0.25, Math.min(window, Number.isFinite(age) ? age : window));
-      const recs = containers(asObject(spec.template).spec).map((c) => {
+          : Math.max(0.25, Math.min(window, Number.isFinite(age) ? age : window)) *
+            (cron?.duty ?? 1);
+      const recs = containers(podSpecOf(w)).map((c) => {
         const name = String(c.name ?? '');
         const current = resourcesOf(c);
-        const usage =
-          source === 'none'
-            ? null
-            : syntheticUsage(`${db.id}/${ns}/${w.metadata.name}/${name}`, current, hours);
-        return recommendContainer(name, current, usage, source, settings);
+        const usage = source === 'none' ? null : syntheticUsage(`${seed}/${name}`, current, hours);
+        const rec = recommendContainer(name, current, usage, source, settings);
+        return cron && usage ? { ...rec, evidence: cron.evidence(hours) } : rec;
       });
-      const current = monthlyRequests(recs, replicas, pricing, false);
-      const next = monthlyRequests(recs, replicas, pricing, true);
+      const costReplicasOf = costReplicas(kind, replicas, recs);
+      const current = monthlyRequests(recs, costReplicasOf, pricing, false);
+      const next = monthlyRequests(recs, costReplicasOf, pricing, true);
       const coverage = recs.reduce((m, c) => Math.max(m, c.usage?.hours ?? 0), 0);
       out.push({
         kind,
@@ -812,7 +872,7 @@ export function workloadRecommendations(
         pods_truncated: false,
         hpa: null,
         lenses: [],
-        cost_replicas: replicas,
+        cost_replicas: costReplicasOf,
       });
     }
   }

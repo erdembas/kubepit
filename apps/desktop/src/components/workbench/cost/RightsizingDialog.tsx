@@ -26,12 +26,12 @@ import {
   limitRatio,
   memoryText,
   warningText,
+  workloadGvk,
 } from '@/lib/kube/rightsizing/model';
 import { useAppStore } from '@/store/useAppStore';
 import type {
   ContainerRecommendation,
   DryRunResult,
-  Gvk,
   KubeObject,
   ResourceChange,
   WorkloadRecommendation,
@@ -45,12 +45,6 @@ import { GitOpsNotice } from '../gitops/ManagedNotice';
 import { errorText } from '../util';
 import { refreshRightsizing } from './useCost';
 import { CONFIDENCE_TONE } from './tones';
-
-export function appsGvk(kind: string): Gvk {
-  const plural =
-    kind === 'Deployment' ? 'deployments' : kind === 'StatefulSet' ? 'statefulsets' : 'daemonsets';
-  return { group: 'apps', version: 'v1', kind, plural, namespaced: true };
-}
 
 const CHANGE_TONE: Record<ResourceChange, string> = {
   increase: 'text-status-starting',
@@ -242,7 +236,8 @@ export function RightsizingDialog({
   const cluster = useAppStore((s) => s.clusters.find((c) => c.id === clusterId));
   const readOnly = !!cluster?.read_only;
   const production = cluster?.environment === 'production';
-  const gvk = useMemo(() => appsGvk(rec.kind), [rec.kind]);
+  const gvk = useMemo(() => workloadGvk(rec.kind), [rec.kind]);
+  const cronJob = rec.kind === 'CronJob';
   const [includeLimits, setIncludeLimits] = useState(true);
   const changes = useMemo(() => changesOf(rec, { includeLimits }), [rec, includeLimits]);
   const optionalLimits = hasOptionalLimitChanges(rec);
@@ -281,11 +276,11 @@ export function RightsizingDialog({
   const gateObj = useMemo<KubeObject>(
     () =>
       live ?? {
-        apiVersion: 'apps/v1',
+        apiVersion: `${gvk.group}/${gvk.version}`,
         kind: rec.kind,
         metadata: { name: rec.name, namespace: rec.namespace, uid: rec.uid },
       },
-    [live, rec],
+    [live, rec, gvk],
   );
   const gate = useActionGates(
     clusterId,
@@ -319,10 +314,15 @@ export function RightsizingDialog({
     if (production) {
       useAppStore.getState().requestConfirm({
         title: i18n.t('Apply recommendation'),
-        message: i18n.t(
-          'Change the resources of {kind} {name} on a production cluster? Its pods are replaced according to the update strategy.',
-          { kind: rec.kind, name: rec.name },
-        ),
+        message: cronJob
+          ? i18n.t(
+              'Change the resources of {kind} {name} on a production cluster? Jobs created from now on use the new values; running Jobs keep theirs.',
+              { kind: rec.kind, name: rec.name },
+            )
+          : i18n.t(
+              'Change the resources of {kind} {name} on a production cluster? Its pods are replaced according to the update strategy.',
+              { kind: rec.kind, name: rec.name },
+            ),
         confirmLabel: i18n.t('Apply'),
         tone: 'danger',
         typeToConfirm: rec.name,
@@ -385,11 +385,13 @@ export function RightsizingDialog({
         <div className="flex flex-wrap items-center gap-2 text-[11.5px]">
           <Badge tone={CONFIDENCE_TONE[rec.confidence]}>{confidenceLabel(rec.confidence)}</Badge>
           <span className="text-fg-dim">
-            {i18n.plural(
-              'Applies to {count} replica; pods are replaced by a rollout.',
-              'Applies to {count} replicas; pods are replaced by a rollout.',
-              rec.replicas,
-            )}
+            {cronJob
+              ? i18n.t('Applies to the Job template: Jobs created from now on use the new values.')
+              : i18n.plural(
+                  'Applies to {count} replica; pods are replaced by a rollout.',
+                  'Applies to {count} replicas; pods are replaced by a rollout.',
+                  rec.replicas,
+                )}
           </span>
         </div>
         <ContainerChanges containers={rec.containers} includeLimits={includeLimits} />

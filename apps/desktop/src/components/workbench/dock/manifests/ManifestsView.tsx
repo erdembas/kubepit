@@ -216,20 +216,25 @@ export const ManifestsView = memo(function ManifestsView({
         </div>
       ) : (
         <>
-          <EditorBar>
-            <BarLabel>{i18n.t('Diff against')}</BarLabel>
-            <TargetPicker value={targets} onChange={setTargets} disabled={controls.applying} />
-            <span aria-hidden className="bg-border/70 mx-1 h-4 w-px shrink-0" />
-            <BarLabel>{i18n.t('Default namespace')}</BarLabel>
-            <input
-              value={namespace}
-              onChange={(e) => setNamespace(e.target.value)}
-              placeholder={i18n.t('cluster default')}
-              aria-label={i18n.t('Default namespace')}
-              title={i18n.t('Used for objects that do not set metadata.namespace')}
-              spellCheck={false}
-              className="border-border bg-surface-raised text-fg placeholder:text-fg-dim focus:border-accent rounded-app-sm h-6 w-36 shrink-0 border px-2 font-mono text-[11.5px] outline-none"
-            />
+          {/* Narrower than 48rem: targets on the first row, namespace and actions below. */}
+          <EditorBar wrap>
+            <div className="flex max-w-full min-w-0 basis-full items-center gap-1.5 @3xl:basis-auto">
+              <BarLabel>{i18n.t('Diff against')}</BarLabel>
+              <TargetPicker value={targets} onChange={setTargets} disabled={controls.applying} />
+            </div>
+            <span aria-hidden className="bg-border/70 mx-1 hidden h-4 w-px shrink-0 @3xl:block" />
+            <div className="flex min-w-0 items-center gap-1.5">
+              <BarLabel>{i18n.t('Default namespace')}</BarLabel>
+              <input
+                value={namespace}
+                onChange={(e) => setNamespace(e.target.value)}
+                placeholder={i18n.t('cluster default')}
+                aria-label={i18n.t('Default namespace')}
+                title={i18n.t('Used for objects that do not set metadata.namespace')}
+                spellCheck={false}
+                className="border-border bg-surface-raised text-fg placeholder:text-fg-dim focus:border-accent rounded-app-sm h-6 w-36 min-w-20 shrink border px-2 font-mono text-[11.5px] outline-none"
+              />
+            </div>
             <div className="ml-auto flex shrink-0 items-center gap-1.5 pl-2">
               {kindText && (
                 <span className="text-fg-dim text-[11px]" title={data.command ?? undefined}>

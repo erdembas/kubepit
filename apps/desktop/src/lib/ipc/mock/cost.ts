@@ -16,6 +16,7 @@ import type {
   Settings,
   WorkloadRef,
 } from '@/types';
+import { isRightsizable, workloadGvk } from '@/lib/kube/rightsizing/model';
 import { sleep } from './bus';
 import {
   DEFAULT_SETTINGS,
@@ -26,6 +27,7 @@ import {
   formatCpu,
   formatMemory,
   platformOf,
+  podSpecOf,
   workloadRecommendations,
   type UsageMap,
 } from './fixtures/cost';
@@ -237,17 +239,13 @@ async function rightsizing(clusterId: string, request: RightsizingRequest) {
   return result;
 }
 
-const PLURAL: Record<string, string> = {
-  Deployment: 'deployments',
-  StatefulSet: 'statefulsets',
-  DaemonSet: 'daemonsets',
-};
-
-/** The live object with `changes` merged into its containers by name. */
-function patched(live: KubeObject, changes: ContainerResourceChange[]): KubeObject {
+/**
+ * The live object with `changes` merged into its containers by name, at
+ * the pod spec right-sizing patches (a CronJob's job template).
+ */
+export function patched(live: KubeObject, changes: ContainerResourceChange[]): KubeObject {
   const next = structuredClone(live);
-  const spec = (next.spec as { template?: { spec?: { containers?: unknown[] } } }).template?.spec;
-  const list = (spec?.containers ?? []) as Array<{
+  const list = (podSpecOf(next).containers ?? []) as Array<{
     name: string;
     resources?: { requests?: Record<string, string>; limits?: Record<string, string> };
   }>;
@@ -279,13 +277,13 @@ async function apply(
   changes: ContainerResourceChange[],
   dryRun: boolean,
 ): Promise<DryRunResult> {
-  const plural = PLURAL[target.kind];
-  if (!plural) throw new Error('right-sizing supports Deployments, StatefulSets and DaemonSets');
+  if (!isRightsizable(target.kind))
+    throw new Error('right-sizing supports Deployments, StatefulSets, DaemonSets and CronJobs');
   if (!changes.length) throw new Error('nothing to change');
   const cluster = clusterDef(clusterId);
   if (!dryRun && cluster.read_only)
     throw new Error(`cluster "${cluster.name}" is read-only: right-size is not allowed`);
-  const gvk = { group: 'apps', version: 'v1', kind: target.kind, plural, namespaced: true };
+  const gvk = workloadGvk(target.kind);
   const live = handlers.resource_get!({
     clusterId,
     gvk,
@@ -298,6 +296,7 @@ async function apply(
   if (!dryRun) {
     // A merge patch with the whole merged container list (the demo's patch
     // engine replaces arrays), through the regular patch path so rollouts start.
+    const podSpec = { spec: { containers: podSpecOf(next).containers } };
     result = (await handlers.resource_patch!({
       clusterId,
       gvk,
@@ -305,20 +304,16 @@ async function apply(
       name: target.name,
       patch: {
         metadata: { annotations: next.metadata.annotations },
-        spec: {
-          template: {
-            spec: {
-              containers: (next.spec as { template: { spec: { containers: unknown[] } } }).template
-                .spec.containers,
-            },
-          },
-        },
+        spec:
+          target.kind === 'CronJob'
+            ? { jobTemplate: { spec: { template: podSpec } } }
+            : { template: podSpec },
       },
       patchType: 'merge',
     })) as KubeObject;
   }
   return {
-    api_version: 'apps/v1',
+    api_version: `${gvk.group}/${gvk.version}`,
     kind: target.kind,
     name: target.name,
     namespace: target.namespace,

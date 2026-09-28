@@ -22,6 +22,7 @@ import {
   toSeriesPoints,
   type PromRangeKey,
 } from '@/lib/prometheus';
+import { clusterMatchers } from '@/lib/prometheusAccess';
 import { useAppStore } from '@/store/useAppStore';
 import { useDockStore, type DockTab } from '@/store/useDockStore';
 import type { ClusterId, PromQueryResult } from '@/types';
@@ -184,6 +185,8 @@ export function PromqlView({
 
   const st = status.data;
   const service = st?.service ?? null;
+  // Presets get the cluster selector of a shared Prometheus; typed PromQL does not.
+  const matchers = clusterMatchers(cluster?.prometheus_access);
 
   let overlay: React.ReactNode = null;
   if (loading && !result)
@@ -350,6 +353,13 @@ export function PromqlView({
             title={`${kindLabel(service.kind)} · ${serviceAddress(service)}`}
           >
             {i18n.t('Prometheus: {service}', { service: serviceLabel(service) })}
+          </span>
+        )}
+        {matchers && (
+          <span className="truncate" title={matchers}>
+            {i18n.rich('Cluster selector {matchers} is not added to your own queries.', {
+              matchers: <code className="text-fg-muted font-mono">{`{${matchers}}`}</code>,
+            })}
           </span>
         )}
         {result && (

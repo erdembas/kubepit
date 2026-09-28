@@ -22,7 +22,7 @@ export function DetailsToolbar({
   const primary = actions.filter((a) => a.primary);
   const rest = actions.filter((a) => !a.primary);
   return (
-    <div className="flex items-center gap-0.5">
+    <div className="flex flex-wrap items-center gap-0.5">
       {primary.map((a) => {
         const Icon = a.icon;
         const gate = gates.get(a.id) ?? OPEN_GATE;

@@ -46,8 +46,9 @@ export function CompareView({
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
-      <div className="border-border/60 flex h-9 shrink-0 items-center gap-3 border-b px-3">
-        <div className="bg-fg/4 inline-flex gap-0.5 rounded-md p-0.5" role="tablist">
+      {/* A size container: below 32rem the object moves to its own row under the controls. */}
+      <div className="border-border/60 @container flex min-h-9 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-1">
+        <div className="bg-fg/4 inline-flex shrink-0 gap-0.5 rounded-md p-0.5" role="tablist">
           {(
             [
               ['compare', i18n.t('Compare')],
@@ -71,10 +72,12 @@ export function CompareView({
             </button>
           ))}
         </div>
-        <span className="text-fg-muted flex min-w-0 items-center gap-1.5 text-[11.5px]">
+        <span className="text-fg-muted order-last flex min-w-0 basis-full items-center gap-1.5 overflow-hidden text-[11.5px] @lg:order-none @lg:flex-1 @lg:basis-0">
           <GitCompareArrows className="text-fg-dim h-3.5 w-3.5 shrink-0" />
           <span className="text-fg-dim shrink-0">{tab.gvk.kind}</span>
-          <span className="text-fg truncate font-mono">{object}</span>
+          <span className="text-fg truncate font-mono" title={object}>
+            {object}
+          </span>
         </span>
         <div className="ml-auto flex shrink-0 items-center gap-3">
           <Switch

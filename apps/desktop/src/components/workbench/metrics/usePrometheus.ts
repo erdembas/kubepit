@@ -8,6 +8,7 @@ import {
   targetKey,
   type PromRangeKey,
 } from '@/lib/prometheus';
+import { accessKey } from '@/lib/prometheusAccess';
 import { useAppStore } from '@/store/useAppStore';
 import type {
   ClusterId,
@@ -32,9 +33,10 @@ export const STATUS_POLL_MS = 5 * 60_000;
  * setting; `null` while disconnected or before the cluster exists.
  */
 function useSourceKey(clusterId: ClusterId | null): string | null {
-  const config = useAppStore((s) =>
-    configKey(s.clusters.find((c) => c.id === clusterId)?.prometheus),
-  );
+  const config = useAppStore((s) => {
+    const cluster = s.clusters.find((c) => c.id === clusterId);
+    return `${configKey(cluster?.prometheus)}${accessKey(cluster?.prometheus_access)}`;
+  });
   const status = useAppStore((s) => (clusterId ? s.statuses[clusterId] : undefined));
   if (!clusterId || status?.state !== 'connected') return null;
   return `${config}|${status.connected_at ?? 0}`;

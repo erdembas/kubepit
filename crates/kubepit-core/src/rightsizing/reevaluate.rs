@@ -19,21 +19,6 @@ use super::types::{
 };
 use crate::cost::CostPricing;
 
-/// Replicas behind totals and monthly amounts (spec §6.9): `replicas`, or
-/// for a CronJob the largest observed duty cycle of its containers (1.0
-/// without evidence).
-pub fn cost_replicas(kind: &str, replicas: u32, containers: &[ContainerRecommendation]) -> f64 {
-    if kind != "CronJob" {
-        return f64::from(replicas);
-    }
-    containers
-        .iter()
-        .filter_map(|c| c.evidence.as_ref()?.duty)
-        .filter(|d| d.is_finite() && *d >= 0.0)
-        .reduce(f64::max)
-        .unwrap_or(1.0)
-}
-
 fn reevaluate_workload(
     stored: &WorkloadRecommendation,
     source: RightsizingSource,
@@ -57,9 +42,9 @@ fn reevaluate_workload(
             strategy::recommend(strategy, &input)
         })
         .collect();
-    let cost_replicas = cost_replicas(&stored.kind, stored.replicas, &containers);
-    let monthly_current = math::monthly_requests(&containers, 1, pricing, false) * cost_replicas;
-    let monthly_recommended = math::monthly_requests(&containers, 1, pricing, true) * cost_replicas;
+    let cost_replicas = math::cost_replicas(&stored.kind, stored.replicas, &containers);
+    let monthly_current = math::monthly_requests(&containers, cost_replicas, pricing, false);
+    let monthly_recommended = math::monthly_requests(&containers, cost_replicas, pricing, true);
     // The weakest container with data decides.
     let confidence = containers
         .iter()
@@ -339,16 +324,14 @@ mod tests {
         assert_eq!(legacy.cost_replicas, 2.0);
         assert!(!legacy.lenses.is_empty());
         let per_replica =
-            crate::rightsizing::math::monthly_requests(&legacy.containers, 1, &pricing(), false);
+            crate::rightsizing::math::monthly_requests(&legacy.containers, 1.0, &pricing(), false);
         assert!((legacy.monthly_current - per_replica * 2.0).abs() < 1e-9);
 
         // A CronJob costs its duty cycle, not its replicas.
         let nightly = find(&again, "nightly");
         assert_eq!(nightly.cost_replicas, 0.25);
         let per_replica =
-            crate::rightsizing::math::monthly_requests(&nightly.containers, 1, &pricing(), false);
+            crate::rightsizing::math::monthly_requests(&nightly.containers, 1.0, &pricing(), false);
         assert!((nightly.monthly_current - per_replica * 0.25).abs() < 1e-9);
-        assert_eq!(cost_replicas("CronJob", 1, &[]), 1.0, "without evidence");
-        assert_eq!(cost_replicas("StatefulSet", 4, &nightly.containers), 4.0);
     }
 }

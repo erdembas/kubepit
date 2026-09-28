@@ -106,7 +106,8 @@ workload details, Health and the dashboard.
 | Pod names stored per workload | 50 | |
 
 **Dependencies:** no new crates, except phase 7's in-tree `hyper`, `hyper-util`,
-`http-body-util`, `tokio-rustls` and `rustls`.
+`http-body-util`, `tokio-rustls`, `rustls` and `rustls-native-certs` (the system roots
+for the tunnel's TLS).
 
 **Checks** (every task ends green):
 - `pnpm typecheck`
@@ -963,7 +964,7 @@ git commit -m "feat(rightsizing): ownership-aware collection pipeline with autom
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn cronjob_patches_the_job_template() {
@@ -984,28 +985,28 @@ async fn cronjobs_are_recommended_and_dry_run_patched() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core rightsizing::patch && cargo test -p kubepit-core --test cost`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement the core and UI changes listed under Interfaces**
+- [x] **Step 3: Implement the core and UI changes listed under Interfaces**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core && pnpm typecheck`
 
 Expected: PASS.
 
-- [ ] **Step 5: Verify the demo**
+- [x] **Step 5: Verify the demo**
 
 Run: `pnpm dev:ui`, open a CronJob's details.
 
 Expected: a Right-sizing section, and "Review & apply" shows a dry-run diff at
 `jobTemplate`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/kubepit-core apps/desktop/src
@@ -2556,12 +2557,16 @@ git commit -m "feat(alerts): optional alert for new high-confidence savings"
     name, pub key }`.
   - `PrometheusAccess::normalized(self) -> Result<Self>`: spec §14 validation; the
     reserved keys are listed verbatim.
+  - `PrometheusAccess::ensure_source(&self, config: &PrometheusConfig) -> Result<()>`:
+    `auth` needs `PrometheusConfig::Service` (never `Auto` or `Off`); called by
+    `cluster_add` / `cluster_update`. `credentials_allowed(config, service)` is the
+    runtime check (only the configured service itself).
   - `pub fn matchers(&self) -> String`: `k="v"` pairs through `quote()`, sorted by key.
   - `pub fn provably_disjoint(a: &PrometheusAccess, b: &PrometheusAccess) -> bool`.
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn access_is_validated() {
@@ -2576,21 +2581,21 @@ Steps:
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core prometheus::access`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement it, and mirror it in TS**
+- [x] **Step 3: Implement it, and mirror it in TS**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core && pnpm typecheck`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core apps/desktop/src/types/index.ts
@@ -2629,7 +2634,7 @@ git commit -m "feat(prometheus): tenant, cluster labels and secret auth settings
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn matchers_reach_every_vector_selector() {
@@ -2652,21 +2657,21 @@ async fn every_scan_query_carries_the_cluster_label_and_mismatches_fail() {
 The fake server's `Request` gains `headers: Vec<(String, String)>` in
 `tests/support/mod.rs`.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core prometheus::matchers && cargo test -p kubepit-core --test recommendations cluster_label`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement the lexer and the single transport, and move every caller to it**
+- [x] **Step 3: Implement the lexer and the single transport, and move every caller to it**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test --workspace`
 
 Expected: PASS, including `tests/prometheus.rs`, `cost.rs` and `upgrade.rs`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core
@@ -2679,10 +2684,11 @@ git commit -m "feat(prometheus): cluster-label selector on every preset and tena
 - Create: `crates/kubepit-core/src/prometheus/tunnel.rs`
 - Modify:
   - `crates/kubepit-core/Cargo.toml` (hyper 1, hyper-util, http-body-util, tokio-rustls,
-    rustls, all already in `Cargo.lock`)
+    rustls, rustls-native-certs, all already in `Cargo.lock`)
   - `crates/kubepit-core/src/portforward.rs:352` (`resolve_target` becomes `pub(crate)`)
   - `crates/kubepit-core/src/prometheus/mod.rs` (`prometheus_get` chooses the tunnel
-    when `auth` is set)
+    when `auth` is set, and only for the configured service: a detected candidate
+    never gets the credentials, the request fails with the validation message)
 - Test:
   - the tests module of `tunnel.rs`
   - `crates/kubepit-core/tests/recommendations.rs`
@@ -2707,7 +2713,7 @@ git commit -m "feat(prometheus): cluster-label selector on every preset and tena
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[tokio::test] async fn tunnel_requests_carry_auth_and_tenant() {
@@ -2729,21 +2735,21 @@ async fn secret_values_stay_out_of_errors() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core prometheus::tunnel && cargo test -p kubepit-core --test recommendations secret_values`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement the tunnel and the transport choice**
+- [x] **Step 3: Implement the tunnel and the transport choice**
 
-- [ ] **Step 4: Run the tests and checks**
+- [x] **Step 4: Run the tests and checks**
 
 Run: `cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core Cargo.lock
@@ -2776,9 +2782,9 @@ labels are configured.
 
 Steps:
 
-- [ ] **Step 1: Implement the section, the hint and the demo echo; update the docs**
+- [x] **Step 1: Implement the section, the hint and the demo echo; update the docs**
 
-- [ ] **Step 2: Translate, run the checks**
+- [x] **Step 2: Translate, run the checks**
 
 Run: `pnpm i18n:check -- --fix`, add the Turkish, then `pnpm typecheck && pnpm i18n:check`.
 
@@ -2791,7 +2797,12 @@ Run: `pnpm dev:ui`, edit a cluster → Prometheus.
 - A saved bearer reference round-trips.
 - The PromQL tab shows the hint.
 
-- [ ] **Step 4: Commit**
+  Still needs the browser walkthrough (the implementer had no browser). Covered
+  meanwhile by `PrometheusAccessFields.test.tsx` (reserved key error, Secret
+  reference, skip-verify badge) and `prometheusAccess.test.ts` (round trip, the
+  selector text of the hint).
+
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/desktop/src docs/ARCHITECTURE.md

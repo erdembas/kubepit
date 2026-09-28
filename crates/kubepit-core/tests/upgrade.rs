@@ -9,6 +9,8 @@ mod support;
 use std::sync::Arc;
 
 use base64::Engine as _;
+use kubepit_core::prometheus::access::PrometheusAccess;
+use kubepit_core::types::{PromScheme, PrometheusConfig};
 use kubepit_core::upgrade::{
     UpgradeMetricsState, UpgradeScanOptions, UpgradeSeverity, UpgradeSource,
 };
@@ -409,4 +411,73 @@ async fn metrics_are_optional() {
     assert_eq!(report.metrics, UpgradeMetricsState::Unavailable);
     assert!(report.metrics_error.is_some());
     assert!(!report.findings.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn metrics_query_carries_the_cluster_label_of_a_shared_prometheus() {
+    const PROM: &str = "/api/v1/namespaces/monitoring/services/http:thanos-query:9090/proxy";
+    let objects = router();
+    let server = start(Arc::new(move |req: &Request, log: &Log| {
+        if req.path.starts_with(&format!("{PROM}/api/v1/query_range")) {
+            Reply::Json(
+                200,
+                json!({"status": "success", "data": {"resultType": "matrix", "result": []}}),
+            )
+        } else if req.path.starts_with(&format!("{PROM}/api/v1/query")) {
+            Reply::Json(
+                200,
+                json!({"status": "success", "data": {"resultType": "scalar", "result": [1, "1"]}}),
+            )
+        } else {
+            objects(req, log)
+        }
+    }))
+    .await;
+    let (_dir, app, _recorder, id) = setup(&server.url, false);
+    let mut def = app.cluster_def(&id).unwrap();
+    def.prometheus = PrometheusConfig::Service {
+        namespace: "monitoring".into(),
+        service: "thanos-query".into(),
+        port: 9090,
+        scheme: PromScheme::Http,
+        path_prefix: String::new(),
+    };
+    def.prometheus_access = PrometheusAccess {
+        tenant: "team-a".into(),
+        cluster_labels: [("cluster".to_string(), "prod".to_string())]
+            .into_iter()
+            .collect(),
+        ..Default::default()
+    };
+    app.cluster_update(def).unwrap();
+
+    let report = app
+        .upgrade_readiness_scan(
+            &id,
+            &UpgradeScanOptions {
+                target_version: None,
+                metrics: true,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        report.metrics,
+        UpgradeMetricsState::Used,
+        "{:?}",
+        report.metrics_error
+    );
+    let log = server.log.lock().clone();
+    let sent = log
+        .iter()
+        .find(|r| r.path.starts_with(&format!("{PROM}/api/v1/query_range")))
+        .expect("metrics queried");
+    // `apiserver_requested_deprecated_apis{cluster="prod"}`, percent-encoded.
+    assert!(
+        sent.path
+            .contains("apiserver_requested_deprecated_apis%7Bcluster%3D%22prod%22%7D"),
+        "{}",
+        sent.path
+    );
+    assert_eq!(sent.header("x-scope-orgid"), Some("team-a"));
 }

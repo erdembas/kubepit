@@ -106,6 +106,7 @@
   "Close tab": "Close tab",
   "Cluster": "Cluster",
   "cluster default": "cluster default",
+  "Cluster selector {matchers} is not added to your own queries.": "Cluster selector {matchers} is not added to your own queries.",
   "Cluster shell": "Cluster shell",
   "Cluster shell ({cluster})": "Cluster shell ({cluster})",
   "Clusters": "Clusters",

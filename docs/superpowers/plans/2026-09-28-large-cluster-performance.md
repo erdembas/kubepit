@@ -473,7 +473,7 @@ Expected: FAIL (module missing).
   - With `churn > 0`, the liveness timer ticks every 100 ms and applies `churn / 10` pod changes per tick round-robin: 90% status/label updates, 10% delete + recreate.
   - `db.ts` keeps `byName: Map<kindKey, Map<"ns/name", uid>>` and `byOwner: Map<ownerUid, Set<uid>>` in sync in `put`/`drop`.
 
-- [ ] **Step 4: Run the tests and check the build time** _(Partly verified on 2026-09-28: the tests and typecheck pass; the browser check below was not run, no browser was available. Headless (Vitest, fake timers): `c-scale-l` builds in ~0.25 s; the list arrives 150–350 ms after the watch, its 40 full batches go out at once (one macrotask each), and `synced` follows at the first 150 ms tick after them: at 450 ms under fake timers.)_
+- [x] **Step 4: Run the tests and check the build time** _(Browser check on 2026-09-28, `pnpm dev:ui` at `?scale=l` in the desktop app's browser pane (pane hidden, `setTimeout` polling): `c-scale-l` connected 1.5 s after the click, and the pods table showed all 20 000 pods 0.77 s after opening Pods, 2.3 s in total. Earlier, the tests and typecheck passed. Headless (Vitest, fake timers): `c-scale-l` builds in ~0.25 s; the list arrives 150–350 ms after the watch, its 40 full batches go out at once (one macrotask each), and `synced` follows at the first 150 ms tick after them: at 450 ms under fake timers.)_
 
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck`
 Expected: PASS. Then open `pnpm dev:ui` at `http://localhost:1430/?scale=l`: the `c-scale-l` cluster connects and the pods table fills within 3 s.
