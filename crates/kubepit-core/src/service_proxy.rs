@@ -32,6 +32,9 @@ use crate::types::{ClusterDef, PromScheme};
 
 /// `ApiError::reason` of errors from the proxy path (API server, service).
 pub const PROXY_REASON: &str = "ServiceProxy";
+/// `ApiError::reason` of the API server's RBAC denial of a proxy request (no
+/// `get` on `services/proxy`), see [`is_proxy_forbidden`].
+pub const PROXY_FORBIDDEN_REASON: &str = "ServiceProxyForbidden";
 /// Longest error body quoted in a message.
 pub const MAX_ERROR_BODY: usize = 300;
 
@@ -166,12 +169,35 @@ pub fn short_body(code: u16, body: &str) -> String {
     }
 }
 
+/// The API server's own RBAC denial of a proxy request: a `Status` body with
+/// reason `Forbidden` whose message names `services/proxy` (`… cannot get
+/// resource "services/proxy" …`). A 403 of the service itself (an auth
+/// proxy or gateway in front of it: HTML, plain text, its own JSON) is not.
+fn is_api_server_denial(code: u16, body: &str) -> bool {
+    if code != 403 {
+        return false;
+    }
+    let Ok(status) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    let field = |key: &str| status.get(key).and_then(serde_json::Value::as_str);
+    field("kind") == Some("Status")
+        && field("reason") == Some("Forbidden")
+        && field("message").is_some_and(|m| m.contains("services/proxy"))
+}
+
 /// The error of a non-2xx answer that did not come from the service's own
-/// API: the API server's `Status` message, or the (shortened) body.
+/// API: the API server's `Status` message, or the (shortened) body. The API
+/// server's denial of `services/proxy` gets [`PROXY_FORBIDDEN_REASON`].
 pub fn proxy_error(code: u16, body: &str) -> ApiError {
+    let reason = if is_api_server_denial(code, body) {
+        PROXY_FORBIDDEN_REASON
+    } else {
+        PROXY_REASON
+    };
     ApiError {
         code,
-        reason: PROXY_REASON.to_string(),
+        reason: reason.to_string(),
         message: status_message(body).unwrap_or_else(|| short_body(code, body)),
     }
 }
@@ -184,6 +210,33 @@ pub fn is_proxy_failure(err: &anyhow::Error) -> bool {
             .downcast_ref::<ApiError>()
             .is_some_and(|api| api.reason == PROXY_REASON && matches!(api.code, 404 | 502 | 503))
     })
+}
+
+/// The API server refused the proxy request itself: the user may not `get`
+/// `services/proxy` in the service's namespace. Only the API server's own
+/// `Status` denial counts (see [`proxy_error`]); a 403 of the service or of
+/// an auth proxy in front of it, and a plain Kubernetes 403, do not.
+pub fn is_proxy_forbidden(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        cause
+            .downcast_ref::<ApiError>()
+            .is_some_and(|api| api.reason == PROXY_FORBIDDEN_REASON && api.code == 403)
+    })
+}
+
+/// Detection outcome of probing several candidates (see the state rule of
+/// Prometheus, Loki and cost): `true` when every probe failed with
+/// [`is_proxy_forbidden`]. Mixed failures (one 403, one unreachable or timed
+/// out) are not "forbidden"; neither is an empty probe list.
+pub fn all_forbidden<'a, T: 'a>(probes: impl IntoIterator<Item = &'a Result<T>>) -> bool {
+    let mut any = false;
+    for probe in probes {
+        match probe {
+            Err(e) if is_proxy_forbidden(e) => any = true,
+            _ => return false,
+        }
+    }
+    any
 }
 
 // ---------------------------------------------------------------------------
@@ -554,6 +607,60 @@ mod tests {
         assert!(is_proxy_failure(&gone));
         let bad: anyhow::Error = proxy_error(400, "").into();
         assert!(!is_proxy_failure(&bad));
+    }
+
+    /// The API server's RBAC denial of `get` on `services/proxy`.
+    const DENIAL: &str = r#"{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"Forbidden","code":403,"message":"services \"http:loki:80\" is forbidden: User \"dev\" cannot get resource \"services/proxy\" in API group \"\" in the namespace \"loki\""}"#;
+
+    #[test]
+    fn is_proxy_forbidden_matches_only_proxy_403() {
+        let forbidden: anyhow::Error = proxy_error(403, DENIAL).into();
+        assert!(is_proxy_forbidden(&forbidden));
+        assert!(is_proxy_forbidden(&forbidden.context("probe failed")));
+        assert!(proxy_error(403, DENIAL).message.contains("services/proxy"));
+        assert!(!is_proxy_failure(&proxy_error(403, DENIAL).into()));
+        let gone: anyhow::Error = proxy_error(503, "").into();
+        assert!(!is_proxy_forbidden(&gone));
+        let kube: anyhow::Error = ApiError {
+            code: 403,
+            reason: "Forbidden".into(),
+            message: "services is forbidden".into(),
+        }
+        .into();
+        assert!(!is_proxy_forbidden(&kube));
+    }
+
+    #[test]
+    fn a_403_of_the_service_itself_is_not_an_rbac_denial() {
+        // An auth proxy or gateway in front of the service answers 403 itself.
+        let upstream = [
+            "<html>403 Forbidden</html>",
+            "Forbidden\n",
+            r#"{"error":"forbidden"}"#,
+            "",
+            // Status bodies that are not a denial of services/proxy.
+            r#"{"kind":"Status","reason":"Forbidden","message":"services \"loki:80\" is forbidden","code":403}"#,
+            r#"{"kind":"Status","reason":"NotFound","message":"services/proxy","code":403}"#,
+        ];
+        for body in upstream {
+            let err = proxy_error(403, body);
+            assert_eq!(err.reason, PROXY_REASON, "{body:?}");
+            assert!(!is_proxy_forbidden(&err.into()), "{body:?}");
+        }
+        // The denial body with another status code is not a 403 denial.
+        assert!(!is_proxy_forbidden(&proxy_error(401, DENIAL).into()));
+    }
+
+    #[test]
+    fn all_forbidden_needs_every_probe_refused() {
+        let refused = || -> Result<()> { Err(proxy_error(403, DENIAL).into()) };
+        let gone = || -> Result<()> { Err(proxy_error(503, "").into()) };
+        let upstream = || -> Result<()> { Err(proxy_error(403, "Forbidden").into()) };
+        assert!(all_forbidden(&[refused(), refused()]));
+        assert!(!all_forbidden(&[refused(), gone()]));
+        assert!(!all_forbidden(&[refused(), upstream()]));
+        assert!(!all_forbidden(&[refused(), Ok(())]));
+        assert!(!all_forbidden(&Vec::<Result<()>>::new()));
     }
 
     #[test]

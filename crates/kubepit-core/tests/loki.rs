@@ -10,7 +10,7 @@ use kubepit_core::types::{
     LokiConfig, LokiDirection, LokiKind, LokiQuery, LokiSource, LokiState, PromScheme,
 };
 use serde_json::{json, Value};
-use support::{setup, start, status, Log, Reply, Request, Router};
+use support::{proxy_forbidden, setup, start, status, Log, Reply, Request, Router};
 
 const GATEWAY: &str = "/api/v1/namespaces/loki/services/http:loki-gateway:80/proxy";
 const READ: &str = "/api/v1/namespaces/loki/services/http:loki-read:3100/proxy";
@@ -195,6 +195,65 @@ fn chart_router(gateway_down: Arc<AtomicBool>, read_gone: Arc<AtomicBool>) -> Ro
             _ => Reply::Json(404, status(404, "NotFound", "not found")),
         }
     })
+}
+
+/// How the service proxy answers in [`router_with`].
+#[derive(Debug, Clone, Copy)]
+enum ProxyAnswer {
+    /// Every proxy request is refused (no `get` on `services/proxy`).
+    Forbidden,
+    /// The first candidate (`loki-gateway`) is refused, the second
+    /// (`loki-read`) has no endpoints.
+    ForbiddenThen503,
+}
+
+/// The grafana/loki detection router of [`chart_router`], with every
+/// service-proxy request answered by `answer`.
+fn router_with(answer: ProxyAnswer) -> Router {
+    let detection = chart_router(Arc::default(), Arc::default());
+    Arc::new(move |req: &Request, log: &Log| {
+        if !req.path.contains("/proxy") {
+            return detection(req, log);
+        }
+        match answer {
+            ProxyAnswer::Forbidden => proxy_forbidden(&req.path),
+            ProxyAnswer::ForbiddenThen503 if req.path.starts_with(GATEWAY) => {
+                proxy_forbidden(&req.path)
+            }
+            ProxyAnswer::ForbiddenThen503 => no_endpoints("loki-read"),
+        }
+    })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn proxy_403_reports_forbidden_state() {
+    let server = start(router_with(ProxyAnswer::Forbidden)).await;
+    let (_dir, app, _rec, id) = setup(&server.url, false);
+    app.cluster_connect(&id).await.unwrap();
+    let st = app.loki_status(&id, false).await.unwrap();
+    assert_eq!(st.state, LokiState::Forbidden);
+    assert!(
+        st.error.as_deref().unwrap().contains("services/proxy"),
+        "{st:?}"
+    );
+    assert_eq!(st.service.unwrap().service, "loki-gateway");
+    let err = app
+        .loki_labels(&id, "1", "2", None)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("services/proxy"), "{err}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mixed_forbidden_and_unreachable_candidates_stay_unreachable() {
+    let server = start(router_with(ProxyAnswer::ForbiddenThen503)).await;
+    let (_dir, app, _rec, id) = setup(&server.url, false);
+    app.cluster_connect(&id).await.unwrap();
+    assert_eq!(
+        app.loki_status(&id, false).await.unwrap().state,
+        LokiState::Unreachable
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -98,6 +98,15 @@ pub struct ClusterInput {
     /// Connectivity: per-cluster proxy override (see [`ClusterDef::proxy_url`]).
     #[serde(default)]
     pub proxy_url: Option<String>,
+    /// Cost source and price model (see [`ClusterDef::cost`]).
+    #[serde(default)]
+    pub cost: crate::cost::CostConfig,
+    /// Prometheus source (see [`ClusterDef::prometheus`]).
+    #[serde(default)]
+    pub prometheus: PrometheusConfig,
+    /// Loki source (see [`ClusterDef::loki`]).
+    #[serde(default)]
+    pub loki: LokiConfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1306,6 +1315,9 @@ pub enum PrometheusState {
     NotFound,
     /// A service was found or configured but did not answer queries.
     Unreachable,
+    /// Every probed service was refused by the API server: the user may not
+    /// `get` `services/proxy` there (`error` quotes the API server).
+    Forbidden,
     /// Disabled in the cluster settings.
     Off,
 }
@@ -1505,6 +1517,9 @@ pub enum LokiState {
     NotFound,
     /// A service was found or configured but did not answer.
     Unreachable,
+    /// Every probed service was refused by the API server: the user may not
+    /// `get` `services/proxy` there (`error` quotes the API server).
+    Forbidden,
     /// Disabled in the cluster settings.
     Off,
 }

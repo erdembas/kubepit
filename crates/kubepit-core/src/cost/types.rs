@@ -128,6 +128,10 @@ pub struct CostStatus {
     pub configured: bool,
     /// Why a found or configured cost API is not used.
     pub error: Option<String>,
+    /// Every probed cost API was refused by the API server (no `get` on
+    /// `services/proxy`); costs are estimated and `error` says why.
+    #[serde(default)]
+    pub forbidden: bool,
     /// Cost APIs detection considered, best first.
     pub candidates: Vec<CostService>,
     pub platform: CostPlatform,

@@ -686,7 +686,7 @@ git commit -m "fix(ui): Changes header and details tab strip fit narrow panes"
 **Interfaces:**
 - Produces: `formatMoney(value: number, currency: string, opts?: { compact?: boolean; signed?: boolean }): string`. The `cents` option is removed; nothing uses it.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // apps/desktop/src/lib/cost.test.ts
@@ -728,12 +728,12 @@ describe('formatMoney', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `pnpm --filter @kubepit/desktop test -- src/lib/cost.test.ts`
 Expected: FAIL (`$5,669.3` and `$2,299.7` are returned).
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
   - `const amount = Number.isFinite(value) ? Math.round(value * 100) / 100 : 0`.
   - `const decimals = Math.abs(amount) < 1000 ? 2 : 0`.
   - `notation: compact && Math.abs(amount) >= 1_000_000 ? 'compact' : 'standard'`, with `maximumFractionDigits: 1` in compact mode.
@@ -741,12 +741,12 @@ Expected: FAIL (`$5,669.3` and `$2,299.7` are returned).
   - The fallback uses the same fraction digits.
   - `RightsizingPanel` passes `formatMoney(delta, currency, { signed: true })` instead of the hand-built prefix.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pnpm --filter @kubepit/desktop test && pnpm typecheck`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/src
@@ -1005,7 +1005,7 @@ git commit -m "feat(manifests): notify-based Watch replaces 2 s fingerprint poll
   - TS `ClusterInput` gains `prometheus?: PrometheusConfig; loki?: LokiConfig; cost?: CostConfig`.
   - The field components take `clusterId: ClusterId | null`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 #[test]
@@ -1034,23 +1034,23 @@ fn cluster_add_keeps_observability_settings() {
 
 Use the exact variant and field names of `PrometheusConfig::Service` from `types.rs:1283`. The scheme type may have a different name; take it from the struct.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p kubepit-core --test prometheus cluster_add_keeps_observability_settings`
 Expected: FAIL. `ClusterInput` has no field `prometheus`.
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
   - `cluster_add` validates every input's configs with the same `normalized()` calls as `cluster_update`, before anything is saved, and stores them.
   - The editor sends the drafts in add mode and drops the `editing &&` guards; `clusterId` is `editing?.id ?? null`.
   - The status hooks return idle for a `null` id.
   - The mock forwards the fields.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core && pnpm typecheck`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates apps/desktop
@@ -1084,7 +1084,7 @@ git commit -m "feat(clusters): set Prometheus, Loki and cost sources when adding
   - else, when every probed candidate's error `is_proxy_forbidden` → `Forbidden`, with `service` set to the best candidate and `error` to its message;
   - else `Unreachable`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 // tests/prometheus.rs — the router answers every `/proxy/` path with a 403 Status
@@ -1113,22 +1113,22 @@ async fn mixed_forbidden_and_unreachable_candidates_stay_unreachable() {
 - In `tests/cost.rs` add `forbidden_cost_api_is_flagged`: `status.forbidden == true`, and `source == CostSourceKind::Estimate`.
 - Unit test in `service_proxy.rs`, `is_proxy_forbidden_matches_only_proxy_403`: `proxy_error(403, ..)` → true; `proxy_error(503, ..)` → false; a plain kube 403 `ApiError` with reason `Forbidden` → false.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core forbidden`
 Expected: FAIL (`PrometheusState::Forbidden` not found).
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
   - Add the variants and the field. Apply the state rule. Fix the cost `is_proxy_failure` comment to match the code.
   - `ProxyForbiddenNotice` says "Your account may not use the service proxy for {what}." and "Kubepit reaches it through the API server, which needs get on services/proxy in namespace {namespace}." It shows the API server message verbatim in a `CopyableCodeBlock`, plus a copyable `kubectl auth can-i get services/proxy -n {namespace}`.
   - Each view renders the notice for `forbidden` instead of its "does not answer" state.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core && pnpm typecheck && pnpm i18n:check`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates apps/desktop docs/ARCHITECTURE.md

@@ -7,25 +7,31 @@ import type { CostPlatform, CostPricing, CostService, CostSourceKind, CostSummar
  * price-model text and fleet totals per currency. Pure.
  */
 
-/** Currency with the UI locale's grouping; falls back to `12.34 XYZ` for unknown codes. */
+/**
+ * The one money format of the cost view, overview card, dashboard and
+ * right-sizing, in the UI locale: rounded to cents first, two decimals below
+ * 1,000 and none from there (`$12.40`, `$7,969`). `compact` switches to
+ * compact notation from one million only (`$1.2M`); `signed` prefixes
+ * non-zero deltas with `+` / `-`. Non-finite values count as 0; unknown
+ * currency codes fall back to `12.40 XYZ` with the same fraction rule.
+ */
 export function formatMoney(
   value: number,
   currency: string,
-  { compact = false, cents }: { compact?: boolean; cents?: boolean } = {},
+  { compact = false, signed = false }: { compact?: boolean; signed?: boolean } = {},
 ): string {
-  const amount = Number.isFinite(value) ? value : 0;
-  const fraction = cents ?? Math.abs(amount) < 100;
+  // `|| 0` turns a rounded -0 (e.g. -0.004) into 0, so it never shows "-$0.00".
+  const amount = Number.isFinite(value) ? Math.round(value * 100) / 100 || 0 : 0;
+  const decimals = Math.abs(amount) < 1000 ? 2 : 0;
+  const short = compact && Math.abs(amount) >= 1_000_000;
+  const digits: Intl.NumberFormatOptions = short
+    ? { notation: 'compact', maximumFractionDigits: 1 }
+    : { notation: 'standard', minimumFractionDigits: decimals, maximumFractionDigits: decimals };
+  const signDisplay = signed ? 'exceptZero' : 'auto';
   try {
-    return i18n.number(amount, {
-      style: 'currency',
-      currency,
-      notation: compact && Math.abs(amount) >= 10_000 ? 'compact' : 'standard',
-      minimumFractionDigits: fraction ? 2 : 0,
-      maximumFractionDigits: fraction ? 2 : compact ? 1 : 0,
-    });
+    return i18n.number(amount, { style: 'currency', currency, signDisplay, ...digits });
   } catch {
-    const text = i18n.number(amount, { maximumFractionDigits: fraction ? 2 : 0 });
-    return `${text} ${currency}`;
+    return `${i18n.number(amount, { signDisplay, ...digits })} ${currency}`;
   }
 }
 

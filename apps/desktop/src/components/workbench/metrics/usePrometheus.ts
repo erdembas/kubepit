@@ -27,21 +27,25 @@ import { refreshPolledPrefix, usePolled } from '../data/polled';
 /** The backend re-detects on its own after negative answers; this only picks that up. */
 export const STATUS_POLL_MS = 5 * 60_000;
 
-/** Cache-key fragment that changes with the connection and the cluster's setting. */
-function useSourceKey(clusterId: ClusterId): string | null {
+/**
+ * Cache-key fragment that changes with the connection and the cluster's
+ * setting; `null` while disconnected or before the cluster exists.
+ */
+function useSourceKey(clusterId: ClusterId | null): string | null {
   const config = useAppStore((s) =>
     configKey(s.clusters.find((c) => c.id === clusterId)?.prometheus),
   );
-  const status = useAppStore((s) => s.statuses[clusterId]);
-  if (status?.state !== 'connected') return null;
+  const status = useAppStore((s) => (clusterId ? s.statuses[clusterId] : undefined));
+  if (!clusterId || status?.state !== 'connected') return null;
   return `${config}|${status.connected_at ?? 0}`;
 }
 
-export function usePrometheusStatus(clusterId: ClusterId, enabled = true) {
+/** Idle for a `null` id (a cluster that is still being added). */
+export function usePrometheusStatus(clusterId: ClusterId | null, enabled = true) {
   const source = useSourceKey(clusterId);
   return usePolled<PrometheusStatus>(
     source ? `${clusterId}|prometheus-status|${source}` : null,
-    () => ipc.prometheusStatus(clusterId),
+    () => ipc.prometheusStatus(clusterId!),
     STATUS_POLL_MS,
     enabled,
   );

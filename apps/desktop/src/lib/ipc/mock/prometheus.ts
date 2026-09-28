@@ -123,6 +123,10 @@ async function service(clusterId: string): Promise<PrometheusService> {
     throw new Error(
       `Prometheus at ${st.service.namespace}/${st.service.service} is not reachable: ${st.error}`,
     );
+  if (st.state === 'forbidden' && st.service)
+    throw new Error(
+      `Prometheus at ${st.service.namespace}/${st.service.service} needs get on services/proxy in namespace ${st.service.namespace}: ${st.error}`,
+    );
   throw new Error('no Prometheus was found on this cluster');
 }
 

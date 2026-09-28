@@ -13,11 +13,12 @@ use anyhow::{anyhow, bail, Context, Result};
 use kube::config::Kubeconfig;
 
 use crate::app::Kubepit;
+use crate::cost::CostConfig;
 use crate::kubeconfig;
 use crate::objects::now_millis;
 use crate::paths::{atomic_write, expand_tilde};
 use crate::proxy;
-use crate::types::{ClusterDef, ClusterInput};
+use crate::types::{ClusterDef, ClusterInput, LokiConfig, PrometheusConfig};
 
 /// Where a new cluster's kubeconfig comes from.
 enum Origin {
@@ -54,7 +55,15 @@ fn resolve_kubeconfig_path(raw: &str) -> Result<PathBuf> {
         .with_context(|| format!("cannot resolve kubeconfig path {}", path.display()))
 }
 
-fn validate_input(index: usize, input: &ClusterInput) -> Result<(Origin, Kubeconfig)> {
+/// The observability sources of a new cluster, normalized like
+/// `cluster_update` does before anything is stored.
+struct Sources {
+    cost: CostConfig,
+    prometheus: PrometheusConfig,
+    loki: LokiConfig,
+}
+
+fn validate_input(index: usize, input: &ClusterInput) -> Result<(Origin, Sources)> {
     let label = if input.name.trim().is_empty() {
         format!("cluster #{} ({})", index + 1, input.context)
     } else {
@@ -64,7 +73,24 @@ fn validate_input(index: usize, input: &ClusterInput) -> Result<(Origin, Kubecon
         bail!("{label}: a context name is required");
     }
     proxy::normalize(input.proxy_url.as_deref()).with_context(|| label.clone())?;
-    match (
+    let sources = Sources {
+        cost: input
+            .cost
+            .clone()
+            .normalized()
+            .with_context(|| label.clone())?,
+        prometheus: input
+            .prometheus
+            .clone()
+            .normalized()
+            .with_context(|| label.clone())?,
+        loki: input
+            .loki
+            .clone()
+            .normalized()
+            .with_context(|| label.clone())?,
+    };
+    let origin = match (
         non_blank(&input.kubeconfig_path),
         non_blank(&input.kubeconfig_text),
     ) {
@@ -77,16 +103,17 @@ fn validate_input(index: usize, input: &ClusterInput) -> Result<(Origin, Kubecon
             let kc = kubeconfig::load(&path)
                 .with_context(|| format!("{label}: failed to read {}", path.display()))?;
             kubeconfig::ensure_context(&kc, &input.context).with_context(|| label.clone())?;
-            Ok((Origin::File(path), kc))
+            Origin::File(path)
         }
         (None, Some(_)) => {
             let text = input.kubeconfig_text.clone().unwrap_or_default();
             let kc = kubeconfig::load_text(&text)
                 .with_context(|| format!("{label}: the pasted kubeconfig is invalid"))?;
             kubeconfig::ensure_context(&kc, &input.context).with_context(|| label.clone())?;
-            Ok((Origin::Pasted(text), kc))
+            Origin::Pasted(text)
         }
-    }
+    };
+    Ok((origin, sources))
 }
 
 impl Kubepit {
@@ -95,23 +122,26 @@ impl Kubepit {
         self.store.clusters()
     }
 
-    /// `cluster_add`: validates every input first (all-or-nothing), then
-    /// stores pasted kubeconfigs and appends the new definitions.
+    /// `cluster_add`: validates every input first (all-or-nothing, including
+    /// its Prometheus, Loki and cost settings), then stores pasted
+    /// kubeconfigs and appends the new definitions.
     pub fn cluster_add(&self, inputs: Vec<ClusterInput>) -> Result<Vec<ClusterDef>> {
         if inputs.is_empty() {
             return Ok(Vec::new());
         }
-        let validated: Vec<(ClusterInput, Origin)> = inputs
+        let validated: Vec<(ClusterInput, Origin, Sources)> = inputs
             .into_iter()
             .enumerate()
-            .map(|(i, input)| validate_input(i, &input).map(|(origin, _)| (input, origin)))
+            .map(|(i, input)| {
+                validate_input(i, &input).map(|(origin, sources)| (input, origin, sources))
+            })
             .collect::<Result<_>>()?;
 
         let now = now_millis();
         let mut written: Vec<(String, PathBuf)> = Vec::new();
         let mut defs: Vec<ClusterDef> = Vec::new();
         let write_result: Result<()> = (|| {
-            for (input, origin) in validated {
+            for (input, origin, sources) in validated {
                 let id = uuid::Uuid::new_v4().to_string();
                 let (kubeconfig_path, managed) = match origin {
                     Origin::File(path) => (path, false),
@@ -141,9 +171,9 @@ impl Kubepit {
                     notes: input.notes,
                     created_at: now,
                     last_connected_at: None,
-                    cost: Default::default(),
-                    prometheus: Default::default(),
-                    loki: Default::default(),
+                    cost: sources.cost,
+                    prometheus: sources.prometheus,
+                    loki: sources.loki,
                     proxy_url: proxy::normalize(input.proxy_url.as_deref())?,
                 });
             }

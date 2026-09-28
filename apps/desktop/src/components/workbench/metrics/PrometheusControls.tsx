@@ -13,6 +13,7 @@ import {
 import { useAppStore } from '@/store/useAppStore';
 import { dock } from '@/store/useDockStore';
 import type { ClusterId, PrometheusStatus } from '@/types';
+import { ProxyForbiddenNotice } from '../common/ProxyForbiddenNotice';
 import { RangeToggle } from './UsageHistory';
 import {
   redetectPrometheus,
@@ -88,7 +89,8 @@ function NoteButton({
 /**
  * Subtle line under the charts naming the active source ("Prometheus:
  * monitoring/prometheus-operated" or "metrics-server"), with ways out when
- * Prometheus was not found or does not answer.
+ * Prometheus was not found or does not answer. When the API server refuses
+ * the service proxy, the permission notice sits above the line.
  */
 export function MetricsSourceNote({
   clusterId,
@@ -146,6 +148,7 @@ export function MetricsSourceNote({
     );
   }
 
+  const forbidden = status?.state === 'forbidden' ? status : null;
   const hint = !historyAvailable
     ? i18n.t(
         'Neither metrics-server nor Prometheus was found. Install one of them, or set the Prometheus service in the cluster settings.',
@@ -162,10 +165,10 @@ export function MetricsSourceNote({
               'No Prometheus found, so charts show the last hour from metrics-server. Set a service in the cluster settings if detection misses it.',
             )
           : undefined;
-  return (
+  const line = (
     <div className="text-fg-dim flex items-center justify-end gap-1 text-[10.5px]">
       <span className="flex min-w-0 items-center gap-1.5" title={hint}>
-        {status?.state === 'unreachable' ? (
+        {status?.state === 'unreachable' || forbidden ? (
           <span className="bg-status-starting h-1.5 w-1.5 shrink-0 rounded-full" aria-hidden />
         ) : (
           <Gauge className="h-3 w-3 shrink-0" aria-hidden />
@@ -175,7 +178,9 @@ export function MetricsSourceNote({
             ? i18n.t('No metrics source')
             : status?.state === 'unreachable'
               ? i18n.t('metrics-server · Prometheus unreachable')
-              : 'metrics-server'}
+              : forbidden
+                ? i18n.t('metrics-server · no access to Prometheus')
+                : 'metrics-server'}
         </span>
       </span>
       {status && status.state !== 'off' && (
@@ -188,6 +193,18 @@ export function MetricsSourceNote({
           <Settings2 />
         </NoteButton>
       )}
+    </div>
+  );
+  if (!forbidden) return line;
+  return (
+    <div className="space-y-1.5">
+      <ProxyForbiddenNotice
+        what="Prometheus"
+        namespace={forbidden.service?.namespace ?? '—'}
+        message={forbidden.error}
+        className="max-w-none"
+      />
+      {line}
     </div>
   );
 }

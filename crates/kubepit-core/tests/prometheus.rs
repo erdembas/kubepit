@@ -6,12 +6,14 @@ mod support;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use kubepit_core::cost::{CostConfig, CostSourceConfig};
 use kubepit_core::types::{
-    PromScheme, PrometheusConfig, PrometheusKind, PrometheusMetric, PrometheusRange,
-    PrometheusSource, PrometheusState, PrometheusTarget,
+    ClusterInput, LokiConfig, PromScheme, PrometheusConfig, PrometheusKind, PrometheusMetric,
+    PrometheusRange, PrometheusSource, PrometheusState, PrometheusTarget,
 };
+use kubepit_core::{Kubepit, NullSink, Paths};
 use serde_json::{json, Value};
-use support::{setup, start, status, Log, Reply, Request, Router};
+use support::{proxy_forbidden, setup, start, status, Log, Reply, Request, Router};
 
 const OPERATED: &str = "/api/v1/namespaces/monitoring/services/http:prometheus-operated:9090/proxy";
 
@@ -165,6 +167,79 @@ fn stack_router(gone: Arc<AtomicBool>) -> Router {
             _ => Reply::Json(404, status(404, "NotFound", "not found")),
         }
     })
+}
+
+/// How the service proxy answers in [`router_with`].
+#[derive(Debug, Clone, Copy)]
+enum ProxyAnswer {
+    /// Every proxy request is refused (no `get` on `services/proxy`).
+    Forbidden,
+    /// The first candidate (`prometheus-operated`) is refused, the second
+    /// (`kps-kube-prometheus-prometheus`) has no endpoints.
+    ForbiddenThen503,
+    /// An auth proxy in front of every candidate answers 403 itself (the
+    /// API server let the request through).
+    UpstreamForbidden,
+}
+
+/// The kube-prometheus-stack detection router of [`stack_router`], with
+/// every service-proxy request answered by `answer`.
+fn router_with(answer: ProxyAnswer) -> Router {
+    let detection = stack_router(Arc::default());
+    Arc::new(move |req: &Request, log: &Log| {
+        if !req.path.contains("/proxy") {
+            return detection(req, log);
+        }
+        match answer {
+            ProxyAnswer::Forbidden => proxy_forbidden(&req.path),
+            ProxyAnswer::ForbiddenThen503 if req.path.starts_with(OPERATED) => {
+                proxy_forbidden(&req.path)
+            }
+            ProxyAnswer::ForbiddenThen503 => no_endpoints("kps-kube-prometheus-prometheus"),
+            ProxyAnswer::UpstreamForbidden => Reply::Json(403, json!({"error": "forbidden"})),
+        }
+    })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn upstream_403_is_unreachable_not_forbidden() {
+    let server = start(router_with(ProxyAnswer::UpstreamForbidden)).await;
+    let (_dir, app, _rec, id) = setup(&server.url, false);
+    app.cluster_connect(&id).await.unwrap();
+    let st = app.prometheus_status(&id, false).await.unwrap();
+    assert_eq!(st.state, PrometheusState::Unreachable, "{st:?}");
+    assert!(st.error.as_deref().unwrap().contains("forbidden"), "{st:?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn proxy_403_reports_forbidden_state() {
+    let server = start(router_with(ProxyAnswer::Forbidden)).await;
+    let (_dir, app, _rec, id) = setup(&server.url, false);
+    app.cluster_connect(&id).await.unwrap();
+    let st = app.prometheus_status(&id, false).await.unwrap();
+    assert_eq!(st.state, PrometheusState::Forbidden);
+    assert!(
+        st.error.as_deref().unwrap().contains("services/proxy"),
+        "{st:?}"
+    );
+    assert_eq!(st.service.unwrap().service, "prometheus-operated");
+    let err = app
+        .prometheus_query_range(&id, "up", &last_hour())
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("services/proxy"), "{err}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mixed_forbidden_and_unreachable_candidates_stay_unreachable() {
+    let server = start(router_with(ProxyAnswer::ForbiddenThen503)).await;
+    let (_dir, app, _rec, id) = setup(&server.url, false);
+    app.cluster_connect(&id).await.unwrap();
+    assert_eq!(
+        app.prometheus_status(&id, false).await.unwrap().state,
+        PrometheusState::Unreachable
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -430,4 +505,59 @@ async fn configured_service_off_and_not_found() {
         path_prefix: "/../../api".into(),
     };
     assert!(app.cluster_update(def).is_err());
+}
+
+#[test]
+fn cluster_add_keeps_observability_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = Kubepit::open(Paths::new(dir.path().join("home")), Arc::new(NullSink)).unwrap();
+    let prometheus = PrometheusConfig::Service {
+        namespace: " monitoring ".into(),
+        service: "prometheus-operated".into(),
+        port: 9090,
+        scheme: PromScheme::Http,
+        path_prefix: "/".into(),
+    };
+    let cost = CostConfig {
+        source: CostSourceConfig::Estimate,
+        pricing: None,
+    };
+    let added = app
+        .cluster_add(vec![ClusterInput {
+            name: "Obs".into(),
+            context: "fake".into(),
+            kubeconfig_text: Some(support::kubeconfig_for("http://127.0.0.1:1")),
+            prometheus: prometheus.clone(),
+            loki: LokiConfig::Off,
+            cost: cost.clone(),
+            ..Default::default()
+        }])
+        .unwrap();
+    assert_eq!(added[0].prometheus, prometheus.normalized().unwrap());
+    assert_eq!(added[0].loki, LokiConfig::Off);
+    assert_eq!(added[0].cost, cost);
+    assert_eq!(app.cluster_list()[0].prometheus, added[0].prometheus);
+
+    // An invalid setting refuses the whole batch before anything is saved.
+    let good = ClusterInput {
+        name: "Good".into(),
+        context: "fake".into(),
+        kubeconfig_text: Some(support::kubeconfig_for("http://127.0.0.1:1")),
+        ..Default::default()
+    };
+    let bad = ClusterInput {
+        name: "Bad".into(),
+        context: "fake".into(),
+        kubeconfig_text: Some(support::kubeconfig_for("http://127.0.0.1:1")),
+        prometheus: PrometheusConfig::Service {
+            namespace: "a|b".into(),
+            service: "x".into(),
+            port: 1,
+            scheme: PromScheme::Http,
+            path_prefix: "/".into(),
+        },
+        ..Default::default()
+    };
+    assert!(app.cluster_add(vec![good, bad]).is_err());
+    assert_eq!(app.cluster_list().len(), 1);
 }

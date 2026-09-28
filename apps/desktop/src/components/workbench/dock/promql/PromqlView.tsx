@@ -25,6 +25,7 @@ import {
 import { useAppStore } from '@/store/useAppStore';
 import { useDockStore, type DockTab } from '@/store/useDockStore';
 import type { ClusterId, PromQueryResult } from '@/types';
+import { ProxyForbiddenNotice } from '../../common/ProxyForbiddenNotice';
 import { MultiSeriesChart, type MultiSeries } from '../../overview/MultiSeriesChart';
 import { redetectPrometheus, usePrometheusStatus } from '../../metrics/usePrometheus';
 import { DockStripAction } from '../DockStripAction';
@@ -221,20 +222,30 @@ export function PromqlView({
     return (
       <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-6 text-center">
         <Flame className="text-fg-dim h-5 w-5" />
-        <p className="text-fg text-[12.5px] font-medium">
-          {st.state === 'off'
-            ? i18n.t('Prometheus is turned off for this cluster.')
-            : st.state === 'unreachable'
-              ? i18n.t('Prometheus does not answer')
-              : i18n.t('No Prometheus found on this cluster')}
-        </p>
-        <p className="text-fg-dim max-w-lg text-[11.5px]">
-          {st.state === 'unreachable' && st.error
-            ? st.error
-            : i18n.t(
-                'Kubepit looks for kube-prometheus-stack, the Prometheus chart, Thanos, VictoriaMetrics, Mimir and OpenShift monitoring, and queries them through the API server. You can also set the service in the cluster settings.',
-              )}
-        </p>
+        {st.state === 'forbidden' ? (
+          <ProxyForbiddenNotice
+            what="Prometheus"
+            namespace={st.service?.namespace ?? '—'}
+            message={st.error}
+          />
+        ) : (
+          <>
+            <p className="text-fg text-[12.5px] font-medium">
+              {st.state === 'off'
+                ? i18n.t('Prometheus is turned off for this cluster.')
+                : st.state === 'unreachable'
+                  ? i18n.t('Prometheus does not answer')
+                  : i18n.t('No Prometheus found on this cluster')}
+            </p>
+            <p className="text-fg-dim max-w-lg text-[11.5px]">
+              {st.state === 'unreachable' && st.error
+                ? st.error
+                : i18n.t(
+                    'Kubepit looks for kube-prometheus-stack, the Prometheus chart, Thanos, VictoriaMetrics, Mimir and OpenShift monitoring, and queries them through the API server. You can also set the service in the cluster settings.',
+                  )}
+            </p>
+          </>
+        )}
         <div className="mt-1 flex gap-1.5">
           {st.state !== 'off' && (
             <button

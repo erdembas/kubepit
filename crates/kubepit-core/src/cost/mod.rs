@@ -40,6 +40,7 @@ use crate::app::Kubepit;
 use crate::error::ApiError;
 use crate::objects::now_millis;
 use crate::prometheus::detect::list_services;
+use crate::service_proxy;
 use crate::types::{
     ClusterDef, PrometheusMetric, PrometheusRange, PrometheusState, PrometheusTarget,
 };
@@ -101,7 +102,10 @@ impl CostState {
     }
 }
 
-/// Whether a status entry may be reused.
+/// Whether a status entry may be reused. A found cost API and a chosen
+/// source are kept for the connection; "no cost API" and a refused proxy
+/// (`forbidden`, configured or detected) are rechecked after
+/// [`RECHECK_AFTER`], like Prometheus and Loki.
 fn status_fresh(
     entry: &StatusEntry,
     connected_at: Option<i64>,
@@ -109,14 +113,17 @@ fn status_fresh(
     platform: &Option<String>,
     now: Instant,
 ) -> bool {
-    let positive = entry.status.source != CostSourceKind::Estimate || entry.status.configured;
+    let positive = entry.status.source != CostSourceKind::Estimate
+        || (entry.status.configured && !entry.status.forbidden);
     entry.connected_at == connected_at
         && &entry.config == config
         && &entry.platform == platform
         && (positive || now.duration_since(entry.at) < RECHECK_AFTER)
 }
 
-/// The proxy could not reach the service (gone, no endpoints, forbidden).
+/// The proxy could not reach the service (gone: 404, 502 or 503). A 403
+/// (no `get` on `services/proxy`) is not a failure of the service; detection
+/// reports it as `CostStatus::forbidden`.
 fn is_proxy_failure(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
         cause.downcast_ref::<ApiError>().is_some_and(|api| {
@@ -223,6 +230,7 @@ impl Kubepit {
             service: None,
             configured: false,
             error: None,
+            forbidden: false,
             candidates: Vec::new(),
             platform,
             platform_label: conn.platform.clone(),
@@ -239,7 +247,10 @@ impl Kubepit {
                 let client = self.cost_client(&cluster).await?;
                 match probe(&client, &service).await {
                     Ok(()) => status.source = source_of(service.kind),
-                    Err(e) => status.error = Some(format!("{e:#}")),
+                    Err(e) => {
+                        status.forbidden = service_proxy::is_proxy_forbidden(&e);
+                        status.error = Some(format!("{e:#}"));
+                    }
                 }
                 status.service = Some(service);
             }
@@ -260,6 +271,7 @@ impl Kubepit {
                         }
                         None => {
                             status.service = Some(candidates[0].clone());
+                            status.forbidden = service_proxy::all_forbidden(&probes);
                             status.error = probes
                                 .into_iter()
                                 .find_map(Result::err)
@@ -604,6 +616,7 @@ mod tests {
             service: None,
             configured,
             error: None,
+            forbidden: false,
             candidates: Vec::new(),
             platform: CostPlatform::Generic,
             platform_label: None,
@@ -671,6 +684,31 @@ mod tests {
             &eks,
             now + RECHECK_AFTER * 4
         ));
+    }
+
+    #[test]
+    fn forbidden_cost_sources_are_rechecked_like_other_negative_answers() {
+        let now = Instant::now();
+        let config = CostConfig::default();
+        let eks = Some("EKS".to_string());
+        let later = now + RECHECK_AFTER + Duration::from_secs(1);
+        for configured in [true, false] {
+            let entry = StatusEntry {
+                connected_at: Some(1),
+                config: CostConfig::default(),
+                platform: Some("EKS".into()),
+                status: CostStatus {
+                    forbidden: true,
+                    ..status(CostSourceKind::Estimate, configured)
+                },
+                at: now,
+            };
+            assert!(status_fresh(&entry, Some(1), &config, &eks, now));
+            assert!(
+                !status_fresh(&entry, Some(1), &config, &eks, later),
+                "configured: {configured}"
+            );
+        }
     }
 
     #[test]

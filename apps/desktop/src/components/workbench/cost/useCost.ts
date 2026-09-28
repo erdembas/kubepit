@@ -27,22 +27,26 @@ export const RIGHTSIZING_POLL_MS = 15 * 60_000;
 /** Keys whose next fetch bypasses the backend cache. */
 const forced = new Set<string>();
 
-/** Cache-key fragment of the connection and the cost setting. */
-export function useCostSourceKey(clusterId: ClusterId): string | null {
+/**
+ * Cache-key fragment of the connection and the cost setting; `null` while
+ * disconnected or before the cluster exists.
+ */
+export function useCostSourceKey(clusterId: ClusterId | null): string | null {
   const config = useAppStore((s) =>
     JSON.stringify(s.clusters.find((c) => c.id === clusterId)?.cost ?? null),
   );
-  const status = useAppStore((s) => s.statuses[clusterId]);
-  if (status?.state !== 'connected') return null;
+  const status = useAppStore((s) => (clusterId ? s.statuses[clusterId] : undefined));
+  if (!clusterId || status?.state !== 'connected') return null;
   return `${config}|${status.connected_at ?? 0}`;
 }
 
-export function useCostStatus(clusterId: ClusterId, enabled = true) {
+/** Idle for a `null` id (a cluster that is still being added). */
+export function useCostStatus(clusterId: ClusterId | null, enabled = true) {
   const source = useCostSourceKey(clusterId);
   const key = source ? `${clusterId}|cost-status|${source}` : null;
   return usePolled<CostStatus>(
     key,
-    () => ipc.costStatus(clusterId, key ? forced.delete(key) : false),
+    () => ipc.costStatus(clusterId!, key ? forced.delete(key) : false),
     COST_POLL_MS,
     enabled,
   );

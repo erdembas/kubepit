@@ -93,6 +93,7 @@ async function status(clusterId: string): Promise<CostStatus> {
     service: null,
     configured: source.mode !== 'auto',
     error: null,
+    forbidden: false,
     candidates: [],
     platform,
     platform_label: conn.platform,

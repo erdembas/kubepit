@@ -46,6 +46,7 @@ import { formatLogTime, incNs, msToNs, nsToIso, nsToMs } from '@/lib/logs/time';
 import { useAppStore } from '@/store/useAppStore';
 import { useDockStore, type DockTab } from '@/store/useDockStore';
 import type { ClusterId, LokiService } from '@/types';
+import { ProxyForbiddenNotice } from '../../common/ProxyForbiddenNotice';
 import { formatLogLine, truncateAnsi, type LogFormatOptions } from '../logs/format';
 import { MAX_LOG_LINES, type LogEntry } from '../logs/logBuffer';
 import { LogTerminal, type LogTerminalHandle } from '../logs/LogTerminal';
@@ -432,20 +433,30 @@ export function LokiView({
     return (
       <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-6 text-center">
         <CalendarSearch className="text-fg-dim h-5 w-5" />
-        <p className="text-fg text-[12.5px] font-medium">
-          {st.state === 'off'
-            ? i18n.t('Loki is turned off for this cluster.')
-            : st.state === 'unreachable'
-              ? i18n.t('Loki does not answer')
-              : i18n.t('No Loki found on this cluster')}
-        </p>
-        <p className="text-fg-dim max-w-lg text-[11.5px]">
-          {st.state === 'unreachable' && st.error
-            ? st.error
-            : i18n.t(
-                'Kubepit looks for the Loki gateway, query frontend, read path or single binary (grafana/loki, loki-distributed, loki-stack) and queries it through the API server. You can also set the service in the cluster settings.',
-              )}
-        </p>
+        {st.state === 'forbidden' ? (
+          <ProxyForbiddenNotice
+            what="Loki"
+            namespace={st.service?.namespace ?? '—'}
+            message={st.error}
+          />
+        ) : (
+          <>
+            <p className="text-fg text-[12.5px] font-medium">
+              {st.state === 'off'
+                ? i18n.t('Loki is turned off for this cluster.')
+                : st.state === 'unreachable'
+                  ? i18n.t('Loki does not answer')
+                  : i18n.t('No Loki found on this cluster')}
+            </p>
+            <p className="text-fg-dim max-w-lg text-[11.5px]">
+              {st.state === 'unreachable' && st.error
+                ? st.error
+                : i18n.t(
+                    'Kubepit looks for the Loki gateway, query frontend, read path or single binary (grafana/loki, loki-distributed, loki-stack) and queries it through the API server. You can also set the service in the cluster settings.',
+                  )}
+            </p>
+          </>
+        )}
         <div className="mt-1 flex gap-1.5">
           {st.state !== 'off' && (
             <button

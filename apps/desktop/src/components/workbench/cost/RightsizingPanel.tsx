@@ -244,7 +244,7 @@ function RecommendationRow({
               <TrendingUp className="h-3.5 w-3.5" />
             )}
             {i18n.t('{amount} / month', {
-              amount: `${delta < 0 ? '−' : '+'}${formatMoney(Math.abs(delta), currency)}`,
+              amount: formatMoney(delta, currency, { signed: true }),
             })}
           </span>
         ) : (

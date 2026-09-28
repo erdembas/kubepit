@@ -7,22 +7,28 @@ import { refreshPolledPrefix, usePolled } from '../../data/polled';
 /** The backend re-detects on its own after negative answers; this only picks that up. */
 const STATUS_POLL_MS = 5 * 60_000;
 
-/** Cache-key fragment that changes with the connection and the cluster's Loki setting. */
-export function useLokiSourceKey(clusterId: ClusterId): string | null {
+/**
+ * Cache-key fragment that changes with the connection and the cluster's Loki
+ * setting; `null` while disconnected or before the cluster exists.
+ */
+export function useLokiSourceKey(clusterId: ClusterId | null): string | null {
   const config = useAppStore((s) =>
     lokiConfigKey(s.clusters.find((c) => c.id === clusterId)?.loki),
   );
-  const status = useAppStore((s) => s.statuses[clusterId]);
-  if (status?.state !== 'connected') return null;
+  const status = useAppStore((s) => (clusterId ? s.statuses[clusterId] : undefined));
+  if (!clusterId || status?.state !== 'connected') return null;
   return `${config}|${status.connected_at ?? 0}`;
 }
 
-/** Loki detection status (cached per connection in the backend). */
-export function useLokiStatus(clusterId: ClusterId, enabled = true) {
+/**
+ * Loki detection status (cached per connection in the backend). Idle for a
+ * `null` id (a cluster that is still being added).
+ */
+export function useLokiStatus(clusterId: ClusterId | null, enabled = true) {
   const source = useLokiSourceKey(clusterId);
   return usePolled<LokiStatus>(
     source ? `${clusterId}|loki-status|${source}` : null,
-    () => ipc.lokiStatus(clusterId),
+    () => ipc.lokiStatus(clusterId!),
     STATUS_POLL_MS,
     enabled,
   );

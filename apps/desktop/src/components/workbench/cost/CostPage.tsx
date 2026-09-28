@@ -25,6 +25,7 @@ import { cn } from '@/lib/cn';
 import { efficiencyTone, share } from '@/lib/kube/cost/breakdown';
 import { seriesColor } from '@/lib/prometheus';
 import type { CostReport, CostUsageSource, CostWindow } from '@/types';
+import { ProxyForbiddenNotice } from '../common/ProxyForbiddenNotice';
 import { MultiSeriesChart } from '../overview/MultiSeriesChart';
 import { Card, Legend, SegmentBar, StatTile, type Segment } from '../overview/charts';
 import { CostBreakdown } from './CostBreakdown';
@@ -98,14 +99,21 @@ export function PriceModelCard({ report }: { report: CostReport }) {
                 <li key={line}>{line}</li>
               ))}
             </ul>
-            {st.error && st.service && (
+            {st.forbidden && st.service ? (
+              <ProxyForbiddenNotice
+                what={costSourceLabel(st.service.kind)}
+                namespace={st.service.namespace}
+                message={st.error}
+                className="max-w-none"
+              />
+            ) : st.error && st.service ? (
               <p className="text-fg-dim text-[11px] break-words">
                 {i18n.t('{service} was found but did not answer: {error}', {
                   service: costServiceLabel(st.service),
                   error: st.error,
                 })}
               </p>
-            )}
+            ) : null}
           </>
         )}
         <p className="text-fg-dim text-[11px]">{usageLabel(report.usage, report.window)}</p>

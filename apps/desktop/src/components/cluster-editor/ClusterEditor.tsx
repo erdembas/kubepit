@@ -62,6 +62,8 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
   const clusterSection = useAppStore((s) => s.clusterSection);
   const clusters = useAppStore((s) => s.clusters);
   const editing = state.mode === 'edit' ? state.cluster : null;
+  /** No status lookups run before the cluster exists. */
+  const clusterId = editing?.id ?? null;
   const [fields, setFields] = useState<ClusterFieldValues>(() =>
     editing ? fieldsFrom(editing, clusterSection[editing.id] ?? null) : emptyFields(),
   );
@@ -138,16 +140,16 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
     if (!name) return setError(i18n.t('Give the cluster a name.'));
     const proxyProblem = proxyUrlProblem(proxy);
     if (proxyProblem) return setError(proxyProblem);
+    const metrics = prometheusConfig(prometheus);
+    if ('error' in metrics) return setError(metrics.error);
+    const logs = lokiConfig(loki);
+    if ('error' in logs) return setError(logs.error);
+    const costing = costConfig(cost);
+    if ('error' in costing) return setError(costing.error);
     setBusy(true);
     try {
       const store = useAppStore.getState();
       if (editing) {
-        const metrics = prometheusConfig(prometheus);
-        if ('error' in metrics) return setError(metrics.error);
-        const logs = lokiConfig(loki);
-        if ('error' in logs) return setError(logs.error);
-        const costing = costConfig(cost);
-        if ('error' in costing) return setError(costing.error);
         const saved = await saveCluster({
           ...editing,
           name,
@@ -180,6 +182,9 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
           read_only: fields.read_only,
           notes: fields.notes,
           proxy_url: proxy.trim() || null,
+          prometheus: metrics.config,
+          loki: logs.config,
+          cost: costing.config,
         };
         const [added] = await ipc.clusterAdd([input]);
         if (added) {
@@ -349,7 +354,7 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
         <ClusterFields value={fields} onChange={setFields} />
 
         <div className="border-border/60 space-y-3 border-t pt-4">
-          <ProxyField value={proxy} onChange={setProxy} clusterId={editing?.id ?? null} />
+          <ProxyField value={proxy} onChange={setProxy} clusterId={clusterId} />
           <Switch
             checked={fields.read_only}
             onChange={(read_only) => setFields((f) => ({ ...f, read_only }))}
@@ -360,17 +365,13 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
           />
         </div>
 
-        {editing && (
-          <div className="border-border/60 border-t pt-4">
-            <PrometheusFields clusterId={editing.id} value={prometheus} onChange={setPrometheus} />
-          </div>
-        )}
-        {editing && (
-          <div className="border-border/60 border-t pt-4">
-            <LokiFields clusterId={editing.id} value={loki} onChange={setLoki} />
-            <CostFields clusterId={editing.id} value={cost} onChange={setCost} />
-          </div>
-        )}
+        <div className="border-border/60 border-t pt-4">
+          <PrometheusFields clusterId={clusterId} value={prometheus} onChange={setPrometheus} />
+        </div>
+        <div className="border-border/60 border-t pt-4">
+          <LokiFields clusterId={clusterId} value={loki} onChange={setLoki} />
+          <CostFields clusterId={clusterId} value={cost} onChange={setCost} />
+        </div>
       </div>
     </Dialog>
   );

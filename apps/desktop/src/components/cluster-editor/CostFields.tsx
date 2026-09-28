@@ -160,7 +160,8 @@ export function CostFields({
   value,
   onChange,
 }: {
-  clusterId: ClusterId;
+  /** `null` while adding: no status lookup runs before the cluster exists. */
+  clusterId: ClusterId | null;
   value: CostDraft;
   onChange: (next: CostDraft) => void;
 }) {

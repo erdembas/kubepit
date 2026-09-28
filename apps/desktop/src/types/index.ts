@@ -119,6 +119,12 @@ export interface ClusterInput {
   notes: string;
   /** Connectivity: per-cluster proxy override (see `ClusterDef.proxy_url`). */
   proxy_url?: string | null;
+  /** Prometheus source (see `ClusterDef.prometheus`; missing = auto-detect). */
+  prometheus?: PrometheusConfig;
+  /** Loki source (see `ClusterDef.loki`; missing = auto-detect). */
+  loki?: LokiConfig;
+  /** Cost source and price model (see `ClusterDef.cost`; missing = auto, platform prices). */
+  cost?: CostConfig;
 }
 
 export type ConnState = 'disconnected' | 'connecting' | 'connected' | 'error';
@@ -1520,7 +1526,8 @@ export type PrometheusConfig =
     }
   | { mode: 'off' };
 
-export type PrometheusState = 'available' | 'not-found' | 'unreachable' | 'off';
+/** `forbidden`: every probed service was refused (no get on services/proxy). */
+export type PrometheusState = 'available' | 'not-found' | 'unreachable' | 'forbidden' | 'off';
 
 export interface PrometheusStatus {
   state: PrometheusState;
@@ -1643,7 +1650,8 @@ export type LokiConfig =
     }
   | { mode: 'off' };
 
-export type LokiState = 'available' | 'not-found' | 'unreachable' | 'off';
+/** `forbidden`: every probed service was refused (no get on services/proxy). */
+export type LokiState = 'available' | 'not-found' | 'unreachable' | 'forbidden' | 'off';
 
 export interface LokiStatus {
   state: LokiState;
@@ -2047,6 +2055,8 @@ export interface CostStatus {
   configured: boolean;
   /** Why a found or configured cost API is not used. */
   error: string | null;
+  /** Every probed cost API was refused (no get on services/proxy); costs are estimated. */
+  forbidden: boolean;
   candidates: CostService[];
   platform: CostPlatform;
   platform_label: string | null;
