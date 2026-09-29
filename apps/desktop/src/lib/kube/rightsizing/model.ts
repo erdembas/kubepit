@@ -9,7 +9,6 @@ import type {
   ResourceChange,
   RightsizingConfidence,
   RightsizingReport,
-  RightsizingSettings,
   RightsizingSource,
   RightsizingStrategyInfo,
   RightsizingVerdict,
@@ -24,19 +23,6 @@ import type {
  */
 
 export const MiB = 1024 ** 2;
-
-/** Defaults of the backend (`RightsizingSettings::default`). */
-export const DEFAULT_RIGHTSIZING: RightsizingSettings = {
-  cpu_headroom_percent: 15,
-  memory_headroom_percent: 20,
-  memory_limit_headroom_percent: 40,
-  min_cpu_millicores: 10,
-  min_memory_bytes: 32 * MiB,
-  days: 7,
-  min_hours: 24,
-  min_coverage: 0.9,
-  throttle_threshold_percent: 5,
-};
 
 /**
  * Kinds the recommendations cover (and `rightsizing_apply` patches). A

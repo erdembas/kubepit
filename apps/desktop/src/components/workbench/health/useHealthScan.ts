@@ -14,7 +14,6 @@ import { perfNow, recordSince } from '@/lib/perf/probe';
 import { useHealthIgnores, useHealthOptIns, useHealthStore } from '@/store/useHealthStore';
 import type { ApiResourceInfo, Gvk } from '@/types';
 import { restartWatch, useWatch, type WatchSnapshot } from '../data/watchCache';
-import { useCostPrefs } from '../cost/prefs';
 import { useRightsizing } from '../cost/useCost';
 import { useNow } from '../util';
 import { hasListIssue, scanLists } from './scanLists';
@@ -180,14 +179,7 @@ export function useHealthScan(
     fluxProviders: useWatch(clusterId, gvks.fluxProviders, namespaces, enabled),
   };
   // Cost insight: right-sizing findings (efficiency) when a report is available.
-  const rightsizing = useRightsizing(
-    clusterId,
-    namespaces,
-    null,
-    useCostPrefs((s) => s.settings),
-    useCostPrefs((s) => s.strategy),
-    enabled,
-  ).data;
+  const rightsizing = useRightsizing(clusterId, namespaces, null, enabled).data;
   const kinds = Object.keys(snaps) as HealthKind[];
   const watched = kinds.filter((k) => gvks[k]);
   const settled = watched.filter((k) => snaps[k].synced || snaps[k].status === 'error');

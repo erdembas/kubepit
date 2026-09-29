@@ -71,6 +71,7 @@ import {
   PackageSearch,
   ServerCog,
   ShieldAlert,
+  Sparkles,
   UserCheck,
 } from 'lucide-react';
 
@@ -105,6 +106,7 @@ const KIND_ICONS: Record<string, LucideIcon> = {
   '@upgrade': CircleArrowUp,
   '@security': ShieldAlert,
   '@cost': CircleDollarSign,
+  '@recommendations': Sparkles,
   nodes: Server,
   namespaces: FolderTree,
   events: Bell,

@@ -1967,8 +1967,9 @@ git commit -m "feat(demo): recommendation scans in the in-memory backend"
     - the input is never mutated;
   - `capacityByNamespace(list, resource, top = 5): NamespaceCapacity[]`;
   - `optimizationTotals(list): OptimizationTotals`;
-  - `type ApplyMode = 'one-click' | 'review' | 'blocked'` and `applyMode(rec, cluster:
-    Pick<ClusterDef, 'read_only' | 'environment'>): ApplyMode` (spec §8; the RBAC gate is
+  - `type ApplyMode = 'one-click' | 'review' | 'read-only' | 'none'` and `applyMode(rec,
+    cluster: Pick<ClusterDef, 'read_only' | 'environment'>): ApplyMode` (spec §8;
+    `read-only` keeps the review with apply refused, `none` = no change; the RBAC gate is
     checked by the caller);
   - `scanStateText(status)`;
   - `runErrorText(error)`, which translates the codes `app-restarted`, `stopped`,
@@ -1976,9 +1977,9 @@ git commit -m "feat(demo): recommendation scans in the in-memory backend"
 
 Steps:
 
-- [ ] **Step 1: Implement the store, the model and the translation functions**
+- [x] **Step 1: Implement the store, the model and the translation functions**
 
-- [ ] **Step 2: Add the translations**
+- [x] **Step 2: Add the translations**
 
 Run: `pnpm i18n:check -- --fix`, then add the Turkish for every key it prints, for
 example:
@@ -1987,13 +1988,13 @@ example:
 - "OOM-killed in the window: memory never goes below the limit that killed it." →
   "Pencerede OOM ile sonlandı: bellek, sonlandıran sınırın altına inmez."
 
-- [ ] **Step 3: Run the checks**
+- [x] **Step 3: Run the checks**
 
 Run: `pnpm typecheck && pnpm i18n:check`
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/desktop/src
@@ -2048,15 +2049,15 @@ git commit -m "feat(ui): recommendations store and view models"
 
 Steps:
 
-- [ ] **Step 1: Implement the components and the removals listed under Files**
+- [x] **Step 1: Implement the components and the removals listed under Files**
 
-- [ ] **Step 2: Translate, run the checks**
+- [x] **Step 2: Translate, run the checks**
 
 Run: `pnpm i18n:check -- --fix`, add the Turkish, then `pnpm typecheck && pnpm i18n:check`.
 
 Expected: PASS.
 
-- [ ] **Step 3: Verify the demo**
+- [x] **Step 3: Verify the demo**
 
 Run: `pnpm dev:ui`.
 - prod-eu-west-1 → Cluster → Recommendations: the header shows "Prometheus · 7 days",
@@ -2066,7 +2067,7 @@ Run: `pnpm dev:ui`.
 - kind shows the empty state "No scan yet".
 - Cost → Right-sizing shows the summary card, and its link opens the view.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/desktop/src
