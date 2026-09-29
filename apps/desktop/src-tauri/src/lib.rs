@@ -13,6 +13,7 @@ mod app_state;
 pub mod ipc;
 mod setup;
 pub mod terminal;
+mod text_input;
 mod windows;
 
 pub use app_state::AppState;
@@ -29,6 +30,8 @@ pub fn run() {
         )
         .with_target(false)
         .try_init();
+    // Before any webview exists: WebKit reads these once per process.
+    text_input::disable_os_typing_helpers();
 
     let context = tauri::generate_context!();
     // Updates stay inert until a release signing key is configured (docs/RELEASING.md).

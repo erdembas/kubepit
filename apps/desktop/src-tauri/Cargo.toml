@@ -45,5 +45,9 @@ base64 = "0.22"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# App-scoped user defaults that switch off WebKit's autocorrect (see text_input.rs).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSUserDefaults"] }
+
 [features]
 custom-protocol = ["tauri/custom-protocol"]
