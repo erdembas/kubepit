@@ -1,7 +1,7 @@
 import * as i18n from '@/i18n';
-import { ChevronDown } from 'lucide-react';
-import { cn } from '@/lib/cn';
+import { connState, isLive } from '@/lib/clusterMeta';
 import { ClusterRow } from './ClusterRow';
+import { TreeGroupHeader } from './TreeGroupHeader';
 import type { ClusterGroup } from './dnd';
 import type { ClusterDef, ClusterStatus, SectionId } from '@/types';
 
@@ -34,35 +34,19 @@ export function GroupedClusterList({
     <>
       {groups.map((group) => {
         const collapsed = collapsedGroups.has(group.key);
+        const running = group.clusters.filter((c) => isLive(connState(statuses[c.id]))).length;
         return (
-          <section key={group.key} className="animate-slide-in">
-            <header
-              onClick={() => onToggleGroup(group.key)}
-              className="hover:bg-surface-overlay/40 sticky top-0 z-10 flex cursor-pointer items-center gap-2 bg-transparent py-1 pr-4 pl-3 backdrop-blur-[2px]"
-            >
-              <ChevronDown
-                className={cn(
-                  'text-fg-dim h-3 w-3 transition-transform',
-                  collapsed && '-rotate-90',
-                )}
-              />
-              {group.dot && (
-                <span className={cn('h-1.5 w-1.5 rounded-full', group.dot)} aria-hidden />
-              )}
-              <span
-                className={cn(
-                  'text-[10.5px] font-semibold tracking-[0.14em] uppercase',
-                  group.color ?? 'text-fg-dim',
-                )}
-              >
-                {group.label}
-              </span>
-              <span className="text-fg-dim bg-surface-muted rounded-app-sm ml-auto px-1.5 text-[10px] tabular-nums">
-                {group.clusters.length}
-              </span>
-            </header>
+          <section key={group.key} className="animate-slide-in mx-2 mb-1">
+            <TreeGroupHeader
+              label={group.label}
+              dotClass={group.dot}
+              collapsed={collapsed}
+              onToggle={() => onToggleGroup(group.key)}
+              total={group.clusters.length}
+              running={running}
+            />
             {!collapsed && (
-              <ul className="mx-2 my-1 space-y-0.5">
+              <ul className="border-border/50 ml-3.5 space-y-px border-l pb-1 pl-1">
                 {group.clusters.map((cluster) => (
                   <li key={cluster.id}>
                     <ClusterRow

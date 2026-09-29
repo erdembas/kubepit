@@ -1,17 +1,17 @@
 import * as i18n from '@/i18n';
 import { useCallback, useEffect, useState } from 'react';
-import { History, Network, Search, Settings as SettingsIcon, X } from 'lucide-react';
-import { useAppStore, ACTIVITY_TAB_KEY, PORT_FORWARDS_TAB_KEY } from '@/store/useAppStore';
+import { FileSearch, PanelLeftClose, Pin, Plus } from 'lucide-react';
+import { useAppStore } from '@/store/useAppStore';
 import { openAndConnect, requestRemoveCluster } from '@/lib/clusterActions';
 import { cn } from '@/lib/cn';
+import { modChord } from '@/lib/platform';
+import { IconButton } from '@/components/ui/IconButton';
 import type { ClusterDef } from '@/types';
-import { SidebarSectionsHeader } from './sidebar/SidebarSectionsHeader';
+import { ClusterFilterInput, ClustersHeader } from './sidebar/ClustersHeader';
+import { FleetNav, SettingsNavRow } from './sidebar/FleetNav';
 import {
-  WorkspaceHeader,
-  CreateActionsFooter,
   CollapsedClusterList,
   GroupedClusterList,
-  SidebarHomeButton,
   SidebarSectionLayout,
   COLLAPSED_W,
   getActiveDrag,
@@ -19,6 +19,10 @@ import {
   useSidebarRailResize,
 } from './sidebar';
 
+/**
+ * Left explorer: fleet destinations on top, then the cluster tree (sections or
+ * a derived grouping). Unpinned it folds into a hotbar of cluster avatars.
+ */
 export function SidebarRail() {
   i18n.useLocale();
   const clusters = useAppStore((s) => s.clusters);
@@ -29,10 +33,7 @@ export function SidebarRail() {
   const sidebarStatusFilter = useAppStore((s) => s.sidebarStatusFilter);
   const groupBy = useAppStore((s) => s.sidebarGroupBy);
   const search = useAppStore((s) => s.search);
-  const setSearch = useAppStore((s) => s.setSearch);
-  const goHome = useAppStore((s) => s.goHome);
   const openClusterEditor = useAppStore((s) => s.openClusterEditor);
-  const setImportDialogOpen = useAppStore((s) => s.setImportDialogOpen);
   const sections = useAppStore((s) => s.sections);
   const clusterSection = useAppStore((s) => s.clusterSection);
   const collapsedSections = useAppStore((s) => s.collapsedSections);
@@ -80,7 +81,6 @@ export function SidebarRail() {
     sectionItemOrder,
   });
   const currentWidth = expanded ? width : COLLAPSED_W;
-  const onHomeSelected = useAppStore((s) => s.activeMainTabKey === 'dashboard:dashboard');
   const useSectionLayout = groupBy === 'none';
 
   const toggleGroupCollapsed = useCallback((key: string) => {
@@ -97,8 +97,21 @@ export function SidebarRail() {
     [openClusterEditor],
   );
 
+  // Arrows walk the explorer rows (fleet items and clusters); Enter opens one.
+  const onKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    if ((e.target as HTMLElement).closest('input')) return;
+    const rows = [...e.currentTarget.querySelectorAll<HTMLElement>('[data-explorer-item]')];
+    const current = rows.findIndex((row) => row === document.activeElement);
+    if (current < 0) return;
+    e.preventDefault();
+    const next = Math.max(0, Math.min(rows.length - 1, current + (e.key === 'ArrowDown' ? 1 : -1)));
+    rows[next]?.focus();
+  };
+
   return (
-    <div
+    <aside
+      aria-label={i18n.t('Explorer')}
       className="chrome-gradient border-border/70 bg-surface-raised relative flex h-full shrink-0 flex-col border-r"
       style={{ width: currentWidth }}
       onMouseEnter={() => {
@@ -107,62 +120,55 @@ export function SidebarRail() {
       onMouseLeave={() => {
         if (!pinned) setHovered(false);
       }}
+      onKeyDown={onKeyDown}
     >
-      <SidebarHomeButton
-        expanded={expanded}
-        pinned={pinned}
-        selected={onHomeSelected}
-        onSelect={goHome}
-        onTogglePinned={() => setPinned(!pinned)}
-      />
-
-      <div className="overlay-scroll min-h-0 flex-1 overflow-x-hidden">
-        {expanded && (
-          <WorkspaceHeader clustersCount={clusters.length} connectedCount={connectedCount} />
+      <div
+        data-tauri-drag-region
+        className={cn(
+          'border-border/60 flex h-9 shrink-0 items-center gap-2 border-b',
+          expanded ? 'justify-between pr-2 pl-4' : 'justify-center',
         )}
-
+      >
         {expanded && (
-          <div className="border-border/70 bg-surface/50 focus-within:border-accent/30 mx-3 mb-3 flex items-center gap-2 rounded-lg border px-2.5">
-            <Search className="text-fg-dim h-3.5 w-3.5 shrink-0" />
-            <input
-              aria-label={i18n.t('Search clusters')}
-              placeholder={i18n.t('Find clusters, tags, sections…')}
-              className="text-fg placeholder:text-fg-dim min-w-0 flex-1 bg-transparent py-2 text-[11.5px] outline-none"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape') {
-                  event.stopPropagation();
-                  setSearch('');
-                }
-              }}
-            />
-            {search && (
-              <button
-                type="button"
-                aria-label={i18n.t('Clear search')}
-                className="text-fg-dim hover:text-fg p-0.5"
-                onClick={() => setSearch('')}
-              >
-                <X className="h-3 w-3" />
-              </button>
-            )}
-          </div>
+          <span className="text-fg-muted text-[10.5px] font-semibold tracking-[0.18em] uppercase">
+            {i18n.t('Explorer')}
+          </span>
         )}
+        <IconButton
+          label={
+            pinned
+              ? i18n.t('Collapse sidebar ({shortcut})', { shortcut: modChord('B') })
+              : i18n.t('Pin sidebar open ({shortcut})', { shortcut: modChord('B') })
+          }
+          icon={pinned ? <PanelLeftClose /> : <Pin />}
+          size="xs"
+          onClick={() => setPinned(!pinned)}
+        />
+      </div>
 
-        {expanded && <SidebarSectionsHeader />}
+      <FleetNav expanded={expanded} />
 
-        {expanded && hiddenCount > 0 && (
-          <div className="border-border/60 mx-3 mb-1 flex items-center gap-2 rounded-[6px] border border-dashed px-2 py-1">
-            <span className="text-fg-dim text-[10.5px]">
+      {expanded && (
+        <div className="border-border/60 shrink-0 border-t pt-1">
+          <ClustersHeader clustersCount={clusters.length} connectedCount={connectedCount} />
+          {clusters.length > 0 && <ClusterFilterInput />}
+          {hiddenCount > 0 && (
+            <p className="text-fg-dim mx-4 mb-1 text-[10.5px]">
               {i18n.t('Showing {shown} · {hiddenCount} hidden', {
                 shown: filteredClusters.length,
                 hiddenCount,
               })}
-            </span>
-          </div>
-        )}
+            </p>
+          )}
+        </div>
+      )}
 
+      <div
+        className={cn(
+          'overlay-scroll min-h-0 flex-1 overflow-x-hidden',
+          !expanded && 'border-border/60 border-t',
+        )}
+      >
         {!expanded && (
           <CollapsedClusterList
             clusters={clusters}
@@ -172,126 +178,94 @@ export function SidebarRail() {
           />
         )}
 
-        {expanded && !useSectionLayout && flatGroups.length === 0 && (
-          <div className="text-fg-dim px-3 py-6 text-center text-[12px]">
-            {clusters.length === 0
-              ? i18n.t('No clusters yet.')
-              : i18n.t('No matches for this filter.')}
-          </div>
-        )}
-
-        {expanded && !useSectionLayout && (
-          <GroupedClusterList
-            groups={flatGroups}
-            collapsedGroups={search.trim() ? new Set() : collapsedGroups}
-            statuses={statuses}
-            selectedClusterId={selectedClusterId}
-            clusterSection={clusterSection}
-            onToggleGroup={toggleGroupCollapsed}
-            onSelect={openAndConnect}
-            onEdit={onEdit}
-            onDelete={requestRemoveCluster}
-          />
-        )}
-
-        {expanded && useSectionLayout && (
-          <SidebarSectionLayout
-            searching={!!search.trim()}
-            sections={sections}
-            itemsBySection={itemsBySection}
-            hasSections={sections.length > 0}
-            collapsedSections={collapsedSections}
-            totalsBySection={totalsBySection}
-            statuses={statuses}
-            selectedClusterId={selectedClusterId}
-            clusterSection={clusterSection}
-            onToggleSection={toggleSectionCollapsed}
-            onSelect={openAndConnect}
-            onEdit={onEdit}
-            onDelete={requestRemoveCluster}
-            emptyMessage={
-              clusters.length === 0
-                ? i18n.t('No clusters yet.')
-                : hiddenCount > 0
-                  ? i18n.t('No matches for this filter.')
-                  : undefined
-            }
-          />
+        {expanded && (
+          <>
+            {clusters.length === 0 ? (
+              <EmptyExplorer
+                onAddCluster={() => openClusterEditor({ mode: 'add' })}
+                onDiscover={() => useAppStore.getState().setImportDialogOpen(true)}
+              />
+            ) : useSectionLayout ? (
+              <div className="pb-3">
+                <SidebarSectionLayout
+                  searching={!!search.trim()}
+                  sections={sections}
+                  itemsBySection={itemsBySection}
+                  hasSections={sections.length > 0}
+                  collapsedSections={collapsedSections}
+                  totalsBySection={totalsBySection}
+                  statuses={statuses}
+                  selectedClusterId={selectedClusterId}
+                  clusterSection={clusterSection}
+                  onToggleSection={toggleSectionCollapsed}
+                  onSelect={openAndConnect}
+                  onEdit={onEdit}
+                  onDelete={requestRemoveCluster}
+                  emptyMessage={hiddenCount > 0 ? i18n.t('No matches for this filter.') : undefined}
+                />
+              </div>
+            ) : flatGroups.length === 0 ? (
+              <p className="text-fg-dim px-4 py-6 text-center text-[12px]">
+                {i18n.t('No matches for this filter.')}
+              </p>
+            ) : (
+              <div className="pb-3">
+                <GroupedClusterList
+                  groups={flatGroups}
+                  collapsedGroups={search.trim() ? new Set() : collapsedGroups}
+                  statuses={statuses}
+                  selectedClusterId={selectedClusterId}
+                  clusterSection={clusterSection}
+                  onToggleGroup={toggleGroupCollapsed}
+                  onSelect={openAndConnect}
+                  onEdit={onEdit}
+                  onDelete={requestRemoveCluster}
+                />
+              </div>
+            )}
+          </>
         )}
       </div>
 
-      {expanded && (
-        <CreateActionsFooter
-          onAddCluster={() => openClusterEditor({ mode: 'add' })}
-          onImport={() => setImportDialogOpen(true)}
-        />
-      )}
-
-      <WorkspaceUtilities expanded={expanded} />
+      <SettingsNavRow expanded={expanded} />
       <div
         onPointerDown={onResizeStart}
         onPointerMove={onResizeMove}
         onPointerUp={onResizeEnd}
-        className="group absolute top-0 right-0 bottom-0 z-20 w-2 cursor-col-resize"
+        className="group absolute top-0 right-0 bottom-0 z-30 w-2 cursor-col-resize"
       >
         <div className="group-hover:bg-accent/30 group-active:bg-accent/50 absolute top-0 right-0 bottom-0 w-[2px] transition-colors" />
       </div>
-    </div>
+    </aside>
   );
 }
 
-/** Bottom utility row (RunHQ's WorkbenchUtilities): port forwards, activity and settings. */
-function WorkspaceUtilities({ expanded }: { expanded: boolean }) {
+function EmptyExplorer({
+  onAddCluster,
+  onDiscover,
+}: {
+  onAddCluster: () => void;
+  onDiscover: () => void;
+}) {
   i18n.useLocale();
-  const forwards = useAppStore((s) => s.portForwards.length);
-  const activeKey = useAppStore((s) => s.activeMainTabKey);
-  const openMainTab = useAppStore((s) => s.openMainTab);
-  const openSettings = useAppStore((s) => s.openSettings);
-  const item =
-    'text-fg-muted hover:bg-fg/5 hover:text-fg flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px]';
+  const action =
+    'border-border/80 bg-surface-raised text-fg hover:bg-surface-overlay hover:border-border-strong rounded-app-sm flex w-full items-center gap-2 border px-2.5 py-1.5 text-left text-[11.5px] font-medium shadow-sm transition';
   return (
-    <div
-      className={cn(
-        'border-border/60 flex shrink-0 items-center justify-evenly gap-1 border-t px-2 py-2',
-        !expanded && 'flex-col',
-      )}
-      aria-label={i18n.t('Workspace tools')}
-    >
-      <button
-        type="button"
-        onClick={() => openMainTab({ kind: 'port-forwards' })}
-        title={i18n.t('Port forwards')}
-        aria-label={i18n.t('Port forwards')}
-        className={cn(item, activeKey === PORT_FORWARDS_TAB_KEY && 'text-accent')}
-      >
-        <Network className="h-3.5 w-3.5" />
-        {expanded && i18n.t('Port forwards')}
-        {forwards > 0 && (
-          <span className="bg-accent/15 text-accent rounded-md px-1.5 text-[10px] tabular-nums">
-            {forwards}
-          </span>
-        )}
-      </button>
-      <button
-        type="button"
-        onClick={() => openMainTab({ kind: 'activity' })}
-        title={i18n.t('Activity')}
-        aria-label={i18n.t('Activity')}
-        className={cn(item, activeKey === ACTIVITY_TAB_KEY && 'text-accent')}
-      >
-        <History className="h-3.5 w-3.5" />
-        {expanded && i18n.t('Activity')}
-      </button>
-      <button
-        type="button"
-        onClick={() => openSettings()}
-        title={i18n.t('Settings')}
-        aria-label={i18n.t('Settings')}
-        className={item}
-      >
-        <SettingsIcon className="h-3.5 w-3.5" />
-        {expanded && i18n.t('Settings')}
-      </button>
+    <div className="px-4 py-4">
+      <p className="text-fg-dim mb-3 text-[11.5px] leading-relaxed">
+        {i18n.t('No clusters yet. Add a kubeconfig context to start exploring.')}
+      </p>
+      <div className="space-y-1.5">
+        <button type="button" className={action} onClick={onDiscover}>
+          <FileSearch className="text-fg-dim h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{i18n.t('Discover kubeconfig contexts')}</span>
+        </button>
+        <button type="button" className={action} onClick={onAddCluster}>
+          <Plus className="text-fg-dim h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{i18n.t('Add cluster')}</span>
+          <span className="text-fg-dim font-mono text-[10px]">{modChord('N')}</span>
+        </button>
+      </div>
     </div>
   );
 }

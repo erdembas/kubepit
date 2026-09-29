@@ -151,14 +151,14 @@ export function SidebarFilterMenu() {
         aria-expanded={open}
         title={i18n.t('Filter & group')}
         className={cn(
-          'rounded-app-sm text-fg-muted hover:bg-surface-overlay hover:text-fg relative inline-flex h-5 w-5 items-center justify-center transition',
-          open && 'bg-surface-overlay text-fg',
+          'rounded-app-sm text-fg-muted hover:bg-fg/10 hover:text-fg relative inline-flex h-6 w-6 items-center justify-center transition',
+          open && 'bg-fg/10 text-fg',
           activeFilterCount > 0 && !open && 'text-accent',
         )}
       >
         <SlidersHorizontal className="h-3 w-3" />
         {activeFilterCount > 0 && (
-          <span className="bg-accent text-accent-fg absolute -top-0.5 -right-0.5 flex h-2 w-2 items-center justify-center rounded-full" />
+          <span className="bg-accent text-accent-fg absolute top-0.5 right-0.5 flex h-1.5 w-1.5 items-center justify-center rounded-full" />
         )}
       </button>
       {popover && createPortal(popover, document.body)}
