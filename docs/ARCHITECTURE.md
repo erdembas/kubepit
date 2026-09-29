@@ -65,7 +65,7 @@ that created them (`src-tauri/src/windows.rs`).
 | `kubeconfigs/<id>.yaml` | backend  | pasted kubeconfigs (`managed: true`), mode 0600     |
 | `run/<id>.kubeconfig`   | backend  | single-context kubeconfig for kubectl/helm/terminal |
 | `port_forwards.json`    | backend  | `SavedPortForward[]` (saved port forwards)          |
-| `history.db`            | backend  | audit log, persisted events / changes (SQLite)      |
+| `history.db`            | backend  | audit log, events / changes, scans (SQLite)         |
 | `actions.json`          | backend  | `CustomActionsFile` (custom actions, see below)     |
 
 With `settings.keychain_kubeconfigs` the pasted kubeconfigs live in the OS
@@ -481,9 +481,8 @@ An optional, richer metrics source next to the metrics-server history
   for minutes. `Kubepit::prometheus_source` (the service, client and
   access settings of the connection, resolved once per command) +
   `prometheus_send` is the one transport of every caller — chart presets,
-  cost usage and trend, right-sizing, the statistics batches, upgrade
-  readiness and the PromQL tab (`prometheus_get` is its single-request
-  form, used by `prometheus_instant_at`): it sends
+  cost usage and trend, the statistics batches, the usage history of the
+  recommendation charts, upgrade readiness and the PromQL tab: it sends
   `X-Scope-OrgID` when a tenant is set (the detection probe too), injects
   the cluster-label selector into `Origin::Preset` queries and makes the
   next status request detect again after a proxy or tunnel failure.
@@ -517,12 +516,15 @@ An optional, richer metrics source next to the metrics-server history
   numbers. It is never applied to the probe (`query=1`) or to PromQL typed
   in the PromQL tab (`Origin::User`). Charts report the query they sent,
   so a PromQL tab opened from one gets the same data. It fails closed: the
-  live right-sizing report keeps the configured label keys in its memory
-  answer (`by (namespace, pod, container, cluster)`) and the statistics
-  batches in Q11 (pod owners); a series without them or with another value
-  fails with `cluster-label-mismatch` (a source that ignored the selector)
-  — the live report then falls back to metrics-server with that note, a
-  batch aborts with `BatchFailure::Proxy`.
+  right-sizing statistics batches keep the configured label keys in the
+  `by (…)` of Q5 (memory max) and Q11 (pod owners) and check both answers
+  (`workload_stats::check_labels`): a series without them or with another
+  value fails the batch with `cluster-label-mismatch`
+  (`BatchFailure::LabelMismatch`, a source that ignored the selector), no
+  series in either leaves it unverified and unused
+  (`cluster-label-unverified`), and Q11 is required. A mismatch aborts
+  the collection; the live report then falls back to metrics-server with
+  that note.
 - **States**: `available` when any probed candidate answers; `forbidden`
   when the API server denied every probed candidate
   (`service_proxy::is_proxy_forbidden`: its own 403 `Status` with reason
@@ -543,7 +545,17 @@ An optional, richer metrics source next to the metrics-server history
   kube-state-metrics and kubelet volume stats; the UI never builds PromQL.
   `range.rs` picks a round step for ~240 points (1h → 15 s, 7d → 1 h) and
   a `rate()` window of at least four scrapes. `prometheus_query_range`
-  serves the PromQL dock tab (≤ 200 series). All of it is read-only.
+  serves the PromQL dock tab (≤ 200 series). `workload_stats.rs` holds the
+  16 instant statistics queries of right-sizing (see Cost insight &
+  right-sizing). `usage_history.rs` (`recommendations_usage_history`)
+  charts one container of one workload: four range queries (CPU peak and
+  average in millicores, memory peak and average) over the last 1–30 days
+  (7 by default) up to the scans' aligned window end, at the automatic
+  step (1 h for 7 days), each aggregated to one series and gaps left as
+  gaps; pods are selected by the row's names (DNS-1123, at most 50,
+  regex-escaped) or else by the workload's pod-name pattern, and a series
+  that fails becomes a warning (the call fails only when all four do).
+  All of it is read-only.
 - **UI**: `components/workbench/metrics/UsageMetrics.tsx` shows
   `PrometheusUsage` (1h/6h/24h/7d, requests/limits as lines, network,
   filesystem, volumes, restarts) when the status is `available`, else the
@@ -787,14 +799,33 @@ that never leaves the machine.
   `schema_version` (a database from a newer Kubepit is refused, never
   migrated backwards), file mode 0600. Tables: `audit` + `audit_objects`
   (before/after per target, cascade-deleted), `events` (upserted by
-  cluster + uid) and `changes` (idempotent per journal start + entry id).
+  cluster + uid) and `changes` (idempotent per journal start + entry id);
+  migration 2 adds the recommendation scans (`history/recommendations.rs`):
+  `rec_runs` (one per scan attempt), `rec_rows` (one
+  `WorkloadRecommendation` per workload of a successful run,
+  cascade-deleted) and `rec_latest` (each cluster's latest successful run
+  and the Prometheus configuration it used). Only a success writes rows
+  and moves the latest pointer; runs still `running` when the writer
+  starts become `interrupted` (`app-restarted`). A row keeps its
+  evidence, pod names and HPA, which is what re-evaluation needs; the
+  usage charts behind it are not stored: `recommendations_usage_history`
+  reads them from Prometheus on demand (`prometheus/usage_history.rs`),
+  so retention and the size cap only ever concern scan results.
 - **One writer** (`history/writer.rs`): a dedicated thread behind a bounded
   queue (1 024 operations). Producers only `try_send`; a full queue drops
   the write and counts it (`HistoryStatus.dropped`), so a command never
   waits for the disk and recording never fails the user's action.
   Operations apply in queue order; consecutive data writes share one
-  transaction; clear, prune and flush are barriers. Queries use their own
-  read connection on the blocking pool at the IPC edge.
+  transaction; clear, prune, flush and the recommendation scan writes
+  (`ScanBegin`, `ScanFinish`) are barriers. Scan writes wait for room and
+  their answer on the blocking pool, bounded as a whole (30 s / 60 s): a
+  begin nobody takes the id of (its caller timed out) is finished as
+  interrupted (`stopped`) at once, and a finish that cannot be queued in
+  time — like a drop guard's detached finish — is handed to a short-lived
+  thread instead of being dropped.
+  `Writer::start` sweeps runs a previous process left `running` before
+  the thread takes its first operation. Queries use their own read
+  connection on the blocking pool at the IPC edge.
 - **Audit log** (on by default, `Settings.history.audit`): every mutating
   command's public entry point lives in `history/audited.rs` and wraps the
   unaudited implementation in its domain module (`*_unaudited` in
@@ -861,9 +892,15 @@ that never leaves the machine.
 - **Retention**: every ten minutes (first after one minute) and after a
   settings change: audit entries older than `audit_retention_days`
   (default 90), events and changes older than `retention_days` (default
-  7), then the size cap `max_size_mb` (default 512: the oldest events and
-  changes go first, the audit log only when nothing else is left), then
-  incremental vacuum (full `VACUUM` after a clear or when most of the file
+  7), recommendation runs older than
+  `Settings.recommendations.retention_days` (default 30; never a
+  cluster's latest), and the rows of successful runs older than 48 hours
+  unless they are the latest or the last successful run of their UTC day
+  (the run and its summary stay), then the size cap `max_size_mb`
+  (default 512, applied until it is reached: the oldest events and
+  changes go first, 10 % but at least 100 rows a round, then the rows of
+  the oldest recommendation runs, the audit log only when nothing else is
+  left), then incremental vacuum (full `VACUUM` after a clear or when most of the file
   is free) and a WAL checkpoint.
 - **Opt-in per process** (`Kubepit::set_history_recording`, enabled in
   `src-tauri/src/setup.rs`): tests and headless tools record nothing, send
@@ -875,7 +912,7 @@ that never leaves the machine.
   `history_audit_get`, `history_audit_export` (JSON lines),
   `history_events_list`, `history_changes_list` (a `ChangeFilter`; ids are
   the database's), `history_changes_get`, `history_clear` (audit / events /
-  changes / all, optionally one cluster).
+  changes / recommendations / all, optionally one cluster).
 - **UI**: the global Activity main tab (`components/activity/`, sidebar
   utility row and palette): filters, day groups, expandable entries with
   targets, the redacted request and a DiffView of before/after, links to
@@ -896,7 +933,8 @@ that never leaves the machine.
 
 What a cluster costs per month, where the money goes and which requests to
 change (`crates/kubepit-core/src/cost/`, `rightsizing/`,
-`prometheus/usage.rs`; UI in `components/workbench/cost/`). Everything but
+`prometheus/usage.rs`, `prometheus/workload_stats.rs`; UI in
+`components/workbench/cost/`). Everything but
 applying a recommendation only reads, so read-only clusters get it all.
 
 - **Sources** (`ClusterDef.cost.source`: `auto`, an `opencost` or
@@ -941,17 +979,42 @@ applying a recommendation only reads, so read-only clusters get it all.
 - **Commands**: `cost_status`, `cost_report` (window 7d/30d, aggregate,
   label; cached five minutes, `refresh` bypasses), `cost_summary` (the
   7-day namespace totals for the dashboard).
-- **Right-sizing**: usage fetching and math are separate.
-  `prometheus/usage.rs` presets return, per container over `days` (default
-  7), the p95 and max of 5-minute CPU rates, the max working set and the
-  hours with samples; pods map to Deployments / StatefulSets / DaemonSets
-  / CronJobs by the pod names their kind generates (longest name wins),
-  worst replica wins, hours are per replica. A CronJob is read at its job
-  template and counts one replica; its `cost_replicas` (and so its
-  monthly amounts) is the largest duty cycle of its containers' evidence
-  (average running pods), one without evidence (`math::cost_replicas`). Without Prometheus the last metrics-server
-  hour is used, split per container by the current snapshot (always low
-  confidence). Ownership-aware collection is built from
+- **Right-sizing**: usage fetching and math are separate. One collection
+  pipeline, `rightsizing/collect.rs` (`Kubepit::compute_rightsizing(cluster,
+  request, progress)`, behind `rightsizing_report` and the background
+  scans), feeds every strategy: it lists the Deployments, StatefulSets,
+  DaemonSets and CronJobs in scope (every readable namespace, else the
+  accessible ones; one workload is read at its own path and its queries
+  get `pod=~` its pod regex) and the `autoscaling/v2` HPAs (an HPA without
+  metrics scales on 80 % CPU; unlistable HPAs add `hpa-unavailable`), then
+  runs one batch of the 16 statistics queries over the namespaces of those
+  workloads at one aligned window end. A batch whose required query fails
+  is split in sorted halves (halves above 40 namespaces, which would be
+  cluster-wide again, are halved on the spot) down to single namespaces,
+  within 32 batches: a namespace that still fails gets `namespace-failed`,
+  namespaces left over `query-budget-exceeded`, and refining queries that
+  failed or warned `partial-data` (naming them). A proxy or tunnel setup
+  failure, a shared Prometheus answering for another cluster, or no batch
+  succeeding abandons the collection: `RightsizingOutcome.source_abort`
+  says why, typed (proxy, tunnel, label mismatch, all batches failed),
+  and the report falls back to metrics-server with a `prometheus-failed`
+  note carrying the same detail. The live `rightsizing_report` shows that
+  fallback; scans fail on any `source_abort` and keep the last good
+  result, without parsing notes. The batches are folded (below), the
+  strategy is resolved (automatic = `workload-history` when owner series
+  resolved pods, else `percentile-headroom` with `ownership-unavailable`)
+  and runs with the request's settings, else its effective ones; the
+  window is collected for the strategy owner metrics would pick and
+  collected again at the resolved strategy's window when a per-strategy
+  override differs; that first resolution is then kept (window, settings
+  and strategy agree), and both collections share the 32-batch budget,
+  one batch kept back for the second while it is possible. `progress`
+  counts answered queries against 16 × planned batches. A CronJob is read at its job template and counts one
+  replica; its `cost_replicas` (and so its monthly amounts) is the largest
+  duty cycle of its containers' evidence (average running pods), one
+  without evidence (`math::cost_replicas`). Without Prometheus the last
+  metrics-server hour is used, split per container by the current snapshot
+  (always low confidence). Ownership comes from
   `rightsizing/ownership.rs`: kube-state-metrics owner series
   (`kube_pod_owner`, `kube_replicaset_owner`, `kube_job_owner`) index pod
   names per namespace; `<none>`, empty and non-controller owners are
@@ -973,9 +1036,12 @@ applying a recommendation only reads, so read-only clusters get it all.
   tunnel failure aborts (and re-detects Prometheus), other failures are
   listed as failed queries. Every query goes through the one Prometheus
   transport as a preset (tenant, tunnel, cluster-label selector); on a
-  shared Prometheus Q11 keeps the configured label names in its `by (…)`,
-  and an owner series without them (or with another value) fails the batch
-  with `cluster-label-mismatch`. `rightsizing/evidence.rs` folds a batch into
+  shared Prometheus Q5 and Q11 keep the configured label names in their
+  `by (…)`: a checked series without them (or with another value) fails
+  the batch with `cluster-label-mismatch`, no series in either leaves it
+  unverified (unused, its namespaces listed as failed), and Q11 itself is
+  required there (no owners answer, no batch: nothing would prove the
+  data is this cluster's). `rightsizing/evidence.rs` folds a batch into
   per-(workload, container) usage (`ContainerUsage`: `UsageStats` plus
   `UsageEvidence`): pods resolve through the owner index (or, without
   owner series, by name with identity `name-match`), only containers of
@@ -991,8 +1057,11 @@ applying a recommendation only reads, so read-only clusters get it all.
   (`OwnerIndex::missing_parent_series`), pods owned by a ReplicaSet / Job
   there are matched by name among Deployments / CronJobs instead, with
   identity `name-match` and partial data. Rows keep at most 50 sorted pod names and the HPA whose
-  `scaleTargetRef` names the workload. The metrics-server and legacy Prometheus paths produce
-  `ContainerUsage` without evidence. The math sits behind `rightsizing::strategy::RecommendationStrategy`
+  `scaleTargetRef` names the workload; `recommend_workload` copies them
+  to the row and passes the HPA and each container's evidence to the
+  strategy (an ambiguous identity flags every container, with usage or
+  not). The metrics-server path produces `ContainerUsage` without
+  evidence. The math sits behind `rightsizing::strategy::RecommendationStrategy`
   (`fn info() -> RightsizingStrategyInfo`, `fn recommend(&ContainerInput) ->
   StrategyOutput`; input = name, current requests/limits, `UsageStats`,
   source, settings, optional `UsageEvidence` and `HpaInfo`; output =

@@ -187,6 +187,50 @@ export function warningText(w: RecommendationWarning): string {
       return i18n.t(
         'No memory limit yet; one is proposed at the peak plus headroom so a leak cannot take down the node.',
       );
+    // Flags of the shared evidence step; details are data (hours, %, names).
+    case 'identity-unclear':
+      return i18n.t(
+        'A pod name belonged to more than one workload; its usage is left out and this workload may be mixed up with another.',
+      );
+    case 'insufficient-history': {
+      const hours = Number(w.detail ?? 0);
+      return i18n.plural(
+        'Only {count} hour of history, below the minimum; the numbers may miss peaks.',
+        'Only {count} hours of history, below the minimum; the numbers may miss peaks.',
+        Number.isFinite(hours) ? hours : 0,
+      );
+    }
+    case 'low-coverage':
+      return i18n.t(
+        'Usage samples cover only {coverage} of the time the pods ran; gaps may hide peaks.',
+        { coverage: w.detail ?? '' },
+      );
+    case 'partial-data':
+      return i18n.t(
+        'Part of the usage queries failed or returned warnings; the numbers may be incomplete.',
+      );
+    case 'hpa-target':
+      return i18n.t(
+        'The HorizontalPodAutoscaler {name} scales this workload; changing its requests changes how it scales.',
+        { name: w.detail ?? '' },
+      );
+    case 'hpa-utilization':
+      return i18n.t(
+        'The autoscaler targets {targets} of the request; a new request moves the point where it scales.',
+        { targets: w.detail ?? '' },
+      );
+    case 'oom-killed':
+      return i18n.t(
+        'A pod was OOM-killed within the window; the real memory peak is likely above what was measured.',
+      );
+    case 'cpu-throttled':
+      return i18n.t('CPU was throttled in {ratio} of CFS periods; raise or remove the CPU limit.', {
+        ratio: w.detail ?? '',
+      });
+    case 'identity-by-name':
+      return i18n.t(
+        'Pods were tied to this workload by name (no kube-state-metrics owners); a similarly named workload may be mixed in.',
+      );
     default:
       return w.detail ?? w.code;
   }

@@ -34,10 +34,33 @@ export function rightsizingNoteText(note: RightsizingNote): string {
       return i18n.t(
         'No usage history: neither Prometheus nor metrics-server samples are available.',
       );
-    default:
+    case 'pods-unavailable':
       return i18n.t('Pods cannot be listed for the metrics-server fallback: {detail}', {
         detail,
       });
+    case 'ownership-unavailable':
+      return i18n.t(
+        'kube-state-metrics owner series are missing, so pods are matched to workloads by name.',
+      );
+    case 'partial-data':
+      return note.detail
+        ? i18n.t('Some usage queries failed ({detail}); the affected rows are flagged.', {
+            detail,
+          })
+        : i18n.t('Some usage queries returned warnings; the affected rows are flagged.');
+    case 'namespace-failed':
+      return i18n.t('Usage could not be queried for {namespaces}; their workloads have no data.', {
+        namespaces: detail,
+      });
+    case 'query-budget-exceeded':
+      return i18n.t(
+        'The query budget ran out before {namespaces} could be queried; their workloads have no data.',
+        { namespaces: detail },
+      );
+    case 'hpa-unavailable':
+      return i18n.t(
+        'HorizontalPodAutoscalers cannot be listed, so autoscaled workloads are not flagged.',
+      );
   }
 }
 

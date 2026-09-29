@@ -22,6 +22,10 @@ use crate::types::PromQuerySeries;
 /// source ignored or rewrote the selector, so its data cannot be trusted to
 /// belong to this cluster (fail closed).
 pub const CLUSTER_LABEL_MISMATCH: &str = "cluster-label-mismatch";
+/// Error of a statistics batch whose checked answers (memory max and pod
+/// owners) hold no series at all, so nothing proves the rest belongs to
+/// this cluster.
+pub const CLUSTER_LABEL_UNVERIFIED: &str = "cluster-label-unverified";
 
 /// Binary operators, modifiers and keywords (case-insensitive in PromQL).
 const KEYWORDS: [&str; 12] = [
@@ -236,10 +240,11 @@ pub fn with_matchers(query: &str, matchers: &str) -> String {
     out
 }
 
-/// `, k1, k2` for a `by (…)` list, so an aggregated answer keeps the
-/// cluster labels [`series_carry_labels`] checks (`""` without labels).
-pub fn by_labels(labels: &BTreeMap<String, String>) -> String {
-    labels.keys().map(|name| format!(", {name}")).collect()
+/// `, k1, k2` for a `by (…)` list of the cluster label `names`, so an
+/// aggregated answer keeps the labels [`series_carry_labels`] checks (`""`
+/// without labels).
+pub fn by_labels<'a>(names: impl IntoIterator<Item = &'a String>) -> String {
+    names.into_iter().map(|name| format!(", {name}")).collect()
 }
 
 /// Does every series carry each configured label with its value?
@@ -303,18 +308,16 @@ mod tests {
             .collect()
     }
 
-    /// Every other query Kubepit builds: right-sizing and cost usage, the
-    /// 16 statistics queries (cluster-wide, namespace and single-workload
-    /// scopes, with the kept cluster labels too) and upgrade readiness.
+    /// Every other query Kubepit builds: cost usage, the 16 statistics
+    /// queries of right-sizing (cluster-wide, namespace and single-workload
+    /// scopes, with the kept cluster labels too), the recommendation usage
+    /// history (pod names and pattern) and upgrade readiness.
     fn other_presets() -> Vec<String> {
+        use crate::prometheus::usage_history::history_queries;
         use crate::prometheus::workload_stats::{query, StatQuery, StatScope};
+        use crate::rightsizing::WorkloadRef;
         let scope = vec!["shop".to_string(), "a.b".to_string()];
         let mut out = vec![
-            usage::container_cpu_p95(&scope, 7),
-            usage::container_cpu_max(&[], 7),
-            usage::container_memory_max(&scope, 7, ""),
-            usage::container_memory_max(&[], 7, ", cluster"),
-            usage::container_hours(&scope, 7),
             usage::pod_cpu_avg(604_800),
             usage::pod_memory_avg(3_600),
             crate::upgrade::METRIC_QUERY.to_string(),
@@ -337,7 +340,15 @@ mod tests {
         for scope in [&cluster_wide, &namespaces, &workload] {
             out.extend(StatQuery::ALL.iter().map(|q| query(*q, scope)));
         }
-        assert_eq!(out.len(), 8 + 3 * 16);
+        let web = WorkloadRef {
+            kind: "Deployment".into(),
+            namespace: "shop".into(),
+            name: "web".into(),
+        };
+        for pods in [vec![], vec!["web-1".to_string(), "web.2".to_string()]] {
+            out.extend(history_queries(&web, "app", &pods, 3_600).unwrap().0);
+        }
+        assert_eq!(out.len(), 3 + 3 * 16 + 2 * 4);
         out
     }
 
@@ -501,8 +512,8 @@ mod tests {
         let labels: BTreeMap<String, String> = [("cluster".to_string(), "prod".to_string())]
             .into_iter()
             .collect();
-        assert_eq!(by_labels(&labels), ", cluster");
-        assert_eq!(by_labels(&BTreeMap::new()), "");
+        assert_eq!(by_labels(labels.keys()), ", cluster");
+        assert_eq!(by_labels(&Vec::<String>::new()), "");
         let series = |pairs: &[(&str, &str)]| PromQuerySeries {
             labels: pairs
                 .iter()

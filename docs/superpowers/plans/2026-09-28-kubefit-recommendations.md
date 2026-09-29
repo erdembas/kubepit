@@ -822,7 +822,7 @@ git commit -m "feat(rightsizing): workload-history strategy (KubeFit logic)"
 
 Steps:
 
-- [ ] **Step 1: Write the failing end-to-end tests**
+- [x] **Step 1: Write the failing end-to-end tests**
 
 The router `kubefit_router(fixture)` routes `/api/v1/query` by these markers, in this
 order:
@@ -911,21 +911,26 @@ It then asserts:
 - `report.strategy == "percentile-headroom" && report.strategy_auto`;
 - `usage.hours == 84.0` (2016 × 300 s ÷ 2 replicas).
 
-- [ ] **Step 2: Run the tests to verify they fail**
+Also update Task 8's `tests/cost.rs::cronjob_router` to answer the markers and resolve
+pod → Job → CronJob through the owner series (Q11, Q13); with one day of history,
+`cronjobs_are_recommended_and_dry_run_patched` then asserts `cost_replicas == 0.25`
+(72 of 288 running slots), as Task 8 originally wanted.
+
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core --test recommendations --test cost`
 
 Expected: FAIL (`compute_rightsizing` not found).
 
-- [ ] **Step 3: Implement `collect.rs` and the `mod.rs` / `usage.rs` changes listed under Interfaces**
+- [x] **Step 3: Implement `collect.rs` and the `mod.rs` / `usage.rs` changes listed under Interfaces**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core`
 
 Expected: PASS, the whole crate.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core
@@ -1216,7 +1221,7 @@ git commit -m "feat(recommendations): backend settings with per-strategy overrid
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn migration_two_applies_on_fresh_and_version_one_databases() {
@@ -1241,21 +1246,21 @@ Steps:
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core history::recommendations`
 
 Expected: FAIL to compile.
 
-- [ ] **Step 3: Implement `history/recommendations.rs` and append the migration**
+- [x] **Step 3: Implement `history/recommendations.rs` and append the migration**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core history`
 
 Expected: PASS, including the existing history tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/src/history crates/kubepit-core/src/history.rs crates/kubepit-core/src/recommendations
@@ -1290,7 +1295,7 @@ git commit -m "feat(history): store recommendation scans (migration 2)"
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn retention_deletes_old_runs_but_keeps_the_latest() { /* latest older than 30 d stays; others go */ }
@@ -1305,21 +1310,21 @@ Steps:
 #[test] fn clearing_recommendations_per_cluster() { clear(&conn, Some("c1")).unwrap(); assert!(latest(&conn, "c1", CONFIG).unwrap().scan.is_none()); assert!(latest(&conn, "c2", CONFIG).unwrap().scan.is_some()); }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core history`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement prune, clear and status, plus the `HistoryKind` and `HistoryStatus` changes on both sides**
+- [x] **Step 3: Implement prune, clear and status, plus the `HistoryKind` and `HistoryStatus` changes on both sides**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core history && pnpm typecheck`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/src/history crates/kubepit-core/src/history.rs apps/desktop/src/types/index.ts apps/desktop/src/lib/ipc/mock/history.ts
@@ -1361,7 +1366,7 @@ git commit -m "feat(history): retention and thinning of recommendation scans"
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn scan_ops_are_barriers_and_never_dropped() {
@@ -1379,21 +1384,21 @@ Steps:
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core -- history::writer rightsizing::tests`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement the operations, the API and `reevaluate`**
+- [x] **Step 3: Implement the operations, the API and `reevaluate`**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/src
@@ -1422,12 +1427,12 @@ git commit -m "feat(history): blocking scan writes and re-evaluation of stored s
       - the complete resulting `resources` block.
     - Raised limits carry `# raised with the request (limit ÷ request ×{ratio})`, where
       the ratio has at most 2 decimals and no trailing zeros.
-    - Fragments are separated by a blank line.
+    - Fragments are separate YAML documents, separated by a blank line and `---`.
     - With nothing changed, the output is `# No changes to export.\n`.
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn yaml_fragments_use_kubernetes_quantities() {
@@ -1453,21 +1458,21 @@ Steps:
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core rightsizing::export`
 
 Expected: FAIL to compile.
 
-- [ ] **Step 3: Implement both builders**
+- [x] **Step 3: Implement both builders**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core rightsizing::export`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core/src/rightsizing
@@ -1505,7 +1510,7 @@ git commit -m "feat(rightsizing): JSON and container-resources YAML exports"
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn history_queries_use_names_or_the_pattern() {
@@ -1525,21 +1530,21 @@ async fn usage_history_reads_four_range_queries() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core prometheus::usage_history && cargo test -p kubepit-core --test recommendations usage_history`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement the module and update the docs sections**
+- [x] **Step 3: Implement the module and update the docs sections**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core docs/ARCHITECTURE.md
@@ -1549,6 +1554,11 @@ git commit -m "feat(prometheus): per-container usage history for recommendation 
 # Phase 3: Scans
 
 ### Task 16: Scan runner
+
+**Aborted collections:** `compute_rightsizing` returns a `RightsizingOutcome`. When its
+`source_abort` is `Some` (proxy, tunnel, label mismatch, all batches failed), the scan
+run fails with that kind and detail and keeps the last good result, even though the
+report holds a metrics-server fallback. Never parse the report's notes for it.
 
 **Files:**
 - Create: `crates/kubepit-core/src/recommendations/scan.rs`
@@ -1914,6 +1924,8 @@ git commit -m "feat(demo): recommendation scans in the in-memory backend"
     new codes; `strategyLabel` for `workload-history`)
   - `apps/desktop/src/components/workbench/cost/CostNotes.tsx` (texts for the new note
     kinds)
+  - Already done with Task 7, because the Cost view shows the pipeline's notes and flags
+    from then on: `warningText` for the nine codes and the note texts, in EN and TR.
   - `apps/desktop/src/App.tsx`, or the root that already subscribes to `onAlert`
     (`startRecommendationEvents()`)
   - `apps/desktop/src/i18n/{en,tr}/{workbench,shell}.json`

@@ -5,7 +5,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::rightsizing::strategy::{RecommendationStrategy, STRATEGIES};
-use crate::rightsizing::RightsizingSettings;
+use crate::rightsizing::summary::RecommendationSummary;
+use crate::rightsizing::{Confidence, RightsizingSettings, RightsizingSource, Verdict};
 
 /// Default minutes between background scans.
 pub const DEFAULT_INTERVAL_MINUTES: u32 = 60;
@@ -108,6 +109,111 @@ pub fn effective_settings(
         .normalized()
 }
 
+/// Where a stored scan run stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RunStatus {
+    Running,
+    Success,
+    Failed,
+    /// Stopped (disconnect, removal, opt-out) or cut short by an app restart.
+    Interrupted,
+}
+
+impl RunStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Success => "success",
+            Self::Failed => "failed",
+            Self::Interrupted => "interrupted",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        [
+            Self::Running,
+            Self::Success,
+            Self::Failed,
+            Self::Interrupted,
+        ]
+        .into_iter()
+        .find(|s| s.as_str() == text)
+    }
+}
+
+/// What started a scan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScanTrigger {
+    /// "Scan now".
+    Manual,
+    /// The background scheduler.
+    Schedule,
+}
+
+impl ScanTrigger {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::Schedule => "schedule",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        [Self::Manual, Self::Schedule]
+            .into_iter()
+            .find(|t| t.as_str() == text)
+    }
+}
+
+/// One stored scan run (successful or not), without its rows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecommendationRun {
+    pub id: i64,
+    pub cluster_id: String,
+    /// Epoch ms.
+    pub started_at: i64,
+    pub finished_at: Option<i64>,
+    pub status: RunStatus,
+    pub trigger: ScanTrigger,
+    /// A message or a code (`app-restarted`, `stopped`, `no-usage-source`).
+    pub error: Option<String>,
+    /// Successful runs only.
+    pub source: Option<RightsizingSource>,
+    pub strategy: Option<String>,
+    pub window_secs: Option<u64>,
+    pub workloads: u32,
+    /// The run's rows are still stored (thinning keeps the run and its summary).
+    pub rows_kept: bool,
+    /// Successful runs only (`None` for runs of older builds too).
+    pub summary: Option<RecommendationSummary>,
+}
+
+/// One container of a [`RecommendationTrendPoint`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecommendationTrendContainer {
+    pub name: String,
+    pub cpu_request: Option<f64>,
+    pub cpu_recommended: Option<f64>,
+    pub memory_request: Option<f64>,
+    pub memory_recommended: Option<f64>,
+    pub cpu_p95: Option<f64>,
+    pub memory_max: Option<f64>,
+}
+
+/// A workload in one stored run whose rows are kept.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecommendationTrendPoint {
+    pub run_id: i64,
+    /// When the run started (epoch ms).
+    pub at: i64,
+    pub verdict: Verdict,
+    pub confidence: Confidence,
+    pub monthly_delta: f64,
+    pub containers: Vec<RecommendationTrendContainer>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,6 +267,24 @@ mod tests {
         // Settings saved before this field existed still load.
         let old: crate::types::Settings = serde_json::from_str("{}").unwrap();
         assert_eq!(old.recommendations, RecommendationSettings::default());
+    }
+
+    #[test]
+    fn run_status_and_trigger_round_trip_their_wire_names() {
+        for status in [
+            RunStatus::Running,
+            RunStatus::Success,
+            RunStatus::Failed,
+            RunStatus::Interrupted,
+        ] {
+            assert_eq!(serde_json::to_value(status).unwrap(), status.as_str());
+            assert_eq!(RunStatus::parse(status.as_str()), Some(status));
+        }
+        for trigger in [ScanTrigger::Manual, ScanTrigger::Schedule] {
+            assert_eq!(serde_json::to_value(trigger).unwrap(), trigger.as_str());
+            assert_eq!(ScanTrigger::parse(trigger.as_str()), Some(trigger));
+        }
+        assert_eq!(RunStatus::parse("paused"), None);
     }
 
     #[test]

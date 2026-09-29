@@ -13,8 +13,11 @@
 //!   objects. Read-only rejections are not recorded; dry runs are, flagged.
 //! - **Persistence** ([`persist`]): Events and journal entries of clusters
 //!   listed in `Settings.history.persist_clusters`, while connected.
-//! - **Retention**: audit and data retention in days plus a size cap,
-//!   applied every ten minutes (and after a settings change).
+//! - **Recommendation scans** ([`recommendations`]): stored scan runs and
+//!   their rows (migration 2).
+//! - **Retention**: audit and data retention in days, recommendation scans
+//!   by `Settings.recommendations.retention_days` and thinning, plus a size
+//!   cap, applied every ten minutes (and after a settings change).
 //!
 //! Like alerts and the change journal, recording is opt-in per process
 //! ([`Kubepit::set_history_recording`]): the desktop shell enables it; tests
@@ -25,6 +28,7 @@ pub mod audit;
 pub mod audited;
 pub mod db;
 pub mod persist;
+pub mod recommendations;
 pub mod redact;
 pub mod types;
 pub mod writer;
@@ -46,6 +50,7 @@ use crate::change_journal::{ChangeDetail, ChangeFilter};
 use crate::objects::now_millis;
 use crate::tasks::TaskRegistry;
 use db::{PrunePolicy, PruneReport};
+use recommendations::{ScanBegin, ScanOutcome};
 use writer::{WriteOp, Writer, QUEUE_CAPACITY};
 
 pub use types::*;
@@ -71,8 +76,34 @@ pub struct History {
     recorders: TaskRegistry,
     persisting: Arc<Mutex<HashSet<String>>>,
     maintenance: TaskRegistry,
-    /// Copy of `Settings.history` for the retention task.
-    settings: Arc<Mutex<HistorySettings>>,
+    /// Copy of the retention settings for the retention task.
+    settings: Arc<Mutex<Retention>>,
+}
+
+/// What retention reads: `Settings.history` and the days recommendation
+/// scans are kept (`Settings.recommendations.retention_days`).
+#[derive(Debug, Clone, PartialEq)]
+struct Retention {
+    history: HistorySettings,
+    recommendation_days: u32,
+}
+
+impl Default for Retention {
+    fn default() -> Self {
+        Self {
+            history: HistorySettings::default(),
+            recommendation_days: crate::recommendations::DEFAULT_RETENTION_DAYS,
+        }
+    }
+}
+
+impl Retention {
+    fn of(settings: &crate::types::Settings) -> Self {
+        Self {
+            history: settings.history.clone(),
+            recommendation_days: settings.recommendations.retention_days,
+        }
+    }
 }
 
 fn recorder_id(cluster_id: &str) -> String {
@@ -154,6 +185,55 @@ impl History {
         f(slot.as_ref().expect("opened above"))
     }
 
+    /// Insert a `running` recommendation run (a blocking control operation
+    /// on the writer, never dropped; call from the blocking pool). Works
+    /// whether or not this process records history.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the scan runner is not wired yet")
+    )]
+    pub(crate) fn rec_begin(&self, scan: ScanBegin) -> Result<i64> {
+        self.require_writer()?.scan_begin(scan)
+    }
+
+    /// Record how run `run_id` ended, now (blocking, like [`Self::rec_begin`]).
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the scan runner is not wired yet")
+    )]
+    pub(crate) fn rec_finish(&self, run_id: i64, outcome: ScanOutcome) -> Result<()> {
+        self.require_writer()?
+            .scan_finish(run_id, now_millis(), outcome)
+    }
+
+    /// [`Self::rec_finish`] without waiting (drop guards of aborted scans):
+    /// queued, or handed to a thread that waits for room; false only when
+    /// the database is unavailable.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the scan runner is not wired yet")
+    )]
+    pub(crate) fn rec_finish_detached(&self, run_id: i64, outcome: ScanOutcome) -> bool {
+        match self.writer() {
+            Some(writer) => writer.send_detached(WriteOp::ScanFinish(
+                run_id,
+                now_millis(),
+                Box::new(outcome),
+                None,
+            )),
+            None => false,
+        }
+    }
+
+    /// Run `f` on the read connection (stored recommendation scans).
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the scan runner is not wired yet")
+    )]
+    pub(crate) fn rec_read<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        self.read(f)
+    }
+
     pub fn remember_identity(&self, cluster_id: &str, username: &str) {
         if username.is_empty() {
             return;
@@ -198,11 +278,19 @@ impl History {
     }
 }
 
-fn policy(settings: &HistorySettings, now: i64) -> PrunePolicy {
+/// Recommendation runs stay this long regardless of the retention days.
+const REC_ROWS_KEPT_MS: i64 = 48 * 60 * 60 * 1000;
+
+fn policy(retention: &Retention, now: i64) -> PrunePolicy {
+    let settings = &retention.history;
+    // Settings files are not normalized on load: clamp like `normalized`.
+    let rec_days = retention.recommendation_days.clamp(1, 90);
     PrunePolicy {
         audit_before: now - i64::from(settings.audit_retention_days) * DAY_MS,
         data_before: now - i64::from(settings.retention_days) * DAY_MS,
         max_bytes: u64::from(settings.max_size_mb) * 1024 * 1024,
+        rec_before: now - i64::from(rec_days) * DAY_MS,
+        rec_rows_before: now - REC_ROWS_KEPT_MS,
     }
 }
 
@@ -221,7 +309,7 @@ impl Kubepit {
         let Some(writer) = self.history.writer() else {
             return;
         };
-        *self.history.settings.lock() = self.settings().history;
+        *self.history.settings.lock() = Retention::of(&self.settings());
         if tokio::runtime::Handle::try_current().is_ok() {
             let settings = self.history.settings.clone();
             self.history
@@ -272,8 +360,10 @@ impl Kubepit {
     /// Start or stop persistence after a settings change and apply the new
     /// retention right away.
     pub(crate) fn sync_history(&self) {
-        let settings = self.settings().history;
-        *self.history.settings.lock() = settings.clone();
+        let all = self.settings();
+        let retention = Retention::of(&all);
+        let settings = all.history;
+        *self.history.settings.lock() = retention.clone();
         let active = self.history.is_active();
         let has_runtime = tokio::runtime::Handle::try_current().is_ok();
         for cluster in self.store.clusters() {
@@ -289,7 +379,7 @@ impl Kubepit {
         }
         if active {
             if let Some(writer) = self.history.writer.lock().clone() {
-                writer.submit(WriteOp::Prune(policy(&settings, now_millis()), None));
+                writer.submit(WriteOp::Prune(policy(&retention, now_millis()), None));
             }
         }
     }
@@ -305,6 +395,7 @@ impl Kubepit {
             audit: HistoryTableStatus::default(),
             events: HistoryTableStatus::default(),
             changes: HistoryTableStatus::default(),
+            recommendations: HistoryTableStatus::default(),
             dropped: self
                 .history
                 .writer
@@ -322,14 +413,16 @@ impl Kubepit {
                 db::table_status(conn, "audit", "ts")?,
                 db::table_status(conn, "events", "last_ts")?,
                 db::table_status(conn, "changes", "ts")?,
+                recommendations::status(conn)?,
             ))
         });
         match tables {
-            Ok((audit, events, changes)) => {
+            Ok((audit, events, changes, recommendations)) => {
                 status.available = true;
                 status.audit = audit;
                 status.events = events;
                 status.changes = changes;
+                status.recommendations = recommendations;
                 // Opening the reader may have created the file.
                 status.size_bytes = db::size_on_disk(&self.history.path);
             }
@@ -397,10 +490,10 @@ impl Kubepit {
 
     /// Apply retention and the size cap now (also runs periodically).
     pub fn history_prune(&self) -> Result<PruneReport> {
-        let settings = self.settings().history;
+        let retention = Retention::of(&self.settings());
         self.history
             .require_writer()?
-            .prune(policy(&settings, now_millis()))
+            .prune(policy(&retention, now_millis()))
     }
 
     /// Wait (bounded) until every queued write reached the database.
@@ -439,18 +532,36 @@ mod tests {
 
     #[test]
     fn retention_policy_uses_days_and_megabytes() {
-        let p = policy(
-            &HistorySettings {
+        let mut retention = Retention {
+            history: HistorySettings {
                 audit_retention_days: 2,
                 retention_days: 1,
                 max_size_mb: 16,
                 ..HistorySettings::default()
             },
-            10 * DAY_MS,
-        );
-        assert_eq!(p.audit_before, 8 * DAY_MS);
-        assert_eq!(p.data_before, 9 * DAY_MS);
+            recommendation_days: 3,
+        };
+        let p = policy(&retention, 100 * DAY_MS);
+        assert_eq!(p.audit_before, 98 * DAY_MS);
+        assert_eq!(p.data_before, 99 * DAY_MS);
         assert_eq!(p.max_bytes, 16 * 1024 * 1024);
+        assert_eq!(p.rec_before, 97 * DAY_MS);
+        assert_eq!(
+            p.rec_rows_before,
+            98 * DAY_MS,
+            "rows of the last 48 hours stay"
+        );
+        retention.recommendation_days = 999;
+        assert_eq!(policy(&retention, 100 * DAY_MS).rec_before, 10 * DAY_MS);
+        assert_eq!(Retention::default().recommendation_days, 30);
+        let settings = crate::types::Settings {
+            recommendations: crate::recommendations::RecommendationSettings {
+                retention_days: 7,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(Retention::of(&settings).recommendation_days, 7);
     }
 
     #[test]
@@ -465,5 +576,37 @@ mod tests {
         h.forget_cluster("c1");
         assert_eq!(h.identity("c1"), None);
         assert!(!dir.path().join("history.db").exists(), "opened lazily");
+    }
+
+    #[test]
+    fn recommendation_scans_go_through_the_writer() {
+        use crate::recommendations::{RunStatus, ScanTrigger};
+
+        let dir = tempfile::tempdir().unwrap();
+        let h = History::new(dir.path().join("history.db"));
+        let scan = |started| ScanBegin {
+            cluster_id: "c1".into(),
+            started,
+            trigger: ScanTrigger::Schedule,
+            source_config: "{}".into(),
+        };
+        let first = h.rec_begin(scan(1_000)).unwrap();
+        h.rec_finish(first, ScanOutcome::Failed("boom".into()))
+            .unwrap();
+        let runs = h
+            .rec_read(|conn| recommendations::runs(conn, "c1", 5))
+            .unwrap();
+        assert_eq!((runs[0].id, runs[0].status), (first, RunStatus::Failed));
+        assert!(runs[0].finished_at.is_some());
+
+        let second = h.rec_begin(scan(2_000)).unwrap();
+        assert!(h.rec_finish_detached(second, ScanOutcome::Interrupted("stopped".into())));
+        assert!(h.writer().unwrap().flush(Duration::from_secs(10)));
+        let last = h
+            .rec_read(|conn| recommendations::last_attempt(conn, "c1"))
+            .unwrap()
+            .unwrap();
+        assert_eq!((last.id, last.status), (second, RunStatus::Interrupted));
+        assert!(!h.is_active(), "scans are stored without history recording");
     }
 }

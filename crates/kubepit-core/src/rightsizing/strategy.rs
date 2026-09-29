@@ -125,8 +125,17 @@ pub fn resolve(
     }
 }
 
+/// The current limit ÷ request ratio a raised limit keeps (at least 1; a
+/// missing request defaults to the limit, so the ratio is then 1).
+pub fn limit_ratio(current_request: Option<f64>, current_limit: Option<f64>) -> f64 {
+    match (current_request.or(current_limit), current_limit) {
+        (Some(cr), Some(cl)) if cr > 0.0 => (cl / cr).max(1.0),
+        _ => 1.0,
+    }
+}
+
 /// Raise a limit below its request, keeping the current limit ÷ request
-/// ratio (a missing request defaults to the limit, so the ratio is then 1).
+/// ratio ([`limit_ratio`]).
 fn raise(
     current_request: Option<f64>,
     current_limit: Option<f64>,
@@ -140,10 +149,7 @@ fn raise(
     if r <= l {
         return false;
     }
-    let ratio = match (current_request.or(current_limit), current_limit) {
-        (Some(cr), Some(cl)) if cr > 0.0 => (cl / cr).max(1.0),
-        _ => 1.0,
-    };
+    let ratio = limit_ratio(current_request, current_limit);
     *limit = Some(round(r * ratio).max(r));
     true
 }
