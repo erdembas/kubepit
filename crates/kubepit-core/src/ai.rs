@@ -28,6 +28,7 @@
 
 pub mod keys;
 pub mod provider;
+pub mod redact;
 pub mod settings;
 pub mod types;
 
