@@ -2803,17 +2803,14 @@ Run: `pnpm i18n:check -- --fix`, add the Turkish, then `pnpm typecheck && pnpm i
 
 Expected: PASS.
 
-- [ ] **Step 3: Verify the demo**
+- [x] **Step 3: Verify the demo**
 
 Run: `pnpm dev:ui`, edit a cluster → Prometheus.
 - A reserved label key `pod` shows an error.
 - A saved bearer reference round-trips.
 - The PromQL tab shows the hint.
 
-  Still needs the browser walkthrough (the implementer had no browser). Covered
-  meanwhile by `PrometheusAccessFields.test.tsx` (reserved key error, Secret
-  reference, skip-verify badge) and `prometheusAccess.test.ts` (round trip, the
-  selector text of the hint).
+  _(Browser walkthrough on 2026-09-29, `pnpm dev:ui` in the desktop app's browser pane, dev-shared: a cluster label keyed `pod` shows "The label pod is used by Kubepit's own queries; choose another one."; in "Use a service" mode a Bearer reference (monitoring/prometheus-auth, key `token`) saves and reopens with every field, and only the reference is stored; switching back to "Detect automatically" drops the credentials and keeps the labels; the PromQL tab then shows "Cluster selector {cluster=\"dev-shared\"} is not added to your own queries." No console errors.)_
 
 - [x] **Step 4: Commit**
 
