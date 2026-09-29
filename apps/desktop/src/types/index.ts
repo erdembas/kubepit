@@ -338,6 +338,17 @@ export interface WatchBatch {
    * error shown for this watch. Never set together with `error`.
    */
   recovered: boolean;
+  /**
+   * Sequence number, from 1. Acknowledge every batch once applied
+   * (`ipc.resourceWatchAck`): at most 4 go unacknowledged, and a watch
+   * whose batches get no ack for 60 s stops.
+   */
+  seq: number;
+  /**
+   * The watch stopped for want of acks (its webview was frozen or gone):
+   * the last batch, with no objects. Start a new watch to keep the list live.
+   */
+  stopped: boolean;
 }
 
 export type ApplyMode = 'apply' | 'replace' | 'create';

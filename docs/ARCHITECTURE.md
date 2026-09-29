@@ -51,8 +51,9 @@ one backend (connections, port forwards, the PTY manager) and one origin.
 A new window starts as a copy of its opener (`lib/windowSeed.ts`); only
 `main` persists the workbench session, while layout prefs are shared and
 synced live (`store/windowStorage.ts`). Streams are per window (their
-channels belong to the webview); terminals are destroyed with the window
-that created them (`src-tauri/src/windows.rs`).
+channels belong to the webview); terminals are destroyed and resource
+watches stopped with the window that created them
+(`src-tauri/src/windows.rs`, `WindowOwned`).
 
 ## Persistence (`~/.kubepit`, override with `KUBEPIT_HOME`)
 
@@ -106,6 +107,35 @@ localStorage (`kubepit.workbench.v1`, `kubepit.views.v1`,
   or Retry. Error-only batches change no rows and do not bump the snapshot
   `version`. Views that read several lists use `data/listState.ts`: a list
   with an error is incomplete.
+- Watch batches are acknowledged (`watch.rs` `AckWindow`). Each carries a
+  `seq`; the watch cache acks it with `resource_watch_ack` right after
+  applying it (`watchBatch.ts` `routeBatch`), not after the next frame, so
+  a background window whose frames are paused keeps its watches. At most 4
+  batches go unacknowledged: meanwhile the backend keeps folding events
+  (pending upserts are latest-wins) and sends nothing, so a slow webview
+  gets fewer, larger batches instead of a growing IPC queue. Every batch is
+  acked, including a superseded watch's (a restart or unsubscribe raced
+  it). `routeBatch` never throws: a Tauri channel whose `onmessage` throws
+  delivers nothing after that message, so a batch that fails to apply is
+  logged and acked, and the watch stops (its rows may be half-applied) and
+  restarts after a backoff (1 s, doubling, at most 30 s; `ApplyRetry`). A
+  clean apply resets the count; after 3 consecutive failures the list turns
+  `error` and its Retry starts over. The backend skips (and logs) an object
+  that does not serialise to a JSON object, so one bad object cannot fail
+  every batch.
+  A watch whose batches get no ack for 60 s
+  stops; its last batch has `stopped` set, and a view that still
+  subscribes restarts the watch when it runs again (a frozen webview). A
+  hidden tab never holds a backend watch (`useWatch(..., enabled: false)`
+  unsubscribes; the last snapshot stays), so there is nothing to keep
+  alive for it. Closing a window stops its watches at once: the Tauri
+  command records the calling window per watch (`window_watches`), and
+  `on_window_destroyed` unwatches them. Watches that end on their own (ack
+  timeout, refused sink, disconnect, a reloaded window) are pruned from
+  that record whenever a watch starts (`resource_watch_running`). The ack
+  timeout covers the rest,
+  since Tauri reports a send of 8 KB or more to a dead webview as
+  delivered.
 - `read_only` clusters reject every mutating command in the backend (dry runs
   and RBAC self-reviews only read, so they stay available).
 
@@ -1788,6 +1818,11 @@ in-memory demo backend.
     `window.__kubepitPerf`), blocks every request outside the preview
     server and refuses a Tauri page → `perf-results/ui.json`. WKWebView is
     measured by hand with the same probe in `pnpm tauri:dev`.
+- **Optimizations applied.** R1 (no gate): watch objects are converted by
+  value and shared between the aggregator's store and its batches, and
+  fleet search matches ASCII names in place. H6: acknowledged watch
+  batches and window-owned watches (see Kubernetes access). The spec's
+  Results table has every gate and its numbers.
 - **Budgets.** `perf/budgets.json` holds one budget per result id (group,
   value, unit, `max`/`min`, whether it is a timing, `per` for per-line
   budgets, `abs` for drifts), set for the reference machine (Apple
@@ -1809,8 +1844,9 @@ in-memory demo backend.
   `compare.mjs --slack ci --only rust,e2e,engines,structural`, and uploads
   the results. The compare step is `continue-on-error` until calibrated on
   a runner (the first run after the remote exists): the budgets are set on
-  an Apple M-series machine, where three Rust ids already miss, so a runner
-  more than ~1.8× slower fails them even at slack 2.5. It moves into
+  an Apple M-series machine and a runner's speed is unknown (the three
+  Rust ids that missed at the baseline now have ≥ 75% headroom, plan R1).
+  It moves into
   `ci.yml` as its `perf-guard` job when the CI plan lands.
   `.github/workflows/perf-nightly.yml` (03:00 UTC and manual) builds the UI,
   installs Chromium, runs `perf:ui` at `l` with churn 50 and the 30-minute

@@ -2518,6 +2518,7 @@
   "Updated {count} images of {name}": "Updated {count} images of {name}",
   "Updated view “{name}”": "Updated view “{name}”",
   "Updates": "Updates",
+  "Updates to this list could not be applied: {error}": "Updates to this list could not be applied: {error}",
   "Updating repositories…": "Updating repositories…",
   "Updating…": "Updating…",
   "Upgrade": "Upgrade",

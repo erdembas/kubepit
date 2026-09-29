@@ -101,6 +101,12 @@ impl TaskRegistry {
         }
     }
 
+    /// Whether task `id` is still running (a task removes its own entry
+    /// when it ends).
+    pub fn contains(&self, id: &str) -> bool {
+        self.tasks.lock().contains_key(id)
+    }
+
     pub fn len(&self) -> usize {
         self.tasks.lock().len()
     }
@@ -138,6 +144,7 @@ mod tests {
         assert_eq!(registry.len(), 3);
         registry.stop_cluster("c1");
         assert_eq!(registry.len(), 1);
+        assert!(!registry.contains("a") && registry.contains("c"));
         assert!(registry.stop("c"));
         assert!(!registry.stop("c"));
         assert!(registry.is_empty());

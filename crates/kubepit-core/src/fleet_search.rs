@@ -91,13 +91,31 @@ impl NameMatcher {
         ))
     }
 
+    /// Whether `name` matches. Terms compare against `name.to_lowercase()`
+    /// (the pattern was lowercased by [`parse`](Self::parse)). An ASCII
+    /// name, which is every Kubernetes name, lowercases byte by byte, so it
+    /// is compared in place without allocating; any other name takes
+    /// `str::to_lowercase` (full Unicode lowercasing, context included).
     pub fn matches(&self, name: &str) -> bool {
         match self {
             Self::All => true,
             Self::Regex(regex) => regex.is_match(name),
+            Self::Terms(terms) if name.is_ascii() => {
+                let bytes = name.as_bytes();
+                terms.iter().all(|term| match term {
+                    Term::Contains(needle) => contains_ascii_lowered(bytes, needle.as_bytes()),
+                    Term::Glob(pattern) => glob_match_at(pattern, bytes.len(), |i| {
+                        char::from(bytes[i].to_ascii_lowercase())
+                    }),
+                })
+            }
             Self::Terms(terms) => {
                 let lower = name.to_lowercase();
-                let chars: Vec<char> = lower.chars().collect();
+                let chars: Vec<char> = if terms.iter().any(|t| matches!(t, Term::Glob(_))) {
+                    lower.chars().collect()
+                } else {
+                    Vec::new()
+                };
                 terms.iter().all(|term| match term {
                     Term::Contains(needle) => lower.contains(needle.as_str()),
                     Term::Glob(pattern) => glob_match(pattern, &chars),
@@ -107,15 +125,39 @@ impl NameMatcher {
     }
 }
 
+/// Whether the ASCII-lowercased `haystack` contains `needle` (already
+/// lowercase). A non-ASCII byte in `needle` never matches, as it could not
+/// in a lowercased ASCII name.
+fn contains_ascii_lowered(haystack: &[u8], needle: &[u8]) -> bool {
+    let Some((&first, rest)) = needle.split_first() else {
+        return true;
+    };
+    if needle.len() > haystack.len() {
+        return false;
+    }
+    (0..=haystack.len() - needle.len()).any(|start| {
+        haystack[start].to_ascii_lowercase() == first
+            && haystack[start + 1..start + needle.len()]
+                .iter()
+                .zip(rest)
+                .all(|(h, n)| h.to_ascii_lowercase() == *n)
+    })
+}
+
 /// Whole-string glob match (`*` = any run, `?` = one character) with the
 /// classic single-backtrack algorithm: linear for one star, never
 /// exponential.
 pub fn glob_match(pattern: &[char], text: &[char]) -> bool {
+    glob_match_at(pattern, text.len(), |i| text[i])
+}
+
+/// [`glob_match`] over a text of `len` characters read through `at`.
+fn glob_match_at(pattern: &[char], len: usize, at: impl Fn(usize) -> char) -> bool {
     let (mut p, mut t) = (0, 0);
     let mut star: Option<usize> = None;
     let mut resume = 0;
-    while t < text.len() {
-        if p < pattern.len() && (pattern[p] == '?' || pattern[p] == text[t]) {
+    while t < len {
+        if p < pattern.len() && (pattern[p] == '?' || pattern[p] == at(t)) {
             p += 1;
             t += 1;
         } else if p < pattern.len() && pattern[p] == '*' {
@@ -465,6 +507,99 @@ mod tests {
         let pattern: Vec<char> = "*a*a*a*a*b".chars().collect();
         let text: Vec<char> = "a".repeat(200).chars().collect();
         assert!(!glob_match(&pattern, &text), "no catastrophic backtracking");
+    }
+
+    /// The matcher before its ASCII fast path: lowercase every name.
+    fn reference_matches(matcher: &NameMatcher, name: &str) -> bool {
+        match matcher {
+            NameMatcher::All => true,
+            NameMatcher::Regex(regex) => regex.is_match(name),
+            NameMatcher::Terms(terms) => {
+                let lower = name.to_lowercase();
+                let chars: Vec<char> = lower.chars().collect();
+                terms.iter().all(|term| match term {
+                    Term::Contains(needle) => lower.contains(needle.as_str()),
+                    Term::Glob(pattern) => glob_match(pattern, &chars),
+                })
+            }
+        }
+    }
+
+    #[test]
+    fn ascii_fast_path_keeps_the_lowercasing_semantics() {
+        let names = [
+            "",
+            "a",
+            "API",
+            "checkout-web-7f9c",
+            "Checkout-WEB-7F9C",
+            "app-0001-api-kbf2jnh5rf-6gdhk",
+            "orders-db-primary-0",
+            "aaaaaaaaab",
+            "k",
+            "i",
+            // Non-ASCII names take the lowercasing path.
+            "çay-ocağı",
+            "ÇAY-OCAĞI",
+            "İstanbul",
+            "ΟΔΟΣ",
+            "straße",
+            "\u{212A}elvin",
+            "日本-api",
+        ];
+        let patterns = [
+            "api",
+            "API",
+            "Web 7f9",
+            "web zzz",
+            "a",
+            "ab",
+            "k",
+            "i",
+            "i\u{307}",
+            "İ",
+            "\u{212A}",
+            "çay",
+            "ÇAY",
+            "οδος",
+            "ς",
+            "ss",
+            "ß",
+            "web-*",
+            "*web*",
+            "app-*-api",
+            "api-?",
+            "*-db-*-0",
+            "a*b",
+            "?",
+            "??",
+            "*",
+            "**",
+            "?stanbul",
+            "??stanbul",
+            "*ağı",
+            "*\u{212A}*",
+            "日本-*",
+            "?本-api",
+            "/^app-0[0-9]+-api$/",
+            "/web|worker/",
+        ];
+        for pattern in patterns {
+            let matcher = m(pattern);
+            for name in names {
+                assert_eq!(
+                    matcher.matches(name),
+                    reference_matches(&matcher, name),
+                    "pattern {pattern:?}, name {name:?}"
+                );
+            }
+        }
+        // Lowercasing the name, not folding it: `İ` lowers to `i̇`, so a
+        // plain `i` finds it, and the Kelvin sign lowers to ASCII `k`.
+        assert!(m("i").matches("İstanbul"));
+        assert!(m("k").matches("\u{212A}elvin"));
+        assert!(m("\u{212A}").matches("kelvin"));
+        assert!(!m("ss").matches("straße"));
     }
 
     #[test]

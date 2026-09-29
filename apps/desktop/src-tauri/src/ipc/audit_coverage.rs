@@ -121,6 +121,7 @@ const NOT_MUTATING: &[&str] = &[
     "resource_list",
     "resource_watch",
     "resource_unwatch",
+    "resource_watch_ack",
     "resource_get",
     "resource_get_yaml",
     "resource_events",

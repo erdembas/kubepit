@@ -1158,19 +1158,33 @@ git commit -m "perf(ui): run health, netpol or topology engines in a worker"
   - `Kubepit::resource_watch_ack(&self, watch_id: &str, seq: u64)`, a Tauri command `resource_watch_ack(watchId, seq)`, and `ipc.resourceWatchAck`.
   - `WatchEntry` acks after `applyBatch`. The mock acks as a no-op.
 
-- [ ] **Step 1: Check the gate.** It fires if the churn run at `l` (the `apply` scenario with `--churn 50`) shows a watch lag > 1 s, or a watch still running (`watchStats`/backend log) after its window closed. The lag is `watch:apply`'s `latencyMs` meta (the first batch's arrival → React commit; the driver's `raw.apply.latencyP95`), not the `watch:apply` duration, which only measures apply + flush → commit.
+_As built (2026-09-29):_
+- **`stopped`.** `WatchBatch.stopped: bool` (serde default) was added. The watch that times out sends one last, empty batch with it, and a `WatchEntry` that still has subscribers restarts. A webview that was only frozen (JS suspended for over a minute) gets it on resume instead of keeping a dead list. No UI and no strings.
+- **Window close.** The window half of the gate is fixed directly too. `resource_watch` takes the calling `tauri::Window` and records the watch in `AppState.window_watches` (`windows.rs` `WindowOwned`, which `WindowTerminals` became). `resource_unwatch` forgets it, and `on_window_destroyed` unwatches the rest. The ack timeout remains the fallback.
+- **Flush timing.** A flush that falls due while the window is full (a tick, or 500 pending) goes out with the ack that frees it. Every ack that makes progress restarts the timeout, which is armed by the first unacknowledged batch.
+- **Frontend.** `watchBatch.ts` `routeBatch` holds the frontend rule: apply a current batch, then ack every batch (superseded generations included); `stopped` → restart. It never throws, because a throwing `onmessage` stalls a Tauri channel for good. A failed apply is logged and acked. The watch then stops and restarts with backoff (`ApplyRetry`: 1 s doubling to 30 s), and after 3 consecutive failures it turns `error` for Retry. The backend skips objects that serialise to `null`. Hidden tabs hold no backend watch (`useWatch` unsubscribes, no linger), so nothing needs keeping alive for them.
+- **Callers in tests.** They now ack what they read: `support::perf::wait_synced` and the fake-server watch test.
 
-- [ ] **Step 2: Write the failing tests.**
+- [x] **Step 1: Check the gate.** It fires if the churn run at `l` (the `apply` scenario with `--churn 50`) shows a watch lag > 1 s, or a watch still running (`watchStats`/backend log) after its window closed. The lag is `watch:apply`'s `latencyMs` meta (the first batch's arrival → React commit; the driver's `raw.apply.latencyP95`), not the `watch:apply` duration, which only measures apply + flush → commit. _(Fired from the code: see the spec's gates table.)_
+
+- [x] **Step 2: Write the failing tests.**
   - `ack_window_blocks_after_four_unacked`: four `on_sent` → `!can_send`; `on_ack(2)` → `can_send`.
   - `unacked_watch_coalesces_and_stops_after_timeout`, with tokio time paused:
     - a sink that never acks receives exactly 4 batches while 2 000 burst events arrive (`ScaleWatch::PodBurst(2000)`);
     - the task ends once 60 s have been advanced.
+  - _As built:_
+    - The burst test is in `tests/fake_apiserver.rs`. It uses the `s` preset with 8 replicas (2 000 pods), and pauses time only after `resource_watch` returns, because connecting waits on real time. The fifth and last batch is the `stopped` one, at 60 s.
+    - `watch.rs` repeats it on a synthetic stream (`drive` is generic over the event stream). It adds:
+      - `an_ack_releases_one_coalesced_latest_wins_batch`: 2 000 events for 1 000 pods → one batch of 1 000, each at its last `resourceVersion`;
+      - `every_ack_that_makes_progress_restarts_the_timeout`;
+      - `ack_registry_forwards_the_newest_seq_while_the_watch_runs`.
+    - `windows.rs` adds `closing_a_window_hands_back_only_its_live_watches`, and `watchBatch.test.ts` the `routeBatch` cases.
 
-- [ ] **Step 3: Run the tests to verify they fail, implement, then run to verify they pass.** Run: `cargo test -p kubepit-core watch && pnpm typecheck && pnpm --filter @kubepit/desktop test`. Expected: PASS.
+- [x] **Step 3: Run the tests to verify they fail, implement, then run to verify they pass.** Run: `cargo test -p kubepit-core watch && pnpm typecheck && pnpm --filter @kubepit/desktop test`. Expected: PASS.
 
-- [ ] **Step 4: Re-run the churn soak.** Record the After values.
+- [x] **Step 4: Re-run the churn soak.** Record the After values. _(As built: the `apply,ttfr` scenarios at `l` with churn 50 (3 runs) and `e2e/watch_pods_synced_l`, not the 30-minute soak. The demo backend acks as a no-op, so the UI numbers show only the frontend's cost of acking; the flow control itself is covered by the paused-time tests.)_
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates apps/desktop docs/superpowers/specs
@@ -1329,6 +1343,38 @@ it('caps the view at DEFAULT_MAX_NODES with one "+N more" node per kind', () => 
 ```bash
 git add apps/desktop/src docs
 git commit -m "perf(map): raise the Resource Map cap to the measured budget"
+```
+
+---
+
+### R1: backend hot paths (no gate)
+
+The baseline missed three Rust budgets that no gate reads (spec, Results, "Misses that no gate covers"): `watch/aggregator_initial_20k` (170 ms / 120 ms), `watch/reset_batch_20k` (64.4 ms / 60 ms) and `fleet_search/matcher_substring_50k` (6.0 ms / 5 ms). This task fixes them with ≥ 30% headroom, since CI runners are slower. _(Added after the baseline; done as described.)_
+
+**Files:**
+- Modify: `crates/kubepit-core/src/objects.rs` (`to_kube_object`), `src/types.rs` (`SharedKubeObject`, `WatchBatch.upserts`), `src/watch.rs` (`WatchAggregator`), `crates/kubepit-core/Cargo.toml` (serde `rc`)
+- Modify: `crates/kubepit-core/src/fleet_search.rs` (`NameMatcher::matches`)
+- Test: unit tests in `objects.rs` and `fleet_search.rs`; the watch unit tests, `tests/fake_apiserver.rs` and `tests/perf_probe.rs` unchanged
+
+**Interfaces:**
+- Produces: `pub type SharedKubeObject = Arc<KubeObject>`; `WatchBatch.upserts: Vec<SharedKubeObject>` (same JSON). No IPC change.
+
+- [x] **Step 1: Measure.** Instruments' Time Profiler (`xctrace`) failed on this machine, so a throwaway example timed each step on the 20 000 `l` pods:
+  - `to_kube_object`: 80 ms, of which 23 ms dropped the `DynamicObject` after serialising a copy of it;
+  - one deep `Value` clone per pod: 40 ms, and dropping a copy: 25 ms;
+  - `ObjectMeta` alone to a `Value`: 15 ms; sorting 20 000 keys: 1.5 ms.
+
+  The aggregator converted each pod (80 ms), cloned it into its store (40 ms) and dropped the batch copies (25 ms): about the 156 ms measured. A reset batch cloned the whole store (40 of 60 ms).
+- [x] **Step 2: Convert by value.** `to_kube_object` moves `data` (spec, status) into the result and serialises only `metadata`, inserting keys in serde's order (type meta, `metadata`, then `data`, later keys winning); non-object `data` takes serde's path. Test `by_value_conversion_equals_serialising_the_object` pins it against `serde_json::to_value` (colliding keys, empty type meta, no metadata, non-object data). Every caller gains, not only watches (24 ms instead of 80 ms for 20 000 pods).
+- [x] **Step 3: Share objects.** The store, the staged upserts and the batches hold one `Arc<Value>` per object, so staging and reset snapshots copy nothing and dropping a batch only drops references. Batch semantics are unchanged (`reset` first, `synced` after InitDone, latest-wins upserts, deletes, flush at 500 or 150 ms); the existing tests pass unchanged.
+- [x] **Step 4: Match names in place.** `NameMatcher::matches` allocated a lowercased `String` and a `Vec<char>` per name. An ASCII name (every Kubernetes name) lowercases byte by byte, so substrings and globs compare it in place against the pattern lowercased once by `parse`; `glob_match` became a thin wrapper over an index-based `glob_match_at`. Other names keep `str::to_lowercase`. Test `ascii_fast_path_keeps_the_lowercasing_semantics` compares every pattern × name against the previous matcher, Unicode included (`İ`, `ß`, final sigma, the Kelvin sign).
+- [x] **Step 5: Re-measure** (5 short runs: `cargo bench -p kubepit-core --bench watch -- --noplot --warm-up-time 1 --measurement-time 3`, and `--bench search_proxies … fleet_search`). Medians: `aggregator_initial_20k` 28.2 ms, `reset_batch_20k` 1.14 ms, `matcher_substring_50k` 0.76 ms, `matcher_glob_50k` 1.28 ms (spec, Results).
+- [x] **Step 6: Commit** one commit per fix, then this record:
+
+```bash
+git commit -m "perf(watch): share watch objects and convert them by value (R1a)"
+git commit -m "perf(fleet): match ASCII names without allocating (R1b)"
+git commit -m "docs(perf): R1 backend hot paths and their results"
 ```
 
 ---

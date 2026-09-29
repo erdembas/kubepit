@@ -32,26 +32,51 @@ pub async fn resource_list(
 }
 
 /// Starts a batched watch; batches arrive on `on_event` until
-/// `resource_unwatch` or until the webview drops the channel.
+/// `resource_unwatch`, until the calling window closes (see `windows`), or
+/// until the webview drops the channel or stops acknowledging batches
+/// (`resource_watch_ack`).
 #[tauri::command]
 pub async fn resource_watch(
     cluster_id: String,
     gvk: Gvk,
     namespaces: Vec<String>,
     on_event: Channel<WatchBatch>,
+    window: tauri::Window,
     state: State<'_, AppState>,
 ) -> IpcResult<String> {
     let core = state.core.clone();
-    core.resource_watch(&cluster_id, &gvk, namespaces, move |batch| {
-        on_event.send(batch).is_ok()
-    })
-    .await
-    .map_err(ipc_err)
+    let watch_id = core
+        .resource_watch(&cluster_id, &gvk, namespaces, move |batch| {
+            on_event.send(batch).is_ok()
+        })
+        .await
+        .map_err(ipc_err)?;
+    // Watches that ended on their own (ack timeout, refused sink,
+    // disconnect, a reloaded window) are never unwatched: forget them here,
+    // so the registry only holds live watches and the new one.
+    state
+        .window_watches
+        .retain_live(|id| core.resource_watch_running(id));
+    if !state.window_watches.register(window.label(), &watch_id) {
+        // The window closed while the watch was starting.
+        core.resource_unwatch(&watch_id);
+        return Err("window closed".to_string());
+    }
+    Ok(watch_id)
 }
 
 #[tauri::command]
 pub async fn resource_unwatch(watch_id: String, state: State<'_, AppState>) -> IpcResult<()> {
+    state.window_watches.forget(&watch_id);
     state.core.resource_unwatch(&watch_id);
+    Ok(())
+}
+
+// Only forwards a number to the watch task; no I/O or blocking wait here.
+/// The webview applied every batch of `watch_id` up to `seq`.
+#[tauri::command]
+pub fn resource_watch_ack(watch_id: String, seq: u64, state: State<'_, AppState>) -> IpcResult<()> {
+    state.core.resource_watch_ack(&watch_id, seq);
     Ok(())
 }
 

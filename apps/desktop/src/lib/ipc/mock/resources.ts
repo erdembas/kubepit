@@ -136,6 +136,8 @@ register({
             synced: false,
             error,
             recovered: false,
+            seq: 1,
+            stopped: false,
           });
           removeWatcher(id);
           return;
@@ -151,6 +153,8 @@ register({
     return id;
   },
   resource_unwatch: ({ watchId }: MockArgs) => removeWatcher(watchId),
+  // The demo backend has no ack window: batches never wait for the UI.
+  resource_watch_ack: () => undefined,
   resource_get: ({ clusterId, gvk, namespace, name }: MockArgs) =>
     structuredClone(getObject(getDb(clusterId), gvk, namespace, name)),
   resource_get_yaml: async ({ clusterId, gvk, namespace, name }: MockArgs) => {

@@ -2518,6 +2518,7 @@
   "Updated {count} images of {name}": "{name} için {count} image güncellendi",
   "Updated view “{name}”": "“{name}” görünümü güncellendi",
   "Updates": "Günceller",
+  "Updates to this list could not be applied: {error}": "Bu listeye gelen güncellemeler uygulanamadı: {error}",
   "Updating repositories…": "Repository'ler güncelleniyor…",
   "Updating…": "Güncelleniyor…",
   "Upgrade": "Güncelle",

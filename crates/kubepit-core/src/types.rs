@@ -14,6 +14,10 @@ use serde_json::Value;
 /// Raw Kubernetes object as returned by the API server (managedFields stripped).
 pub type KubeObject = Value;
 
+/// A [`KubeObject`] shared without copying: a watch's store and the batches
+/// it sends hold the same object. Serialises exactly like `KubeObject`.
+pub type SharedKubeObject = std::sync::Arc<KubeObject>;
+
 // ---------------------------------------------------------------------------
 // Clusters
 // ---------------------------------------------------------------------------
@@ -231,7 +235,7 @@ pub struct ResourceList {
 pub struct WatchBatch {
     pub watch_id: String,
     pub reset: bool,
-    pub upserts: Vec<KubeObject>,
+    pub upserts: Vec<SharedKubeObject>,
     pub deletes: Vec<String>,
     pub synced: bool,
     pub error: Option<String>,
@@ -240,6 +244,15 @@ pub struct WatchBatch {
     /// with `error`.
     #[serde(default)]
     pub recovered: bool,
+    /// Sequence number, from 1; acknowledge it with `resource_watch_ack`
+    /// once the batch is applied (see `watch::AckWindow`).
+    #[serde(default)]
+    pub seq: u64,
+    /// The watch stopped because its batches went unacknowledged for
+    /// `watch::ACK_TIMEOUT`: this is its last batch, with no objects. A
+    /// view that still wants the list starts a new watch.
+    #[serde(default)]
+    pub stopped: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

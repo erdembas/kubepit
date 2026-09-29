@@ -4,8 +4,10 @@
 //! more (`win-*`), all sharing this process's backend: connections, watches'
 //! cluster clients, port forwards and the PTY manager. Streams are per
 //! window because their channels belong to the webview that asked. PTYs
-//! outlive their channel, so [`WindowTerminals`] remembers which window
-//! created each terminal and closing a window destroys them.
+//! outlive their channel, and a watch only notices a dead webview when its
+//! batches go unacknowledged for a minute, so [`WindowOwned`] registries
+//! remember which window created each terminal and each resource watch,
+//! and closing a window destroys them at once.
 
 use std::collections::{HashMap, HashSet};
 
@@ -18,9 +20,9 @@ use crate::AppState;
 /// Offset of a new window from the one that opened it (cascade).
 const CASCADE: f64 = 28.0;
 
-/// Terminal ids by the window that created them.
+/// Ids (terminals, resource watches) by the window that created them.
 #[derive(Default)]
-pub struct WindowTerminals {
+pub struct WindowOwned {
     inner: Mutex<Inner>,
 }
 
@@ -30,24 +32,46 @@ struct Inner {
     closed: HashSet<String>,
 }
 
-impl WindowTerminals {
-    /// Records that `window` owns `terminal`; false when the window already closed.
-    pub fn register(&self, window: &str, terminal: &str) -> bool {
+impl WindowOwned {
+    /// Records that `window` owns `id`; false when the window already closed.
+    pub fn register(&self, window: &str, id: &str) -> bool {
         let mut inner = self.inner.lock();
         if inner.closed.contains(window) {
             return false;
         }
-        inner
-            .owners
-            .insert(terminal.to_string(), window.to_string());
+        inner.owners.insert(id.to_string(), window.to_string());
         true
+    }
+
+    /// `id` ended on its own (unwatched): its window no longer owns it.
+    pub fn forget(&self, id: &str) {
+        self.inner.lock().owners.remove(id);
+    }
+
+    /// Forgets every id for which `is_live` is false (ids that ended
+    /// without being forgotten). `is_live` runs outside the lock.
+    pub fn retain_live(&self, is_live: impl Fn(&str) -> bool) {
+        let ids: Vec<String> = self.inner.lock().owners.keys().cloned().collect();
+        let dead: Vec<String> = ids.into_iter().filter(|id| !is_live(id)).collect();
+        if dead.is_empty() {
+            return;
+        }
+        let mut inner = self.inner.lock();
+        for id in &dead {
+            inner.owners.remove(id);
+        }
+    }
+
+    #[cfg(test)]
+    fn owned(&self) -> usize {
+        self.inner.lock().owners.len()
     }
 
     pub fn is_closed(&self, window: &str) -> bool {
         self.inner.lock().closed.contains(window)
     }
 
-    /// Marks `window` closed and hands back the terminals it owned.
+    /// Marks `window` closed and hands back the ids it owned.
     pub fn close_window(&self, window: &str) -> Vec<String> {
         let mut inner = self.inner.lock();
         inner.closed.insert(window.to_string());
@@ -119,11 +143,16 @@ pub async fn window_open(
     Ok(())
 }
 
-/// A window went away: end the terminals it created.
+/// A window went away: stop the resource watches and end the terminals it
+/// created.
 pub(crate) fn on_window_destroyed(window: &tauri::Window) {
     let Some(state) = window.try_state::<AppState>() else {
         return;
     };
+    // Aborting a watch task only takes the registry lock.
+    for id in state.window_watches.close_window(window.label()) {
+        state.core.resource_unwatch(&id);
+    }
     let ids = state.window_terminals.close_window(window.label());
     if ids.is_empty() {
         return;
@@ -150,8 +179,40 @@ mod tests {
     }
 
     #[test]
+    fn closing_a_window_hands_back_only_its_live_watches() {
+        let registry = WindowOwned::default();
+        assert!(registry.register("main", "w1"));
+        assert!(registry.register("win-a", "w2"));
+        assert!(registry.register("win-a", "w3"));
+        assert!(registry.register("win-a", "w4"));
+        // Unwatched before the window closed.
+        registry.forget("w3");
+        let mut stopped = registry.close_window("win-a");
+        stopped.sort();
+        assert_eq!(stopped, ["w2", "w4"]);
+        assert!(
+            !registry.register("win-a", "w5"),
+            "a watch that starts after its window closed is stopped at once"
+        );
+        assert!(registry.close_window("win-a").is_empty());
+        assert_eq!(registry.close_window("main"), ["w1"]);
+    }
+
+    #[test]
+    fn watches_that_ended_on_their_own_are_pruned() {
+        let registry = WindowOwned::default();
+        for id in ["w1", "w2", "w3"] {
+            assert!(registry.register("main", id));
+        }
+        // w2 timed out without acks, w3's cluster disconnected.
+        registry.retain_live(|id| id == "w1");
+        assert_eq!(registry.owned(), 1);
+        assert_eq!(registry.close_window("main"), ["w1"]);
+    }
+
+    #[test]
     fn closing_a_window_hands_back_only_its_terminals() {
-        let registry = WindowTerminals::default();
+        let registry = WindowOwned::default();
         assert!(registry.register("main", "t1"));
         assert!(registry.register("win-a", "t2"));
         assert!(registry.register("win-a", "t3"));

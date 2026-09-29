@@ -3,7 +3,14 @@ import { ipc } from '@/lib/ipc';
 import { kindKey } from '@/lib/kube/catalog';
 import { perfNow, recordWatchCommit } from '@/lib/perf/probe';
 import type { ClusterId, Gvk, KubeObject, WatchBatch } from '@/types';
-import { applyBatch, batchFlush, isForbidden } from './watchBatch';
+import {
+  applyBatch,
+  ApplyRetry,
+  batchFlush,
+  isForbidden,
+  routeBatch,
+  type BatchRoute,
+} from './watchBatch';
 
 /**
  * Shared, ref-counted resource watches. Every table, mini-table and overview
@@ -14,6 +21,9 @@ import { applyBatch, batchFlush, isForbidden } from './watchBatch';
  *
  * The last snapshot is kept after the watch stops (hidden tab, disconnected
  * view) so returning to a view paints instantly while the new watch resyncs.
+ * Hidden tabs hold no backend watch, so the backend's flow control (every
+ * batch is acknowledged once applied, see `routeBatch`) only concerns live
+ * views.
  *
  * A batch that reports an error still carries its objects (`watchBatch.ts`):
  * the list only turns `error` when nothing is left; otherwise the rows stay
@@ -47,6 +57,11 @@ function errorText(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** Tells the backend a batch is applied (an ended watch ignores it). */
+function acknowledge(batch: WatchBatch) {
+  void ipc.resourceWatchAck(batch.watch_id, batch.seq).catch(() => undefined);
+}
+
 class WatchEntry {
   private map = new Map<string, KubeObject>();
   private listeners = new Set<() => void>();
@@ -58,6 +73,11 @@ class WatchEntry {
   private applyStart = 0;
   /** Perf probe: time spent applying the batches since the last flush. */
   private applyMs = 0;
+  /** Restarts after failed applies, with backoff, then gives up. */
+  private readonly retry = new ApplyRetry(
+    () => this.relaunch(),
+    (message) => this.update({ status: 'error', error: message, forbidden: false }),
+  );
   snapshot: WatchSnapshot = EMPTY;
 
   constructor(
@@ -79,7 +99,13 @@ class WatchEntry {
     };
   }
 
+  /** Retry button, header refresh: start over, failed applies forgotten. */
   restart() {
+    this.retry.reset();
+    this.relaunch();
+  }
+
+  private relaunch() {
     this.stop();
     if (this.listeners.size) this.start();
   }
@@ -87,10 +113,24 @@ class WatchEntry {
   private start() {
     const generation = ++this.generation;
     this.update({ status: 'loading', error: null, forbidden: false, synced: false });
+    const route: BatchRoute = {
+      apply: (batch) => {
+        this.apply(batch);
+        this.retry.succeeded();
+      },
+      ack: acknowledge,
+      restart: () => this.relaunch(),
+      // Stop at once (later batches would land on half-applied rows), then
+      // restart after a backoff, or give up.
+      failed: (error) => {
+        this.stop();
+        this.retry.failed(error);
+      },
+    };
     ipc
-      .resourceWatch(this.clusterId, this.gvk, this.namespaces, (batch) => {
-        if (generation === this.generation) this.apply(batch);
-      })
+      .resourceWatch(this.clusterId, this.gvk, this.namespaces, (batch) =>
+        routeBatch(batch, generation === this.generation, route),
+      )
       .then((id) => {
         if (generation === this.generation) this.watchId = id;
         else void ipc.resourceUnwatch(id).catch(() => undefined);
@@ -104,6 +144,7 @@ class WatchEntry {
 
   private stop() {
     this.generation++;
+    this.retry.cancel();
     if (this.frame !== null) {
       cancelAnimationFrame(this.frame);
       this.frame = null;

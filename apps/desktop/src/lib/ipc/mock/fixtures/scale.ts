@@ -79,6 +79,8 @@ export function chunkBatches(
       synced: start + size >= items.length,
       error: null,
       recovered: false,
+      seq: batches.length + 1,
+      stopped: false,
     });
   }
   return batches;
