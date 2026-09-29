@@ -69,6 +69,8 @@ let clusters: ClusterDef[] = [
     tags: ['gcp', 'eu'],
     color: '#eab308',
     default_namespace: 'checkout',
+    // Metrics-server only: shows the fallback everywhere (recommendations too).
+    prometheus: { mode: 'off' },
   }),
   def({
     id: 'c-dev',
@@ -196,7 +198,8 @@ const defaultSettings: Settings = {
   history: { ...DEFAULT_HISTORY_SETTINGS, persist_clusters: ['c-staging'] },
   keyboard_mode: false,
   recommendations: {
-    scan_clusters: [],
+    // The clusters whose seeded scans ran on schedule (mock/recommendations.ts).
+    scan_clusters: ['c-dev', 'c-prod-eu', 'c-staging'],
     interval_minutes: 60,
     retention_days: 30,
     strategy: null,

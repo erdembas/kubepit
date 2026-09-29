@@ -1888,15 +1888,15 @@ git commit -m "feat(recommendations): read commands, scan event and Tauri wiring
 
 Steps:
 
-- [ ] **Step 1: Implement the handlers and fixtures listed under Interfaces**
+- [x] **Step 1: Implement the handlers and fixtures listed under Interfaces**
 
-- [ ] **Step 2: Typecheck**
+- [x] **Step 2: Typecheck**
 
 Run: `pnpm typecheck`
 
 Expected: PASS.
 
-- [ ] **Step 3: Verify in the browser console**
+- [x] **Step 3: Verify in the browser console**
 
 Run: `pnpm dev:ui`, then in the console
 `await window.__kubepitMock?.('recommendations_latest', {clusterId: 'prod-eu-west-1', runId: null})`,
@@ -1904,7 +1904,7 @@ or through a temporary call in a component, which you remove afterwards.
 
 Expected: a scan with at least 20 workloads, flags and a summary.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/desktop/src/lib/ipc/mock

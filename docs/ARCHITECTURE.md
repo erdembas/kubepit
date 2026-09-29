@@ -1180,8 +1180,10 @@ applying a recommendation only reads, so read-only clusters get it all.
 - **Demo**: OpenCost on prod-eu-west-1 (`mock/fixtures/cost.ts` derives
   allocations with usage, network and idle plus a daily trend), estimates
   elsewhere (Prometheus usage and a requests trend where the demo runs
-  Prometheus, the metrics-server snapshot on kind), and synthetic usage
-  histories that make some workloads over- and others under-provisioned.
+  Prometheus, the metrics-server snapshot on kind and staging-gke), and
+  synthetic usage histories that make some workloads over- and others
+  under-provisioned, with the pipeline's evidence, flags and notes per
+  cluster (see "Recommendations").
 
 ## Recommendations
 
@@ -1256,6 +1258,28 @@ history") and re-evaluated for the UI with the current settings.
   queries; the UI sends no pod names for a row whose list was truncated,
   so the name pattern is used). All are classified read-only in
   `ipc/audit_coverage.rs`; applying stays the audited `rightsizing_apply`.
+- **Demo** (`mock/recommendations.ts`, `mock/fixtures/recommendations.ts`,
+  registered after `./cost` and before `./history`): every command, with a
+  seeded history per cluster — prod-eu-west-1 30 days of scans (hourly
+  for 48 hours, then daily, one failed and one interrupted), staging-gke
+  metrics-server only (its demo Prometheus is turned off), dev-shared a
+  failed last scan after good ones, prod-us-east-1 three daily scans, kind
+  never scanned. A run keeps how it was collected, not its rows: its
+  report is rebuilt from the fixtures at the run's time (usage drifts over
+  the days), so re-evaluation rebuilds it with the current strategy and
+  settings on the stored window. Each cluster's collection follows a
+  profile that yields the pipeline's notes and flags (`partial-data` and
+  most evidence flags on prod-eu-west-1; `namespace-failed` on
+  dev-shared; no kube-state-metrics, unlistable HPAs and
+  `query-budget-exceeded` on prod-us-east-1). "Scan now" emits queued →
+  running with a total that grows when a batch splits (16, then 48) →
+  success over about three seconds; opted-in connected clusters scan in
+  the background when due; disconnecting stops a scan (interrupted,
+  `stopped`); exports mirror `export.rs`; usage history is a deterministic
+  daily rhythm with gaps; `history_clear` reaches the stored scans through
+  `provideRecommendationHistory`. The live `rightsizing_report` uses the
+  same profiles (automatic strategy, aligned `window_end`, lenses,
+  evidence and flags).
 
 ## Access (RBAC)
 

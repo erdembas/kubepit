@@ -32,6 +32,9 @@ import './customActions';
 import './podSecurity';
 // Cost insight and right-sizing (reads prometheus_status, wraps nothing).
 import './cost';
+// Recommendation scans: wraps settings_set and the cluster lifecycle (after './app',
+// './connectivity'); shows its stored scans in the history (`provideRecommendationHistory`).
+import './recommendations';
 // Registered last: it wraps every mutating command to derive the demo audit log.
 import './history';
 
