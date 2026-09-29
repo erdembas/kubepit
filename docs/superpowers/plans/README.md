@@ -15,7 +15,8 @@ has a design spec next to it in `../specs/` and is meant to be executed with
 | 6   | [AI assistant](2026-09-28-ai-assistant.md)                                       | 18                  | 1 (Vitest)                                                        | Default model, consent and logging policy (spec open questions)                            |
 | 7   | [Cloud import and local clusters](2026-09-28-cloud-import-and-local-clusters.md) | 15                  | 1 (Vitest)                                                        | A real GKE auth-plugin check before release                                                |
 | 8   | [Team sharing](2026-09-28-team-sharing.md)                                       | 15                  | 7 (`ClusterDef.origin`), 5 (Prometheus settings to share)         | Profile hosting convention for your team                                                   |
-| 9   | [More languages](2026-09-28-more-languages.md)                                   | 9 (+6 locale tasks) | Last, so every new string is translated once                      | Reviewers for the drafted locales                                                          |
+| 9   | [Falco runtime threats](2026-09-29-falco-runtime-threats.md)                     | 15 (+2 optional)    | — (builds on the merged Trivy install, alerts and history code)   | Answers to the spec's open questions (alert threshold, source cap)                         |
+| 10  | [More languages](2026-09-28-more-languages.md)                                   | 9 (+6 locale tasks) | Last, so every new string is translated once                      | Reviewers for the drafted locales                                                          |
 
 ## Why this order
 
