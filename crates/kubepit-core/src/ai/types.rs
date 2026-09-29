@@ -207,6 +207,12 @@ pub struct AiModelInfo {
     pub adaptive_thinking: Option<bool>,
     /// Supports `output_config.effort`; `None` = unknown.
     pub effort: Option<bool>,
+    /// The effort levels the Models API reports as supported
+    /// (`capabilities.effort.<level>.supported`); `None` = not reported.
+    /// Rust-only (never serialized, so not part of the TS contract): the
+    /// Anthropic provider clamps a requested level to these.
+    #[serde(skip)]
+    pub effort_levels: Option<Vec<AiEffort>>,
 }
 
 // ---------------------------------------------------------------------------

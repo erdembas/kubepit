@@ -5,8 +5,13 @@
 //!
 //! Use from a test file with `mod support;` and route requests with a
 //! [`Router`] closure.
+//!
+//! The same server doubles as the fake model provider of the assistant
+//! tests (SSE streams, NDJSON, raw status codes, hangs); [`llm`] builds
+//! its replies. No test ever reaches a real provider.
 #![allow(dead_code)]
 
+pub mod llm;
 pub mod perf;
 pub mod scale;
 pub mod stats;
@@ -57,6 +62,53 @@ pub enum Reply {
     Stream(Vec<Value>),
     /// JSON with extra response headers (e.g. `Warning` from admission).
     JsonWithHeaders(u16, Value, Vec<(String, String)>),
+    /// A `text/event-stream` (fake model provider): `events` in order,
+    /// `gap_ms` apart. With `cut_after: Some(n)` only the first `n` events
+    /// are written and the connection is dropped without ending the chunked
+    /// body (a stream cut mid-answer); otherwise the body ends cleanly.
+    Sse {
+        events: Vec<SseEvent>,
+        gap_ms: u64,
+        cut_after: Option<usize>,
+    },
+    /// Any status, headers and body, as given (`Content-Length` is added).
+    Raw {
+        code: u16,
+        headers: Vec<(String, String)>,
+        body: String,
+    },
+    /// A `200 text/event-stream` head, then silence for 30 s.
+    Hang,
+    /// A `code` head announcing a 1 KiB JSON body that never arrives
+    /// (silence for 30 s).
+    Stall {
+        code: u16,
+    },
+    /// Like [`Reply::Stream`] but served as `application/x-ndjson` (Ollama).
+    Ndjson(Vec<Value>),
+}
+
+/// One server-sent event: an optional `event:` name and its `data:` (a
+/// multi-line `data` is sent as several `data:` lines).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SseEvent {
+    pub event: Option<String>,
+    pub data: String,
+}
+
+impl SseEvent {
+    /// The wire form, ending with the blank line that dispatches it.
+    pub fn wire(&self) -> String {
+        let mut text = String::new();
+        if let Some(name) = &self.event {
+            text.push_str(&format!("event: {name}\n"));
+        }
+        for line in self.data.split('\n') {
+            text.push_str(&format!("data: {line}\n"));
+        }
+        text.push('\n');
+        text
+    }
 }
 
 pub type Router = Arc<dyn Fn(&Request, &Log) -> Reply + Send + Sync>;
@@ -130,6 +182,7 @@ async fn handle(mut socket: TcpStream, router: Router, log: Log) -> std::io::Res
     };
     let reply = router(&request, &log);
     log.lock().push(request);
+    let ndjson = matches!(reply, Reply::Ndjson(_));
     match reply {
         Reply::Json(code, value) => {
             let text = value.to_string();
@@ -155,10 +208,18 @@ async fn handle(mut socket: TcpStream, router: Router, log: Log) -> std::io::Res
             );
             socket.write_all(response.as_bytes()).await?;
         }
-        Reply::Stream(events) => {
+        Reply::Stream(events) | Reply::Ndjson(events) => {
+            let content_type = if ndjson {
+                "application/x-ndjson"
+            } else {
+                "application/json"
+            };
             socket
                 .write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+                    )
+                    .as_bytes(),
                 )
                 .await?;
             for event in events {
@@ -170,8 +231,89 @@ async fn handle(mut socket: TcpStream, router: Router, log: Log) -> std::io::Res
             socket.flush().await?;
             tokio::time::sleep(Duration::from_secs(30)).await;
         }
+        Reply::Sse {
+            events,
+            gap_ms,
+            cut_after,
+        } => {
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+                )
+                .await?;
+            socket.flush().await?;
+            let limit = cut_after.unwrap_or(events.len());
+            for (i, event) in events.iter().take(limit).enumerate() {
+                if i > 0 && gap_ms > 0 {
+                    tokio::time::sleep(Duration::from_millis(gap_ms)).await;
+                }
+                let text = event.wire();
+                socket
+                    .write_all(format!("{:x}\r\n{text}\r\n", text.len()).as_bytes())
+                    .await?;
+                socket.flush().await?;
+            }
+            if cut_after.is_none() {
+                socket.write_all(b"0\r\n\r\n").await?;
+            }
+            socket.flush().await?;
+            // Dropping the socket closes the connection (mid-body when cut).
+        }
+        Reply::Raw {
+            code,
+            headers,
+            body,
+        } => {
+            let extra: String = headers
+                .iter()
+                .map(|(name, value)| format!("{name}: {value}\r\n"))
+                .collect();
+            let response = format!(
+                "HTTP/1.1 {code} {}\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                reason_phrase(code),
+                body.len()
+            );
+            socket.write_all(response.as_bytes()).await?;
+        }
+        Reply::Hang => {
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+                )
+                .await?;
+            socket.flush().await?;
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        }
+        Reply::Stall { code } => {
+            let head = format!(
+                "HTTP/1.1 {code} {}\r\nContent-Type: application/json\r\nContent-Length: 1024\r\nConnection: close\r\n\r\n",
+                reason_phrase(code)
+            );
+            socket.write_all(head.as_bytes()).await?;
+            socket.flush().await?;
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        }
     }
     Ok(())
+}
+
+fn reason_phrase(code: u16) -> &'static str {
+    match code {
+        200 | 201 => "OK",
+        301 => "Moved Permanently",
+        302 => "Found",
+        307 => "Temporary Redirect",
+        308 => "Permanent Redirect",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        429 => "Too Many Requests",
+        500 => "Internal Server Error",
+        503 => "Service Unavailable",
+        529 => "Overloaded",
+        _ => "Error",
+    }
 }
 
 async fn write_json(

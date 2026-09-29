@@ -53,6 +53,11 @@ notify = "8"
 keyring = "4"
 # Persistent history (audit log, events, changes): local SQLite, WAL mode.
 rusqlite = { version = "0.32", features = ["bundled"] }
+# Assistant providers (Anthropic, OpenAI-compatible, Ollama) over HTTPS/SSE.
+# Already in the tree through `tauri-plugin-updater`; `rustls-no-provider`
+# keeps the ring-based rustls stack above (no aws-lc-rs, no native-tls): the
+# client gets a preconfigured ring `ClientConfig` (`ai/provider.rs`).
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "json", "stream"] }
 
 [dev-dependencies]
 tempfile = "3"

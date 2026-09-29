@@ -2938,6 +2938,7 @@ dependencies = [
  "notify",
  "parking_lot",
  "regex",
+ "reqwest",
  "rusqlite",
  "rustls",
  "rustls-native-certs",

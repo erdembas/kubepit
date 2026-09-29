@@ -26,14 +26,22 @@
 //! | [`types`]    | serde contract types mirrored in `types/index.ts`     |
 //! | [`settings`] | defaults, normalization, loopback / egress rule       |
 //! | [`keys`]     | `ai/<provider-id>` credential store entries           |
-//! | [`provider`] | the `Provider` trait and chat types (`ToolSpec`)      |
+//! | [`provider`] | the `Provider` trait, chat types, errors, retries, timeouts, HTTPS client, egress guard |
+//! | [`sse`]      | server-sent events / NDJSON framing (bounded)         |
+//! | [`anthropic`] | Anthropic Messages API provider and Models API       |
+//! | [`openai`]   | OpenAI-compatible `/chat/completions` provider        |
+//! | [`ollama`]   | Ollama `/api/chat` provider                           |
 //! | [`tools`]    | read-only tool catalog, input parsing, executor       |
 //! | [`logs`]     | plain-text log condensation for tool results          |
 
+pub mod anthropic;
 pub mod keys;
 pub mod logs;
+pub mod ollama;
+pub mod openai;
 pub mod provider;
 pub mod settings;
+pub mod sse;
 pub mod tools;
 pub mod types;
 
