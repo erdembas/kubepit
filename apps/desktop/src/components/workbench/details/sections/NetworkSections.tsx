@@ -53,6 +53,7 @@ function EndpointTable({ ep, ctx }: { ep: KubeObject; ctx: ColumnContext }) {
         { label: i18n.t('Ports'), cell: (r) => r.ports },
         {
           label: i18n.t('Pod'),
+          lang: 'en',
           cell: (r) =>
             r.target ? (
               <RefLink
@@ -131,6 +132,7 @@ export function ServiceSections({ obj, ctx, isActive }: SectionProps) {
               { label: i18n.t('Name'), cell: (p) => asString(p.name) || '—' },
               {
                 label: i18n.t('Port'),
+                lang: 'en',
                 className: 'font-mono',
                 cell: (p) => `${asString(p.port)}/${asString(p.protocol) || 'TCP'}`,
               },
@@ -269,6 +271,7 @@ export function IngressSections({ obj, ctx }: SectionProps) {
           columns={[
             {
               label: i18n.t('Host'),
+              lang: 'en',
               cell: (r) =>
                 r.host === '*' ? (
                   '*'
@@ -290,6 +293,7 @@ export function IngressSections({ obj, ctx }: SectionProps) {
             { label: i18n.t('Path'), className: 'font-mono', cell: (r) => r.path },
             {
               label: i18n.t('Backend'),
+              lang: 'en',
               cell: (r) =>
                 r.service ? (
                   <RefLink

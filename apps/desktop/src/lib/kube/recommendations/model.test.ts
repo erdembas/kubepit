@@ -530,15 +530,14 @@ describe('stored or live right-sizing (spec §9.2)', () => {
   const stored = (over: Partial<StoredRightsizing> = {}): StoredRightsizing => ({
     report: report('web', 'api'),
     latest,
-    loading: false,
     error: null,
     ...over,
   });
 
   it('reads the latest stored scan when there is one', () => {
     expect(rightsizingOrigin(stored())).toEqual({ origin: 'stored', rec: null });
-    // A reload (settings changed) keeps the previous scan shown meanwhile.
-    expect(rightsizingOrigin(stored({ loading: true })).origin).toBe('stored');
+    // A failed reload keeps the scan read before.
+    expect(rightsizingOrigin(stored({ error: 'history.db is locked' })).origin).toBe('stored');
   });
 
   it('picks the workload row by its key, else falls back to the live report', () => {
@@ -572,26 +571,13 @@ describe('stored or live right-sizing (spec §9.2)', () => {
       rightsizingOrigin(stored({ report: null, latest: null, error: 'history.db is locked' }))
         .origin,
     ).toBe('live');
-    // Not loading (the view is hidden): nothing is pending.
-    expect(rightsizingOrigin(stored({ report: null, latest: null })).origin).toBe('live');
   });
 
-  it('waits for the first read of the stored scans before computing a live report', () => {
+  it('waits until the stored scans were read before computing a live report', () => {
+    // Never read: before the first answer, or an entry a status event created.
     expect(
-      rightsizingOrigin(
-        stored({ report: null, latest: null, loading: true }),
-        'Deployment/shop/web',
-      ),
+      rightsizingOrigin(stored({ report: null, latest: null }), 'Deployment/shop/web'),
     ).toEqual({ origin: 'pending', rec: null });
-    // Answered "no scan" and reloading: the live report stays.
-    expect(
-      rightsizingOrigin(
-        stored({
-          report: null,
-          latest: { scan: null, source_changed: false, last_failure: null },
-          loading: true,
-        }),
-      ).origin,
-    ).toBe('live');
+    expect(rightsizingOrigin(stored({ report: null, latest: null })).origin).toBe('pending');
   });
 });

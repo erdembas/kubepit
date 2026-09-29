@@ -108,7 +108,7 @@ export function BindingSections({ obj, ctx }: SectionProps) {
                   <MonoText>{asString(s.name)}</MonoText>
                 ),
             },
-            { label: i18n.t('Namespace'), cell: (s) => asString(s.namespace) || '—' },
+            { label: i18n.t('Namespace'), lang: 'en', cell: (s) => asString(s.namespace) || '—' },
           ]}
         />
       </Section>

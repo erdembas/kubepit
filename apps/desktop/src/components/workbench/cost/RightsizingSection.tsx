@@ -297,6 +297,7 @@ export function RecommendationBody({
         columns={[
           {
             label: i18n.t('Container'),
+            lang: 'en',
             cell: (c) => <span className="text-fg">{c.name}</span>,
           },
           {

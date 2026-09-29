@@ -332,6 +332,7 @@ export function FluxHelmReleaseSections(props: SectionProps) {
               },
               {
                 label: i18n.t('Chart'),
+                lang: 'en',
                 cell: (h) => <MonoText>{`${h.chartName}@${h.chartVersion}`}</MonoText>,
               },
               { label: i18n.t('App version'), cell: (h) => h.appVersion || '—' },

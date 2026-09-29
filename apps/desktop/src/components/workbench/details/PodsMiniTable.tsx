@@ -90,12 +90,19 @@ export function PodsMiniTable({
             ),
           },
           ...(showNamespace
-            ? [{ label: i18n.t('Namespace'), cell: (p: KubeObject) => p.metadata.namespace ?? '—' }]
+            ? [
+                {
+                  label: i18n.t('Namespace'),
+                  lang: 'en',
+                  cell: (p: KubeObject) => p.metadata.namespace ?? '—',
+                },
+              ]
             : []),
           ...(showNode
             ? [
                 {
                   label: i18n.t('Node'),
+                  lang: 'en',
                   className: 'max-w-[150px] truncate whitespace-nowrap',
                   cell: (p: KubeObject) => <span title={podNode(p)}>{podNode(p) || '—'}</span>,
                 },

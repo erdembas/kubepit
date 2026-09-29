@@ -211,6 +211,43 @@ describe('applyRefusal', () => {
     expect(applyRefusal('c1', oneClickRow('web', { confidence: 'low' }))).toBe('not-one-click');
     expect(applyRefusal('other', rec)).toBe('unknown-cluster');
   });
+
+  it("refuses a past run: the caller's, else the one the view picked", () => {
+    const rec = oneClickRow();
+    expect(applyRefusal('c1', rec, true)).toBe('past-run');
+    pickPastRun();
+    expect(applyRefusal('c1', rec)).toBe('past-run');
+    // The workload details always show the latest scan.
+    expect(applyRefusal('c1', rec, false)).toBeNull();
+  });
+});
+
+/** The Recommendations view of c1 shows the past run 3. */
+function pickPastRun() {
+  useRecommendationsStore.setState({ byCluster: { c1: { runId: 3, applied: {} } as never } });
+}
+
+describe('quickApply and past runs', () => {
+  it('applies from a view showing the latest scan whatever run the view picked', async () => {
+    const rec = oneClickRow();
+    backend(rec);
+    pickPastRun();
+    await expect(quickApply('c1', rec)).resolves.toBe('review');
+    expect(rightsizingApply).not.toHaveBeenCalled();
+    await expect(quickApply('c1', rec, { past: () => false })).resolves.toBe('applied');
+    expect(calls().map((c) => c.dryRun)).toEqual([true, false]);
+  });
+
+  it('does not apply when the caller moved to a past run during the dry run', async () => {
+    const rec = oneClickRow();
+    let past = false;
+    rightsizingApply.mockImplementation(async () => {
+      past = true;
+      return dryRunOf(liveOf(rec));
+    });
+    await expect(quickApply('c1', rec, { past: () => past })).resolves.toBe('review');
+    expect(calls().map((c) => c.dryRun)).toEqual([true]);
+  });
 });
 
 describe('liveDrifted', () => {

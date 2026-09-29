@@ -159,6 +159,12 @@ export interface TableColumn<T> {
   label: string;
   cell: (row: T) => ReactNode;
   className?: string;
+  /**
+   * Language of the header (`'en'` for identifiers such as Container that
+   * stay English in every locale, so the uppercase header keeps English
+   * casing); unset, the page's language.
+   */
+  lang?: string;
 }
 
 export function MiniTable<T>({
@@ -185,6 +191,7 @@ export function MiniTable<T>({
               <th
                 key={c.label}
                 scope="col"
+                lang={c.lang}
                 className={cn(
                   'text-fg-dim px-2.5 py-1.5 text-[10px] font-semibold tracking-[0.08em] whitespace-nowrap uppercase',
                   c.className,

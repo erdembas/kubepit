@@ -29,6 +29,7 @@ export function TemplateContainers({ template }: { template: unknown }) {
       columns={[
         {
           label: i18n.t('Container'),
+          lang: 'en',
           cell: (r) => (
             <span className="text-fg">
               {asString(r.c.name)}
@@ -36,7 +37,11 @@ export function TemplateContainers({ template }: { template: unknown }) {
             </span>
           ),
         },
-        { label: i18n.t('Image'), cell: (r) => <MonoText>{asString(r.c.image)}</MonoText> },
+        {
+          label: i18n.t('Image'),
+          lang: 'en',
+          cell: (r) => <MonoText>{asString(r.c.image)}</MonoText>,
+        },
         {
           label: i18n.t('Ports'),
           cell: (r) =>

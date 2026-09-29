@@ -184,7 +184,7 @@ export function CrdSections({ obj, ctx }: SectionProps) {
             columns={[
               { label: i18n.t('Name'), cell: (c) => <span className="text-fg">{c.name}</span> },
               { label: i18n.t('Type'), cell: (c) => c.type },
-              { label: 'JSONPath', cell: (c) => <MonoText>{c.jsonPath}</MonoText> },
+              { label: 'JSONPath', lang: 'en', cell: (c) => <MonoText>{c.jsonPath}</MonoText> },
               { label: i18n.t('Priority'), cell: (c) => c.priority ?? 0 },
             ]}
           />

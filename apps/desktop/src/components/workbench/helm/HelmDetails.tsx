@@ -288,6 +288,7 @@ export function HelmDetails({
                 },
                 {
                   label: i18n.t('Chart'),
+                  lang: 'en',
                   className: 'whitespace-nowrap font-mono text-[11px]',
                   cell: (r) => r.chart_version,
                 },

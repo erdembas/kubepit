@@ -72,6 +72,18 @@ describe('RightsizingSection', () => {
     expect(html).not.toContain('>Apply<');
   });
 
+  it('keeps English casing only on the identifier header', () => {
+    const headers = [...body('stored').matchAll(/<th ([^>]*)>([^<]*)<\/th>/g)].map(
+      ([, attrs, label]) => [label, attrs!.includes('lang="en"')],
+    );
+    expect(headers).toEqual([
+      ['Container', true],
+      ['CPU request', false],
+      ['Memory request', false],
+      ['Memory limit', false],
+    ]);
+  });
+
   it('shows a live row without a scan age', () => {
     const html = body('live');
     expect(html).not.toContain('From the scan');
