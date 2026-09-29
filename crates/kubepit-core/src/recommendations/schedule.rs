@@ -106,6 +106,14 @@ impl Kubepit {
         self.recommendations.active.load(Ordering::SeqCst)
     }
 
+    /// Whether `cluster_id` should have a scheduler now: this process scans
+    /// in the background, the cluster opted in and it is connected.
+    fn schedule_wanted(&self, cluster_id: &str) -> bool {
+        self.scans_active()
+            && self.settings().recommendations.scans(cluster_id)
+            && self.pool.connected_client(cluster_id).is_some()
+    }
+
     /// Called once a connect succeeded: restart the cluster's scheduler
     /// when this process scans in the background and the cluster opted in.
     pub(crate) fn start_recommendation_scans(&self, cluster_id: &str) {
@@ -118,11 +126,7 @@ impl Kubepit {
     /// lock, so overlapping starts (a connect during `settings_set`, two
     /// syncs) leave exactly one tracked loop.
     fn start_schedule(&self, cluster_id: &str, restart: bool) {
-        if !self.scans_active()
-            || !self.settings().recommendations.scans(cluster_id)
-            || self.pool.connected_client(cluster_id).is_none()
-            || tokio::runtime::Handle::try_current().is_err()
-        {
+        if !self.schedule_wanted(cluster_id) || tokio::runtime::Handle::try_current().is_err() {
             return;
         }
         let Some(app) = self.recommendations.app.lock().clone() else {
@@ -135,7 +139,9 @@ impl Kubepit {
         let jitter = jitter_ms();
         let wake = Arc::new(Notify::new());
         let mut schedules = self.recommendations.schedules.lock();
-        if !restart && schedules.contains_key(cluster_id) {
+        // Again under the lock: an opt-out or disconnect since the check
+        // above has already run its stop, which would miss this loop.
+        if (!restart && schedules.contains_key(cluster_id)) || !self.schedule_wanted(cluster_id) {
             return;
         }
         self.recommendations.scheduled.stop_cluster(cluster_id);
@@ -341,10 +347,21 @@ impl Kubepit {
         };
         let interval = self.scan_interval_minutes();
         let interval_ms = i64::from(interval) * 60_000;
-        let schedules = self.recommendations.schedules.lock();
-        let schedule = schedules
+        let mut schedules = self.recommendations.schedules.lock();
+        schedules
             .get(cluster_id)
             .filter(|s| s.generation == generation)?;
+        // A loop left behind by a start that raced a stop (a disconnect
+        // stops the scheduler before it drops the connection) ends itself.
+        if !self.schedule_wanted(cluster_id) {
+            schedules.remove(cluster_id);
+            self.update_scan_status(cluster_id, |s| {
+                s.scheduled = false;
+                s.next_at = None;
+            });
+            return None;
+        }
+        let schedule = schedules.get(cluster_id)?;
         let due = match schedule.due_override {
             Some(at) => at,
             None => next_due(
