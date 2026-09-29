@@ -32,7 +32,16 @@ import { useEvent } from '../util';
 import { ExportFormatMenu, useClusterName } from './ExportMenu';
 import { RecommendationRow, ROW_GRID } from './RecommendationRow';
 import { exportRecommendations, workloadRefs } from './exportRecommendations';
-import { VERDICT_FILTERS, listRows, pruneSelection, toggleAll, toggleSelection } from './listModel';
+import {
+  VERDICT_FILTERS,
+  listRows,
+  pruneSelection,
+  scopedSelection,
+  toggleAll,
+  toggleSelection,
+  type ScopedSelection,
+  type SelectionScope,
+} from './listModel';
 import type { SectionProps } from './sectionProps';
 import { updateRecommendationsView, useRecommendationsView } from './viewState';
 
@@ -428,7 +437,7 @@ export function RecommendationList({
 
 /**
  * Body section 3 (spec §9.1): the `RecommendationList` over `rows`, the
- * checkbox selection (kept while the scan keeps the rows) and the review
+ * checkbox selection (of the run and report version shown) and the review
  * dialog. Opening a row sets the view's `open`, which the drawer beside it
  * shows. Every apply goes through the audited `RightsizingDialog` (dry run,
  * read-only refusal, typed confirmation on production); Task 26 plugs
@@ -437,12 +446,22 @@ export function RecommendationList({
  */
 export function ListSection({ clusterId, report, rows, runId, past, connected }: SectionProps) {
   i18n.useLocale();
-  const [selected, setSelected] = useState<ReadonlySet<string>>(NO_KEYS);
+  const scope: SelectionScope = { clusterId, runId, report };
+  const [stored, setSelection] = useState<ScopedSelection>(() => ({ scope, keys: NO_KEYS }));
   const [reviewing, setReviewing] = useState<WorkloadRecommendation | null>(null);
 
-  // Checks of rows gone from the scope (another namespace, a new scan) are dropped.
+  // Another cluster, run or report version starts with no checks (reset during render).
+  const selection = scopedSelection(stored, scope);
+  if (selection !== stored) setSelection(selection);
+  const onSelect = (keys: ReadonlySet<string>) => setSelection({ scope, keys });
+
+  // Checks of rows gone from the namespaces in scope are dropped.
   useEffect(() => {
-    setSelected((prev) => pruneSelection(prev, new Set(rows.map(workloadKey))));
+    const present = new Set(rows.map(workloadKey));
+    setSelection((s) => {
+      const keys = pruneSelection(s.keys, present);
+      return keys === s.keys ? s : { ...s, keys };
+    });
   }, [rows]);
 
   const onOpen = useCallback(
@@ -460,8 +479,8 @@ export function ListSection({ clusterId, report, rows, runId, past, connected }:
         runId={runId}
         readOnlyRun={past}
         connected={connected}
-        selected={selected}
-        onSelect={setSelected}
+        selected={selection.keys}
+        onSelect={onSelect}
         onOpen={onOpen}
         onApply={onReview}
         onReview={onReview}

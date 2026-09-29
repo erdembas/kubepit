@@ -26,7 +26,7 @@ export function withLenses(
 }
 
 export interface ListRows {
-  /** Rows per verdict tab, the search applied. */
+  /** Rows per verdict tab, the search and the picked lenses applied: what picking the tab shows. */
   tabs: Record<RightsizingFilter, number>;
   /**
    * Rows per lens among the rows shown: for a picked lens, the rows shown;
@@ -43,19 +43,19 @@ export function listRows(
   view: { filter: RightsizingFilter; lenses: readonly RecommendationLens[]; sort: RecSort },
   query: string,
 ): ListRows {
-  const searched = filterRecommendations(rows, 'all', [], query);
+  const lensed = withLenses(filterRecommendations(rows, 'all', [], query), view.lenses);
   const tabs: Record<RightsizingFilter, number> = {
     changed: 0,
     over: 0,
     under: 0,
-    all: searched.length,
+    all: lensed.length,
   };
-  for (const r of searched) {
+  for (const r of lensed) {
     if (r.changed) tabs.changed++;
     if (r.verdict === 'over') tabs.over++;
     else if (r.verdict === 'under') tabs.under++;
   }
-  const narrowed = withLenses(filterRecommendations(searched, view.filter, [], ''), view.lenses);
+  const narrowed = filterRecommendations(lensed, view.filter, [], '');
   return { tabs, lenses: countLenses(narrowed), shown: sortRecommendations(narrowed, view.sort) };
 }
 
@@ -198,6 +198,36 @@ export function toggleAll(selected: ReadonlySet<string>, keys: readonly string[]
     else next.add(k);
   }
   return next;
+}
+
+/**
+ * What a selection was made on: a cluster's run as shown. A re-evaluation
+ * (other settings, a newer scan) is a new `report` object.
+ */
+export interface SelectionScope {
+  clusterId: string;
+  runId: number | null;
+  report: object;
+}
+
+export interface ScopedSelection {
+  scope: SelectionScope;
+  keys: ReadonlySet<string>;
+}
+
+/**
+ * `selection` while it still belongs to `scope`; an empty selection for
+ * `scope` once the cluster, the run or the report version changed, so
+ * checks never carry over to rows of another scan.
+ */
+export function scopedSelection(
+  selection: ScopedSelection,
+  scope: SelectionScope,
+): ScopedSelection {
+  const s = selection.scope;
+  return s.clusterId === scope.clusterId && s.runId === scope.runId && s.report === scope.report
+    ? selection
+    : { scope, keys: new Set() };
 }
 
 /** The checks of keys still present (the same set when none was dropped). */

@@ -10,6 +10,7 @@ import {
   listRows,
   pruneSelection,
   rowFlags,
+  scopedSelection,
   toggleAll,
   toggleSelection,
   withLenses,
@@ -89,7 +90,7 @@ describe('list rows', () => {
     sort: 'delta' as const,
   };
 
-  it('count every verdict tab over the searched rows', () => {
+  it('count every verdict tab over the searched rows with the picked lenses', () => {
     expect(listRows(rows, view, '').tabs).toEqual({ changed: 3, over: 2, under: 1, all: 4 });
     expect(listRows(rows, view, 'Deployment shop/w').tabs).toEqual({
       changed: 1,
@@ -97,6 +98,13 @@ describe('list rows', () => {
       under: 0,
       all: 1,
     });
+    // A tab's count is what picking it shows.
+    const lensed = { ...view, lenses: ['cpu-reduction'] as RecommendationLens[] };
+    expect(listRows(rows, lensed, '').tabs).toEqual({ changed: 2, over: 2, under: 0, all: 2 });
+    for (const filter of ['changed', 'over', 'under', 'all'] as const)
+      expect(listRows(rows, { ...lensed, filter }, '').shown).toHaveLength(
+        listRows(rows, lensed, '').tabs[filter],
+      );
   });
 
   it('show the tab, narrowed by every picked lens, sorted', () => {
@@ -204,5 +212,23 @@ describe('selection', () => {
     const selected = new Set(['a', 'b']);
     expect(pruneSelection(selected, new Set(['a', 'b', 'c']))).toBe(selected);
     expect([...pruneSelection(selected, new Set(['b']))]).toEqual(['b']);
+  });
+
+  it('never carries checks over to another cluster, run or report version', () => {
+    const past = {};
+    const latest = {};
+    const onPast = { scope: { clusterId: 'c-dev', runId: 7, report: past }, keys: new Set(['a']) };
+    // The same scan, even through a new scope object: kept as it is.
+    expect(scopedSelection(onPast, { clusterId: 'c-dev', runId: 7, report: past })).toBe(onPast);
+    // Picking the latest run, another cluster, or a re-evaluated report: no checks.
+    for (const scope of [
+      { clusterId: 'c-dev', runId: null, report: latest },
+      { clusterId: 'c-prod-eu', runId: 7, report: past },
+      { clusterId: 'c-dev', runId: 7, report: {} },
+    ]) {
+      const next = scopedSelection(onPast, scope);
+      expect(next.scope).toBe(scope);
+      expect(next.keys.size).toBe(0);
+    }
   });
 });
