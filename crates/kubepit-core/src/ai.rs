@@ -6,12 +6,14 @@
 //!
 //! - **Off by default, per cluster.** `Settings.ai.enabled` is off; each
 //!   cluster is enabled with [`Kubepit::ai_cluster_set`], production ones only
-//!   with the user's typed acknowledgement. `settings_set` cannot change the
-//!   enabled clusters, and removing a cluster (or making it production)
-//!   forgets it.
+//!   with the user's typed acknowledgement (`ai.production_acknowledged`).
+//!   `settings_set` cannot change either list, removing a cluster (or
+//!   making it production) forgets it, and loading drops what the registry
+//!   no longer allows.
 //! - **Keys** live in the OS credential store at `ai/<provider-id>`
-//!   ([`keys`]); they are never written under the data folder and never
-//!   returned to the webview.
+//!   ([`keys`]), bound to the provider kind and origin they were saved for;
+//!   they are never written under the data folder, never returned to the
+//!   webview and never sent over plain `http://` to another computer.
 //! - **Remote egress is opt-in per process**
 //!   ([`Kubepit::set_ai_remote_providers`]): without it only loopback
 //!   providers are allowed ([`settings::egress_allowed`]). The desktop shell
@@ -46,6 +48,11 @@ pub use types::*;
 pub struct AiState {
     /// Non-loopback providers may be reached from this process (D5).
     remote_allowed: AtomicBool,
+    /// What each provider's stored key is bound to (never the key).
+    key_bindings: keys::BindingCache,
+    /// Held across a key write or delete *and* its cache update, so the
+    /// cache always describes the entry the credential store ends up with.
+    key_writes: parking_lot::Mutex<()>,
 }
 
 impl Kubepit {
@@ -60,9 +67,26 @@ impl Kubepit {
         self.ai.remote_allowed.load(Ordering::SeqCst)
     }
 
+    /// The binding of a provider's stored key: cached after the first
+    /// successful read; a failed read (locked store) is retried next time.
+    fn ai_key_binding(&self, provider_id: &str) -> Result<keys::KeyBinding> {
+        if let Some(binding) = self.ai.key_bindings.get(provider_id) {
+            return Ok(binding);
+        }
+        let epoch = self.ai.key_bindings.epoch();
+        let binding = keys::read_binding(self.secrets.as_ref(), provider_id)?;
+        self.ai
+            .key_bindings
+            .insert_read(provider_id, binding.clone(), epoch);
+        Ok(binding)
+    }
+
     /// `ai_status`: the switches, the credential store's name and, per
-    /// provider, whether a key is stored and whether requests may go to it.
-    /// Reads the credential store; never contacts a provider.
+    /// provider, whether a usable key is stored and whether requests may go
+    /// to it. Reads each provider's credential store entry once per process
+    /// (then `ai_key_set` / `ai_key_delete` keep the cache current); never
+    /// contacts a provider. A key saved for another address or provider
+    /// type is `has_key: false` with a `key_error` saying so.
     pub fn ai_status(&self) -> AiStatus {
         let ai = self.settings().ai;
         let remote_allowed = self.ai_remote_allowed();
@@ -70,8 +94,11 @@ impl Kubepit {
             .providers
             .iter()
             .map(|p| {
-                let (has_key, key_error) = match keys::read_key(self.secrets.as_ref(), &p.id) {
-                    Ok(key) => (key.is_some(), None),
+                let (has_key, key_error) = match self.ai_key_binding(&p.id) {
+                    Ok(binding) => match binding.check(p) {
+                        Ok(present) => (present, None),
+                        Err(mismatch) => (false, Some(mismatch.to_string())),
+                    },
                     Err(e) => (false, Some(format!("{e:#}"))),
                 };
                 AiProviderStatus {
@@ -80,7 +107,7 @@ impl Kubepit {
                     local: is_loopback(&p.base_url),
                     has_key,
                     key_error,
-                    allowed: egress_allowed(&p.base_url, remote_allowed, ai.local_only),
+                    allowed: settings::provider_allowed(p, has_key, remote_allowed, ai.local_only),
                 }
             })
             .collect();
@@ -94,8 +121,10 @@ impl Kubepit {
     }
 
     /// `ai_key_set`: store the API key of a configured provider in the
-    /// credential store (never on disk, never returned). Surrounding
-    /// whitespace from a paste is dropped.
+    /// credential store (never on disk, never returned), bound to the
+    /// provider's kind and current origin (`ai/keys.rs`). Surrounding
+    /// whitespace from a paste is dropped; at most 8 KiB; only for an
+    /// `https://` or loopback base URL.
     pub fn ai_key_set(&self, provider_id: &str, key: &str) -> Result<AiStatus> {
         let ai = self.settings().ai;
         let provider = ai
@@ -105,16 +134,31 @@ impl Kubepit {
         if key.is_empty() {
             bail!("the API key is empty");
         }
+        if key.len() > keys::MAX_KEY_BYTES {
+            bail!("the API key is longer than 8 KiB");
+        }
         if key.chars().any(|c| c.is_whitespace() || c.is_control()) {
             bail!("the API key must not contain spaces or line breaks");
         }
-        keys::write_key(self.secrets.as_ref(), &provider.id, key).map_err(|e| {
-            anyhow!(
-                "could not store the {} API key in the {}: {e:#}",
-                provider.name,
-                self.secrets.name()
-            )
-        })?;
+        let binding = keys::binding_for(provider)?;
+        {
+            let _serialized = self.ai.key_writes.lock();
+            let written = keys::write_key(self.secrets.as_ref(), provider, key).map_err(|e| {
+                anyhow!(
+                    "could not store the {} API key in the {}: {e:#}",
+                    provider.name,
+                    self.secrets.name()
+                )
+            });
+            match written {
+                Ok(()) => self.ai.key_bindings.set(&provider.id, binding),
+                Err(e) => {
+                    // A partial write may have left anything behind.
+                    self.ai.key_bindings.forget(&provider.id);
+                    return Err(e);
+                }
+            }
+        }
         Ok(self.ai_status())
     }
 
@@ -125,57 +169,106 @@ impl Kubepit {
         if provider_id.is_empty() {
             bail!("no assistant provider given");
         }
-        keys::delete_key(self.secrets.as_ref(), provider_id).map_err(|e| {
-            anyhow!(
-                "could not remove the API key from the {}: {e:#}",
-                self.secrets.name()
-            )
-        })?;
+        {
+            let _serialized = self.ai.key_writes.lock();
+            let deleted = keys::delete_key(self.secrets.as_ref(), provider_id).map_err(|e| {
+                anyhow!(
+                    "could not remove the API key from the {}: {e:#}",
+                    self.secrets.name()
+                )
+            });
+            match deleted {
+                Ok(()) => self
+                    .ai
+                    .key_bindings
+                    .set(provider_id, keys::KeyBinding::Missing),
+                Err(e) => {
+                    self.ai.key_bindings.forget(provider_id);
+                    return Err(e);
+                }
+            }
+        }
         Ok(self.ai_status())
     }
 
     /// `ai_cluster_set`: enable or disable the assistant for a cluster.
     /// Enabling a production cluster needs `acknowledge_production` (the
-    /// UI's typed confirmation). Returns the saved settings.
+    /// UI's typed confirmation), which is recorded in
+    /// `ai.production_acknowledged`. The cluster is read under the settings
+    /// lock (lock order: settings, then clusters), so it cannot become
+    /// production between the check and the write; `cluster_update` then
+    /// forgets it. Returns the saved settings.
     pub fn ai_cluster_set(
         &self,
         cluster_id: &str,
         enabled: bool,
         acknowledge_production: bool,
     ) -> Result<Settings> {
-        if enabled {
-            let cluster = self.cluster_def(cluster_id)?;
-            if cluster.environment == Some(ClusterEnvironment::Production)
-                && !acknowledge_production
-            {
+        let ((), saved) = self.store.update_settings(|settings| {
+            if !enabled {
+                settings.ai.forget_cluster(cluster_id);
+                return Ok(());
+            }
+            let cluster = self
+                .store
+                .cluster(cluster_id)
+                .ok_or_else(|| anyhow!("cluster {cluster_id} is not registered"))?;
+            let production = cluster.environment == Some(ClusterEnvironment::Production);
+            if production && !acknowledge_production {
                 bail!(
                     "{} is a production cluster: confirm to enable the assistant",
                     cluster.name
                 );
             }
-        }
-        self.store.update_settings(|settings| {
-            let clusters = &mut settings.ai.clusters;
-            clusters.retain(|id| id != cluster_id);
-            if enabled {
-                clusters.push(cluster_id.to_string());
-            }
-            clusters.sort();
-            clusters.dedup();
-        })
+            settings.ai.enable_cluster(cluster_id, production);
+            Ok(())
+        })?;
+        Ok(saved)
     }
 
-    /// Drop a cluster from the enabled list (cluster removed, or it became
-    /// a production cluster).
-    pub(crate) fn ai_forget_cluster(&self, cluster_id: &str) {
-        if !self.settings().ai.is_cluster_enabled(cluster_id) {
-            return;
-        }
+    /// Disable the assistant for a cluster (it becomes production). The
+    /// membership check runs under the settings lock; nothing is written
+    /// when it was not enabled.
+    pub(crate) fn ai_forget_cluster(&self, cluster_id: &str) -> Result<()> {
+        self.store
+            .update_settings(|settings| {
+                settings.ai.forget_cluster(cluster_id);
+                Ok(())
+            })
+            .map(|_| ())
+    }
+
+    /// Make a cluster's enablement match the registry after it changed or
+    /// was removed ([`AiSettings::reconcile_cluster`]): an unregistered
+    /// cluster is forgotten, a production one without an acknowledgement
+    /// is disabled, a stale acknowledgement is dropped. Reads the cluster
+    /// under the settings lock.
+    ///
+    /// Fails only when saving fails while a registered production cluster
+    /// without an acknowledgement had to be disabled. Any other leftover
+    /// (a stale acknowledgement, the id of a removed cluster) cannot enable
+    /// anything ([`AiSettings::cluster_allowed`]) and is dropped at the
+    /// next start, so failing to save it is logged.
+    pub(crate) fn ai_reconcile_cluster(&self, cluster_id: &str) -> Result<()> {
+        let mut disables_production = false;
         let saved = self.store.update_settings(|settings| {
-            settings.ai.clusters.retain(|id| id != cluster_id);
+            let cluster = self.store.cluster(cluster_id);
+            let was_enabled = settings.ai.is_cluster_enabled(cluster_id);
+            settings.ai.reconcile_cluster(cluster_id, cluster.as_ref());
+            disables_production =
+                cluster.is_some() && was_enabled && !settings.ai.is_cluster_enabled(cluster_id);
+            Ok(())
         });
-        if let Err(e) = saved {
-            tracing::warn!("could not disable the assistant for cluster {cluster_id}: {e:#}");
+        match saved {
+            Ok(_) => Ok(()),
+            Err(e) if disables_production => Err(e),
+            Err(e) => {
+                tracing::warn!(
+                    cluster = cluster_id,
+                    "could not tidy the assistant's cluster lists (done at the next start): {e:#}"
+                );
+                Ok(())
+            }
         }
     }
 }

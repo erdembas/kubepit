@@ -298,6 +298,23 @@ impl Kubepit {
             let kc = self.load_cluster_source(&next)?;
             kubeconfig::ensure_context(&kc, &next.context)?;
         }
+        // Every check that can refuse the save runs before the assistant is
+        // turned off below (it runs again, authoritatively, in the save).
+        ensure_disjoint_sources(&next, self.store.clusters().iter())?;
+        // Enabling the assistant on a production cluster needs a typed
+        // acknowledgement: a cluster that becomes production must get it.
+        // Turned off before the save, so failing to turn it off changes
+        // nothing, and reconciled again after it (see below).
+        let becomes_production = next.environment == Some(ClusterEnvironment::Production)
+            && existing.environment != Some(ClusterEnvironment::Production);
+        if becomes_production {
+            self.ai_forget_cluster(&next.id).map_err(|e| {
+                e.context(format!(
+                    "could not turn off the assistant for \"{}\"; nothing was changed",
+                    next.name
+                ))
+            })?;
+        }
         let stored = next.clone();
         let ((), list) = self.store.update_clusters(move |list| {
             ensure_disjoint_sources(&stored, list.iter())?;
@@ -311,13 +328,11 @@ impl Kubepit {
         if connection_changed {
             self.cluster_disconnect(&next.id);
         }
-        // Enabling the assistant on a production cluster needs a typed
-        // acknowledgement: a cluster that becomes production must get it.
-        if next.environment == Some(ClusterEnvironment::Production)
-            && existing.environment != Some(ClusterEnvironment::Production)
-        {
-            self.ai_forget_cluster(&next.id);
-        }
+        // `ai_cluster_set` may have enabled it (as not production) between
+        // the forget and the save; a production cluster without an
+        // acknowledgement is disabled. Failing that is the command's error;
+        // failing to drop a stale acknowledgement is only logged.
+        let ai_reconciled = self.ai_reconcile_cluster(&next.id);
         // Secret values read for the old settings must not outlive them,
         // and scans of the new source start soon.
         if next.prometheus != existing.prometheus
@@ -332,13 +347,22 @@ impl Kubepit {
             }
         }
         self.sink.cluster_list(&list);
+        ai_reconciled.map_err(|e| {
+            e.context(format!(
+                "\"{}\" was saved, but the assistant could not be turned off for it",
+                next.name
+            ))
+        })?;
         Ok(next)
     }
 
     /// `cluster_remove`: disconnect, stop its work, delete node-shell pods,
-    /// the managed kubeconfig and the run kubeconfig. Idempotent.
+    /// the managed kubeconfig and the run kubeconfig, and drop it from the
+    /// assistant's cluster lists. Idempotent.
     pub async fn cluster_remove(&self, id: &str) -> Result<()> {
         let Some(existing) = self.store.cluster(id) else {
+            // Tidies a leftover of an earlier removal (see below).
+            self.ai_forget_removed_cluster(id);
             return Ok(());
         };
         self.cleanup_cluster_node_shells(id).await;
@@ -355,9 +379,22 @@ impl Kubepit {
         }
         self.remove_run_kubeconfig(id);
         self.forget_saved_forwards(id);
-        self.ai_forget_cluster(id);
+        // After the removal, so `ai_cluster_set` cannot enable it again.
+        self.ai_forget_removed_cluster(id);
         self.sink.cluster_list(&list);
         Ok(())
+    }
+
+    /// Drop a removed cluster from the assistant's lists. Never fails the
+    /// removal: an unregistered cluster cannot be used, and loading drops
+    /// a leftover id (`ai_reconcile_cluster` logs a failed save).
+    fn ai_forget_removed_cluster(&self, id: &str) {
+        if let Err(e) = self.ai_reconcile_cluster(id) {
+            tracing::warn!(
+                cluster = id,
+                "could not drop a removed cluster from the assistant settings: {e:#}"
+            );
+        }
     }
 
     /// `cluster_export_kubeconfig`: (re)write and return the path of the
@@ -749,6 +786,106 @@ mod tests {
             app.cluster_def(&added[1].id).unwrap().prometheus_access,
             added[1].prometheus_access
         );
+    }
+
+    #[test]
+    fn a_refused_save_keeps_the_assistant_enabled() {
+        use crate::prometheus::access::PrometheusAccess;
+        use crate::types::PromScheme;
+
+        let (_dir, app, _) = setup();
+        let shared = PrometheusConfig::Service {
+            namespace: "monitoring".into(),
+            service: "thanos-query".into(),
+            port: 9090,
+            scheme: PromScheme::Http,
+            path_prefix: String::new(),
+        };
+        let labelled = |value: &str| PrometheusAccess {
+            cluster_labels: [("cluster".to_string(), value.to_string())]
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        };
+        let add = |context: &str, value: &str| ClusterInput {
+            kubeconfig_text: Some(TWO_CONTEXTS.to_string()),
+            prometheus: shared.clone(),
+            prometheus_access: labelled(value),
+            ..input(context)
+        };
+        let added = app
+            .cluster_add(vec![add("dev", "dev"), add("prod", "prod")])
+            .unwrap();
+        app.ai_cluster_set(&added[1].id, true, false).unwrap();
+        // Becoming production with a source that overlaps the other
+        // cluster's: the save is refused, so nothing may change.
+        let mut edited = added[1].clone();
+        edited.environment = Some(ClusterEnvironment::Production);
+        edited.prometheus_access = labelled("dev");
+        let err = app.cluster_update(edited).unwrap_err();
+        assert!(format!("{err:#}").contains("overlap"), "{err:#}");
+        assert_eq!(app.cluster_def(&added[1].id).unwrap().environment, None);
+        assert_eq!(app.settings().ai.clusters, vec![added[1].id.clone()]);
+    }
+
+    /// Makes `settings.json` unwritable (a directory in its place).
+    fn break_settings(app: &Kubepit) -> PathBuf {
+        let file = app.paths().settings_file();
+        let _ = std::fs::remove_file(&file);
+        std::fs::create_dir(&file).unwrap();
+        file
+    }
+
+    #[test]
+    fn a_failed_reconcile_only_fails_the_save_for_an_unacknowledged_production_cluster() {
+        let (_dir, app, _) = setup();
+        let added = app
+            .cluster_add(vec![ClusterInput {
+                kubeconfig_text: Some(TWO_CONTEXTS.to_string()),
+                environment: Some(ClusterEnvironment::Production),
+                ..input("prod")
+            }])
+            .unwrap()
+            .remove(0);
+        app.ai_cluster_set(&added.id, true, true).unwrap();
+
+        // Leaving production only drops the acknowledgement: a failure to
+        // save that is logged, and the change is saved.
+        let file = break_settings(&app);
+        let mut staging = added.clone();
+        staging.environment = Some(ClusterEnvironment::Staging);
+        app.cluster_update(staging).unwrap();
+        assert_eq!(
+            app.cluster_def(&added.id).unwrap().environment,
+            Some(ClusterEnvironment::Staging)
+        );
+        std::fs::remove_dir(&file).unwrap();
+
+        // A production cluster enabled without an acknowledgement (only
+        // reachable through a race) must be turned off: that failure is
+        // the command's error.
+        let mut production = app.cluster_def(&added.id).unwrap();
+        production.environment = Some(ClusterEnvironment::Production);
+        app.store
+            .update_clusters(|list| {
+                list[0] = production.clone();
+                Ok(())
+            })
+            .unwrap();
+        app.store
+            .update_settings(|s| {
+                s.ai.production_acknowledged.clear();
+                Ok(())
+            })
+            .unwrap();
+        assert!(app.settings().ai.is_cluster_enabled(&added.id));
+        let file = break_settings(&app);
+        production.notes = "edited".into();
+        let err = format!("{:#}", app.cluster_update(production.clone()).unwrap_err());
+        assert!(err.contains("could not be turned off"), "{err}");
+        std::fs::remove_dir(&file).unwrap();
+        app.cluster_update(production).unwrap();
+        assert!(app.settings().ai.clusters.is_empty());
     }
 
     #[test]

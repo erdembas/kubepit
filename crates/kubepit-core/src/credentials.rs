@@ -240,7 +240,7 @@ impl Kubepit {
     /// credential store (`true`) or in `kubeconfigs/` (`false`), migrating
     /// the existing ones. See the module docs for the guarantees.
     pub fn kubeconfig_storage_set(&self, keychain: bool) -> Result<Settings> {
-        let mut settings = self.settings();
+        let settings = self.settings();
         if settings.keychain_kubeconfigs == keychain {
             return Ok(settings);
         }
@@ -286,8 +286,12 @@ impl Kubepit {
                 }
             }
         }
-        settings.keychain_kubeconfigs = keychain;
-        let saved = self.store.set_settings(settings)?;
+        // Only this flag: the moves may have waited on the credential store
+        // for a long time, and `settings` is stale by now.
+        let ((), saved) = self.store.update_settings(|current| {
+            current.keychain_kubeconfigs = keychain;
+            Ok(())
+        })?;
         if keychain {
             // Run kubeconfigs of idle managed clusters hold the same credentials.
             for cluster in &managed {
@@ -332,7 +336,8 @@ impl Kubepit {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{mpsc, Arc};
+    use std::time::Duration;
 
     use super::*;
     use crate::events::NullSink;
@@ -511,6 +516,81 @@ mod tests {
         let err = format!("{:#}", app.kubeconfig_storage_set(true).unwrap_err());
         assert!(err.contains("no OS credential store"), "{err}");
         assert!(!app.settings().keychain_kubeconfigs);
+    }
+
+    /// Holds the first `kubeconfig/` write until the test releases it.
+    struct GatedSecretStore {
+        inner: MemorySecretStore,
+        gate: parking_lot::Mutex<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>>,
+    }
+
+    impl SecretStore for GatedSecretStore {
+        fn name(&self) -> &str {
+            self.inner.name()
+        }
+        fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+            self.inner.get(key)
+        }
+        fn set(&self, key: &str, value: &[u8]) -> Result<()> {
+            if key.starts_with("kubeconfig/") {
+                let gate = self.gate.lock().take();
+                if let Some((entered, release)) = gate {
+                    entered.send(()).unwrap();
+                    release.recv().unwrap();
+                }
+            }
+            self.inner.set(key, value)
+        }
+        fn delete(&self, key: &str) -> Result<()> {
+            self.inner.delete(key)
+        }
+    }
+
+    #[test]
+    fn a_storage_move_keeps_settings_changed_meanwhile() {
+        let dir = tempfile::tempdir().unwrap();
+        let (entered_tx, entered) = mpsc::channel();
+        let (release, release_rx) = mpsc::channel();
+        let secrets = Arc::new(GatedSecretStore {
+            inner: MemorySecretStore::default(),
+            gate: parking_lot::Mutex::new(Some((entered_tx, release_rx))),
+        });
+        let home = dir.path().join("home");
+        let app = Arc::new(
+            Kubepit::open_with_secrets(Paths::new(&home), Arc::new(NullSink), secrets).unwrap(),
+        );
+        let a = pasted(&app, "dev");
+        let b = pasted(&app, "prod");
+        let c = pasted(&app, "dev");
+        for cluster in [&a, &b, &c] {
+            app.ai_cluster_set(&cluster.id, true, false).unwrap();
+        }
+
+        let mover = {
+            let app = app.clone();
+            std::thread::spawn(move || app.kubeconfig_storage_set(true))
+        };
+        entered.recv_timeout(Duration::from_secs(10)).unwrap();
+        // While the first kubeconfig is being moved: disable one cluster,
+        // make one production (which forgets it), turn on local-only.
+        app.ai_cluster_set(&a.id, false, false).unwrap();
+        let mut def = app.cluster_def(&b.id).unwrap();
+        def.environment = Some(crate::types::ClusterEnvironment::Production);
+        app.cluster_update(def).unwrap();
+        let mut settings = app.settings();
+        settings.ai.local_only = true;
+        app.set_settings(settings).unwrap();
+        release.send(()).unwrap();
+
+        let saved = mover.join().unwrap().unwrap();
+        let reopened = crate::store::Store::open(Paths::new(&home))
+            .unwrap()
+            .settings();
+        for settings in [saved, app.settings(), reopened] {
+            assert!(settings.keychain_kubeconfigs);
+            assert!(settings.ai.local_only);
+            assert_eq!(settings.ai.clusters, vec![c.id.clone()]);
+        }
     }
 
     #[test]

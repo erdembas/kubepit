@@ -183,8 +183,11 @@ impl Kubepit {
     }
 
     /// `settings_set`: normalises obviously invalid values instead of
-    /// persisting them (empty image, zero font size, blank tool paths).
+    /// persisting them (empty image, zero font size, blank tool paths), and
+    /// refuses assistant provider ids and base URLs that cannot be used
+    /// safely. Backend-owned fields keep their stored values.
     pub fn set_settings(&self, mut settings: Settings) -> Result<Settings> {
+        settings.ai.validate()?;
         let blank_to_none =
             |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
         settings.kubectl_path = blank_to_none(settings.kubectl_path);
@@ -211,12 +214,15 @@ impl Kubepit {
         settings.history = settings.history.normalized();
         settings.recommendations = settings.recommendations.normalized();
         settings.ai = settings.ai.normalized();
-        let saved = self.store.update_settings(move |current| {
+        let ((), saved) = self.store.update_settings(move |current| {
             // Only `kubeconfig_storage_set` flips this, because it migrates.
             settings.keychain_kubeconfigs = current.keychain_kubeconfigs;
-            // Only `ai_cluster_set` (and cluster removal) change these.
+            // Only `ai_cluster_set` (and cluster changes) change these.
             settings.ai.clusters = std::mem::take(&mut current.ai.clusters);
+            settings.ai.production_acknowledged =
+                std::mem::take(&mut current.ai.production_acknowledged);
             *current = settings;
+            Ok(())
         })?;
         self.apply_alert_settings(&saved.alerts);
         self.sync_change_journals();
