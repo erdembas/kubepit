@@ -24,11 +24,15 @@
 //! | [`types`]    | serde contract types mirrored in `types/index.ts`     |
 //! | [`settings`] | defaults, normalization, loopback / egress rule       |
 //! | [`keys`]     | `ai/<provider-id>` credential store entries           |
-//! | [`provider`] | the `Provider` trait and chat types (`ToolSpec`)      |
+//! | [`provider`] | the `Provider` trait, chat types, errors, retries, timeouts, HTTPS client, egress guard |
+//! | [`sse`]      | server-sent events / NDJSON framing (bounded)         |
+//! | [`anthropic`] | Anthropic Messages API provider and Models API       |
 
+pub mod anthropic;
 pub mod keys;
 pub mod provider;
 pub mod settings;
+pub mod sse;
 pub mod types;
 
 use std::sync::atomic::{AtomicBool, Ordering};

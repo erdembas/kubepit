@@ -530,8 +530,9 @@ impl ServerCertVerifier for SkipVerification {
     }
 }
 
-/// The platform's trusted roots, loaded once.
-fn system_roots() -> Arc<RootCertStore> {
+/// The platform's trusted roots, loaded once (shared with the assistant
+/// providers' HTTPS client in `ai/provider.rs`).
+pub(crate) fn system_roots() -> Arc<RootCertStore> {
     static ROOTS: OnceLock<Arc<RootCertStore>> = OnceLock::new();
     ROOTS
         .get_or_init(|| {
