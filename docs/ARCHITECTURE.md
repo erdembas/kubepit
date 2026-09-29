@@ -1809,8 +1809,11 @@ in-memory demo backend.
   `compare.mjs --slack ci --only rust,e2e,engines,structural`, and uploads
   the results. The compare step is `continue-on-error` until calibrated on
   a runner (the first run after the remote exists): the budgets are set on
-  an Apple M-series machine, where three Rust ids already miss, so a runner
-  more than ~1.8× slower fails them even at slack 2.5. It moves into
+  an Apple M-series machine and a runner's speed is unknown. (Three Rust
+  ids missed at the baseline; plan R1 fixed them with ≥ 75% headroom:
+  watch objects are converted by value and shared between the aggregator's
+  store and its batches, and fleet search matches ASCII names without
+  allocating.) It moves into
   `ci.yml` as its `perf-guard` job when the CI plan lands.
   `.github/workflows/perf-nightly.yml` (03:00 UTC and manual) builds the UI,
   installs Chromium, runs `perf:ui` at `l` with churn 50 and the 30-minute

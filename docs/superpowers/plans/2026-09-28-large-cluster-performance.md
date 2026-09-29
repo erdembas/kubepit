@@ -1333,6 +1333,38 @@ git commit -m "perf(map): raise the Resource Map cap to the measured budget"
 
 ---
 
+### R1: backend hot paths (no gate)
+
+The baseline missed three Rust budgets that no gate reads (spec, Results, "Misses that no gate covers"): `watch/aggregator_initial_20k` (170 ms / 120 ms), `watch/reset_batch_20k` (64.4 ms / 60 ms) and `fleet_search/matcher_substring_50k` (6.0 ms / 5 ms). This task fixes them with ≥ 30% headroom, since CI runners are slower. _(Added after the baseline; done as described.)_
+
+**Files:**
+- Modify: `crates/kubepit-core/src/objects.rs` (`to_kube_object`), `src/types.rs` (`SharedKubeObject`, `WatchBatch.upserts`), `src/watch.rs` (`WatchAggregator`), `crates/kubepit-core/Cargo.toml` (serde `rc`)
+- Modify: `crates/kubepit-core/src/fleet_search.rs` (`NameMatcher::matches`)
+- Test: unit tests in `objects.rs` and `fleet_search.rs`; the watch unit tests, `tests/fake_apiserver.rs` and `tests/perf_probe.rs` unchanged
+
+**Interfaces:**
+- Produces: `pub type SharedKubeObject = Arc<KubeObject>`; `WatchBatch.upserts: Vec<SharedKubeObject>` (same JSON). No IPC change.
+
+- [x] **Step 1: Measure.** Instruments' Time Profiler (`xctrace`) failed on this machine, so a throwaway example timed each step on the 20 000 `l` pods:
+  - `to_kube_object`: 80 ms, of which 23 ms dropped the `DynamicObject` after serialising a copy of it;
+  - one deep `Value` clone per pod: 40 ms, and dropping a copy: 25 ms;
+  - `ObjectMeta` alone to a `Value`: 15 ms; sorting 20 000 keys: 1.5 ms.
+
+  The aggregator converted each pod (80 ms), cloned it into its store (40 ms) and dropped the batch copies (25 ms): about the 156 ms measured. A reset batch cloned the whole store (40 of 60 ms).
+- [x] **Step 2: Convert by value.** `to_kube_object` moves `data` (spec, status) into the result and serialises only `metadata`, inserting keys in serde's order (type meta, `metadata`, then `data`, later keys winning); non-object `data` takes serde's path. Test `by_value_conversion_equals_serialising_the_object` pins it against `serde_json::to_value` (colliding keys, empty type meta, no metadata, non-object data). Every caller gains, not only watches (24 ms instead of 80 ms for 20 000 pods).
+- [x] **Step 3: Share objects.** The store, the staged upserts and the batches hold one `Arc<Value>` per object, so staging and reset snapshots copy nothing and dropping a batch only drops references. Batch semantics are unchanged (`reset` first, `synced` after InitDone, latest-wins upserts, deletes, flush at 500 or 150 ms); the existing tests pass unchanged.
+- [x] **Step 4: Match names in place.** `NameMatcher::matches` allocated a lowercased `String` and a `Vec<char>` per name. An ASCII name (every Kubernetes name) lowercases byte by byte, so substrings and globs compare it in place against the pattern lowercased once by `parse`; `glob_match` became a thin wrapper over an index-based `glob_match_at`. Other names keep `str::to_lowercase`. Test `ascii_fast_path_keeps_the_lowercasing_semantics` compares every pattern × name against the previous matcher, Unicode included (`İ`, `ß`, final sigma, the Kelvin sign).
+- [x] **Step 5: Re-measure** (5 short runs: `cargo bench -p kubepit-core --bench watch -- --noplot --warm-up-time 1 --measurement-time 3`, and `--bench search_proxies … fleet_search`). Medians: `aggregator_initial_20k` 28.2 ms, `reset_batch_20k` 1.14 ms, `matcher_substring_50k` 0.76 ms, `matcher_glob_50k` 1.28 ms (spec, Results).
+- [x] **Step 6: Commit** one commit per fix, then this record:
+
+```bash
+git commit -m "perf(watch): share watch objects and convert them by value (R1a)"
+git commit -m "perf(fleet): match ASCII names without allocating (R1b)"
+git commit -m "docs(perf): R1 backend hot paths and their results"
+```
+
+---
+
 ### Task 23: Final results and checks
 
 **Files:**

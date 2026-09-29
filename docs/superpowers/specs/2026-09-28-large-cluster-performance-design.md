@@ -274,9 +274,9 @@ Filled in by plan Task 10 and each gated task.
 
 | Id | Budget | Baseline | After | Gate fired? |
 |----|-------:|---------:|------:|-------------|
-| `watch/aggregator_initial_20k` | 120 ms | **170 ms** (155–218) ✗ | | no gate covers it |
-| `watch/reset_batch_20k` | 60 ms | **64.4 ms** (60.0–74.3) ✗ | | no gate covers it |
-| `watch/steady_500` | 3 ms | 2.04 ms ✓ | | |
+| `watch/aggregator_initial_20k` | 120 ms | **170 ms** (155–218) ✗ | 28.2 ms (28.0–28.5) ✓ | no gate covers it; fixed by plan R1 |
+| `watch/reset_batch_20k` | 60 ms | **64.4 ms** (60.0–74.3) ✗ | 1.14 ms (1.12–1.19) ✓ | no gate covers it; fixed by plan R1 |
+| `watch/steady_500` | 3 ms | 2.04 ms ✓ | 0.15 ms (0.14–0.39) ✓ | R1 |
 | `metrics_history/record_5k_pods_1k_nodes` | 4 ms | 0.61 ms ✓ | | |
 | `metrics_history/series_cluster` | 50 µs | 1.6 µs ✓ | | |
 | `metrics_history/series_100_pods` | 1 ms | 59 µs ✓ | | |
@@ -287,8 +287,8 @@ Filled in by plan Task 10 and each gated task.
 | `journal/apply_update` | 60 µs | 5.4 µs ✓ | | H9: no |
 | `journal/details_after_500` | 50 ms | 5.2 ms ✓ | | H9: no |
 | `history/writer_events_10k` | 1.0 s, 0 dropped | 56 ms, 0 dropped ✓ | | |
-| `fleet_search/matcher_substring_50k` | 5 ms | **6.0 ms** (5.5–6.9) ✗ | | no gate covers it |
-| `fleet_search/matcher_glob_50k` | 15 ms | 6.5 ms ✓ | | |
+| `fleet_search/matcher_substring_50k` | 5 ms | **6.0 ms** (5.5–6.9) ✗ | 0.76 ms (0.75–0.80) ✓ | no gate covers it; fixed by plan R1 |
+| `fleet_search/matcher_glob_50k` | 15 ms | 6.5 ms ✓ | 1.28 ms (1.27–1.30) ✓ | R1 |
 | `fleet_search/matcher_regex_50k` | 15 ms | 0.44 ms ✓ | | |
 | `prometheus/parse_200x240` | 8 ms | 3.5 ms ✓ | | |
 | `loki/parse_5000_lines_50_streams` | 10 ms | 0.85 ms ✓ | | |
@@ -336,6 +336,7 @@ Notes:
   - `watch/aggregator_initial_20k`, `watch/reset_batch_20k`: no gate reads these ids. H1 reads only the e2e ids, which pass.
   - `fleet_search/matcher_substring_50k`: H10 reads only `e2e/fleet_search_l` (0.15 s). `NameMatcher::matches` allocates per name.
   - These budgets stay unchanged until a task is decided for them.
+  - **Decided: plan R1** (2026-09-29). Watch objects are converted by value and shared (`Arc`) between the aggregator's store and its batches; ASCII names are matched without allocating. The After column holds the medians of 5 short Criterion runs (`--warm-up-time 1 --measurement-time 3`) on the same M5 Max, 1-minute load 6–19 (other agents building). The budgets stay as they are; every R1 id now has ≥ 75% headroom.
 - **`ui/map_all_m`.** Each run rebuilt the graph 72–76 times while the watches synced (about 1.0–1.5 s of `map:build` in total), so the time is mostly rebuilds, not one slow build. H5 only moves that work off the main thread.
 
 **Gates (plan Tasks 12–22)**, from the numbers above:
