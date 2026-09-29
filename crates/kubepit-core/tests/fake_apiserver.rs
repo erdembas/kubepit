@@ -276,6 +276,49 @@ async fn request_headers_are_recorded() {
 }
 
 #[tokio::test]
+async fn discovery_refresh_picks_up_new_crds() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let installed = Arc::new(AtomicBool::new(false));
+    let base = cluster_router();
+    let flag = installed.clone();
+    let router: Router = Arc::new(move |req: &Request, log: &Log| {
+        let served = flag.load(Ordering::SeqCst);
+        match req.path_only() {
+            "/apis" if served => Reply::Json(
+                200,
+                json!({"kind": "APIGroupList", "apiVersion": "v1", "groups": [{
+                    "name": "aquasecurity.github.io",
+                    "versions": [{"groupVersion": "aquasecurity.github.io/v1alpha1", "version": "v1alpha1"}],
+                    "preferredVersion": {"groupVersion": "aquasecurity.github.io/v1alpha1", "version": "v1alpha1"}
+                }]}),
+            ),
+            "/apis/aquasecurity.github.io/v1alpha1" if served => Reply::Json(
+                200,
+                json!({"kind": "APIResourceList", "groupVersion": "aquasecurity.github.io/v1alpha1", "resources": [
+                    {"name": "vulnerabilityreports", "singularName": "vulnerabilityreport", "namespaced": true,
+                     "kind": "VulnerabilityReport", "verbs": ["get", "list", "watch"], "shortNames": ["vuln"]}
+                ]}),
+            ),
+            _ => base(req, log),
+        }
+    });
+    let server = start(router).await;
+    let (_dir, app, _rec, id) = setup(&server.url, false);
+    let has_trivy = |resources: &[kubepit_core::types::ApiResourceInfo]| {
+        resources.iter().any(|r| r.kind == "VulnerabilityReport")
+    };
+
+    assert!(!has_trivy(&app.api_resources(&id).await.unwrap()));
+    installed.store(true, Ordering::SeqCst);
+    // Cached per connection: the new CRD is not seen yet…
+    assert!(!has_trivy(&app.api_resources(&id).await.unwrap()));
+    // …until discovery is refreshed, which also refills the cache.
+    assert!(has_trivy(&app.api_resources_refresh(&id).await.unwrap()));
+    assert!(has_trivy(&app.api_resources(&id).await.unwrap()));
+}
+
+#[tokio::test]
 async fn unreachable_server_reports_error_status() {
     // Grab a free port and close it again so nothing listens there.
     let port = {

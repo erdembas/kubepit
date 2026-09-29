@@ -109,6 +109,11 @@ register({
     await sleep(120);
     return apiResources(getDb(clusterId));
   },
+  // Demo discovery is computed live, so a refresh is the same lookup.
+  api_resources_refresh: async ({ clusterId }: MockArgs) => {
+    await sleep(300);
+    return apiResources(getDb(clusterId));
+  },
   namespace_names: ({ clusterId }: MockArgs) =>
     list(getDb(clusterId), 'namespaces')
       .map((n) => n.metadata.name)

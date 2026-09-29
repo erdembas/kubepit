@@ -11,7 +11,7 @@ import { TRIVY_KEYS, detectTrivy, trivyKindOf } from '@/lib/kube/trivy';
 import { VIEW, navigateTo, useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { ApiResourceInfo, KubeObject } from '@/types';
 import { DetailsPanel } from '../details/DetailsPanel';
-import { useTrivyReports } from './hooks';
+import { useTrivyOperatorMissing, useTrivyReports } from './hooks';
 import { PodSecurityOverview } from './PodSecurityOverview';
 import { TrivyMissing } from './TrivyMissing';
 import { TrivyOverview, type OverviewActions } from './TrivyOverview';
@@ -64,6 +64,13 @@ export function SecurityPage({
     namespaces,
     isActive && tab === 'trivy' && trivyServed,
   );
+  const reportCount = Object.values(trivy.items).reduce((s, l) => s + l.length, 0);
+  // CRDs without an operator (left by a failed install or an uninstall): offer the install again.
+  const operatorMissing = useTrivyOperatorMissing(
+    clusterId,
+    isActive && tab === 'trivy' && trivy.synced && !trivy.errors.length && reportCount === 0,
+  );
+  const trivyCard = tab === 'trivy' && (!trivyServed || operatorMissing);
 
   const selectedGvk = selection ? gvkForKey(selection.key, apiResources) : null;
   const selectedObj = useMemo(() => {
@@ -129,7 +136,7 @@ export function SecurityPage({
                 aria-label={
                   tab === 'trivy' ? i18n.t('Search vulnerabilities') : i18n.t('Filter namespaces')
                 }
-                disabled={tab === 'trivy' && !trivyServed}
+                disabled={trivyCard}
                 className="text-fg placeholder:text-fg-dim min-w-0 flex-1 bg-transparent text-[12px] outline-none disabled:opacity-50"
               />
               {query && (
@@ -176,7 +183,7 @@ export function SecurityPage({
               </button>
             ))}
           </div>
-          {tab === 'trivy' && trivyServed && (
+          {tab === 'trivy' && !trivyCard && (
             <label className="text-fg-dim ml-auto flex shrink-0 items-center gap-2 pr-1 text-[11px]">
               <Switch checked={fixableOnly} onChange={setFixableOnly} bare />
               {i18n.t('Fixable only')}
@@ -200,8 +207,8 @@ export function SecurityPage({
             <Loader2 className="h-4 w-4 animate-spin" />
             {i18n.t('Discovering API resources…')}
           </div>
-        ) : tab === 'trivy' && !trivyServed ? (
-          <TrivyMissing />
+        ) : trivyCard ? (
+          <TrivyMissing clusterId={clusterId} crdsServed={trivyServed} />
         ) : (
           <div className="overlay-scroll min-h-0 flex-1 overflow-auto">
             <div className="mx-auto max-w-6xl p-5">
@@ -240,13 +247,7 @@ export function SecurityPage({
           {tab === 'trivy' && trivyServed && (
             <>
               <span className="text-fg-dim/40">·</span>
-              <span>
-                {i18n.plural(
-                  '{count} report',
-                  '{count} reports',
-                  Object.values(trivy.items).reduce((s, l) => s + l.length, 0),
-                )}
-              </span>
+              <span>{i18n.plural('{count} report', '{count} reports', reportCount)}</span>
             </>
           )}
         </div>

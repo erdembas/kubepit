@@ -189,6 +189,9 @@ export const ipc = {
 
   // -- Discovery ------------------------------------------------------------
   apiResources: (clusterId: ClusterId) => call<ApiResourceInfo[]>('api_resources', { clusterId }),
+  /** Discovery is cached per connection; this rediscovers (after new CRDs were installed). */
+  apiResourcesRefresh: (clusterId: ClusterId) =>
+    call<ApiResourceInfo[]>('api_resources_refresh', { clusterId }),
   namespaceNames: (clusterId: ClusterId) => call<string[]>('namespace_names', { clusterId }),
 
   // -- OpenAPI v3 (schema-aware YAML editing, API explorer; read-only) ------

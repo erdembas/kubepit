@@ -72,9 +72,11 @@ export function refreshPolled(key: string) {
   if (cache.has(key)) void run(key);
 }
 
-/** Refetch every cached key starting with `prefix`. */
-export function refreshPolledPrefix(prefix: string) {
-  for (const key of cache.keys()) if (key.startsWith(prefix)) void run(key);
+/** Refetch every cached key starting with `prefix`; resolves once they have settled. */
+export function refreshPolledPrefix(prefix: string): Promise<void> {
+  const runs: Promise<void>[] = [];
+  for (const key of cache.keys()) if (key.startsWith(prefix)) runs.push(run(key));
+  return Promise.all(runs).then(() => undefined);
 }
 
 export function dropPolledPrefix(prefix: string) {

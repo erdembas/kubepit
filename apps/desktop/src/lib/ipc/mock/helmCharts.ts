@@ -29,9 +29,12 @@ import {
   valuesYaml,
   type ChartDef,
 } from './fixtures/charts';
+import { buildCrds } from './fixtures/crds';
 import { getDb, helmKey, list, type ClusterDb, type HelmRecord } from './fixtures/db';
 import { syncHelmSecrets } from './fixtures/helm';
 import { applyYaml } from './fixtures/ops';
+import { scalePresetOf } from './fixtures/scale';
+import { TRIVY_CLUSTERS, buildTrivy, hasTrivy, trivyCrds } from './fixtures/trivy';
 import { mergePatch, nowIso } from './fixtures/util';
 import { handlers, register, type MockArgs } from './registry';
 
@@ -219,6 +222,16 @@ function deployObjects(db: ClusterDb, manifest: string, namespace: string) {
   } catch {
     /* The demo cluster may not serve every kind; the release still records it. */
   }
+}
+
+/** Trivy Operator (the Security view's one-click install) serves its CRDs; reports follow the first scans. */
+function installOperators(db: ClusterDb, chart: ChartDef) {
+  if (chart.repo !== 'aqua' || chart.chart !== 'trivy-operator' || hasTrivy(db)) return;
+  // Scale-preset clusters serve only their generated CRDs (./fixtures/crds.ts).
+  if (scalePresetOf(db.id)) return;
+  TRIVY_CLUSTERS.add(db.profile.id);
+  buildCrds(db, trivyCrds(db));
+  window.setTimeout(() => buildTrivy(db), 6000);
 }
 
 function failIfTimedOut(
@@ -436,6 +449,7 @@ register({
       store(rec, 1, data);
       syncHelmSecrets(db, req.namespace, name);
       deployObjects(db, manifest, req.namespace);
+      installOperators(db, chart);
     }
     return {
       release: { ...release },

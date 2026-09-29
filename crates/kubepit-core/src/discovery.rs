@@ -8,7 +8,8 @@
 //! `metrics.k8s.io` whose backing service is down) is skipped instead of
 //! failing the whole list.
 //!
-//! Results are cached per connection and invalidated on reconnect.
+//! Results are cached per connection and invalidated on reconnect, or on
+//! request after something installed new CRDs (e.g. a Helm chart).
 
 use std::sync::Arc;
 
@@ -108,6 +109,16 @@ impl Kubepit {
             .await?
             .as_ref()
             .clone())
+    }
+
+    /// `api_resources_refresh`: discover again, so kinds added since the
+    /// connection was made (new CRDs) show up. The cached list is replaced
+    /// only on success; a failed attempt leaves it for every other caller.
+    pub async fn api_resources_refresh(&self, cluster_id: &str) -> Result<Vec<ApiResourceInfo>> {
+        let client = self.client(cluster_id).await?;
+        let resources = Arc::new(discover(&client).await?);
+        self.pool.set_resources(cluster_id, resources.clone());
+        Ok(resources.as_ref().clone())
     }
 
     pub(crate) async fn api_resources_cached(

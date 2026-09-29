@@ -118,6 +118,17 @@ pub async fn api_resources(
 }
 
 #[tauri::command]
+pub async fn api_resources_refresh(
+    cluster_id: String,
+    state: State<'_, AppState>,
+) -> IpcResult<Vec<ApiResourceInfo>> {
+    let core = state.core.clone();
+    core.api_resources_refresh(&cluster_id)
+        .await
+        .map_err(ipc_err)
+}
+
+#[tauri::command]
 pub async fn namespace_names(
     cluster_id: String,
     state: State<'_, AppState>,

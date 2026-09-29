@@ -115,6 +115,7 @@ const NOT_MUTATING: &[&str] = &[
     // Reads: discovery, schemas, objects, watches, logs, metrics.
     "cluster_overview",
     "api_resources",
+    "api_resources_refresh",
     "namespace_names",
     "openapi_v3_index",
     "openapi_v3_document",

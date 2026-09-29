@@ -31,6 +31,7 @@ export const KNOWN_REPOS: KnownRepo[] = [
   { name: 'external-secrets', url: 'https://charts.external-secrets.io', org: 'External Secrets' },
   { name: 'cilium', url: 'https://helm.cilium.io', org: 'Cilium' },
   { name: 'kyverno', url: 'https://kyverno.github.io/kyverno', org: 'Kyverno' },
+  { name: 'aqua', url: 'https://aquasecurity.github.io/helm-charts', org: 'Aqua Security' },
   {
     name: 'open-telemetry',
     url: 'https://open-telemetry.github.io/opentelemetry-helm-charts',
@@ -1078,6 +1079,19 @@ The same chart can be used to run multiple Prometheus instances in the same clus
     source: 'https://github.com/kyverno/kyverno',
     image: 'kyverno/kyverno',
     port: 9443,
+  }),
+  chart({
+    repo: 'aqua',
+    chart: 'trivy-operator',
+    title: 'Trivy Operator',
+    description: 'Keeps security report resources updated',
+    latest: '0.26.1',
+    app: '0.24.1',
+    keywords: ['aquasecurity', 'scanner', 'vulnerabilities', 'kubernetes', 'security'],
+    home: 'https://aquasecurity.github.io/trivy-operator/',
+    source: 'https://github.com/aquasecurity/trivy-operator',
+    image: 'aquasec/trivy-operator',
+    port: 8080,
   }),
   chart({
     repo: 'open-telemetry',

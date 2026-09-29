@@ -1,10 +1,13 @@
 import { useLocaleMemo as useMemo } from '@/i18n';
+import { ipc } from '@/lib/ipc';
 import { BUILTIN, isServed, toGvk } from '@/lib/kube/catalog';
 import { podSpecOwners } from '@/lib/kube/pss';
-import { trivyGvk, type TrivyKind } from '@/lib/kube/trivy';
+import { TRIVY_CHART, trivyGvk, type TrivyKind } from '@/lib/kube/trivy';
 import type { ApiResourceInfo, ClusterId, Gvk, KubeObject } from '@/types';
 import { hasListError } from '../data/listState';
+import { usePolled } from '../data/polled';
 import { restartWatch, useWatch, type WatchSnapshot } from '../data/watchCache';
+import { trivyOperatorKey } from './trivyInstall';
 
 /** Shared watches of the Security view and the security details sections. */
 
@@ -98,6 +101,30 @@ export function useTrivyReports(
     errors: lists.filter((l) => hasListError(l.snap) && l.snap.error),
     restart: () => lists.forEach((l) => restartWatch(clusterId, l.gvk, namespaces)),
   };
+}
+
+/**
+ * `true` when no Trivy Operator Deployment exists although its CRDs are
+ * served: helm keeps a chart's CRDs after a failed install or an uninstall,
+ * and then no report ever arrives. Looked up by the label the chart and the
+ * static manifests put on it; an unknown answer (RBAC, errors) is not "missing".
+ */
+export function useTrivyOperatorMissing(clusterId: ClusterId, enabled: boolean): boolean {
+  const state = usePolled(
+    enabled ? trivyOperatorKey(clusterId) : null,
+    () =>
+      ipc
+        .resourceList(
+          clusterId,
+          toGvk(BUILTIN.Deployment),
+          null,
+          `app.kubernetes.io/name=${TRIVY_CHART}`,
+        )
+        .then((list) => list.items.length === 0),
+    30_000,
+    enabled,
+  );
+  return enabled && state.data === true;
 }
 
 const WORKLOAD_KINDS = [

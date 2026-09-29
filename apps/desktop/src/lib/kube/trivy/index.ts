@@ -1,4 +1,5 @@
 export * from './kinds';
+export * from './install';
 export * from './model';
 export {
   checkGroups,

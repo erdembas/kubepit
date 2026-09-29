@@ -176,8 +176,8 @@ export function crdsFor(db: ClusterDb) {
   );
 }
 
-export function buildCrds(db: ClusterDb) {
-  for (const c of crdsFor(db)) {
+export function buildCrds(db: ClusterDb, crds: readonly CrdInput[] = crdsFor(db)) {
+  for (const c of crds) {
     put(
       db,
       obj(

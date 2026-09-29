@@ -82,6 +82,7 @@ pub fn run() {
             ipc::cluster_overview,
             // Discovery
             ipc::api_resources,
+            ipc::api_resources_refresh,
             ipc::namespace_names,
             // OpenAPI v3 schemas (YAML editing, API explorer)
             ipc::openapi_v3_index,

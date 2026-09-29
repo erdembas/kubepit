@@ -99,7 +99,12 @@ export function trivyGvk(
 export const TRIVY_DOCS_URL = 'https://aquasecurity.github.io/trivy-operator/latest/';
 export const TRIVY_INSTALL_URL =
   'https://aquasecurity.github.io/trivy-operator/latest/getting-started/installation/helm/';
-export const TRIVY_HELM_INSTALL = `helm repo add aqua https://aquasecurity.github.io/helm-charts/
+/** Where the upstream guide installs the operator (and the one-click install too). */
+export const TRIVY_REPO_URL = 'https://aquasecurity.github.io/helm-charts/';
+export const TRIVY_CHART = 'trivy-operator';
+export const TRIVY_RELEASE = 'trivy-operator';
+export const TRIVY_NAMESPACE = 'trivy-system';
+export const TRIVY_HELM_INSTALL = `helm repo add aqua ${TRIVY_REPO_URL}
 helm repo update
-helm install trivy-operator aqua/trivy-operator \\
-  --namespace trivy-system --create-namespace`;
+helm install ${TRIVY_RELEASE} aqua/${TRIVY_CHART} \\
+  --namespace ${TRIVY_NAMESPACE} --create-namespace`;
