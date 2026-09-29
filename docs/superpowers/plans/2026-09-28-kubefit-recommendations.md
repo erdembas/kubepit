@@ -1618,7 +1618,7 @@ report holds a metrics-server fallback. Never parse the report's notes for it.
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1657,21 +1657,21 @@ async fn source_change_hides_results_and_scans_need_a_connection() {
 `history_rec_latest_for_tests` is a `#[doc(hidden)] pub fn` on `Kubepit`. Task 18
 replaces its uses with `recommendations_latest`.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core --test recommendations scan`
 
 Expected: FAIL to compile.
 
-- [ ] **Step 3: Implement the state, the runner, the sink method and the recorder**
+- [x] **Step 3: Implement the state, the runner, the sink method and the recorder**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core

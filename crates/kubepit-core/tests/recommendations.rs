@@ -5,23 +5,28 @@
 
 mod support;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use kubepit_core::prometheus::access::PrometheusAccess;
 use kubepit_core::prometheus::usage_history::PodFilter;
-use kubepit_core::recommendations::RecommendationSettings;
+use kubepit_core::recommendations::{
+    RecommendationScanStatus, RecommendationSettings, RunStatus, ScanState, ScanTrigger,
+};
 use kubepit_core::rightsizing::collect::{ScanProgress, SourceAbortKind};
 use kubepit_core::rightsizing::{
     Confidence, EvidenceIdentity, RightsizingNoteKind, RightsizingReport, RightsizingRequest,
     RightsizingSettings, RightsizingSource, WorkloadRef,
 };
 use kubepit_core::types::{PromScheme, PrometheusConfig};
+use kubepit_core::Kubepit;
 use parking_lot::Mutex;
 use serde_json::{json, Value};
 use support::stats::{
     duplicated, named_namespaces, param, prom_error, scalar_one, stat_query, vector,
 };
-use support::{setup, start, status, Log, Reply, Request, Router};
+use support::{setup, start, status, FakeServer, Log, Recorder, Reply, Request, Router};
 
 const OPERATED: &str = "/api/v1/namespaces/monitoring/services/http:prometheus-operated:9090/proxy";
 const MIB: f64 = 1024.0 * 1024.0;
@@ -67,6 +72,10 @@ struct Fixture {
     ksm_window: Option<&'static str>,
     /// Cluster-wide lists are forbidden.
     restricted: bool,
+    /// While set, Q1 fails for every batch (single namespaces too).
+    fail_q1_now: Arc<AtomicBool>,
+    /// The cluster runs kube-prometheus-stack's Prometheus.
+    prometheus: bool,
 }
 
 fn base() -> Fixture {
@@ -87,6 +96,8 @@ fn base() -> Fixture {
         fail_q1_multi: false,
         ksm_window: None,
         restricted: false,
+        fail_q1_now: Arc::default(),
+        prometheus: true,
     }
 }
 
@@ -239,6 +250,9 @@ fn prometheus(f: &Fixture, req: &Request) -> Reply {
     if n == 1 && f.fail_q1_multi && scope.as_ref().is_none_or(|s| s.len() > 1) {
         return prom_error("query processing would load too many samples into memory");
     }
+    if n == 1 && f.fail_q1_now.load(Ordering::SeqCst) {
+        return prom_error("query processing would load too many samples into memory");
+    }
     let ksm = f.ksm && f.ksm_window.is_none_or(|w| q.contains(w));
     let end: i64 = param(&req.path, "time")
         .and_then(|t| t.parse().ok())
@@ -303,7 +317,8 @@ fn kubefit_router(f: Fixture) -> Router {
                 );
             }
             let items: Vec<Value> = match resource {
-                "services" => vec![prometheus_service()],
+                "services" if f.prometheus => vec![prometheus_service()],
+                "services" => Vec::new(),
                 _ => f
                     .namespaces
                     .iter()
@@ -936,4 +951,248 @@ async fn both_collections_share_one_budget() {
         // Pods matched by name (no owner metrics) cap the confidence.
         assert!(c.warnings.iter().any(|x| x.code == "identity-by-name"));
     }
+}
+
+// ---------------------------------------------------------------------------
+// Scans: stored runs, keep-last-good, one at a time, rate limit
+// ---------------------------------------------------------------------------
+
+struct ScanApp {
+    server: FakeServer,
+    _dir: tempfile::TempDir,
+    app: Arc<Kubepit>,
+    recorder: Arc<Recorder>,
+    id: String,
+}
+
+/// A connected, read-only cluster (scans only read) behind `f`.
+async fn scan_app(f: Fixture) -> ScanApp {
+    let server = start(kubefit_router(f)).await;
+    let (dir, app, recorder, id) = setup(&server.url, true);
+    app.cluster_connect(&id).await.unwrap();
+    ScanApp {
+        server,
+        _dir: dir,
+        app,
+        recorder,
+        id,
+    }
+}
+
+/// The first `recommendations://scan` status in `state` from index `from` on.
+async fn wait_for_state_from(
+    recorder: &Recorder,
+    state: ScanState,
+    from: usize,
+) -> RecommendationScanStatus {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let found = recorder
+            .scans
+            .lock()
+            .iter()
+            .skip(from)
+            .find(|s| s.state == state)
+            .cloned();
+        if let Some(status) = found {
+            return status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no {state:?} status: {:#?}",
+            recorder.scans.lock()
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+async fn wait_for_state(recorder: &Recorder, state: ScanState) -> RecommendationScanStatus {
+    wait_for_state_from(recorder, state, 0).await
+}
+
+fn terminal(state: ScanState) -> bool {
+    matches!(
+        state,
+        ScanState::Success | ScanState::Failed | ScanState::Interrupted
+    )
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn manual_scan_stores_a_run_and_its_rows() {
+    let ScanApp {
+        app,
+        recorder,
+        id,
+        _dir,
+        ..
+    } = scan_app(base()).await;
+    assert_eq!(app.recommendations_status(&id).state, ScanState::Idle);
+    let queued = app.recommendations_scan(&id).await.unwrap();
+    assert_eq!(
+        (queued.state, queued.trigger, queued.run_id),
+        (ScanState::Queued, Some(ScanTrigger::Manual), None)
+    );
+    assert!(queued.manual_available_at.is_some());
+    let done = wait_for_state(&recorder, ScanState::Success).await;
+
+    let read = app.history_rec_latest_for_tests(&id);
+    let scan = read.scan.unwrap();
+    assert_eq!(scan.report.workloads[0].name, "api");
+    assert_eq!(scan.run.id, done.run_id.unwrap());
+    assert_eq!(
+        (scan.run.status, scan.run.trigger),
+        (RunStatus::Success, ScanTrigger::Manual)
+    );
+    assert_eq!(scan.run.summary.as_ref().unwrap().workloads, 1);
+    assert!(scan.run.rows_kept && read.last_failure.is_none());
+    // Strategy-free: automatic, with the strategy's effective settings.
+    assert_eq!(
+        (scan.report.strategy.as_str(), scan.report.strategy_auto),
+        ("workload-history", true)
+    );
+    assert_eq!(scan.report.window_secs, 7 * 86_400);
+
+    let scans = recorder.scans.lock().clone();
+    assert!(scans
+        .iter()
+        .any(|s| s.state == ScanState::Running && s.progress.is_some()));
+    assert!(done.last_success_at.is_some());
+    // The scan ends cleanly: queued, running, then one terminal status
+    // without progress, and nothing after it.
+    assert_eq!(scans[0].state, ScanState::Queued);
+    assert_eq!(scans.last().unwrap(), &done);
+    assert_eq!(scans.iter().filter(|s| terminal(s.state)).count(), 1);
+    assert!(done.progress.is_none() && done.error.is_none());
+    assert_eq!(app.recommendations_status(&id), done);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn failing_scan_keeps_the_last_good_result() {
+    let f = base();
+    let fail = f.fail_q1_now.clone();
+    let ScanApp { app, id, _dir, .. } = scan_app(f).await;
+    let first = app.recommendations_run_for_tests(&id).await.unwrap();
+    let good = app.recommendations_status(&id);
+    assert_eq!(good.state, ScanState::Success, "{good:?}");
+
+    // Q1 now fails for every batch, single namespaces included: the live
+    // report would fall back; the scan fails and keeps the first result.
+    fail.store(true, Ordering::SeqCst);
+    let second = app.recommendations_run_for_tests(&id).await.unwrap();
+    let read = app.history_rec_latest_for_tests(&id);
+    assert_eq!(read.scan.unwrap().run.id, first);
+    let failure = read.last_failure.unwrap();
+    assert_eq!((failure.id, failure.status), (second, RunStatus::Failed));
+    let error = failure.error.unwrap();
+    assert!(error.contains("too many samples"), "{error}");
+    assert!(failure.summary.is_none() && failure.source.is_none());
+
+    let status = app.recommendations_status(&id);
+    assert_eq!(
+        (status.state, status.run_id, status.trigger),
+        (ScanState::Failed, Some(second), Some(ScanTrigger::Schedule))
+    );
+    assert_eq!(status.error.as_deref(), Some(error.as_str()));
+    assert_eq!(status.last_success_at, good.last_success_at);
+    assert!(status.progress.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn scans_fail_on_label_mismatch_and_without_a_usage_source() {
+    // A shared Prometheus that answers without the cluster's label.
+    let ScanApp { app, id, _dir, .. } = scan_app(base()).await;
+    let first = app.recommendations_run_for_tests(&id).await.unwrap();
+    let mut def = app.cluster_def(&id).unwrap();
+    def.prometheus_access = PrometheusAccess {
+        cluster_labels: [("cluster".to_string(), "production".to_string())].into(),
+        ..Default::default()
+    };
+    app.cluster_update(def.clone()).unwrap();
+    app.recommendations_run_for_tests(&id).await.unwrap();
+    let status = app.recommendations_status(&id);
+    assert_eq!(status.state, ScanState::Failed);
+    assert_eq!(status.error.as_deref(), Some("cluster-label-mismatch"));
+    // Back to the first configuration: its result is still the latest.
+    def.prometheus_access = PrometheusAccess::default();
+    app.cluster_update(def).unwrap();
+    let read = app.history_rec_latest_for_tests(&id);
+    assert_eq!(read.scan.unwrap().run.id, first);
+    assert_eq!(
+        read.last_failure.unwrap().error.as_deref(),
+        Some("cluster-label-mismatch")
+    );
+
+    // Neither Prometheus nor metrics-server history.
+    let ScanApp { app, id, _dir, .. } = scan_app(Fixture {
+        prometheus: false,
+        ..base()
+    })
+    .await;
+    let run = app.recommendations_run_for_tests(&id).await.unwrap();
+    let status = app.recommendations_status(&id);
+    assert_eq!(
+        (status.state, status.run_id, status.error.as_deref()),
+        (ScanState::Failed, Some(run), Some("no-usage-source"))
+    );
+    assert!(app.history_rec_latest_for_tests(&id).scan.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn one_scan_per_cluster_and_manual_scans_are_rate_limited() {
+    let ScanApp {
+        app,
+        recorder,
+        id,
+        _dir,
+        ..
+    } = scan_app(base()).await;
+    let a = app.recommendations_scan(&id).await.unwrap();
+    let b = app.recommendations_scan(&id).await.unwrap();
+    assert_eq!(a.run_id.or(b.run_id), b.run_id, "same run reported");
+    assert_ne!(b.state, ScanState::Idle);
+    let done = wait_for_state(&recorder, ScanState::Success).await;
+    let err = app.recommendations_scan(&id).await.unwrap_err().to_string();
+    assert!(err.contains("wait"), "{err}");
+    // One run only.
+    let read = app.history_rec_latest_for_tests(&id);
+    assert_eq!(read.scan.unwrap().run.id, done.run_id.unwrap());
+    assert_eq!(
+        recorder
+            .scans
+            .lock()
+            .iter()
+            .filter(|s| s.state == ScanState::Queued)
+            .count(),
+        1
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn source_change_hides_results_and_scans_need_a_connection() {
+    let ScanApp {
+        app,
+        id,
+        server,
+        _dir,
+        ..
+    } = scan_app(base()).await;
+    app.recommendations_run_for_tests(&id).await.unwrap();
+    assert!(app.history_rec_latest_for_tests(&id).scan.is_some());
+    let mut def = app.cluster_def(&id).unwrap();
+    def.prometheus = PrometheusConfig::Service {
+        namespace: "monitoring".into(),
+        service: "prometheus-operated".into(),
+        port: 9090,
+        scheme: PromScheme::Http,
+        path_prefix: String::new(),
+    };
+    app.cluster_update(def).unwrap();
+    let read = app.history_rec_latest_for_tests(&id);
+    assert!(read.scan.is_none() && read.source_changed);
+
+    app.cluster_disconnect(&id);
+    let sent = server.log.lock().len();
+    let err = app.recommendations_scan(&id).await.unwrap_err().to_string();
+    assert!(err.contains("connect"), "{err}");
+    assert_eq!(server.log.lock().len(), sent, "never connects on its own");
 }

@@ -73,6 +73,8 @@ pub struct Kubepit {
     pub(crate) custom_actions: crate::custom_actions::CustomActionsStore,
     // Cost insight: detection and reports per connection.
     pub(crate) cost: crate::cost::CostState,
+    // Recommendations: scan statuses, running scans (`recommendations/scan.rs`).
+    pub(crate) recommendations: crate::recommendations::Recommendations,
 }
 
 impl Kubepit {
@@ -121,6 +123,7 @@ impl Kubepit {
             history,
             custom_actions,
             cost: crate::cost::CostState::default(),
+            recommendations: crate::recommendations::Recommendations::default(),
         };
         // Left behind by a crash while in keychain mode.
         app.remove_transient_run_kubeconfigs();

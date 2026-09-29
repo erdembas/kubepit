@@ -14,6 +14,7 @@ pub mod stats;
 use std::sync::Arc;
 use std::time::Duration;
 
+use kubepit_core::recommendations::RecommendationScanStatus;
 use kubepit_core::types::{ClusterInput, ClusterStatus, PortForward, Settings};
 use kubepit_core::{EventSink, Kubepit, Paths};
 use parking_lot::Mutex;
@@ -256,6 +257,8 @@ pub fn proxy_forbidden(path: &str) -> Reply {
 #[derive(Default)]
 pub struct Recorder {
     pub statuses: Mutex<Vec<ClusterStatus>>,
+    /// Every `recommendations://scan` status, in order.
+    pub scans: Mutex<Vec<RecommendationScanStatus>>,
 }
 
 impl EventSink for Recorder {
@@ -264,6 +267,9 @@ impl EventSink for Recorder {
     }
     fn cluster_list(&self, _clusters: &[kubepit_core::types::ClusterDef]) {}
     fn port_forwards(&self, _forwards: &[PortForward]) {}
+    fn recommendation_scan(&self, status: &RecommendationScanStatus) {
+        self.scans.lock().push(status.clone());
+    }
 }
 
 pub fn kubeconfig_for(server: &str) -> String {
