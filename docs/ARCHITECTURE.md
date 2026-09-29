@@ -1727,17 +1727,23 @@ in-memory demo backend.
   table records the baseline, which budgets it misses and which gated
   optimizations that fires; a missed budget stays as the target of its
   gated task.
-- **Compare.** `pnpm perf:compare -- [--slack N] [--only rust,e2e,engines,ui,structural]`
+- **Compare.** `pnpm perf:compare -- [--slack N|ci] [--only rust,e2e,engines,ui,structural]`
   prints every budget with its value and exits 1 when one is missed or a
   budgeted result is missing. `--slack` multiplies timing budgets (divides
-  `min` budgets); structural counts, memory and ratios stay exact. Unknown
-  ids only warn. Tests: `pnpm perf:test` (`node --test scripts/perf/`).
+  `min` budgets); `--slack ci` takes `ci_slack` from the budget file.
+  Structural counts, memory and ratios stay exact. Unknown ids only warn.
+  Tests: `pnpm perf:test` (`node --test scripts/perf/`).
 - **CI.** `.github/workflows/perf-guard.yml` (pull requests and pushes to
-  `main`) runs the compare tests, Criterion in quick mode
+  `main`) runs the compare tests, the structural probe
+  (`cargo test -p kubepit-core --test perf_probe`), Criterion in quick mode
   (`--warm-up-time 1 --measurement-time 3`) and the Vitest benches, then
-  `compare.mjs --slack 2.5 --only rust,e2e,engines,structural` (`ci_slack`),
-  and uploads the results. It moves into `ci.yml` as its `perf-guard` job
-  when the CI plan lands. `.github/workflows/perf-nightly.yml` (03:00 UTC
-  and manual) builds the UI, installs Chromium, runs `perf:ui` at `l` with
-  churn 50 and the 30-minute soak, `ttfr,map,health` at `s` and `m`, and
-  `compare.mjs --slack 2.5 --only ui`. Neither uses secrets.
+  `compare.mjs --slack ci --only rust,e2e,engines,structural`, and uploads
+  the results. The compare step is `continue-on-error` until calibrated on
+  a runner (the first run after the remote exists): the budgets are set on
+  an Apple M-series machine, where three Rust ids already miss, so a runner
+  more than ~1.8× slower fails them even at slack 2.5. It moves into
+  `ci.yml` as its `perf-guard` job when the CI plan lands.
+  `.github/workflows/perf-nightly.yml` (03:00 UTC and manual) builds the UI,
+  installs Chromium, runs `perf:ui` at `l` with churn 50 and the 30-minute
+  soak, `ttfr,map,health` at `s` and `m`, and
+  `compare.mjs --slack ci --only ui`. Neither uses secrets.

@@ -649,7 +649,7 @@ git commit -m "perf(ui): dev-only in-app probe (?perf=1) for rows, scrolling, ma
   - It expects `pnpm --filter @kubepit/desktop build` to have run, starts `vite preview --port <port> --strictPort` from `apps/desktop`, and launches Chromium with `--enable-precise-memory-info --js-flags=--expose-gc`.
   - `lib.mjs`:
     - `parseArgs(argv: string[]): Options`: defaults preset `m`, all scenarios, churn 0, soak 0, port 4173.
-    - `soakSummary(samples: Array<{ minute: number; heap: number; dom: number }>): { heapRatio: number; domDrift: number }`. The ratio is the last sample's heap ÷ the first sample at or after minute 5; drift is `(lastDom − firstDom) / firstDom`.
+    - `soakSummary(samples: Array<{ minute: number; heap: number; dom: number }>): { heapRatio: number; domDrift: number }`. The ratio is the last sample's heap ÷ the first sample at or after minute 5; drift is `(lastDom − firstDom) / firstDom`. _(As built, after review: the base is the first sample at or after minute 5 **in the same view as the last sample**. The soak cycles views of very different sizes, so the health view at minute 30 against the map at minute 5 hid up to ~30 % growth.)_
     - `resultIds(preset, measurements): Record<string, number>`. It maps to the `ui/*` ids in the spec budgets table (`ui/ttfr_pods_<preset>` and so on).
   - Safety: the driver aborts if `page.evaluate(() => '__TAURI_INTERNALS__' in window)` is true, and only navigates to `http://localhost:<port>`.
   - As built:
@@ -735,8 +735,8 @@ git commit -m "perf(ui): Playwright driver for rows, scrolling, map, health, vie
     - `budgets.json` also allows a free-text `note`, `abs: true` (compare the absolute value: `ui/soak_dom_nodes` is a ±10 % drift) and a top-level `informational` list of `*` patterns. A result id without a budget that matches one prints as informational instead of warning: the driver's ids at other presets, `ui/scroll_*`, `topology/layout_1200`.
     - The driver's extra ids take the spec's composite budgets: `ui/scroll_p95_frame_l` 25 ms, `ui/scroll_long_task_max_l` 100 ms, `ui/health_long_task_max_m` 200 ms.
     - `structural/list_requests_without_limit` is 2: the snapshot pinned in Task 2 (the metrics.k8s.io nodes and pods lists), like the watch-stream budget. H4 lowers it to 0. `e2e/max_rss_l_all_watchers` is 700 × 10⁶ bytes and not a timing, so no slack.
-    - `loadResults` reads a directory as a Criterion tree (the id is `full_id` from `benchmark.json`) and a file by its shape. Missing paths are skipped, so their ids fail as missing. Vitest 3 (tinybench 2) writes neither `median` nor `p50`, so engine values are means.
-    - `compare.mjs` defaults to slack 1 and every group, reading `target/criterion` (or `$CARGO_TARGET_DIR`), `target/perf/backend-e2e.json`, `perf-results/frontend-bench.json` and every `perf-results/ui*.json`. `--results a,b` and `--budgets <file>` override them. Informational ids print after the table.
+    - `loadResults` reads a directory as a Criterion tree (the id is `full_id` from `benchmark.json`) and a file by its shape. Missing paths are skipped, so their ids fail as missing. Vitest 3 adds `median` to each bench (tinybench 2 has no median or `p50`), so engine values are medians.
+    - `compare.mjs` defaults to slack 1 and every group, reading `target/criterion` (or `$CARGO_TARGET_DIR`), `target/perf/backend-e2e.json`, `perf-results/frontend-bench.json` and every `perf-results/ui*.json`. `--results a,b` and `--budgets <file>` override them. Informational ids print after the table. `--slack ci` reads `ci_slack` from the budget file, which both workflows use. An empty `--only` or `--results` list is an error, not zero rows. The argument parser is `parseCompareArgs` in `compareLib.mjs`, so it is tested.
 
 - [x] **Step 1: Write the failing tests**
 
@@ -801,7 +801,10 @@ Expected: PASS.
   - _Rust, engine and UI suites three times each, and the noisy Rust benches (`watch`, `search_proxies`) five times; the medians are recorded._
   - _The soak ran on its own (`--scenarios= --soak 30`, 30 min)._
   - _Result: 4 budgets missed: `watch/aggregator_initial_20k`, `watch/reset_batch_20k`, `fleet_search/matcher_substring_50k`, `ui/map_all_m`._
-  - _Gates that fire: H5 (map engine only) and MAP (1 200 fits). H6's window-close condition cannot be measured in Chromium and needs a manual `tauri dev` check._
+  - _Gates that fire:_
+    - _H5, for the map engine only;_
+    - _H6, from the code: a closed window's watches outlive it. The manual `tauri dev` check is still pending;_
+    - _MAP, with 1 200 provisional until a WKWebView check._
   - _No gate covers the three Rust misses._
   - _The gate checks needed two measurements the driver does not make, with throwaway scripts that are not committed:_
     - _H2: `mockWatchStats()` after each step of the standard scenario;_
@@ -844,7 +847,10 @@ git commit -m "perf: budgets, compare script and the first baseline"
 
     It uploads the results.
   - As built:
-    - Both workflows use only GitHub's own actions (`checkout`, `setup-node`, `cache`, `upload-artifact`) and no secrets, with `permissions: contents: read`.
+    - Both workflows use only GitHub's own actions (`checkout` with `persist-credentials: false`, `setup-node`, `cache`, `upload-artifact`) and no secrets, with `permissions: contents: read`.
+    - Both compare with `--slack ci` (`ci_slack` from `perf/budgets.json`) instead of a literal 2.5.
+    - The guard's compare step is `continue-on-error: true` until calibrated on a runner (the first run after the remote exists). Three Rust ids already miss on the M-series reference machine, so a runner more than 1.77× (`watch/aggregator_initial_20k`), 2.08× (`fleet_search/matcher_substring_50k`) or 2.33× (`watch/reset_batch_20k`) slower fails even at slack 2.5. A separate optimization task fixes those three misses.
+    - The guard also runs `cargo test -p kubepit-core --test perf_probe` before the benches, because no workflow runs `cargo test` until `ci.yml` exists, and D7 relies on that watch-stream snapshot.
     - pnpm comes from Corepack, Rust from `rustup toolchain install stable --profile minimal`.
     - The guard caches the Cargo registry and `target/`, but not `target/criterion` or `target/perf`, and deletes both before the benches. A stale result must never stand in for a bench that did not run.
     - The nightly also runs `pnpm perf:ui -- --preset s|m --scenarios ttfr,map,health --out perf-results/ui-<p>.json` before the compare. Otherwise `ui/ttfr_pods_s`, `ui/ttfr_pods_m`, `ui/map_all_m`, `ui/health_scan_m` and `ui/health_long_task_max_m` would fail as missing.
@@ -856,7 +862,7 @@ git commit -m "perf: budgets, compare script and the first baseline"
 Run: `node -e "const y=require('./apps/desktop/node_modules/yaml');for (const f of ['.github/workflows/perf-guard.yml','.github/workflows/perf-nightly.yml']) y.parse(require('fs').readFileSync(f,'utf8'));console.log('ok')"`, then run the `perf-guard` commands in order.
 Expected: `ok`, and `compare.mjs` exits 0 with the baseline results.
 
-_(Done: `ok`, and `actionlint` passes. Locally the `perf-guard` commands exit 0 in order: `pnpm install --frozen-lockfile --offline`, `node --test scripts/perf/`, the quick `cargo bench`, `pnpm perf:bench`, and `compare.mjs --slack 2.5 --only rust,e2e,engines,structural`. The Corepack, rustup and `playwright install --with-deps` setup steps were not run locally, because they change the machine's toolchains. The nightly's commands are the ones the Task 10 baseline ran.)_
+_(Done: `ok`, and `actionlint` passes. Locally the `perf-guard` commands exit 0 in order: `pnpm install --frozen-lockfile --offline`, `node --test scripts/perf/`, the quick `cargo bench`, `pnpm perf:bench`, and `compare.mjs --slack 2.5 --only rust,e2e,engines,structural` (later `--slack ci`, which resolves to 2.5), plus `cargo test -p kubepit-core --test perf_probe`. The Corepack, rustup and `playwright install --with-deps` setup steps were not run locally, because they change the machine's toolchains. The nightly's commands are the ones the Task 10 baseline ran.)_
 
 - [x] **Step 3: Commit**
 
@@ -1301,7 +1307,7 @@ git commit -m "perf(fleet): larger metadata pages and more kind concurrency for 
 - Test: `apps/desktop/src/lib/kube/topology/view.test.ts`
 
 **Interfaces:**
-- Produces: `DEFAULT_MAX_NODES` = the largest of 400, 800 and 1 200 for which build + view + layout ≤ 250 ms (`topology/layout_800`, `topology/layout_1200` plus the build/view part of `topology/all_m`) **and** the probe's pan frames p95 ≤ 16 ms at that size in Chromium.
+- Produces: `DEFAULT_MAX_NODES` = the largest of 400, 800 and 1 200 for which build + view + layout ≤ 250 ms (`topology/layout_800`, `topology/layout_1200` plus the build/view part of `topology/all_m`) **and** no dropped frame at 60 Hz while panning at that size in Chromium (the probe's pan p95 frame ≤ one frame, 16.7 ms; amended in the spec's D8, since one 60 Hz frame already exceeds 16 ms). _(Baseline: 1 200 fits, provisional until a WKWebView check. The pointer moves delivered fell from ≈ 280 at 400 nodes to ≈ 160 at 1 200.)_
 
 - [ ] **Step 1: Check the gate.** Measure 800 and 1 200 with the benches and a manual pan in `pnpm dev:ui?scale=m&perf=1` (`scrollTable` does not apply; use `__kubepitPerf.startFps()` while dragging for 5 s). If only 400 fits, record the numbers and stop.
 

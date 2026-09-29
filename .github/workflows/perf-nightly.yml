@@ -6,8 +6,9 @@
 # driver blocks every request outside the preview server. `l` runs every
 # scenario with 50 pod changes/s and the 30-minute soak; `s` and `m` add the
 # ids budgeted at those presets. Checked against perf/budgets.json with the
-# CI slack. No secrets; the downloads are Node, pnpm, npm packages, Chromium
-# and its system libraries (`playwright install --with-deps`).
+# CI slack (ci_slack). No secrets; the downloads are Node, pnpm, npm
+# packages, Chromium and its system libraries (`playwright install
+# --with-deps`).
 #
 # When the CI plan's workflows land, this stays a separate scheduled workflow.
 name: perf-nightly
@@ -31,6 +32,8 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -67,7 +70,7 @@ jobs:
           done
 
       - name: Compare with the budgets
-        run: node scripts/perf/compare.mjs --slack 2.5 --only ui
+        run: node scripts/perf/compare.mjs --slack ci --only ui
 
       - uses: actions/upload-artifact@v4
         if: always()

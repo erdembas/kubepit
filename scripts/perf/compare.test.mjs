@@ -3,7 +3,16 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { evaluate, formatValue, GROUPS, informationalIds, loadResults } from './compareLib.mjs';
+import {
+  evaluate,
+  formatValue,
+  GROUPS,
+  informationalIds,
+  loadResults,
+  parseCompareArgs,
+  resolveSlack,
+  UsageError,
+} from './compareLib.mjs';
 
 const budgets = {
   ci_slack: 2.5,
@@ -241,7 +250,8 @@ test('the checked-in budgets cover the spec ids with valid fields', () => {
     assert.ok(['ns', 'ms', 'bytes', 'ratio', 'fps', 'count'].includes(b.unit), `${id}: unit`);
     assert.ok(['max', 'min'].includes(b.direction), `${id}: direction`);
     assert.equal(typeof b.timing, 'boolean', `${id}: timing`);
-    assert.ok(Number.isFinite(b.value) && b.value > 0, `${id}: value`);
+    // 0 is valid: H4 lowers structural/list_requests_without_limit to 0.
+    assert.ok(Number.isFinite(b.value) && b.value >= 0, `${id}: value`);
   }
   for (const id of [
     'watch/aggregator_initial_20k',
@@ -255,6 +265,24 @@ test('the checked-in budgets cover the spec ids with valid fields', () => {
   ])
     assert.ok(id in file.budgets, id);
   assert.equal(Object.keys(file.budgets).length, 51);
+});
+
+test('parseCompareArgs: defaults, --slack ci and empty lists', () => {
+  const d = parseCompareArgs(['--']);
+  assert.deepEqual([d.slack, d.only, d.results], [1, GROUPS, null]);
+  const ci = parseCompareArgs(['--slack', 'ci', '--only=rust,e2e']);
+  assert.equal(ci.slack, 'ci');
+  assert.deepEqual(ci.only, ['rust', 'e2e']);
+  assert.equal(resolveSlack(ci.slack, budgets), 2.5);
+  assert.equal(resolveSlack(1.5, budgets), 1.5);
+  assert.throws(() => resolveSlack('ci', { budgets: {} }), /ci_slack/);
+  assert.throws(() => parseCompareArgs(['--only=']), /at least one/);
+  assert.throws(() => parseCompareArgs(['--only', ',']), /at least one/);
+  assert.throws(() => parseCompareArgs(['--results', ' , ']), /at least one/);
+  assert.throws(() => parseCompareArgs(['--only', 'rust,gpu']), /Unknown group gpu/);
+  assert.throws(() => parseCompareArgs(['--slack', '0']), /positive number or ci/);
+  assert.throws(() => parseCompareArgs(['--slack']), /needs a value/);
+  assert.throws(() => parseCompareArgs(['--kube', 'prod']), UsageError);
 });
 
 test('formatValue picks a readable unit', () => {

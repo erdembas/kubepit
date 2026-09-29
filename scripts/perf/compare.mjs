@@ -3,12 +3,21 @@
 // `perf/budgets.json` and exits 1 when a budget is missed or a budgeted
 // result is missing.
 //
-//   pnpm perf:compare -- --slack 1                                   # reference machine
-//   node scripts/perf/compare.mjs --slack 2.5 --only rust,e2e,engines,structural   # CI
+//   pnpm perf:compare -- --slack 1                                     # reference machine
+//   node scripts/perf/compare.mjs --slack ci --only rust,e2e,engines,structural   # CI
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { evaluate, formatValue, GROUPS, informationalIds, loadResults } from './compareLib.mjs';
+import {
+  evaluate,
+  formatValue,
+  GROUPS,
+  informationalIds,
+  loadResults,
+  parseCompareArgs,
+  resolveSlack,
+  UsageError,
+} from './compareLib.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -21,55 +30,11 @@ Reads the suites' results and checks them against perf/budgets.json:
   perf-results/ui*.json                      pnpm perf:ui (Playwright)
 <target> is CARGO_TARGET_DIR or ./target.
 
-  --slack <n>          multiply timing budgets by n (divide min budgets); default 1,
-                       CI uses ci_slack from perf/budgets.json
+  --slack <n>|ci       multiply timing budgets by n (divide min budgets); default 1;
+                       ci = ci_slack from the budget file (the CI workflows use it)
   --only a,b,...       groups to check: ${GROUPS.join(',')} (default: all)
   --results a,b,...    result files or Criterion directories instead of the defaults
   --budgets <file>     budget file (default perf/budgets.json)`;
-
-function parseArgs(argv) {
-  const options = { slack: 1, only: [...GROUPS], results: null, budgets: 'perf/budgets.json' };
-  const args = argv.filter((a) => a !== '--');
-  for (let i = 0; i < args.length; i++) {
-    const [flag, inline] = args[i].startsWith('--') ? args[i].split(/=(.*)/s) : [args[i]];
-    const value = () => {
-      const v = inline ?? args[++i];
-      if (v === undefined) throw new Error(`${flag} needs a value`);
-      return v;
-    };
-    const list = () =>
-      value()
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
-    switch (flag) {
-      case '--slack':
-        options.slack = Number(value());
-        if (!Number.isFinite(options.slack) || options.slack <= 0)
-          throw new Error('--slack must be a positive number');
-        break;
-      case '--only':
-        options.only = list();
-        for (const g of options.only)
-          if (!GROUPS.includes(g))
-            throw new Error(`Unknown group ${g} (known: ${GROUPS.join(', ')})`);
-        break;
-      case '--results':
-        options.results = list();
-        break;
-      case '--budgets':
-        options.budgets = value();
-        break;
-      case '--help':
-      case '-h':
-        options.help = true;
-        break;
-      default:
-        throw new Error(`Unknown option ${args[i]}\n\n${USAGE}`);
-    }
-  }
-  return options;
-}
 
 function defaultResultPaths() {
   const target = path.resolve(ROOT, process.env.CARGO_TARGET_DIR ?? 'target');
@@ -104,12 +69,13 @@ function table(rows) {
 }
 
 function main() {
-  const options = parseArgs(process.argv.slice(2));
+  const options = parseCompareArgs(process.argv.slice(2));
   if (options.help) {
     console.log(USAGE);
     return;
   }
   const budgets = JSON.parse(readFileSync(path.resolve(ROOT, options.budgets), 'utf8'));
+  options.slack = resolveSlack(options.slack, budgets);
   const paths = (options.results ?? defaultResultPaths()).map((p) => path.resolve(ROOT, p));
   const results = loadResults(paths);
   const { rows, failed, warnings } = evaluate(budgets, results, options);
@@ -149,5 +115,6 @@ try {
   main();
 } catch (error) {
   console.error(`[perf:compare] ${error instanceof Error ? error.message : error}`);
+  if (error instanceof UsageError) console.error(`\n${USAGE}`);
   process.exitCode = 1;
 }

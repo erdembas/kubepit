@@ -6,6 +6,79 @@ import path from 'node:path';
 
 export const GROUPS = ['rust', 'e2e', 'engines', 'ui', 'structural'];
 
+/** A bad command line: `compare.mjs` prints the usage after the message. */
+export class UsageError extends Error {}
+
+/**
+ * `compare.mjs` options: `slack` (default 1; `'ci'` until {@link resolveSlack}
+ * reads the budget file), `only` (default every group), `results` (null =
+ * the default paths), `budgets`, `help`. A lone `--` (pnpm forwards it) is
+ * ignored; an empty `--only` or `--results` list is an error, not "nothing".
+ */
+export function parseCompareArgs(argv) {
+  const options = {
+    slack: 1,
+    only: [...GROUPS],
+    results: null,
+    budgets: 'perf/budgets.json',
+    help: false,
+  };
+  const args = argv.filter((a) => a !== '--');
+  for (let i = 0; i < args.length; i++) {
+    const [flag, inline] = args[i].startsWith('--') ? args[i].split(/=(.*)/s) : [args[i]];
+    const value = () => {
+      const v = inline ?? args[++i];
+      if (v === undefined) throw new UsageError(`${flag} needs a value`);
+      return v;
+    };
+    const list = () => {
+      const items = value()
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (!items.length) throw new UsageError(`${flag} needs at least one value`);
+      return items;
+    };
+    switch (flag) {
+      case '--slack': {
+        const raw = value();
+        options.slack = raw === 'ci' ? 'ci' : Number(raw);
+        if (options.slack !== 'ci' && !(Number.isFinite(options.slack) && options.slack > 0))
+          throw new UsageError(`--slack must be a positive number or ci (got ${raw})`);
+        break;
+      }
+      case '--only':
+        options.only = list();
+        for (const g of options.only)
+          if (!GROUPS.includes(g))
+            throw new UsageError(`Unknown group ${g} (known: ${GROUPS.join(', ')})`);
+        break;
+      case '--results':
+        options.results = list();
+        break;
+      case '--budgets':
+        options.budgets = value();
+        break;
+      case '--help':
+      case '-h':
+        options.help = true;
+        break;
+      default:
+        throw new UsageError(`Unknown option ${args[i]}`);
+    }
+  }
+  return options;
+}
+
+/** `slack` as a number: `'ci'` is the budget file's `ci_slack`. */
+export function resolveSlack(slack, budgetFile) {
+  if (slack !== 'ci') return slack;
+  const ci = budgetFile.ci_slack;
+  if (!(Number.isFinite(ci) && ci > 0))
+    throw new Error('--slack ci: the budget file has no positive ci_slack');
+  return ci;
+}
+
 /** Nanoseconds per time unit; results in another time unit are converted. */
 const TIME_NS = { ns: 1, us: 1e3, µs: 1e3, ms: 1e6, s: 1e9 };
 
