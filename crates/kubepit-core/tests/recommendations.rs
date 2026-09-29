@@ -1491,6 +1491,11 @@ async fn disconnect_or_removal_interrupts_a_running_scan() {
     assert!(!app.recommendations_status(&id).scheduled);
     assert!(runs_of(&app, &id).is_empty(), "removal clears the history");
     assert!(app.cluster_def(&id).is_err());
+    assert_eq!(app.recommendations_scheduler_tasks_for_tests(), 0);
+    // After the slow query would have answered: still nothing stored.
+    tokio::time::sleep(Duration::from_millis(2_500)).await;
+    assert!(runs_of(&app, &id).is_empty());
+    assert!(app.recommendations_fleet().unwrap().is_empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -1669,4 +1674,148 @@ async fn fleet_trend_and_export_read_the_store() {
         .recommendations_export(&id, None, &[], RecommendationExportFormat::Json)
         .unwrap_err();
     assert!(err.to_string().contains("another Prometheus"), "{err}");
+}
+
+/// Scheduler loops tracked by the app once aborted ones have ended.
+async fn scheduler_tasks(app: &Kubepit) -> usize {
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    app.recommendations_scheduler_tasks_for_tests()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn restarted_and_concurrently_started_schedulers_stay_tracked() {
+    let ScanApp { app, id, _dir, .. } = scan_app(base()).await;
+    app.set_recommendation_scans(true);
+    opt_in(&app, &id, true);
+    assert_eq!(scheduler_tasks(&app).await, 1);
+
+    // Stop and start again right away: the aborted loop's end must not
+    // untrack the new one.
+    for _ in 0..5 {
+        app.recommendations_restart_scheduler_for_tests(&id);
+    }
+    assert_eq!(scheduler_tasks(&app).await, 1);
+    assert!(app.recommendations_status(&id).scheduled);
+    app.cluster_disconnect(&id);
+    assert_eq!(scheduler_tasks(&app).await, 0, "a disconnect stops it");
+
+    // Concurrent settings syncs (and a connect) start exactly one.
+    opt_in(&app, &id, false);
+    app.cluster_connect(&id).await.unwrap();
+    let mut settings = app.settings();
+    settings.recommendations.scan_clusters = vec![id.clone()];
+    let saves: Vec<_> = (0..8)
+        .map(|_| {
+            let (app, settings) = (app.clone(), settings.clone());
+            tokio::task::spawn_blocking(move || app.set_settings(settings).map(|_| ()))
+        })
+        .collect();
+    for save in saves {
+        save.await.unwrap().unwrap();
+    }
+    assert_eq!(scheduler_tasks(&app).await, 1);
+    app.cluster_remove(&id).await.unwrap();
+    assert_eq!(scheduler_tasks(&app).await, 0, "a removal stops it");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_scan_that_outlives_its_cluster_stores_nothing() {
+    // Not stopped by the removal (not a scheduled or manual task), and
+    // slower than the removal waits for it.
+    let ScanApp {
+        app,
+        recorder,
+        id,
+        _dir,
+        ..
+    } = scan_app(Fixture {
+        q1_delay: Some(Duration::from_secs(6)),
+        ..base()
+    })
+    .await;
+    let (scan_app_ref, scan_id) = (app.clone(), id.clone());
+    let scan =
+        tokio::spawn(async move { scan_app_ref.recommendations_run_for_tests(&scan_id).await });
+    wait_for_state(&recorder, ScanState::Running).await;
+    app.cluster_remove(&id).await.unwrap();
+    let _ = scan.await.unwrap();
+    assert!(runs_of(&app, &id).is_empty(), "{:?}", runs_of(&app, &id));
+    assert!(app.recommendations_fleet().unwrap().is_empty());
+}
+
+/// Change the tenant of `id` (a source change without a reconnect).
+fn change_tenant(app: &Kubepit, id: &str, tenant: &str) {
+    let mut def = app.cluster_def(id).unwrap();
+    def.prometheus_access = PrometheusAccess {
+        tenant: tenant.into(),
+        ..Default::default()
+    };
+    app.cluster_update(def).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_source_change_during_a_scan_keeps_the_next_one_due_soon() {
+    let ScanApp {
+        app,
+        recorder,
+        id,
+        _dir,
+        ..
+    } = scan_app(Fixture {
+        q1_delay: Some(Duration::from_secs(2)),
+        ..base()
+    })
+    .await;
+    app.set_recommendation_scans(true);
+    opt_in(&app, &id, true);
+    let from = recorder.scans.lock().len();
+    app.recommendations_scan(&id).await.unwrap();
+    wait_for_state_from(&recorder, ScanState::Running, from).await;
+    let changed = kubepit_core::objects::now_millis();
+    change_tenant(&app, &id, "team-a");
+    let done = wait_for_state_from(&recorder, ScanState::Success, from).await;
+    // That scan used the old source: the new one is still due two minutes
+    // after the change, not an interval after the scan.
+    let s = wait_for_status(&app, &id, |s| {
+        s.next_at
+            .is_some_and(|t| t < done.finished_at.unwrap() + 3_000_000)
+    })
+    .await;
+    let next = s.next_at.unwrap();
+    assert!(
+        (changed + 120_000..=kubepit_core::objects::now_millis() + 120_000).contains(&next),
+        "{next} vs {changed}"
+    );
+    assert!(
+        app.recommendations_latest(&id, None)
+            .unwrap()
+            .source_changed
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn scans_of_another_source_do_not_delay_the_first_of_the_new_one() {
+    let ScanApp { app, id, _dir, .. } = scan_app(base()).await;
+    app.recommendations_run_for_tests(&id).await.unwrap();
+    app.set_recommendation_scans(true);
+    opt_in(&app, &id, true);
+    // An interval after that scan, once the scheduler read it.
+    let soon = kubepit_core::objects::now_millis() + 3_000_000;
+    wait_for_status(&app, &id, |s| s.next_at.is_some_and(|t| t > soon)).await;
+
+    // The source changes and the cluster reconnects (the pending due time
+    // goes with the old scheduler): the recent scan used the old source.
+    change_tenant(&app, &id, "team-b");
+    app.cluster_disconnect(&id);
+    app.cluster_connect(&id).await.unwrap();
+    let connected = app.cluster_status(&id).connected_at.unwrap();
+    // Once the scheduler read the last attempt (the first `next_at` of a
+    // start is provisional).
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let s = app.recommendations_status(&id);
+    let next = s.next_at.unwrap();
+    assert!(
+        (connected + 120_000..=connected + 180_000).contains(&next),
+        "{s:?}"
+    );
 }

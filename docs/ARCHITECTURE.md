@@ -1211,9 +1211,12 @@ history") and re-evaluated for the UI with the current settings.
   (`stopped`) without blocking, unless the real outcome was already handed
   to the writer (the guard is disarmed then, before `rec_finish` returns
   and whatever it returns: the writer applies a run's first finish, so a
-  detached stop must never overtake a success). A run begun after its scan
-  was dropped is stopped by the begin itself; runs still `running` at the
-  next start become `app-restarted`.
+  detached stop must never overtake a success); from then on the store and
+  the terminal status run in a task of their own, so a disconnect cannot
+  show `interrupted` next to a stored success. A run begun after its scan
+  was dropped is stopped by the begin itself; a scan that outlives its
+  removed cluster stores nothing; runs still `running` at the next start
+  become `app-restarted`.
 - **Scheduling** (`recommendations/schedule.rs`): opt-in per process
   (`Kubepit::set_recommendation_scans`, enabled only in
   `src-tauri/src/setup.rs`, so tests and other binaries start no
@@ -1225,7 +1228,10 @@ history") and re-evaluated for the UI with the current settings.
   most 60 s against the wall clock (missed ticks after sleep collapse into
   one scan) and is woken by settings changes, the end of any scan and
   Prometheus configuration changes (which make the next scan due in
-  120 s). Started on connect, stopped with the cluster's work
+  120 s; a scan of the old source, still running at the change or before
+  a reconnect, neither clears that nor counts as the last attempt). Starts
+  are serialized under one lock and each gets its own task id, so a
+  cluster always has exactly one tracked, stoppable loop. Started on connect, stopped with the cluster's work
   (disconnect, removal: running scans are aborted, manual ones too),
   synced after `settings_set` (opting out stops the scheduler and its
   scan), stopped at shutdown. Removing a cluster waits (bounded) until no

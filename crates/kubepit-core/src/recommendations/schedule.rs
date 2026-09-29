@@ -7,7 +7,13 @@
 //!   last_attempt_end + interval)`, where the last attempt is the cluster's
 //!   newest run of any status, so a failure waits a full interval (no hot
 //!   retry). A Prometheus configuration change makes the next scan due in
-//!   120 s.
+//!   120 s; a scan of the old source (still running at the change, or
+//!   before a reconnect) neither clears that nor counts as the last
+//!   attempt.
+//! - **One loop per cluster**: starts (connect, settings syncs) check,
+//!   stop the old loop and spawn under the `schedules` lock, and every
+//!   start has its own task id and generation, so an old loop's end never
+//!   untracks the new one and overlapping starts leave exactly one.
 //! - **Waiting** in slices of at most [`SLICE`] against the wall clock, so
 //!   missed ticks after laptop sleep collapse into one scan; settings and
 //!   source changes wake the scheduler at once.
@@ -18,13 +24,13 @@
 
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use tokio::sync::Notify;
 
-use super::scan::run_claimed;
+use super::scan::{run_claimed, source_config};
 use super::types::ScanTrigger;
 use crate::app::Kubepit;
 use crate::history::recommendations as rec;
@@ -64,15 +70,23 @@ fn jitter_ms() -> i64 {
     (hasher.finish() % (MAX_JITTER_MS as u64 + 1)) as i64
 }
 
+/// Starts of schedulers: each gets its own task id and generation, so a
+/// stopped loop's entry never shadows (and its end never removes) the
+/// entry of the loop that replaced it.
+static SCHEDULE_SEQ: AtomicU64 = AtomicU64::new(0);
+
 /// The scheduler of one cluster.
 pub(crate) struct Schedule {
+    /// Which start this is; a loop of an older one exits.
+    generation: u64,
     connected_at: i64,
     jitter_ms: i64,
     /// A source change: the next scan is due then, whatever ran before.
     due_override: Option<i64>,
-    /// When the cluster's last scan ended (also when `history.db` could
-    /// not record it, so a broken database cannot cause a hot loop).
-    last_end: Option<i64>,
+    /// When the cluster's last scan ended and the source configuration it
+    /// used (also when `history.db` could not record it, so a broken
+    /// database cannot cause a hot loop).
+    last_end: Option<(i64, String)>,
     wake: Arc<Notify>,
 }
 
@@ -92,9 +106,18 @@ impl Kubepit {
         self.recommendations.active.load(Ordering::SeqCst)
     }
 
-    /// Called once a connect succeeded: (re)start the cluster's scheduler
+    /// Called once a connect succeeded: restart the cluster's scheduler
     /// when this process scans in the background and the cluster opted in.
     pub(crate) fn start_recommendation_scans(&self, cluster_id: &str) {
+        self.start_schedule(cluster_id, true);
+    }
+
+    /// Start the cluster's scheduler: always (`restart`, replacing a
+    /// running one) or only when none runs. The check, the stop of an old
+    /// loop, the new entry and the spawn happen under the `schedules`
+    /// lock, so overlapping starts (a connect during `settings_set`, two
+    /// syncs) leave exactly one tracked loop.
+    fn start_schedule(&self, cluster_id: &str, restart: bool) {
         if !self.scans_active()
             || !self.settings().recommendations.scans(cluster_id)
             || self.pool.connected_client(cluster_id).is_none()
@@ -105,16 +128,22 @@ impl Kubepit {
         let Some(app) = self.recommendations.app.lock().clone() else {
             return;
         };
-        self.recommendations.scheduled.stop_cluster(cluster_id);
         let connected_at = self
             .cluster_status(cluster_id)
             .connected_at
             .unwrap_or_else(now_millis);
         let jitter = jitter_ms();
         let wake = Arc::new(Notify::new());
-        self.recommendations.schedules.lock().insert(
+        let mut schedules = self.recommendations.schedules.lock();
+        if !restart && schedules.contains_key(cluster_id) {
+            return;
+        }
+        self.recommendations.scheduled.stop_cluster(cluster_id);
+        let generation = SCHEDULE_SEQ.fetch_add(1, Ordering::Relaxed);
+        schedules.insert(
             cluster_id.to_string(),
             Schedule {
+                generation,
                 connected_at,
                 jitter_ms: jitter,
                 due_override: None,
@@ -122,25 +151,26 @@ impl Kubepit {
                 wake: wake.clone(),
             },
         );
+        self.recommendations.scheduled.spawn(
+            &format!("rec-schedule:{cluster_id}:{generation}"),
+            cluster_id,
+            scheduler(app, cluster_id.to_string(), generation, wake),
+        );
         // The earliest possible due time until the scheduler has read the
-        // last attempt (it corrects `next_at` right away).
+        // last attempt (it corrects `next_at` right away). Published under
+        // the lock, so a stop that follows is shown after it.
         let first = connected_at + FIRST_DELAY_MS + jitter;
         self.update_scan_status(cluster_id, |s| {
             s.scheduled = true;
             s.next_at = Some(s.next_at.map_or(first, |t| t.max(first)));
         });
-        let id = cluster_id.to_string();
-        self.recommendations.scheduled.spawn(
-            &format!("rec-schedule:{cluster_id}"),
-            cluster_id,
-            scheduler(app, id, wake),
-        );
     }
 
     /// Stop the cluster's scheduler (and the scheduled scan it runs).
     fn stop_schedule(&self, cluster_id: &str) {
+        let mut schedules = self.recommendations.schedules.lock();
         self.recommendations.scheduled.stop_cluster(cluster_id);
-        let was = self.recommendations.schedules.lock().remove(cluster_id);
+        let was = schedules.remove(cluster_id);
         let shown = self
             .recommendations
             .statuses
@@ -182,7 +212,8 @@ impl Kubepit {
                 .map(|s| s.wake.clone());
             match (wanted, wake) {
                 (false, Some(_)) => self.stop_schedule(&cluster.id),
-                (true, None) if has_runtime => self.start_recommendation_scans(&cluster.id),
+                // Checked again under the lock: another start may win.
+                (true, None) if has_runtime => self.start_schedule(&cluster.id, false),
                 (true, Some(wake)) => wake.notify_one(),
                 _ => {}
             }
@@ -203,16 +234,34 @@ impl Kubepit {
         wake.notify_one();
     }
 
-    /// A scan of `cluster_id` ended (see `ScanTask::end`): the scheduler
-    /// counts the next interval from now, and shows it at once.
-    pub(crate) fn recommendation_scan_ended(&self, cluster_id: &str, at: i64) {
+    /// The source configuration `cluster_id` has now (`None` once removed).
+    fn current_source_config(&self, cluster_id: &str) -> Option<String> {
+        self.store.cluster(cluster_id).map(|c| source_config(&c))
+    }
+
+    /// A scan of `cluster_id` ended (see `ScanTask::end`) that used
+    /// `used` (`None`: it stored no run, so the current one): the scheduler
+    /// counts the next interval from now, and shows it at once. A pending
+    /// source change stays due unless the scan already used the new source.
+    pub(crate) fn recommendation_scan_ended(
+        &self,
+        cluster_id: &str,
+        at: i64,
+        used: Option<String>,
+    ) {
+        let current = self.current_source_config(cluster_id);
+        let Some(used) = used.or_else(|| current.clone()) else {
+            return;
+        };
         let wake = {
             let mut schedules = self.recommendations.schedules.lock();
             let Some(schedule) = schedules.get_mut(cluster_id) else {
                 return;
             };
-            schedule.last_end = Some(at);
-            schedule.due_override = None;
+            if current.as_deref() == Some(used.as_str()) {
+                schedule.due_override = None;
+            }
+            schedule.last_end = Some((at, used));
             schedule.wake.clone()
         };
         wake.notify_one();
@@ -267,33 +316,43 @@ impl Kubepit {
     }
 
     /// When the next background scan of `cluster_id` is due, published as
-    /// `next_at`; `None` once its scheduler was stopped.
-    async fn scan_due(self: &Arc<Self>, cluster_id: &str) -> Option<i64> {
+    /// `next_at`; `None` once its scheduler (start `generation`) was
+    /// stopped or replaced, or the cluster removed. The last attempt counts
+    /// only when it used the current source configuration: a scan of the
+    /// old source does not delay the first one of the new source.
+    async fn scan_due(self: &Arc<Self>, cluster_id: &str, generation: u64) -> Option<i64> {
+        let current = self.current_source_config(cluster_id)?;
         let app = self.clone();
         let id = cluster_id.to_string();
-        let stored_end = tokio::task::spawn_blocking(move || {
+        let stored = tokio::task::spawn_blocking(move || {
             app.history
-                .rec_read(|conn| rec::last_attempt(conn, &id))
+                .rec_read(|conn| rec::last_attempt_source(conn, &id))
                 .ok()
                 .flatten()
-                .map(|run| run.finished_at.unwrap_or(run.started_at))
         })
         .await
         .ok()
         .flatten();
-        let interval_ms = i64::from(self.scan_interval_minutes()) * 60_000;
-        let due = {
-            let schedules = self.recommendations.schedules.lock();
-            let schedule = schedules.get(cluster_id)?;
-            match schedule.due_override {
-                Some(at) => at,
-                None => next_due(
-                    schedule.connected_at,
-                    schedule.jitter_ms,
-                    stored_end.max(schedule.last_end),
-                    interval_ms,
-                ),
-            }
+        let of_current = |attempt: &Option<(i64, String)>| {
+            attempt
+                .as_ref()
+                .filter(|(_, used)| *used == current)
+                .map(|(end, _)| *end)
+        };
+        let interval = self.scan_interval_minutes();
+        let interval_ms = i64::from(interval) * 60_000;
+        let schedules = self.recommendations.schedules.lock();
+        let schedule = schedules
+            .get(cluster_id)
+            .filter(|s| s.generation == generation)?;
+        let due = match schedule.due_override {
+            Some(at) => at,
+            None => next_due(
+                schedule.connected_at,
+                schedule.jitter_ms,
+                of_current(&stored).max(of_current(&schedule.last_end)),
+                interval_ms,
+            ),
         };
         let shown = self
             .recommendations
@@ -301,7 +360,7 @@ impl Kubepit {
             .lock()
             .get(cluster_id)
             .map(|s| (s.next_at, s.scheduled, s.interval_minutes));
-        let interval = self.scan_interval_minutes();
+        // Under the lock: a stop always shows after this.
         if shown != Some((Some(due), true, interval)) {
             self.update_scan_status(cluster_id, |s| {
                 s.next_at = Some(due);
@@ -309,6 +368,18 @@ impl Kubepit {
             });
         }
         Some(due)
+    }
+
+    /// Tests: scheduler loops tracked (and so stoppable) right now.
+    #[doc(hidden)]
+    pub fn recommendations_scheduler_tasks_for_tests(&self) -> usize {
+        self.recommendations.scheduled.len()
+    }
+
+    /// Tests: restart the scheduler of `cluster_id` (like a connect does).
+    #[doc(hidden)]
+    pub fn recommendations_restart_scheduler_for_tests(&self, cluster_id: &str) {
+        self.start_schedule(cluster_id, true);
     }
 
     /// Tests: make the next background scan of `cluster_id` due now.
@@ -328,12 +399,12 @@ impl Kubepit {
 
 /// The scheduler loop of one cluster (see the module docs). It holds the
 /// app only while it works, never while it sleeps.
-async fn scheduler(app: Weak<Kubepit>, cluster_id: String, wake: Arc<Notify>) {
+async fn scheduler(app: Weak<Kubepit>, cluster_id: String, generation: u64, wake: Arc<Notify>) {
     loop {
         let Some(strong) = app.upgrade() else {
             return;
         };
-        let Some(due) = strong.scan_due(&cluster_id).await else {
+        let Some(due) = strong.scan_due(&cluster_id, generation).await else {
             return;
         };
         let now = now_millis();

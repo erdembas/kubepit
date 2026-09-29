@@ -19,7 +19,11 @@
 //!   without blocking. It is disarmed the moment the real outcome is handed
 //!   to the writer, whether or not storing it then succeeds: the writer
 //!   applies the first finish of a run, and a detached stop could otherwise
-//!   overtake a success whose queueing timed out.
+//!   overtake a success whose queueing timed out. From that moment the
+//!   store and the terminal status run in a task of their own, so aborting
+//!   the scan then cannot show `interrupted` next to a stored success. A
+//!   scan whose cluster was removed meanwhile stores nothing (its run ends
+//!   as `stopped` and what it wrote is cleared).
 //! - **Status.** `recommendations://scan` carries the status at every state
 //!   change and at most every 250 ms while the progress moves. Every scan
 //!   ends with one terminal status (`success`, `failed` or `interrupted`,
@@ -37,6 +41,7 @@ use serde::Serialize;
 use super::types::{RecommendationScanStatus, ScanState, ScanTrigger};
 use crate::app::Kubepit;
 use crate::history::recommendations::{self as rec, ScanBegin, ScanOutcome, ERROR_STOPPED};
+use crate::history::HistoryKind;
 use crate::objects::now_millis;
 use crate::prometheus::access::PrometheusAccess;
 use crate::prometheus::matchers::CLUSTER_LABEL_MISMATCH;
@@ -371,18 +376,7 @@ pub(crate) async fn run_claimed(
     trigger: ScanTrigger,
 ) -> Result<i64> {
     let cluster_id = claim.cluster_id.clone();
-    let stop_app = app.clone();
-    let mut task = ScanTask {
-        app: app.clone(),
-        cluster_id: cluster_id.clone(),
-        claim: Some(Arc::new(claim)),
-        ended: false,
-        guard: RunGuard::new(move |run_id| {
-            stop_app
-                .history
-                .rec_finish_detached(run_id, ScanOutcome::Interrupted(ERROR_STOPPED.into()));
-        }),
-    };
+    let mut task = ScanTask::new(app.clone(), claim);
     let status = app.scan_status_entry_nonblocking(&cluster_id);
     if status.state != ScanState::Queued || status.trigger != Some(trigger) {
         app.update_scan_status(&cluster_id, |s| queued(s, trigger));
@@ -396,18 +390,7 @@ pub(crate) async fn run_claimed(
         .map_err(|_| anyhow!("recommendation scans stopped"))?;
     match task.scan(trigger).await {
         Ok((run_id, outcome)) => {
-            let (state, error) = match &outcome {
-                ScanOutcome::Success { .. } => (ScanState::Success, None),
-                ScanOutcome::Failed(e) => (ScanState::Failed, Some(e.clone())),
-                ScanOutcome::Interrupted(e) => (ScanState::Interrupted, Some(e.clone())),
-            };
-            match task.store(run_id, outcome).await {
-                Ok(()) => task.end(state, error),
-                Err(e) => task.end(
-                    ScanState::Failed,
-                    Some(format!("the scan could not be stored: {e:#}")),
-                ),
-            }
+            hand_off(task, run_id, outcome).await?;
             Ok(run_id)
         }
         Err((state, error)) => {
@@ -415,6 +398,15 @@ pub(crate) async fn run_claimed(
             Err(anyhow!(error))
         }
     }
+}
+
+/// Store `outcome` and end the status in a task of its own: once the
+/// outcome is handed over, aborting the scan (a disconnect) can no longer
+/// leave an `interrupted` status next to a stored success.
+async fn hand_off(task: ScanTask, run_id: i64, outcome: ScanOutcome) -> Result<()> {
+    tokio::spawn(task.finish(run_id, outcome))
+        .await
+        .map_err(|e| anyhow!("the recommendation scan was not stored: {e}"))
 }
 
 /// A scan in progress: its claim, its run guard and its status.
@@ -425,10 +417,45 @@ struct ScanTask {
     claim: Option<Arc<Claim>>,
     /// A terminal status was recorded.
     ended: bool,
+    /// The source configuration of the run once begun.
+    source_config: Option<String>,
     guard: RunGuard,
 }
 
 impl ScanTask {
+    fn new(app: Arc<Kubepit>, claim: Claim) -> Self {
+        let stop_app = app.clone();
+        Self {
+            app,
+            cluster_id: claim.cluster_id.clone(),
+            claim: Some(Arc::new(claim)),
+            ended: false,
+            source_config: None,
+            guard: RunGuard::new(move |run_id| {
+                stop_app
+                    .history
+                    .rec_finish_detached(run_id, ScanOutcome::Interrupted(ERROR_STOPPED.into()));
+            }),
+        }
+    }
+
+    /// Store `outcome`, then record the terminal status.
+    async fn finish(mut self, run_id: i64, outcome: ScanOutcome) {
+        let (state, error) = match &outcome {
+            ScanOutcome::Success { .. } => (ScanState::Success, None),
+            ScanOutcome::Failed(e) => (ScanState::Failed, Some(e.clone())),
+            ScanOutcome::Interrupted(e) => (ScanState::Interrupted, Some(e.clone())),
+        };
+        match self.store(run_id, outcome).await {
+            Ok(true) => self.end(state, error),
+            Ok(false) => self.end(ScanState::Interrupted, Some(ERROR_STOPPED.into())),
+            Err(e) => self.end(
+                ScanState::Failed,
+                Some(format!("the scan could not be stored: {e:#}")),
+            ),
+        }
+    }
+
     fn claim(&self) -> Arc<Claim> {
         self.claim.clone().expect("held until the scan ends")
     }
@@ -436,7 +463,7 @@ impl ScanTask {
     /// Begin the run and collect: the run id and how it ended, or the
     /// terminal state and error of a scan that stored no run.
     async fn scan(
-        &self,
+        &mut self,
         trigger: ScanTrigger,
     ) -> std::result::Result<(i64, ScanOutcome), (ScanState, String)> {
         let app = self.app.clone();
@@ -448,12 +475,14 @@ impl ScanTask {
             return Err((ScanState::Interrupted, ERROR_STOPPED.into()));
         }
         let started = now_millis();
+        let config = source_config(&cluster);
+        self.source_config = Some(config.clone());
         let run_id = self
             .begin(ScanBegin {
                 cluster_id: cluster_id.clone(),
                 started,
                 trigger,
-                source_config: source_config(&cluster),
+                source_config: config,
             })
             .await
             .map_err(|e| (ScanState::Failed, format!("{e:#}")))?;
@@ -518,14 +547,34 @@ impl ScanTask {
 
     /// `rec_finish` on the blocking pool, after the guard handed the run
     /// over (see the module docs).
-    async fn store(&self, run_id: i64, outcome: ScanOutcome) -> Result<()> {
+    ///
+    /// A scan whose cluster was removed meanwhile stores nothing: its run
+    /// ends as `stopped` and whatever it wrote is cleared (`Ok(false)`).
+    async fn store(&self, run_id: i64, outcome: ScanOutcome) -> Result<bool> {
         let app = self.app.clone();
         let claim = self.claim();
+        let cluster_id = self.cluster_id.clone();
         let finish = self.guard.hand_over(|| {
             tokio::task::spawn_blocking(move || {
+                let removed = || app.store.cluster(&cluster_id).is_none();
+                let gone = removed();
+                let outcome = if gone {
+                    ScanOutcome::Interrupted(ERROR_STOPPED.into())
+                } else {
+                    outcome
+                };
                 let stored = app.history.rec_finish(run_id, outcome);
+                // Removed before or while it was stored: clean up after it.
+                let cleared = if gone || removed() {
+                    app.history
+                        .require_writer()
+                        .and_then(|w| w.clear(HistoryKind::Recommendations, Some(cluster_id)))
+                        .map(|()| false)
+                } else {
+                    Ok(true)
+                };
                 drop(claim);
-                stored
+                stored.and(cleared)
             })
         });
         finish
@@ -539,7 +588,8 @@ impl ScanTask {
         self.ended = true;
         let claim = self.claim.take();
         let now = now_millis();
-        self.app.recommendation_scan_ended(&self.cluster_id, now);
+        self.app
+            .recommendation_scan_ended(&self.cluster_id, now, self.source_config.clone());
         self.app.update_scan_status(&self.cluster_id, |s| {
             s.state = state;
             s.progress = None;
@@ -718,6 +768,104 @@ mod tests {
         assert!(stored.is_err());
         drop(guard);
         assert!(stopped.lock().is_empty(), "never finished twice");
+    }
+
+    /// Records every scan status.
+    #[derive(Default)]
+    struct Statuses(Mutex<Vec<RecommendationScanStatus>>);
+
+    impl crate::events::EventSink for Statuses {
+        fn cluster_status(&self, _status: &crate::types::ClusterStatus) {}
+        fn cluster_list(&self, _clusters: &[ClusterDef]) {}
+        fn port_forwards(&self, _forwards: &[crate::types::PortForward]) {}
+        fn recommendation_scan(&self, status: &RecommendationScanStatus) {
+            self.0.lock().push(status.clone());
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_handed_over_outcome_is_stored_and_shown_even_if_the_scan_is_aborted() {
+        use crate::history::writer::WriteOp;
+        use std::time::Duration;
+
+        let dir = tempfile::tempdir().unwrap();
+        let sink = Arc::new(Statuses::default());
+        let app = Arc::new(
+            Kubepit::open(
+                crate::paths::Paths::new(dir.path().join("home")),
+                sink.clone(),
+            )
+            .unwrap(),
+        );
+        // A registered cluster (never connected) whose scan collected a result.
+        let cluster = app
+            .cluster_add(vec![crate::types::ClusterInput {
+                name: "One".into(),
+                context: "one".into(),
+                kubeconfig_text: Some(
+                    "apiVersion: v1\nkind: Config\nclusters:\n- name: one\n  cluster:\n    server: http://127.0.0.1:9\ncontexts:\n- name: one\n  context:\n    cluster: one\n    user: u\nusers:\n- name: u\n  user:\n    token: t\ncurrent-context: one\n"
+                        .into(),
+                ),
+                ..Default::default()
+            }])
+            .unwrap()
+            .remove(0);
+        let run_id = app
+            .history
+            .rec_begin(ScanBegin {
+                cluster_id: cluster.id.clone(),
+                started: 1,
+                trigger: ScanTrigger::Manual,
+                source_config: source_config(&cluster),
+            })
+            .unwrap();
+        let mut task = ScanTask::new(app.clone(), app.recommendations.claim(&cluster.id).unwrap());
+        task.source_config = Some(source_config(&cluster));
+        assert!(RunGuard::begun(&task.guard.slot(), run_id));
+        let report = report(RightsizingSource::Prometheus);
+        let outcome = ScanOutcome::Success {
+            summary: summarize(&report),
+            settings: report.settings.clone(),
+            report,
+        };
+
+        // The writer is busy: the store waits while the scan is aborted.
+        let (release, gate) = std::sync::mpsc::channel();
+        assert!(app.history.submit(WriteOp::Block(gate)));
+        let scan = tokio::spawn(hand_off(task, run_id, outcome));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        scan.abort();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        release.send(()).unwrap();
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        loop {
+            let done = sink
+                .0
+                .lock()
+                .last()
+                .is_some_and(|s| s.state == ScanState::Success);
+            if done && !app.recommendations.is_running(&cluster.id) {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "{:?}", sink.0.lock());
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let statuses = sink.0.lock().clone();
+        assert!(
+            statuses.iter().all(|s| s.state != ScanState::Interrupted),
+            "{statuses:?}"
+        );
+        assert!(statuses.last().unwrap().last_success_at.is_some());
+        assert!(app.history_flush());
+        let runs = app
+            .history
+            .rec_read(|conn| rec::runs(conn, &cluster.id, 5))
+            .unwrap();
+        assert_eq!(
+            (runs[0].id, runs[0].status),
+            (run_id, crate::recommendations::RunStatus::Success)
+        );
     }
 
     #[test]
