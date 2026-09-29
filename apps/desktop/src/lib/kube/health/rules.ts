@@ -270,6 +270,15 @@ export const RULES: readonly RuleDef[] = [
         'Raise the requests (and memory limits) to the right-sizing recommendation so pods are not throttled, evicted or OOM-killed.',
       ),
   ),
+  rule(
+    'workload-cpu-throttled',
+    'efficiency',
+    'warning',
+    [],
+    false,
+    () => i18n.t('Workloads throttled by their CPU limit'),
+    () => i18n.t('Raise or remove the CPU limit; the request stays as recommended.'),
+  ),
   // -- Network ----------------------------------------------------------------
   rule(
     'service-no-pods',

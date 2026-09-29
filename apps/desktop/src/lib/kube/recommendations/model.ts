@@ -570,3 +570,44 @@ export function intervalLabel(minutes: number): string {
     return i18n.plural('Every {count} hour', 'Every {count} hours', minutes / 60);
   return i18n.plural('Every {count} minute', 'Every {count} minutes', minutes);
 }
+
+// -- Stored or live -----------------------------------------------------------------
+
+/**
+ * Where right-sizing outside the Recommendations view comes from (spec
+ * §9.2): `stored`, the latest stored scan; `live`, a report computed now;
+ * `pending` while the first read of the stored scans runs, so no live
+ * report is computed for nothing.
+ */
+export type RightsizingOrigin = 'stored' | 'live' | 'pending';
+
+/** What `useLatestRecommendations` knows of a cluster's stored scans. */
+export interface StoredRightsizing {
+  /** The latest scan's report (null without a scan, or after a source change). */
+  report: RightsizingReport | null;
+  /** The last answer of `recommendations_latest` (null before the first). */
+  latest: object | null;
+  loading: boolean;
+  error: string | null;
+}
+
+/**
+ * The latest stored scan when there is one, else the live report. For one
+ * workload (`key`, a `workloadKey`) the scan must have its row (`rec`): a
+ * workload created after the scan, or in a namespace the scan could not
+ * read, falls back to the live report. A failed read of the stored scans
+ * falls back too.
+ */
+export function rightsizingOrigin(
+  stored: StoredRightsizing,
+  key?: string,
+): { origin: RightsizingOrigin; rec: WorkloadRecommendation | null } {
+  if (stored.report) {
+    if (key === undefined) return { origin: 'stored', rec: null };
+    const rec = stored.report.workloads.find((w) => workloadKey(w) === key) ?? null;
+    return rec ? { origin: 'stored', rec } : { origin: 'live', rec: null };
+  }
+  if (stored.latest == null && stored.loading && !stored.error)
+    return { origin: 'pending', rec: null };
+  return { origin: 'live', rec: null };
+}
