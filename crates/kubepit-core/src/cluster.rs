@@ -298,6 +298,20 @@ impl Kubepit {
             let kc = self.load_cluster_source(&next)?;
             kubeconfig::ensure_context(&kc, &next.context)?;
         }
+        // Enabling the assistant on a production cluster needs a typed
+        // acknowledgement: a cluster that becomes production must get it.
+        // Turned off before the save, so failing to turn it off changes
+        // nothing, and reconciled again after it (see below).
+        let becomes_production = next.environment == Some(ClusterEnvironment::Production)
+            && existing.environment != Some(ClusterEnvironment::Production);
+        if becomes_production {
+            self.ai_forget_cluster(&next.id).map_err(|e| {
+                e.context(format!(
+                    "could not turn off the assistant for \"{}\"; nothing was changed",
+                    next.name
+                ))
+            })?;
+        }
         let stored = next.clone();
         let ((), list) = self.store.update_clusters(move |list| {
             ensure_disjoint_sources(&stored, list.iter())?;
@@ -311,13 +325,10 @@ impl Kubepit {
         if connection_changed {
             self.cluster_disconnect(&next.id);
         }
-        // Enabling the assistant on a production cluster needs a typed
-        // acknowledgement: a cluster that becomes production must get it.
-        if next.environment == Some(ClusterEnvironment::Production)
-            && existing.environment != Some(ClusterEnvironment::Production)
-        {
-            self.ai_forget_cluster(&next.id);
-        }
+        // `ai_cluster_set` may have enabled it (as not production) between
+        // the forget and the save; a production cluster without an
+        // acknowledgement is disabled. A failure is the command's error.
+        let ai_reconciled = self.ai_reconcile_cluster(&next.id);
         // Secret values read for the old settings must not outlive them,
         // and scans of the new source start soon.
         if next.prometheus != existing.prometheus
@@ -332,14 +343,25 @@ impl Kubepit {
             }
         }
         self.sink.cluster_list(&list);
+        ai_reconciled.map_err(|e| {
+            e.context(format!(
+                "\"{}\" was saved, but the assistant could not be turned off for it",
+                next.name
+            ))
+        })?;
         Ok(next)
     }
 
     /// `cluster_remove`: disconnect, stop its work, delete node-shell pods,
-    /// the managed kubeconfig and the run kubeconfig. Idempotent.
+    /// the managed kubeconfig and the run kubeconfig, and turn the
+    /// assistant off for it. Idempotent: calling it again after a failure
+    /// finishes the job.
     pub async fn cluster_remove(&self, id: &str) -> Result<()> {
         let Some(existing) = self.store.cluster(id) else {
-            return Ok(());
+            // Also after a removal whose assistant cleanup failed.
+            return self.ai_reconcile_cluster(id).map_err(|e| {
+                e.context("could not turn off the assistant for the removed cluster")
+            });
         };
         self.cleanup_cluster_node_shells(id).await;
         self.forget_connection(id);
@@ -355,9 +377,16 @@ impl Kubepit {
         }
         self.remove_run_kubeconfig(id);
         self.forget_saved_forwards(id);
-        self.ai_forget_cluster(id);
+        // After the removal: `ai_cluster_set` cannot enable it any more.
+        let ai_reconciled = self.ai_reconcile_cluster(id);
         self.sink.cluster_list(&list);
-        Ok(())
+        ai_reconciled.map_err(|e| {
+            e.context(format!(
+                "\"{}\" was removed, but the assistant could not be turned off for it; \
+                 remove it again",
+                existing.name
+            ))
+        })
     }
 
     /// `cluster_export_kubeconfig`: (re)write and return the path of the

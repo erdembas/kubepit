@@ -126,6 +126,11 @@ pub struct AiSettings {
     /// Clusters the assistant may be used with. Read-only in `settings_set`;
     /// changed by `ai_cluster_set`, pruned on `cluster_remove`.
     pub clusters: Vec<String>,
+    /// The production clusters of `clusters` that were enabled with the
+    /// typed acknowledgement while they were production. Backend-owned like
+    /// `clusters`: a production cluster missing here is not enabled.
+    #[serde(default)]
+    pub production_acknowledged: Vec<String>,
     pub redaction: AiRedactionSettings,
     pub tool_policy: AiToolPolicy,
     /// Keep every request in the local `ai_log` of `history.db`.
