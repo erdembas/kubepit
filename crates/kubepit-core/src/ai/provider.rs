@@ -24,9 +24,12 @@
 //! - **The client is not the caller's:** every provider builds its own
 //!   [`http_client`] for its base URL in its constructor, so no caller can
 //!   hand it a client that follows redirects or uses a proxy for loopback.
-//! - **One deadline per call:** `AiTimeouts::total` bounds a whole `chat`,
-//!   retries included; a failure is re-sent automatically only when no
-//!   content had started streaming.
+//! - **Deadlines per call:** `AiTimeouts::total` bounds everything before
+//!   content starts (connecting, retries, waits, the first event); after
+//!   that `idle` and [`answer_cap`] (scaled to `max_tokens`) apply. A
+//!   failure is re-sent automatically only when no content had started, so
+//!   callers must not wrap `chat` in another retry loop.
+//! - **Keys travel only over HTTPS or to loopback** ([`check_key_egress`]).
 
 use std::fmt;
 use std::future::Future;
@@ -280,6 +283,12 @@ impl std::error::Error for ProviderError {}
 
 /// Spec §10: connect 10 s, first stream event 60 s, idle between events
 /// 90 s, total 10 min (shortened in tests).
+///
+/// `total` bounds everything before the answer's content starts
+/// (connecting, retries and their waits, the first event). Once content
+/// streams, the call is bounded by `idle` between events and a hard cap
+/// scaled to the output size ([`answer_cap`]), so a long answer at a high
+/// `max_tokens` is not cut off at `total`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AiTimeouts {
     pub connect: Duration,
@@ -296,6 +305,33 @@ impl Default for AiTimeouts {
             idle: Duration::from_secs(90),
             total: Duration::from_secs(600),
         }
+    }
+}
+
+/// The hard cap of one call once content streams:
+/// `max(total, 3600 s × max_tokens / 128 000)`.
+pub fn answer_cap(t: &AiTimeouts, max_tokens: u32) -> Duration {
+    let scaled = Duration::from_secs(3600).mul_f64(f64::from(max_tokens) / 128_000.0);
+    t.total.max(scaled)
+}
+
+/// The deadlines of one call, fixed when it starts and shared by its
+/// retries: `content` (no content yet: `total`) and `finish` (content
+/// streaming: [`answer_cap`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Deadlines {
+    pub content: Instant,
+    pub finish: Instant,
+}
+
+impl Deadlines {
+    /// For a call producing up to `max_tokens` (`None`: no streamed answer,
+    /// e.g. a model list, bounded by `total` alone).
+    pub fn new(t: &AiTimeouts, max_tokens: Option<u32>) -> Self {
+        let start = Instant::now();
+        let content = start + t.total;
+        let finish = max_tokens.map_or(content, |n| start + answer_cap(t, n));
+        Self { content, finish }
     }
 }
 
@@ -326,15 +362,29 @@ impl Default for RetryPolicy {
 
 /// A model provider. Dyn-compatible (`Box<dyn Provider>`): the async
 /// methods return boxed futures.
+///
+/// An instance is meant to be cached and reused across sends (the
+/// connection pool and the adaptive request switches — Anthropic's
+/// `fallbacks`, OpenAI's `stream_options` / `max_completion_tokens` — live
+/// in it); refresh its egress rule per send with [`Provider::set_egress`].
+///
+/// **Do not wrap [`Provider::chat`] in another retry loop:** it already
+/// retries transient failures (with backoff, `retry-after` and the shared
+/// deadline) and never re-sends once content started; an outer loop would
+/// multiply requests and could re-send an answer that was under way.
 pub trait Provider: Send + Sync {
     fn kind(&self) -> AiProviderKind;
-    /// The base URL is a loopback address (like `AiProviderStatus::local`).
+    /// The base URL is a loopback address (both URL parsers agree).
     fn is_local(&self) -> bool;
+    /// Replaces the egress rule checked before every request (the session
+    /// refreshes it per send on a cached instance).
+    fn set_egress(&self, egress: Egress);
     /// The provider's models (Anthropic: with capabilities).
     fn list_models(&self) -> BoxFuture<'_, Result<Vec<AiModelInfo>, ProviderError>>;
     /// Streams one response, retrying transient failures before any
-    /// content arrived. `on_event` sees text, thinking, usage, fallback and
-    /// retry events; `cancel` aborts the call (`Cancelled`, with the partial).
+    /// content started. `on_event` sees text, thinking, usage, fallback and
+    /// retry events. `cancel` aborts the call with `Cancelled`, carrying
+    /// the partial answer only when content had already started.
     fn chat<'a>(
         &'a self,
         req: &'a ChatRequest,
@@ -361,6 +411,40 @@ impl Egress {
     pub fn check(&self, base_url: &str) -> Result<(), ProviderError> {
         check_egress(base_url, self.remote_allowed, self.local_only)
     }
+}
+
+/// A provider's current [`Egress`], replaceable through `&self`
+/// ([`Provider::set_egress`] on a cached instance).
+#[derive(Debug, Default)]
+pub(crate) struct EgressCell(parking_lot::Mutex<Egress>);
+
+impl EgressCell {
+    pub fn set(&self, egress: Egress) {
+        *self.0.lock() = egress;
+    }
+
+    pub fn check(&self, base_url: &str) -> Result<(), ProviderError> {
+        let egress = *self.0.lock();
+        egress.check(base_url)
+    }
+}
+
+/// Refuses to send an API key anywhere but over HTTPS or to a loopback
+/// address ([`is_local_url`]): a key must never cross a network in clear
+/// text. The same rule as `settings::key_egress_allowed` (https or
+/// loopback). Nothing is sent when it fails.
+pub fn check_key_egress(base_url: &str) -> Result<(), ProviderError> {
+    let https = reqwest::Url::parse(base_url.trim()).is_ok_and(|url| url.scheme() == "https");
+    if https || is_local_url(base_url) {
+        return Ok(());
+    }
+    let host = url_host(base_url).unwrap_or_else(|| "this address".to_string());
+    Err(ProviderError::new(
+        ProviderErrorKind::EgressRefused,
+        format!(
+            "an API key is only sent over HTTPS or to a loopback address: {host} uses plain http, so nothing was sent"
+        ),
+    ))
 }
 
 /// Refuses a non-loopback `base_url` unless remote egress is allowed in
@@ -416,6 +500,14 @@ fn url_is_loopback(base_url: &str) -> bool {
         || host
             .parse::<std::net::IpAddr>()
             .is_ok_and(|ip| ip.is_loopback())
+}
+
+/// Whether traffic to `base_url` skips proxies: decided by the parser
+/// reqwest actually connects with, so whatever it sends to a loopback
+/// address never goes through `HTTP_PROXY` & co. (The egress rule and
+/// `is_local` use the stricter [`is_local_url`].)
+pub(crate) fn bypasses_proxy(base_url: &str) -> bool {
+    url_is_loopback(base_url)
 }
 
 /// `host[:port]` of a URL, without scheme, user info or path.
@@ -521,7 +613,7 @@ pub fn http_client(t: &AiTimeouts, base_url: &str) -> Result<reqwest::Client, Pr
         .referer(false)
         .user_agent(concat!("kubepit/", env!("CARGO_PKG_VERSION")))
         .tls_backend_preconfigured(tls_config());
-    if is_local_url(base_url) {
+    if bypasses_proxy(base_url) {
         builder = builder.no_proxy();
     }
     builder.build().map_err(|e| {
@@ -675,6 +767,17 @@ fn error_detail(body: &[u8]) -> String {
     }
 }
 
+/// Which timer bounds a wait (for the timeout message).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Wait {
+    FirstEvent,
+    Idle,
+    /// No content within `total`.
+    Content,
+    /// The answer outlasted [`answer_cap`].
+    Finish,
+}
+
 /// One HTTP exchange with a provider: its name (for messages), the keys to
 /// mask, the deadlines and the cancellation token.
 pub(crate) struct Call<'a> {
@@ -685,8 +788,8 @@ pub(crate) struct Call<'a> {
     pub cancel: &'a CancellationToken,
     /// When this request started (the first-event timer).
     started: Instant,
-    /// The whole call's deadline, shared by its retries.
-    deadline: Instant,
+    /// The whole call's deadlines, shared by its retries.
+    deadlines: Deadlines,
 }
 
 impl<'a> Call<'a> {
@@ -695,7 +798,7 @@ impl<'a> Call<'a> {
         url: &reqwest::Url,
         secrets: &'a [&'a str],
         timeouts: &'a AiTimeouts,
-        deadline: Instant,
+        deadlines: Deadlines,
         cancel: &'a CancellationToken,
     ) -> Self {
         Self {
@@ -705,16 +808,29 @@ impl<'a> Call<'a> {
             timeouts,
             cancel,
             started: Instant::now(),
-            deadline,
+            deadlines,
         }
     }
 
-    fn deadline(&self) -> Instant {
-        self.deadline
-    }
-
-    fn first_event_deadline(&self) -> Instant {
-        (self.started + self.timeouts.first_event).min(self.deadline())
+    /// Until when the next wait may last, and which timer that is: the
+    /// first event (before any chunk), then `idle` between chunks; bounded
+    /// by `total` until content started and by the answer cap after.
+    fn next_wait(&self, first: bool, content_started: bool) -> (Instant, Wait) {
+        let (until, wait) = if first {
+            (self.started + self.timeouts.first_event, Wait::FirstEvent)
+        } else {
+            (Instant::now() + self.timeouts.idle, Wait::Idle)
+        };
+        let (bound, bound_wait) = if content_started {
+            (self.deadlines.finish, Wait::Finish)
+        } else {
+            (self.deadlines.content, Wait::Content)
+        };
+        if until <= bound {
+            (until, wait)
+        } else {
+            (bound, bound_wait)
+        }
     }
 
     /// `error` with the partial answer when content had started.
@@ -730,25 +846,22 @@ impl<'a> Call<'a> {
         ProviderError::new(kind, mask_secrets(message.as_ref(), self.secrets))
     }
 
-    fn timeout_error(&self, first: bool) -> ProviderError {
-        let message = if Instant::now() >= self.deadline() {
-            format!(
-                "{} did not finish within {} s",
-                self.provider,
-                self.timeouts.total.as_secs()
-            )
-        } else if first {
-            format!(
-                "{} did not answer within {} s",
-                self.provider,
+    fn timeout_error(&self, wait: Wait) -> ProviderError {
+        let provider = self.provider;
+        let message = match wait {
+            Wait::FirstEvent => format!(
+                "{provider} did not answer within {} s",
                 self.timeouts.first_event.as_secs_f32()
-            )
-        } else {
-            format!(
-                "{} stopped sending for {} s",
-                self.provider,
+            ),
+            Wait::Idle => format!(
+                "{provider} stopped sending for {} s",
                 self.timeouts.idle.as_secs_f32()
-            )
+            ),
+            Wait::Content => format!(
+                "{provider} sent no answer within {} s",
+                self.timeouts.total.as_secs_f32()
+            ),
+            Wait::Finish => format!("{provider} did not finish the answer in time"),
         };
         ProviderError::new(ProviderErrorKind::Timeout, message)
     }
@@ -775,7 +888,7 @@ impl<'a> Call<'a> {
     }
 
     /// Sends `request` and waits for the response head (bounded by the
-    /// first-event deadline). A non-2xx status becomes an error.
+    /// first-event timer and `total`). A non-2xx status becomes an error.
     pub async fn send(
         &self,
         request: reqwest::RequestBuilder,
@@ -783,12 +896,12 @@ impl<'a> Call<'a> {
         if self.cancel.is_cancelled() {
             return Err(ProviderError::cancelled());
         }
-        let deadline = tokio::time::Instant::from_std(self.first_event_deadline());
+        let (until, wait) = self.next_wait(true, false);
         let response = tokio::select! {
             biased;
             _ = self.cancel.cancelled() => return Err(ProviderError::cancelled()),
-            result = tokio::time::timeout_at(deadline, request.send()) => match result {
-                Err(_) => return Err(self.timeout_error(true)),
+            result = tokio::time::timeout_at(tokio::time::Instant::from_std(until), request.send()) => match result {
+                Err(_) => return Err(self.timeout_error(wait)),
                 Ok(Err(e)) => return Err(self.transport_error(&e)),
                 Ok(Ok(response)) => response,
             },
@@ -822,8 +935,8 @@ impl<'a> Call<'a> {
                 }
             }
         };
-        // Bounded by idle and the call's deadline; cancel wins.
-        let until = (Instant::now() + self.timeouts.idle).min(self.deadline());
+        // Bounded by idle and `total` (no content yet); cancel wins.
+        let (until, _) = self.next_wait(false, false);
         tokio::select! {
             biased;
             _ = self.cancel.cancelled() => return ProviderError::cancelled(),
@@ -846,16 +959,15 @@ impl<'a> Call<'a> {
     pub async fn json(&self, request: reqwest::RequestBuilder) -> Result<Value, ProviderError> {
         let mut response = self.send(request).await?;
         let mut body = Vec::new();
-        let idle = self.timeouts.idle;
         loop {
-            let deadline = tokio::time::Instant::from_std(self.deadline());
+            let (until, wait) = self.next_wait(false, false);
             let next = tokio::select! {
                 biased;
                 _ = self.cancel.cancelled() => return Err(ProviderError::cancelled()),
-                r = tokio::time::timeout_at(deadline.min(tokio::time::Instant::now() + idle), response.chunk()) => r,
+                r = tokio::time::timeout_at(tokio::time::Instant::from_std(until), response.chunk()) => r,
             };
             match next {
-                Err(_) => return Err(self.timeout_error(false)),
+                Err(_) => return Err(self.timeout_error(wait)),
                 Ok(Err(e)) => return Err(self.transport_error(&e)),
                 Ok(Ok(None)) => break,
                 Ok(Ok(Some(chunk))) => {
@@ -883,9 +995,9 @@ impl<'a> Call<'a> {
     /// Feeds the streamed body to `decoder` until it reports completion.
     /// A success whose content type the decoder does not accept (an HTML
     /// or JSON page from a proxy) is a `Protocol` error. Waits at most
-    /// `first_event` for the first chunk, `idle` between chunks and the
-    /// call's deadline overall; errors carry the partial answer once
-    /// content had started.
+    /// `first_event` for the first chunk and `idle` between chunks, within
+    /// `total` until content starts and within the answer cap after;
+    /// errors carry the partial answer once content had started.
     pub async fn read_stream<D: Decoder>(
         &self,
         mut response: reqwest::Response,
@@ -916,23 +1028,19 @@ impl<'a> Call<'a> {
         }
         let mut first = true;
         loop {
-            let wait_until = if first {
-                self.first_event_deadline()
-            } else {
-                (Instant::now() + self.timeouts.idle).min(self.deadline())
-            };
+            let (until, wait) = self.next_wait(first, decoder.started());
             let next = tokio::select! {
                 biased;
                 _ = self.cancel.cancelled() => {
                     return Err(self.fail(ProviderError::cancelled(), decoder));
                 }
-                r = tokio::time::timeout_at(tokio::time::Instant::from_std(wait_until), response.chunk()) => r,
+                r = tokio::time::timeout_at(tokio::time::Instant::from_std(until), response.chunk()) => r,
             };
             let chunk: Bytes = match next {
-                Err(_) => return Err(self.fail(self.timeout_error(first), decoder)),
+                Err(_) => return Err(self.fail(self.timeout_error(wait), decoder)),
                 Ok(Err(e)) => {
                     let error = if e.is_timeout() {
-                        self.timeout_error(first)
+                        self.timeout_error(wait)
                     } else {
                         self.error(
                             ProviderErrorKind::Network,
@@ -1214,5 +1322,54 @@ mod tests {
         let t = AiTimeouts::default();
         assert!(http_client(&t, "http://127.0.0.1:11434").is_ok());
         assert!(http_client(&t, "https://api.anthropic.com").is_ok());
+    }
+
+    #[test]
+    fn the_proxy_bypass_follows_the_parser_reqwest_connects_with() {
+        // `url` connects to 127.0.0.1 here: no proxy may see that traffic,
+        // although the strict egress check calls it remote.
+        for url in [
+            "http://127.1:4000",
+            "http://0x7f000001:4000",
+            "http://localhost",
+        ] {
+            assert!(bypasses_proxy(url), "{url}");
+        }
+        assert!(!is_local_url("http://127.1:4000"));
+        for url in ["https://api.anthropic.com", "http://10.0.0.1", "not a url"] {
+            assert!(!bypasses_proxy(url), "{url}");
+        }
+    }
+
+    #[test]
+    fn keys_only_travel_over_https_or_to_loopback() {
+        for url in [
+            "https://api.anthropic.com",
+            "HTTPS://api.openai.com/v1",
+            "http://127.0.0.1:4000",
+            "http://localhost:8080",
+            "http://[::1]:8080",
+        ] {
+            assert!(check_key_egress(url).is_ok(), "{url}");
+        }
+        for url in [
+            "http://api.anthropic.com",
+            "http://10.0.0.1:8000/v1",
+            "http://127.1:4000",
+            "ftp://127.0.0.1",
+            "not a url",
+        ] {
+            let err = check_key_egress(url).unwrap_err();
+            assert_eq!(err.kind, ProviderErrorKind::EgressRefused, "{url}");
+        }
+    }
+
+    #[test]
+    fn the_answer_cap_scales_with_max_tokens() {
+        let t = AiTimeouts::default();
+        assert_eq!(answer_cap(&t, 0), Duration::from_secs(600));
+        assert_eq!(answer_cap(&t, 4_096), Duration::from_secs(600));
+        assert_eq!(answer_cap(&t, 64_000), Duration::from_secs(1_800));
+        assert_eq!(answer_cap(&t, 128_000), Duration::from_secs(3_600));
     }
 }

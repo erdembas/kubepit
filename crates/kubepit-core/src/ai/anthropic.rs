@@ -27,18 +27,17 @@
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Instant;
 
 use futures::future::BoxFuture;
 use serde_json::{json, Map, Value};
 use tokio_util::sync::CancellationToken;
 
 use super::provider::{
-    endpoint, is_event_stream, is_local_url, parse_tool_input, provider_client, secret_header,
-    with_retries, AiTimeouts, AssistantTurn, Budget, Call, ChatMessage, ChatRequest, Decoder,
-    Egress, EventSink, Provider, ProviderError, ProviderErrorKind, RetryPolicy, StopReason,
-    StreamEvent, ToolCallReq, UserBlock, MAX_CONTENT_BLOCKS, MAX_RESPONSE_BYTES,
-    MAX_TOOL_INPUT_BYTES,
+    check_key_egress, endpoint, is_event_stream, is_local_url, parse_tool_input, provider_client,
+    secret_header, with_retries, AiTimeouts, AssistantTurn, Budget, Call, ChatMessage, ChatRequest,
+    Deadlines, Decoder, Egress, EgressCell, EventSink, Provider, ProviderError, ProviderErrorKind,
+    RetryPolicy, StopReason, StreamEvent, ToolCallReq, UserBlock, MAX_CONTENT_BLOCKS,
+    MAX_RESPONSE_BYTES, MAX_TOOL_INPUT_BYTES,
 };
 use super::settings::ANTHROPIC_BASE_URL;
 use super::sse::SseParser;
@@ -71,7 +70,7 @@ pub struct AnthropicProvider {
     timeouts: AiTimeouts,
     retry: RetryPolicy,
     model_info: Option<AiModelInfo>,
-    egress: Egress,
+    egress: EgressCell,
     /// Send `fallbacks: "default"` (cleared when the server rejects it).
     fallbacks: AtomicBool,
 }
@@ -99,14 +98,14 @@ impl AnthropicProvider {
             timeouts,
             retry,
             model_info,
-            egress: Egress::default(),
+            egress: EgressCell::default(),
             fallbacks: AtomicBool::new(true),
         })
     }
 
     /// The egress rule checked before every request.
-    pub fn with_egress(mut self, egress: Egress) -> Self {
-        self.egress = egress;
+    pub fn with_egress(self, egress: Egress) -> Self {
+        self.egress.set(egress);
         self
     }
 
@@ -121,6 +120,7 @@ impl AnthropicProvider {
         let id = id.trim().to_string();
         Box::pin(async move {
             self.egress.check(&self.base_url)?;
+            check_key_egress(&self.base_url)?;
             self.require_key()?;
             if id.is_empty() || id == "." || id == ".." {
                 return Err(ProviderError::new(
@@ -130,9 +130,9 @@ impl AnthropicProvider {
             }
             let url = endpoint(&self.base_url, &["v1", "models", &id])?;
             let cancel = CancellationToken::new();
-            let deadline = Instant::now() + self.timeouts.total;
-            let value = with_retries(&self.retry, deadline, &|_| {}, &cancel, || {
-                self.get_json(url.clone(), deadline, &cancel)
+            let deadlines = Deadlines::new(&self.timeouts, None);
+            let value = with_retries(&self.retry, deadlines.content, &|_| {}, &cancel, || {
+                self.get_json(url.clone(), deadlines, &cancel)
             })
             .await?;
             model_from_json(&value).ok_or_else(|| {
@@ -216,11 +216,11 @@ impl AnthropicProvider {
     async fn get_json(
         &self,
         url: reqwest::Url,
-        deadline: Instant,
+        deadlines: Deadlines,
         cancel: &CancellationToken,
     ) -> Result<Value, ProviderError> {
         let secrets = [self.api_key.as_str()];
-        let call = Call::new(NAME, &url, &secrets, &self.timeouts, deadline, cancel);
+        let call = Call::new(NAME, &url, &secrets, &self.timeouts, deadlines, cancel);
         call.json(self.authorized(self.client.get(url.clone()))?)
             .await
     }
@@ -255,20 +255,20 @@ impl AnthropicProvider {
     async fn attempt(
         &self,
         req: &ChatRequest,
-        deadline: Instant,
+        deadlines: Deadlines,
         on_event: EventSink<'_>,
         cancel: &CancellationToken,
     ) -> Result<AssistantTurn, ProviderError> {
         let url = endpoint(&self.base_url, &["v1", "messages"])?;
         let secrets = [self.api_key.as_str()];
         let fallbacks = self.fallbacks.load(Ordering::SeqCst);
-        let call = Call::new(NAME, &url, &secrets, &self.timeouts, deadline, cancel);
+        let call = Call::new(NAME, &url, &secrets, &self.timeouts, deadlines, cancel);
         let sent = call.send(self.message_request(&url, req, fallbacks)?).await;
         let (call, response) = match sent {
             Err(error) if fallbacks && rejects_fallbacks(&error) => {
                 self.fallbacks.store(false, Ordering::SeqCst);
                 tracing::info!("Anthropic rejected server-side fallbacks; sending without them");
-                let call = Call::new(NAME, &url, &secrets, &self.timeouts, deadline, cancel);
+                let call = Call::new(NAME, &url, &secrets, &self.timeouts, deadlines, cancel);
                 let response = call.send(self.message_request(&url, req, false)?).await?;
                 (call, response)
             }
@@ -289,7 +289,8 @@ fn rejects_fallbacks(error: &ProviderError) -> bool {
 
 /// The effort to send: none without effort support; the requested level
 /// when the Models API did not list levels; else the highest listed level
-/// not above the requested one (none if there is no such level).
+/// not above the requested one, or failing that the lowest listed level
+/// above it (none when no level is listed).
 fn supported_effort(info: Option<&AiModelInfo>, requested: Option<AiEffort>) -> Option<AiEffort> {
     let (info, requested) = (info?, requested?);
     if info.effort != Some(true) {
@@ -299,12 +300,22 @@ fn supported_effort(info: Option<&AiModelInfo>, requested: Option<AiEffort>) -> 
         return Some(requested);
     };
     let rank = |effort: AiEffort| EFFORT_LEVELS.iter().position(|(e, _)| *e == effort);
-    let ceiling = rank(requested)?;
-    levels
-        .iter()
-        .copied()
-        .filter(|level| rank(*level).is_some_and(|r| r <= ceiling))
-        .max_by_key(|level| rank(*level))
+    let wanted = rank(requested)?;
+    let ranked = || {
+        levels
+            .iter()
+            .copied()
+            .filter_map(move |level| rank(level).map(|r| (r, level)))
+    };
+    ranked()
+        .filter(|(r, _)| *r <= wanted)
+        .max_by_key(|(r, _)| *r)
+        .or_else(|| {
+            ranked()
+                .filter(|(r, _)| *r > wanted)
+                .min_by_key(|(r, _)| *r)
+        })
+        .map(|(_, level)| level)
 }
 
 impl Provider for AnthropicProvider {
@@ -316,13 +327,18 @@ impl Provider for AnthropicProvider {
         is_local_url(&self.base_url)
     }
 
+    fn set_egress(&self, egress: Egress) {
+        self.egress.set(egress);
+    }
+
     /// `GET {base}/v1/models`, following `has_more` / `last_id`.
     fn list_models(&self) -> BoxFuture<'_, Result<Vec<AiModelInfo>, ProviderError>> {
         Box::pin(async move {
             self.egress.check(&self.base_url)?;
+            check_key_egress(&self.base_url)?;
             self.require_key()?;
             let cancel = CancellationToken::new();
-            let deadline = Instant::now() + self.timeouts.total;
+            let deadlines = Deadlines::new(&self.timeouts, None);
             let mut models: Vec<AiModelInfo> = Vec::new();
             let mut after: Option<String> = None;
             for _ in 0..MAX_MODEL_PAGES {
@@ -334,8 +350,8 @@ impl Provider for AnthropicProvider {
                         query.append_pair("after_id", after);
                     }
                 }
-                let page = with_retries(&self.retry, deadline, &|_| {}, &cancel, || {
-                    self.get_json(url.clone(), deadline, &cancel)
+                let page = with_retries(&self.retry, deadlines.content, &|_| {}, &cancel, || {
+                    self.get_json(url.clone(), deadlines, &cancel)
                 })
                 .await?;
                 let data = page["data"].as_array().ok_or_else(|| {
@@ -366,10 +382,11 @@ impl Provider for AnthropicProvider {
     ) -> BoxFuture<'a, Result<AssistantTurn, ProviderError>> {
         Box::pin(async move {
             self.egress.check(&self.base_url)?;
+            check_key_egress(&self.base_url)?;
             self.require_key()?;
-            let deadline = Instant::now() + self.timeouts.total;
-            with_retries(&self.retry, deadline, on_event, cancel, || {
-                self.attempt(req, deadline, on_event, cancel)
+            let deadlines = Deadlines::new(&self.timeouts, Some(req.max_tokens));
+            with_retries(&self.retry, deadlines.content, on_event, cancel, || {
+                self.attempt(req, deadlines, on_event, cancel)
             })
             .await
         })
@@ -630,12 +647,27 @@ impl MessageStream {
                     signature: String::new(),
                     done: false,
                 };
-                if let Kind::Text = block.kind {
-                    if let Some(initial) = block.start["text"].as_str().filter(|t| !t.is_empty()) {
-                        block.buf.push_str(initial);
-                        self.text.push_str(initial);
-                        on_event(StreamEvent::Text(initial.to_string()));
+                // Gateways may send a whole block in its start event: seed
+                // the text, or the thinking text and signature, from it.
+                match block.kind {
+                    Kind::Text => {
+                        if let Some(initial) =
+                            block.start["text"].as_str().filter(|t| !t.is_empty())
+                        {
+                            block.buf.push_str(initial);
+                            self.text.push_str(initial);
+                            on_event(StreamEvent::Text(initial.to_string()));
+                        }
                     }
+                    Kind::Thinking => {
+                        block
+                            .buf
+                            .push_str(block.start["thinking"].as_str().unwrap_or_default());
+                        block
+                            .signature
+                            .push_str(block.start["signature"].as_str().unwrap_or_default());
+                    }
+                    _ => {}
                 }
                 self.blocks.insert(index, block);
             }

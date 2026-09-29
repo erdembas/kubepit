@@ -12,7 +12,7 @@ use kubepit_core::ai::is_loopback;
 use kubepit_core::ai::ollama::OllamaProvider;
 use kubepit_core::ai::openai::{stop_reason, OpenAiCompatProvider};
 use kubepit_core::ai::provider::{
-    AiTimeouts, AssistantTurn, ChatMessage, ChatRequest, Provider, ProviderError,
+    AiTimeouts, AssistantTurn, ChatMessage, ChatRequest, Egress, Provider, ProviderError,
     ProviderErrorKind, RetryPolicy, StopReason, StreamEvent, ToolCallReq, ToolSpec, UserBlock,
     MAX_TOOL_CALLS,
 };
@@ -20,7 +20,7 @@ use kubepit_core::ai::{AiProviderKind, AiUsage};
 use parking_lot::Mutex;
 use serde_json::{json, Value};
 use support::llm::*;
-use support::{Reply, Request};
+use support::{Reply, Request, SseEvent};
 use tokio_util::sync::CancellationToken;
 
 const KEY: &str = "sk-openai-test-0123456789abcdef";
@@ -719,4 +719,183 @@ async fn openai_and_ollama_check_egress_before_connecting() {
         assert!(!provider.is_local());
     }
     assert!(server.log.lock().is_empty());
+}
+
+#[tokio::test]
+async fn egress_can_be_refreshed_on_a_cached_provider() {
+    let server = serve(|| ollama_stream(&[ollama_line("OK"), ollama_done("stop", 1, 1)])).await;
+    let port = server.url.rsplit(':').next().unwrap();
+    let url = format!("http://[::ffff:127.0.0.1]:{port}");
+    let provider = ollama(&url);
+    let (result, _) = chat(&provider, &ask("m")).await;
+    assert_eq!(result.unwrap_err().kind, ProviderErrorKind::EgressRefused);
+    // The session refreshes the rule per send on its cached instance.
+    provider.set_egress(Egress {
+        remote_allowed: true,
+        local_only: false,
+    });
+    let (result, _) = chat(&provider, &ask("m")).await;
+    if let Err(err) = &result {
+        assert_ne!(
+            err.kind,
+            ProviderErrorKind::EgressRefused,
+            "{}",
+            err.message
+        );
+    }
+    provider.set_egress(Egress {
+        remote_allowed: true,
+        local_only: true,
+    });
+    let (result, _) = chat(&provider, &ask("m")).await;
+    assert_eq!(result.unwrap_err().kind, ProviderErrorKind::EgressRefused);
+    assert_eq!(
+        provider.list_models().await.unwrap_err().kind,
+        ProviderErrorKind::EgressRefused
+    );
+}
+
+#[tokio::test]
+async fn openai_sends_a_key_only_over_https_or_to_loopback() {
+    let server =
+        serve(|| openai_stream(&[openai_chunk(json!({"content": "OK"}), Some("stop"))])).await;
+    let port = server.url.rsplit(':').next().unwrap();
+    let url = format!("http://[::ffff:127.0.0.1]:{port}");
+    let remote = Egress {
+        remote_allowed: true,
+        local_only: false,
+    };
+    let with_key = openai(&url, Some(KEY)).with_egress(remote);
+    let (result, _) = chat(&with_key, &ask("m")).await;
+    assert_eq!(result.unwrap_err().kind, ProviderErrorKind::EgressRefused);
+    assert_eq!(
+        with_key.list_models().await.unwrap_err().kind,
+        ProviderErrorKind::EgressRefused
+    );
+    assert!(server.log.lock().is_empty(), "the key was never sent");
+    // Without a key plain http to a remote host is allowed.
+    let keyless = openai(&url, None).with_egress(remote);
+    let (result, _) = chat(&keyless, &ask("m")).await;
+    if let Err(err) = &result {
+        assert_ne!(
+            err.kind,
+            ProviderErrorKind::EgressRefused,
+            "{}",
+            err.message
+        );
+    }
+}
+
+#[tokio::test]
+async fn openai_a_reused_index_with_a_new_id_starts_a_new_call() {
+    let server = serve(|| {
+        openai_stream(&[
+            openai_chunk(
+                json!({"tool_calls": [{"index": 0, "id": "a", "type": "function",
+                        "function": {"name": "get_pod", "arguments": "{}"}}]}),
+                None,
+            ),
+            openai_chunk(
+                json!({"tool_calls": [{"index": 0, "id": "b", "type": "function",
+                        "function": {"name": "get_events", "arguments": "{\"names"}}]}),
+                None,
+            ),
+            openai_chunk(
+                json!({"tool_calls": [{"index": 0, "function": {"arguments": "pace\":\"shop\"}"}}]}),
+                None,
+            ),
+            // Same index, no id, a different name: a new call too.
+            openai_chunk(
+                json!({"tool_calls": [{"index": 0, "type": "function",
+                        "function": {"name": "list_pods", "arguments": "{}"}}]}),
+                None,
+            ),
+            openai_chunk(json!({}), Some("tool_calls")),
+        ])
+    })
+    .await;
+    let (result, _) = chat(&openai(&server.url, None), &ask("gpt-test")).await;
+    let turn = result.unwrap();
+    let calls: Vec<_> = turn
+        .tool_calls
+        .iter()
+        .map(|c| (c.id.as_str(), c.name.as_str(), c.input.clone()))
+        .collect();
+    assert_eq!(
+        calls,
+        vec![
+            ("a", "get_pod", Ok(json!({}))),
+            ("b", "get_events", Ok(json!({"namespace": "shop"}))),
+            ("call_3", "list_pods", Ok(json!({}))),
+        ]
+    );
+}
+
+fn sse_body(chunks: &[Value]) -> String {
+    let mut body: String = chunks
+        .iter()
+        .map(|c| {
+            SseEvent {
+                event: None,
+                data: c.to_string(),
+            }
+            .wire()
+        })
+        .collect();
+    body.push_str("data: [DONE]\n\n");
+    body
+}
+
+#[tokio::test]
+async fn openai_accepts_event_streams_with_or_without_a_content_type() {
+    for content_type in [Some("text/event-stream; charset=utf-8"), None] {
+        let server = serve(move || Reply::Raw {
+            code: 200,
+            headers: content_type
+                .map(|ct| vec![("content-type".to_string(), ct.to_string())])
+                .unwrap_or_default(),
+            body: sse_body(&[openai_chunk(json!({"content": "OK"}), Some("stop"))]),
+        })
+        .await;
+        let (result, _) = chat(&openai(&server.url, None), &ask("gpt-test")).await;
+        assert_eq!(result.unwrap().text, "OK", "{content_type:?}");
+    }
+
+    // No content type, but not an event stream: a protocol error.
+    let server = serve(|| Reply::Raw {
+        code: 200,
+        headers: vec![],
+        body: json!({"choices": [{"message": {"content": "not streamed"}}]}).to_string(),
+    })
+    .await;
+    let (result, _) = chat(&openai(&server.url, None), &ask("gpt-test")).await;
+    assert_eq!(result.unwrap_err().kind, ProviderErrorKind::Protocol);
+    assert_eq!(server.log.lock().len(), 1, "not retried");
+}
+
+#[tokio::test]
+async fn html_pages_from_a_proxy_are_protocol_errors() {
+    let page = || Reply::Raw {
+        code: 200,
+        headers: vec![("content-type".into(), "text/html; charset=utf-8".into())],
+        body: "<html>Please sign in</html>".into(),
+    };
+    let server = serve(page).await;
+    let (result, _) = chat(&openai(&server.url, None), &ask("gpt-test")).await;
+    let err = result.unwrap_err();
+    assert_eq!(err.kind, ProviderErrorKind::Protocol, "{}", err.message);
+    assert_eq!(server.log.lock().len(), 1);
+
+    let server = serve(page).await;
+    let (result, _) = chat(&ollama(&server.url), &ask("llama3.1:8b")).await;
+    let err = result.unwrap_err();
+    assert_eq!(err.kind, ProviderErrorKind::Protocol, "{}", err.message);
+    assert_eq!(server.log.lock().len(), 1);
+}
+
+#[tokio::test]
+async fn ollama_also_accepts_json_streams() {
+    let server = serve(|| Reply::Stream(vec![ollama_line("OK"), ollama_done("stop", 1, 1)])).await;
+    let (result, _) = chat(&ollama(&server.url), &ask("llama3.1:8b")).await;
+    assert_eq!(result.unwrap().text, "OK");
 }

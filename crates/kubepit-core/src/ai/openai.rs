@@ -21,18 +21,17 @@
 //!   `max_completion_tokens`, and servers that do not know `stream_options`.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Instant;
 
 use futures::future::BoxFuture;
 use serde_json::{json, Map, Value};
 use tokio_util::sync::CancellationToken;
 
 use super::provider::{
-    endpoint, is_event_stream, is_local_url, parse_tool_input, provider_client, secret_header,
-    with_retries, AiTimeouts, AssistantTurn, Budget, Call, ChatMessage, ChatRequest, Decoder,
-    Egress, EventSink, Provider, ProviderError, ProviderErrorKind, RetryPolicy, StopReason,
-    StreamEvent, ToolCallReq, ToolSpec, UserBlock, MAX_RESPONSE_BYTES, MAX_TOOL_CALLS,
-    MAX_TOOL_INPUT_BYTES,
+    check_key_egress, endpoint, is_event_stream, is_local_url, parse_tool_input, provider_client,
+    secret_header, with_retries, AiTimeouts, AssistantTurn, Budget, Call, ChatMessage, ChatRequest,
+    Deadlines, Decoder, Egress, EgressCell, EventSink, Provider, ProviderError, ProviderErrorKind,
+    RetryPolicy, StopReason, StreamEvent, ToolCallReq, ToolSpec, UserBlock, MAX_RESPONSE_BYTES,
+    MAX_TOOL_CALLS, MAX_TOOL_INPUT_BYTES,
 };
 use super::sse::SseParser;
 use super::types::{AiModelInfo, AiProviderKind, AiUsage};
@@ -45,7 +44,7 @@ pub struct OpenAiCompatProvider {
     api_key: Option<String>,
     timeouts: AiTimeouts,
     retry: RetryPolicy,
-    egress: Egress,
+    egress: EgressCell,
     /// Send `max_completion_tokens` instead of `max_tokens`.
     completion_tokens: AtomicBool,
     /// Send `stream_options.include_usage` (cleared when rejected).
@@ -80,15 +79,15 @@ impl OpenAiCompatProvider {
                 .filter(|k| !k.is_empty()),
             timeouts,
             retry,
-            egress: Egress::default(),
+            egress: EgressCell::default(),
             completion_tokens: AtomicBool::new(false),
             stream_options: AtomicBool::new(true),
         })
     }
 
     /// The egress rule checked before every request.
-    pub fn with_egress(mut self, egress: Egress) -> Self {
-        self.egress = egress;
+    pub fn with_egress(self, egress: Egress) -> Self {
+        self.egress.set(egress);
         self
     }
 
@@ -129,6 +128,15 @@ impl OpenAiCompatProvider {
 
     fn secrets(&self) -> Vec<&str> {
         self.api_key.as_deref().into_iter().collect()
+    }
+
+    /// The egress rule, and with a key: HTTPS or loopback only.
+    fn check_egress(&self) -> Result<(), ProviderError> {
+        self.egress.check(&self.base_url)?;
+        if self.api_key.is_some() {
+            check_key_egress(&self.base_url)?;
+        }
+        Ok(())
     }
 
     fn authorized(
@@ -183,7 +191,7 @@ impl OpenAiCompatProvider {
     async fn attempt(
         &self,
         req: &ChatRequest,
-        deadline: Instant,
+        deadlines: Deadlines,
         on_event: EventSink<'_>,
         cancel: &CancellationToken,
     ) -> Result<AssistantTurn, ProviderError> {
@@ -191,7 +199,7 @@ impl OpenAiCompatProvider {
         let secrets = self.secrets();
         let mut switches = 0;
         let (call, response) = loop {
-            let call = Call::new(NAME, &url, &secrets, &self.timeouts, deadline, cancel);
+            let call = Call::new(NAME, &url, &secrets, &self.timeouts, deadlines, cancel);
             match call
                 .send(self.completion_request(&url, req, self.shape())?)
                 .await
@@ -208,12 +216,12 @@ impl OpenAiCompatProvider {
 
     async fn get_models(
         &self,
-        deadline: Instant,
+        deadlines: Deadlines,
         cancel: &CancellationToken,
     ) -> Result<Value, ProviderError> {
         let url = endpoint(&self.base_url, &["models"])?;
         let secrets = self.secrets();
-        let call = Call::new(NAME, &url, &secrets, &self.timeouts, deadline, cancel);
+        let call = Call::new(NAME, &url, &secrets, &self.timeouts, deadlines, cancel);
         call.json(self.authorized(self.client.get(url.clone()))?)
             .await
     }
@@ -228,14 +236,18 @@ impl Provider for OpenAiCompatProvider {
         is_local_url(&self.base_url)
     }
 
+    fn set_egress(&self, egress: Egress) {
+        self.egress.set(egress);
+    }
+
     /// `GET {base}/models` → ids, sorted.
     fn list_models(&self) -> BoxFuture<'_, Result<Vec<AiModelInfo>, ProviderError>> {
         Box::pin(async move {
-            self.egress.check(&self.base_url)?;
+            self.check_egress()?;
             let cancel = CancellationToken::new();
-            let deadline = Instant::now() + self.timeouts.total;
-            let value = with_retries(&self.retry, deadline, &|_| {}, &cancel, || {
-                self.get_models(deadline, &cancel)
+            let deadlines = Deadlines::new(&self.timeouts, None);
+            let value = with_retries(&self.retry, deadlines.content, &|_| {}, &cancel, || {
+                self.get_models(deadlines, &cancel)
             })
             .await?;
             let data = value["data"].as_array().ok_or_else(|| {
@@ -267,10 +279,10 @@ impl Provider for OpenAiCompatProvider {
         cancel: &'a CancellationToken,
     ) -> BoxFuture<'a, Result<AssistantTurn, ProviderError>> {
         Box::pin(async move {
-            self.egress.check(&self.base_url)?;
-            let deadline = Instant::now() + self.timeouts.total;
-            with_retries(&self.retry, deadline, on_event, cancel, || {
-                self.attempt(req, deadline, on_event, cancel)
+            self.check_egress()?;
+            let deadlines = Deadlines::new(&self.timeouts, Some(req.max_tokens));
+            with_retries(&self.retry, deadlines.content, on_event, cancel, || {
+                self.attempt(req, deadlines, on_event, cancel)
             })
             .await
         })
@@ -432,16 +444,28 @@ impl CompletionStream {
         }
     }
 
-    /// The pending call a tool-call delta continues: by `index`, else by
-    /// `id`, else the latest one; a new one otherwise (capped).
-    fn call_for(&mut self, call: &Value) -> Result<&mut PendingCall, ProviderError> {
-        let index = call["index"].as_u64();
-        let id = call["id"].as_str().filter(|id| !id.is_empty());
+    /// The pending call a tool-call delta continues: the latest one with
+    /// its `index`, else with its `id`, else the latest one. A delta that
+    /// brings a different id, or a different name to a call that already
+    /// has one, starts a new call (servers that reuse `index` 0). New calls
+    /// are capped.
+    fn call_for(
+        &mut self,
+        index: Option<u64>,
+        id: Option<&str>,
+        name: Option<&str>,
+    ) -> Result<&mut PendingCall, ProviderError> {
         let found = match (index, id) {
-            (Some(index), _) => self.calls.iter().position(|c| c.index == Some(index)),
-            (None, Some(id)) => self.calls.iter().position(|c| c.id == id),
+            (Some(index), _) => self.calls.iter().rposition(|c| c.index == Some(index)),
+            (None, Some(id)) => self.calls.iter().rposition(|c| c.id == id),
             (None, None) => self.calls.len().checked_sub(1),
         };
+        let found = found.filter(|&position| {
+            let call = &self.calls[position];
+            let other_id = id.is_some_and(|id| !call.id.is_empty() && call.id != id);
+            let other_name = name.is_some_and(|name| !call.name.is_empty() && call.name != name);
+            !other_id && !other_name
+        });
         let position = match found {
             Some(position) => position,
             None => {
@@ -523,7 +547,7 @@ impl CompletionStream {
                 )?;
                 self.input_budget
                     .add(arguments.len(), MAX_TOOL_INPUT_BYTES, "tool input")?;
-                let pending = self.call_for(call)?;
+                let pending = self.call_for(call["index"].as_u64(), id, name)?;
                 if let Some(id) = id {
                     pending.id = id.to_string();
                 }
@@ -575,8 +599,10 @@ impl CompletionStream {
 }
 
 impl Decoder for CompletionStream {
+    /// An event stream, or no content type at all (some servers send
+    /// none; a body that is not SSE then still ends as a protocol error).
     fn accepts(&self, content_type: &str) -> bool {
-        is_event_stream(content_type)
+        content_type.is_empty() || is_event_stream(content_type)
     }
 
     fn feed(&mut self, bytes: &[u8], on_event: EventSink<'_>) -> Result<bool, ProviderError> {

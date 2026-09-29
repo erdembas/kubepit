@@ -279,9 +279,16 @@ fn effort_is_clamped_to_the_levels_the_model_supports() {
         with_levels(vec![Low], Max)["output_config"]["effort"],
         "low"
     );
-    // Nothing supported at or below the request → omitted.
-    let body = with_levels(vec![High, Max], Low);
-    assert!(body.get("output_config").is_none());
+    // Nothing supported at or below the request → the lowest level above.
+    assert_eq!(
+        with_levels(vec![High, Max], Low)["output_config"]["effort"],
+        "high"
+    );
+    assert_eq!(
+        with_levels(vec![Max], Medium)["output_config"]["effort"],
+        "max"
+    );
+    // No level at all → omitted.
     let body = with_levels(vec![], Medium);
     assert!(body.get("output_config").is_none());
 }
@@ -1408,4 +1415,176 @@ async fn every_streamed_payload_counts_against_the_response_budget() {
     let (result, _) = chat(&anthropic(&server.url), &ask("hi")).await;
     let err = result.unwrap_err();
     assert_eq!(err.kind, ProviderErrorKind::Protocol, "{}", err.message);
+}
+
+#[tokio::test]
+async fn whole_thinking_blocks_from_a_gateway_are_echoed_intact() {
+    let server = serve(|| {
+        anthropic_stream(&[
+            message_start(json!({"input_tokens": 10})),
+            block_start(
+                0,
+                json!({"type": "thinking", "thinking": "Summary.", "signature": "sig-whole"}),
+            ),
+            block_stop(0),
+            block_start(
+                1,
+                json!({"type": "thinking", "thinking": "Part one", "signature": ""}),
+            ),
+            block_delta(
+                1,
+                json!({"type": "thinking_delta", "thinking": ", part two"}),
+            ),
+            block_delta(1, json!({"type": "signature_delta", "signature": "sig-2"})),
+            block_stop(1),
+            message_delta("end_turn", 3),
+            message_stop(),
+        ])
+    })
+    .await;
+    let (result, _) = chat(&anthropic(&server.url), &ask("hi")).await;
+    let turn = result.unwrap();
+    assert_eq!(
+        turn.raw[0],
+        json!({"type": "thinking", "thinking": "Summary.", "signature": "sig-whole"})
+    );
+    assert_eq!(
+        turn.raw[1],
+        json!({"type": "thinking", "thinking": "Part one, part two", "signature": "sig-2"})
+    );
+}
+
+/// A stream whose content starts at once, then one text delta every
+/// `gap_ms` for `deltas` deltas.
+fn slow_answer(deltas: usize, gap_ms: u64) -> Reply {
+    let mut events = vec![
+        message_start(json!({"input_tokens": 10})),
+        block_start(0, json!({"type": "text", "text": ""})),
+    ];
+    for _ in 0..deltas {
+        events.push(block_delta(0, json!({"type": "text_delta", "text": "x"})));
+    }
+    events.push(block_stop(0));
+    events.push(message_delta("end_turn", deltas as u64));
+    events.push(message_stop());
+    Reply::Sse {
+        events: anthropic_sse(&events),
+        gap_ms,
+        cut_after: None,
+    }
+}
+
+#[tokio::test]
+async fn total_bounds_the_wait_for_content_and_a_scaled_cap_bounds_the_answer() {
+    let timeouts = AiTimeouts {
+        total: Duration::from_millis(300),
+        idle: Duration::from_secs(1),
+        ..Default::default()
+    };
+
+    // Content started: the answer may outlast `total` (idle is respected).
+    let server = serve(|| slow_answer(8, 100)).await;
+    let req = ChatRequest {
+        max_tokens: 1024, // cap = max(0.3 s, 3600 s × 1024 / 128000 ≈ 28.8 s)
+        ..ask("hi")
+    };
+    let started = Instant::now();
+    let (result, _) = chat(&anthropic_with(&server.url, timeouts, None), &req).await;
+    assert_eq!(result.unwrap().text, "xxxxxxxx");
+    assert!(started.elapsed() > Duration::from_millis(500));
+
+    // The hard cap scales with max_tokens: 3600 s × 20 / 128000 ≈ 0.56 s.
+    let server = serve(|| slow_answer(30, 100)).await;
+    let req = ChatRequest {
+        max_tokens: 20,
+        ..ask("hi")
+    };
+    let started = Instant::now();
+    let (result, _) = chat(&anthropic_with(&server.url, timeouts, None), &req).await;
+    let err = result.unwrap_err();
+    assert_eq!(err.kind, ProviderErrorKind::Timeout, "{}", err.message);
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed > Duration::from_millis(450) && elapsed < Duration::from_millis(1500),
+        "{elapsed:?}"
+    );
+    assert!(!err.partial.unwrap().text.is_empty());
+
+    // No content yet: `total` still applies (pings keep the stream alive).
+    let server = serve(|| Reply::Sse {
+        events: anthropic_sse(&[
+            message_start(json!({"input_tokens": 10})),
+            json!({"type": "ping"}),
+            json!({"type": "ping"}),
+            json!({"type": "ping"}),
+            json!({"type": "ping"}),
+        ]),
+        gap_ms: 150,
+        cut_after: None,
+    })
+    .await;
+    let started = Instant::now();
+    let (result, _) = chat(&anthropic_with(&server.url, timeouts, None), &ask("hi")).await;
+    let err = result.unwrap_err();
+    assert_eq!(err.kind, ProviderErrorKind::Timeout, "{}", err.message);
+    assert!(started.elapsed() < Duration::from_millis(550));
+    assert!(err.partial.is_none());
+}
+
+#[tokio::test]
+async fn the_key_never_travels_over_plain_http_to_a_remote_host() {
+    let server = serve(|| anthropic_text("OK", json!({}))).await;
+    let port = server.url.rsplit(':').next().unwrap();
+    // Remote (not a loopback name) plain http, with remote egress allowed.
+    let url = format!("http://[::ffff:127.0.0.1]:{port}");
+    let provider = anthropic(&url).with_egress(Egress {
+        remote_allowed: true,
+        local_only: false,
+    });
+    let (result, _) = chat(&provider, &ask("hi")).await;
+    let err = result.unwrap_err();
+    assert_eq!(
+        err.kind,
+        ProviderErrorKind::EgressRefused,
+        "{}",
+        err.message
+    );
+    assert_eq!(
+        provider.list_models().await.unwrap_err().kind,
+        ProviderErrorKind::EgressRefused
+    );
+    assert_eq!(
+        provider.model_info("claude-opus-5").await.unwrap_err().kind,
+        ProviderErrorKind::EgressRefused
+    );
+    assert!(server.log.lock().is_empty(), "the key was never sent");
+    // Loopback plain http is fine (local proxies, tests).
+    let (result, _) = chat(&anthropic(&server.url), &ask("hi")).await;
+    result.unwrap();
+}
+
+#[tokio::test]
+async fn an_event_stream_with_a_charset_is_accepted() {
+    let body: String = anthropic_sse(&[
+        message_start(json!({"input_tokens": 10})),
+        block_start(0, json!({"type": "text", "text": ""})),
+        block_delta(0, json!({"type": "text_delta", "text": "OK"})),
+        block_stop(0),
+        message_delta("end_turn", 1),
+        message_stop(),
+    ])
+    .iter()
+    .map(SseEvent::wire)
+    .collect();
+    let server = serve(move || Reply::Raw {
+        code: 200,
+        headers: vec![(
+            "content-type".into(),
+            "text/event-stream; charset=utf-8".into(),
+        )],
+        body: body.clone(),
+    })
+    .await;
+    let (result, _) = chat(&anthropic(&server.url), &ask("hi")).await;
+    assert_eq!(result.unwrap().text, "OK");
 }

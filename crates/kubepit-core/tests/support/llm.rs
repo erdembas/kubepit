@@ -319,10 +319,10 @@ pub fn openai_usage(usage: Value) -> Value {
     })
 }
 
-/// NDJSON lines through the existing [`Reply::Stream`] (held open after
-/// the last line, like a real server between requests).
+/// NDJSON lines as Ollama serves them (`application/x-ndjson`, held open
+/// after the last line, like a real server between requests).
 pub fn ollama_stream(lines: &[Value]) -> Reply {
-    Reply::Stream(lines.to_vec())
+    Reply::Ndjson(lines.to_vec())
 }
 
 /// One streamed Ollama `/api/chat` line.

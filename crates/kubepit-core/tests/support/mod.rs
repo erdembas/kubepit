@@ -84,6 +84,8 @@ pub enum Reply {
     Stall {
         code: u16,
     },
+    /// Like [`Reply::Stream`] but served as `application/x-ndjson` (Ollama).
+    Ndjson(Vec<Value>),
 }
 
 /// One server-sent event: an optional `event:` name and its `data:` (a
@@ -96,7 +98,7 @@ pub struct SseEvent {
 
 impl SseEvent {
     /// The wire form, ending with the blank line that dispatches it.
-    fn wire(&self) -> String {
+    pub fn wire(&self) -> String {
         let mut text = String::new();
         if let Some(name) = &self.event {
             text.push_str(&format!("event: {name}\n"));
@@ -180,6 +182,7 @@ async fn handle(mut socket: TcpStream, router: Router, log: Log) -> std::io::Res
     };
     let reply = router(&request, &log);
     log.lock().push(request);
+    let ndjson = matches!(reply, Reply::Ndjson(_));
     match reply {
         Reply::Json(code, value) => {
             let text = value.to_string();
@@ -205,10 +208,18 @@ async fn handle(mut socket: TcpStream, router: Router, log: Log) -> std::io::Res
             );
             socket.write_all(response.as_bytes()).await?;
         }
-        Reply::Stream(events) => {
+        Reply::Stream(events) | Reply::Ndjson(events) => {
+            let content_type = if ndjson {
+                "application/x-ndjson"
+            } else {
+                "application/json"
+            };
             socket
                 .write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+                    )
+                    .as_bytes(),
                 )
                 .await?;
             for event in events {

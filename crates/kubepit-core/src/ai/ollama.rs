@@ -11,7 +11,6 @@
 //!   `eval_count` are the usage. Lines are bounded like SSE events.
 
 use std::collections::HashMap;
-use std::time::Instant;
 
 use futures::future::BoxFuture;
 use serde_json::{json, Value};
@@ -20,9 +19,9 @@ use tokio_util::sync::CancellationToken;
 use super::openai::{function_tools, tool_result_text, user_text};
 use super::provider::{
     endpoint, is_local_url, parse_tool_input, provider_client, with_retries, AiTimeouts,
-    AssistantTurn, Budget, Call, ChatMessage, ChatRequest, Decoder, Egress, EventSink, Provider,
-    ProviderError, ProviderErrorKind, RetryPolicy, StopReason, StreamEvent, ToolCallReq, UserBlock,
-    MAX_RESPONSE_BYTES, MAX_TOOL_CALLS, MAX_TOOL_INPUT_BYTES,
+    AssistantTurn, Budget, Call, ChatMessage, ChatRequest, Deadlines, Decoder, Egress, EgressCell,
+    EventSink, Provider, ProviderError, ProviderErrorKind, RetryPolicy, StopReason, StreamEvent,
+    ToolCallReq, UserBlock, MAX_RESPONSE_BYTES, MAX_TOOL_CALLS, MAX_TOOL_INPUT_BYTES,
 };
 use super::settings::DEFAULT_OLLAMA_CONTEXT_WINDOW;
 use super::sse::LineSplitter;
@@ -36,7 +35,7 @@ pub struct OllamaProvider {
     context_window: u32,
     timeouts: AiTimeouts,
     retry: RetryPolicy,
-    egress: Egress,
+    egress: EgressCell,
 }
 
 impl OllamaProvider {
@@ -62,13 +61,13 @@ impl OllamaProvider {
             },
             timeouts,
             retry,
-            egress: Egress::default(),
+            egress: EgressCell::default(),
         })
     }
 
     /// The egress rule checked before every request.
-    pub fn with_egress(mut self, egress: Egress) -> Self {
-        self.egress = egress;
+    pub fn with_egress(self, egress: Egress) -> Self {
+        self.egress.set(egress);
         self
     }
 
@@ -89,7 +88,7 @@ impl OllamaProvider {
     async fn send_once(
         &self,
         req: &ChatRequest,
-        deadline: Instant,
+        deadlines: Deadlines,
         on_event: EventSink<'_>,
         cancel: &CancellationToken,
     ) -> Result<AssistantTurn, ProviderError> {
@@ -105,7 +104,7 @@ impl OllamaProvider {
             .post(url.clone())
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(body);
-        let call = Call::new(NAME, &url, &[], &self.timeouts, deadline, cancel);
+        let call = Call::new(NAME, &url, &[], &self.timeouts, deadlines, cancel);
         let response = call.send(request).await?;
         let mut stream = ChatLines::new(&req.model);
         call.read_stream(response, &mut stream, on_event).await?;
@@ -114,11 +113,11 @@ impl OllamaProvider {
 
     async fn get_tags(
         &self,
-        deadline: Instant,
+        deadlines: Deadlines,
         cancel: &CancellationToken,
     ) -> Result<Value, ProviderError> {
         let url = endpoint(&self.base_url, &["api", "tags"])?;
-        let call = Call::new(NAME, &url, &[], &self.timeouts, deadline, cancel);
+        let call = Call::new(NAME, &url, &[], &self.timeouts, deadlines, cancel);
         call.json(self.client.get(url.clone())).await
     }
 }
@@ -132,14 +131,18 @@ impl Provider for OllamaProvider {
         is_local_url(&self.base_url)
     }
 
+    fn set_egress(&self, egress: Egress) {
+        self.egress.set(egress);
+    }
+
     /// `GET {base}/api/tags` → the pulled models, sorted.
     fn list_models(&self) -> BoxFuture<'_, Result<Vec<AiModelInfo>, ProviderError>> {
         Box::pin(async move {
             self.egress.check(&self.base_url)?;
             let cancel = CancellationToken::new();
-            let deadline = Instant::now() + self.timeouts.total;
-            let value = with_retries(&self.retry, deadline, &|_| {}, &cancel, || {
-                self.get_tags(deadline, &cancel)
+            let deadlines = Deadlines::new(&self.timeouts, None);
+            let value = with_retries(&self.retry, deadlines.content, &|_| {}, &cancel, || {
+                self.get_tags(deadlines, &cancel)
             })
             .await?;
             let models = value["models"].as_array().ok_or_else(|| {
@@ -173,9 +176,9 @@ impl Provider for OllamaProvider {
     ) -> BoxFuture<'a, Result<AssistantTurn, ProviderError>> {
         Box::pin(async move {
             self.egress.check(&self.base_url)?;
-            let deadline = Instant::now() + self.timeouts.total;
-            with_retries(&self.retry, deadline, on_event, cancel, || {
-                self.send_once(req, deadline, on_event, cancel)
+            let deadlines = Deadlines::new(&self.timeouts, Some(req.max_tokens));
+            with_retries(&self.retry, deadlines.content, on_event, cancel, || {
+                self.send_once(req, deadlines, on_event, cancel)
             })
             .await
         })
