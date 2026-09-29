@@ -1183,6 +1183,80 @@ applying a recommendation only reads, so read-only clusters get it all.
   Prometheus, the metrics-server snapshot on kind), and synthetic usage
   histories that make some workloads over- and others under-provisioned.
 
+## Recommendations
+
+Stored, scheduled right-sizing scans (`crates/kubepit-core/src/recommendations.rs`
++ `recommendations/`), kept in `history.db` (migration 2, see "Persistent
+history") and re-evaluated for the UI with the current settings.
+
+- **Scans** (`recommendations/scan.rs`): one strategy-free collection of
+  every workload the user can read — `compute_rightsizing` with the saved
+  strategy (else automatic) and its effective settings, under a 20-minute
+  timeout — stored as a run: `rec_begin` inserts it `running`,
+  `rec_finish` records how it ended. Only a success writes rows and moves
+  the latest pointer, so a failed scan keeps the last good result. Any
+  typed `source_abort` fails the run (never parsed from notes; the
+  metrics-server fallback in its report is never stored): a label mismatch
+  as `cluster-label-mismatch`, else the abort's detail (e.g.
+  `cluster-label-unverified`, or Prometheus' own message); a report
+  without a usage source as `no-usage-source`, a timeout as `timed-out`.
+  One scan per cluster (a claim held until its history writes are done)
+  and two overall (a semaphore; the rest `queued`). Scans only read, so
+  read-only clusters are scanned; they never connect on their own.
+- **Stopping**: a scan is cancelled only by dropping its future (abort on
+  disconnect, removal, shutdown), which is safe because a collection has
+  no side effects. Its drop guard finishes the run as interrupted
+  (`stopped`) without blocking, unless the real outcome was already handed
+  to the writer (the guard is disarmed then, before `rec_finish` returns
+  and whatever it returns: the writer applies a run's first finish, so a
+  detached stop must never overtake a success). A run begun after its scan
+  was dropped is stopped by the begin itself; runs still `running` at the
+  next start become `app-restarted`.
+- **Scheduling** (`recommendations/schedule.rs`): opt-in per process
+  (`Kubepit::set_recommendation_scans`, enabled only in
+  `src-tauri/src/setup.rs`, so tests and other binaries start no
+  scheduler; manual scans work either way) and per cluster
+  (`Settings.recommendations.scan_clusters`). A scheduler runs per
+  connected, opted-in cluster: due = max(connected_at + 120 s + 0–60 s
+  jitter, end of the newest run of any status + interval (60 min,
+  15–1440)), so failures wait a full interval. It sleeps in slices of at
+  most 60 s against the wall clock (missed ticks after sleep collapse into
+  one scan) and is woken by settings changes, the end of any scan and
+  Prometheus configuration changes (which make the next scan due in
+  120 s). Started on connect, stopped with the cluster's work
+  (disconnect, removal: running scans are aborted, manual ones too),
+  synced after `settings_set` (opting out stops the scheduler and its
+  scan), stopped at shutdown. Removing a cluster waits (bounded) until no
+  scan of it will write, then clears its stored scans.
+- **Status and event**: `recommendations://scan` carries a
+  `RecommendationScanStatus` (state idle / queued / running / success /
+  failed / interrupted, run id, trigger, progress while running — queries
+  answered against 16 × planned batches, growing with splits and a
+  re-collection — error code or message, last success, `scheduled`,
+  `next_at`, `manual_available_at`) at every state change and at most
+  every 250 ms while progressing; every scan ends with one terminal status
+  without progress, after its last progress. "Scan now" is refused while
+  disconnected and within 60 s of the last manual scan; during a scan it
+  returns the running status.
+- **Reads** (on the blocking pool; no cluster access):
+  `recommendations_latest` (the latest successful scan, or a past run,
+  re-evaluated with `rightsizing::reevaluate` when the current strategy or
+  settings differ — `reevaluated`, `days_changed` when the window no
+  longer matches; the scan's pricing, window, notes and time stay; a
+  latest scan of another Prometheus configuration is hidden,
+  `source_changed`, by comparing `recommendations::scan::source_config`,
+  the one serializer of `ClusterDef.prometheus` plus `prometheus_access`
+  (tenant, labels, auth Secret reference, TLS); `last_failure` is the
+  newest failed or interrupted run after it), `recommendations_runs`
+  (newest first, ≤ 500), `recommendations_trend` (one workload across the
+  runs whose rows are kept), `recommendations_fleet` (every registered
+  cluster with its latest run), `recommendations_export` (JSON / YAML of
+  the re-evaluated scan, no connection metadata, never the stored source
+  configuration) and `recommendations_usage_history` (the chart range
+  queries; the UI sends no pod names for a row whose list was truncated,
+  so the name pattern is used). All are classified read-only in
+  `ipc/audit_coverage.rs`; applying stays the audited `rightsizing_apply`.
+
 ## Access (RBAC)
 
 `access.rs` wraps SelfSubjectAccessReview, SelfSubjectRulesReview and

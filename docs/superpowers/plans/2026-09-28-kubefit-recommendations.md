@@ -1815,7 +1815,7 @@ git commit -m "feat(recommendations): hourly background scans while connected"
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1834,21 +1834,21 @@ async fn fleet_trend_and_export_read_the_store() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core --test recommendations -- latest fleet`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement the commands, the Tauri wiring, the TS contract and the docs section**
+- [x] **Step 3: Implement the commands, the Tauri wiring, the TS contract and the docs section**
 
-- [ ] **Step 4: Run the tests and checks**
+- [x] **Step 4: Run the tests and checks**
 
 Run: `cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && pnpm typecheck`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core apps/desktop/src-tauri apps/desktop/src/types/index.ts apps/desktop/src/lib/ipc.ts docs/ARCHITECTURE.md

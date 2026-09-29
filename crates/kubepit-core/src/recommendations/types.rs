@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use crate::rightsizing::collect::ScanProgress;
 use crate::rightsizing::strategy::{RecommendationStrategy, STRATEGIES};
 use crate::rightsizing::summary::RecommendationSummary;
-use crate::rightsizing::{Confidence, RightsizingSettings, RightsizingSource, Verdict};
+use crate::rightsizing::{
+    Confidence, RightsizingReport, RightsizingSettings, RightsizingSource, Verdict,
+};
 
 /// Default minutes between background scans.
 pub const DEFAULT_INTERVAL_MINUTES: u32 = 60;
@@ -258,6 +260,53 @@ pub struct RecommendationRun {
     pub rows_kept: bool,
     /// Successful runs only (`None` for runs of older builds too).
     pub summary: Option<RecommendationSummary>,
+}
+
+/// A stored successful scan as `recommendations_latest` shows it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecommendationScanView {
+    pub run: RecommendationRun,
+    /// Re-evaluated with the current strategy and settings when they
+    /// differ from the stored ones (`reevaluated`); the window, the notes
+    /// and `computed_at` are the scan's.
+    pub report: RightsizingReport,
+    /// The current strategy or settings differ from the stored ones.
+    pub reevaluated: bool,
+    /// The current `days` differ from the window the scan collected (the
+    /// next scan collects the new one).
+    pub days_changed: bool,
+}
+
+/// `recommendations_latest`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecommendationLatest {
+    /// The latest successful scan (or the requested run), unless the
+    /// latest used another Prometheus configuration.
+    pub scan: Option<RecommendationScanView>,
+    /// The latest scan used another Prometheus configuration (hidden).
+    pub source_changed: bool,
+    /// The newest failed or interrupted run after the latest success.
+    pub last_failure: Option<RecommendationRun>,
+}
+
+/// One registered cluster in `recommendations_fleet` (no cluster access).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ClusterRecommendationSummary {
+    pub cluster_id: String,
+    /// A background scheduler runs for it.
+    pub scheduled: bool,
+    /// Its latest scan used another Prometheus configuration.
+    pub source_changed: bool,
+    /// Its latest successful run (with the summary), if any.
+    pub run: Option<RecommendationRun>,
+}
+
+/// `recommendations_export` formats.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RecommendationExportFormat {
+    Json,
+    Yaml,
 }
 
 /// One container of a [`RecommendationTrendPoint`].

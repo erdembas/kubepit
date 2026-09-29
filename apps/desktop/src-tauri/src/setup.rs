@@ -29,6 +29,9 @@ pub(crate) fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::
     core.set_history_recording(true);
     // ... and samples metrics-server usage for charts (see `metrics_history.rs`).
     core.set_metrics_sampling(true);
+    // ... and scans opted-in clusters for recommendations in the background
+    // (see `recommendations/schedule.rs`; never in tests or other binaries).
+    core.set_recommendation_scans(true);
     tracing::info!(data_dir = %core.paths().root().display(), "kubepit core ready");
     core.start_kubeconfig_watch();
 

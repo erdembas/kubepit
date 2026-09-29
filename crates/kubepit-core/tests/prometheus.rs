@@ -1137,7 +1137,7 @@ async fn an_unverified_shared_source_fails_the_scan_and_keeps_the_last_good() {
             Some("cluster-label-unverified")
         )
     );
-    let read = app.history_rec_latest_for_tests(&id);
+    let read = app.recommendations_latest(&id, None).unwrap();
     let scan = read.scan.expect("the last good result stays");
     assert_eq!(scan.run.id, good);
     assert_eq!(scan.report.source, RightsizingSource::Prometheus);

@@ -34,11 +34,9 @@ use anyhow::{anyhow, bail, Result};
 use parking_lot::Mutex;
 use serde::Serialize;
 
-use super::types::{RecommendationRun, RecommendationScanStatus, ScanState, ScanTrigger};
+use super::types::{RecommendationScanStatus, ScanState, ScanTrigger};
 use crate::app::Kubepit;
-use crate::history::recommendations::{
-    self as rec, LatestRead, ScanBegin, ScanOutcome, ERROR_STOPPED,
-};
+use crate::history::recommendations::{self as rec, ScanBegin, ScanOutcome, ERROR_STOPPED};
 use crate::objects::now_millis;
 use crate::prometheus::access::PrometheusAccess;
 use crate::prometheus::matchers::CLUSTER_LABEL_MISMATCH;
@@ -342,26 +340,6 @@ impl Kubepit {
                 }
             });
         Ok(status)
-    }
-
-    /// Tests: the latest stored scan of `cluster_id` under its current
-    /// source configuration (`recommendations_latest` replaces it).
-    #[doc(hidden)]
-    pub fn history_rec_latest_for_tests(&self, cluster_id: &str) -> LatestRead {
-        let config = source_config(&self.cluster_def(cluster_id).expect("registered"));
-        self.history
-            .rec_read(|conn| rec::latest(conn, cluster_id, &config))
-            .expect("history.db readable")
-    }
-
-    /// Tests: the stored runs of `cluster_id`, newest first, after every
-    /// queued history write (`recommendations_runs` replaces it).
-    #[doc(hidden)]
-    pub fn history_rec_runs_for_tests(&self, cluster_id: &str) -> Vec<RecommendationRun> {
-        assert!(self.history_flush(), "history writes flushed");
-        self.history
-            .rec_read(|conn| rec::runs(conn, cluster_id, rec::MAX_RUNS))
-            .expect("history.db readable")
     }
 
     /// Tests: run one scheduled scan of `cluster_id` now and wait for it
