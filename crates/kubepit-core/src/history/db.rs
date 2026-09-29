@@ -1108,23 +1108,39 @@ pub const MAX_AI_EXPORT_BYTES: usize = 64 * 1024 * 1024;
 
 /// The filtered runs as JSON lines, newest first, bodies included (the
 /// record of what left the machine). The cursor and limit are ignored. At
-/// most [`MAX_AI_EXPORT_BYTES`]: then a last line
-/// `{"truncated":true,"exported":N,"total":M}` says how much is missing.
+/// most [`MAX_AI_EXPORT_BYTES`] and [`MAX_EXPORT`] rows: when either cap
+/// leaves rows out, a last line `{"truncated":true,"exported":N,"total":M}`
+/// says how many (M counts every matching row).
 pub fn export_ai(conn: &Connection, filter: &AiLogFilter) -> Result<String> {
-    export_ai_within(conn, filter, MAX_AI_EXPORT_BYTES)
+    export_ai_within(conn, filter, MAX_AI_EXPORT_BYTES, MAX_EXPORT)
 }
 
-fn export_ai_within(conn: &Connection, filter: &AiLogFilter, max_bytes: usize) -> Result<String> {
+/// [`export_ai`] with explicit caps (bytes before the marker, rows). The
+/// marker line follows whenever fewer rows were written than match, which
+/// ever cap was hit.
+fn export_ai_within(
+    conn: &Connection,
+    filter: &AiLogFilter,
+    max_bytes: usize,
+    max_rows: u32,
+) -> Result<String> {
     let mut args = Vec::new();
     let clause = ai_where(filter, &mut args);
-    args.push(Sql::Integer(i64::from(MAX_EXPORT)));
+    let total: i64 = conn.query_row(
+        &format!("SELECT COUNT(*) FROM ai_log WHERE {clause}"),
+        params_from_iter(args.iter()),
+        |r| r.get(0),
+    )?;
+    let total = sql_u64(total);
+    args.push(Sql::Integer(i64::from(max_rows)));
     let mut stmt = conn.prepare(&format!(
         "SELECT {AI_COLUMNS}, {AI_DETAIL_COLUMNS} FROM ai_log WHERE {clause}
          ORDER BY ts DESC, id DESC LIMIT ?"
     ))?;
     let mut out = String::new();
+    let mut exported: u64 = 0;
     let rows = stmt.query_map(params_from_iter(args.iter()), ai_detail)?;
-    for (exported, detail) in (0_u64..).zip(rows) {
+    for (written, detail) in (1_u64..).zip(rows) {
         let detail = detail?;
         let line = serde_json::to_string(&AiExportLine {
             entry: &detail.entry,
@@ -1133,22 +1149,17 @@ fn export_ai_within(conn: &Connection, filter: &AiLogFilter, max_bytes: usize) -
             tools: &detail.tools,
         })?;
         if out.len() + line.len() + 1 > max_bytes {
-            let mut count_args = Vec::new();
-            let clause = ai_where(filter, &mut count_args);
-            let total: i64 = conn.query_row(
-                &format!("SELECT COUNT(*) FROM ai_log WHERE {clause}"),
-                params_from_iter(count_args.iter()),
-                |r| r.get(0),
-            )?;
-            let total = sql_u64(total).min(u64::from(MAX_EXPORT));
-            out.push_str(
-                &serde_json::json!({"truncated": true, "exported": exported, "total": total})
-                    .to_string(),
-            );
-            out.push('\n');
             break;
         }
         out.push_str(&line);
+        out.push('\n');
+        exported = written;
+    }
+    if exported < total {
+        out.push_str(
+            &serde_json::json!({"truncated": true, "exported": exported, "total": total})
+                .to_string(),
+        );
         out.push('\n');
     }
     Ok(out)
@@ -2195,7 +2206,18 @@ mod tests {
         insert_ai_rows(&mut conn, &rows);
         let full = export_ai(&conn, &AiLogFilter::default()).unwrap();
         assert_eq!(full.lines().count(), 10, "under the cap: no marker");
-        let capped = export_ai_within(&conn, &AiLogFilter::default(), 3_500).unwrap();
+        // The row cap: the marker counts every matching row.
+        let by_rows = export_ai_within(&conn, &AiLogFilter::default(), usize::MAX, 4).unwrap();
+        let lines: Vec<Value> = by_rows
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 5);
+        assert_eq!(
+            lines[4],
+            json!({"truncated": true, "exported": 4, "total": 10})
+        );
+        let capped = export_ai_within(&conn, &AiLogFilter::default(), 3_500, MAX_EXPORT).unwrap();
         assert!(capped.len() <= 3_500 + 200, "{}", capped.len());
         let lines: Vec<Value> = capped
             .lines()

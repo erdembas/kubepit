@@ -2,11 +2,13 @@
 //! model, strict input parsing, and [`ReadOnlyCluster`], which runs a tool
 //! against the one cluster a session is bound to.
 //!
-//! - **Read-only by construction.** Every tool goes through an existing
-//!   `Kubepit` read (`resource_list`, `resource_get`, `api_resources`,
-//!   `metrics_*`, `pod_logs_tail`, `prometheus_*`), so only GETs reach the
-//!   API server; there is no cluster argument, so a tool cannot leave the
-//!   session's cluster.
+//! - **Read-only by construction.** Every tool reads: through existing
+//!   `Kubepit` reads (`resource_get`, `api_resources`, `metrics_*`,
+//!   `pod_logs_tail_read`, `prometheus_*`) or, for lists and events,
+//!   through `list_chunk`, which calls `list` / `list_metadata` on the
+//!   session cluster's own client (`Kubepit::client`) with a limit. Only
+//!   GETs reach the API server; there is no cluster argument, so a tool
+//!   cannot leave the session's cluster.
 //! - **Strict inputs** ([`parse_input`]): unknown tools, unknown fields,
 //!   wrong types, out-of-range `tail_lines` and malformed names are errors
 //!   the model sees. Names, namespaces and containers are validated because
@@ -24,8 +26,11 @@
 //!   (never the whole collection); events one chunk of Warnings, then one
 //!   of the rest; logs are condensed to ≤ [`MAX_LOG_OUTPUT_LINES`] lines
 //!   within the byte cap; PromQL ≤ [`MAX_PROM_SERIES`] summarized series;
-//!   every result ≤ [`MAX_TOOL_RESULT_BYTES`], cut on a character boundary;
-//!   every call ≤ [`TOOL_TIMEOUT`].
+//!   every result ≤ [`MAX_TOOL_RESULT_BYTES`], cut on a character boundary.
+//! - **Timeouts.** Connecting (and discovery) runs in a task of its own,
+//!   awaited for at most [`TOOL_TIMEOUT`]: a slow connect fails the call
+//!   but finishes in the background instead of being dropped halfway. The
+//!   reads then get [`TOOL_TIMEOUT`] of their own.
 //! - `query_prometheus` is offered only when the caller says Prometheus is
 //!   available ([`tool_specs`]) and refused unless the cluster's Prometheus
 //!   status is `available` ([`ReadOnlyCluster::prometheus_available`]).
@@ -635,10 +640,28 @@ fn str_at<'a>(value: &'a Value, pointer: &str) -> Option<&'a str> {
 
 const LAST_APPLIED: &str = "kubectl.kubernetes.io/last-applied-configuration";
 
+/// An annotation value that copies secret material: JSON (`"data"`), JSON
+/// encoded once more (`\"data\"`) or YAML (`data:` / `stringData:`).
+fn embeds_secret_copy(value: &Value) -> bool {
+    if embeds_secret_data(value) {
+        return true;
+    }
+    let Some(text) = value.as_str() else {
+        return false;
+    };
+    text.contains("\\\"data\\\"")
+        || text.contains("\\\"stringData\\\"")
+        || text.lines().any(|line| {
+            let line = line.trim_start().trim_start_matches("- ");
+            line.starts_with("data:") || line.starts_with("stringData:")
+        })
+}
+
 /// Metadata without `managedFields` and the last-applied annotation.
 /// Annotation values become `__SECRET__` when they may hold secret
 /// material: every value of a Secret-like object (`secretish`), and on
-/// other kinds values that embed `data` / `stringData` (object copies).
+/// other kinds values that embed `data` / `stringData` (object copies as
+/// JSON, JSON in a JSON string, or YAML).
 fn clean_metadata(object: &mut Value, secretish: bool) {
     let Some(meta) = object.get_mut("metadata").and_then(Value::as_object_mut) else {
         return;
@@ -648,7 +671,7 @@ fn clean_metadata(object: &mut Value, secretish: bool) {
         Some(annotations) => {
             annotations.remove(LAST_APPLIED);
             for value in annotations.values_mut() {
-                if secretish || embeds_secret_data(value) {
+                if secretish || embeds_secret_copy(value) {
                     *value = json!(SECRET_MARKER);
                 }
             }
@@ -928,10 +951,51 @@ impl ReadOnlyCluster {
     /// slower than the timeout) come back as an error result for the model,
     /// never as a panic or a mutation.
     pub async fn execute(&self, input: &ToolInput) -> ToolOutput {
+        if let Err(message) = self.prepare(input).await {
+            return ToolOutput::error(message);
+        }
         match tokio::time::timeout(self.timeout, self.run(input)).await {
             Ok(output) => output,
             Err(_) => ToolOutput::error(format!(
                 "{} timed out after {:?}",
+                input.name(),
+                self.timeout
+            )),
+        }
+    }
+
+    /// Connect and (for tools that name a kind) discover, in a task of its
+    /// own awaited for at most the timeout. Dropping a connect halfway would
+    /// leave the cluster "connecting"; this way a slow one fails the call
+    /// but completes in the background, and the connection and discovery
+    /// stay cached for the next call.
+    async fn prepare(&self, input: &ToolInput) -> Result<(), String> {
+        // Some(required): discovery failing fails the call only when the
+        // tool cannot do without it (events fall back to the kind as typed).
+        let discovery = match input {
+            ToolInput::Get { .. } | ToolInput::List { .. } => Some(true),
+            ToolInput::Events { kind: Some(_), .. } => Some(false),
+            _ => None,
+        };
+        let app = self.app.clone();
+        let cluster_id = self.cluster_id.clone();
+        let task = tokio::spawn(async move {
+            app.client(&cluster_id).await?;
+            if let Some(required) = discovery {
+                if let Err(e) = app.api_resources_cached(&cluster_id).await {
+                    if required {
+                        return Err(e);
+                    }
+                }
+            }
+            anyhow::Ok(())
+        });
+        match tokio::time::timeout(self.timeout, task).await {
+            Ok(Ok(Ok(()))) => Ok(()),
+            Ok(Ok(Err(e))) => Err(format!("{e:#}")),
+            Ok(Err(e)) => Err(format!("connecting to the cluster failed: {e}")),
+            Err(_) => Err(format!(
+                "{} timed out after {:?} connecting to the cluster (the connection continues in the background; try again shortly)",
                 input.name(),
                 self.timeout
             )),
@@ -996,7 +1060,7 @@ impl ReadOnlyCluster {
     }
 
     async fn resolve(&self, kind: &str) -> Result<ApiResourceInfo> {
-        let resources = self.app.api_resources(&self.cluster_id).await?;
+        let resources = self.app.api_resources_cached(&self.cluster_id).await?;
         resolve_kind(&resources, kind)
             .cloned()
             .ok_or_else(|| anyhow!("this cluster serves no kind named {kind:?}"))
@@ -1185,20 +1249,39 @@ impl ReadOnlyCluster {
             .event_chunk(namespace, &with_type("type=Warning"))
             .await?;
         let others = if warnings.items.len() < MAX_EVENTS {
-            self.event_chunk(namespace, &with_type("type!=Warning"))
-                .await?
+            Some(
+                self.event_chunk(namespace, &with_type("type!=Warning"))
+                    .await?,
+            )
         } else {
-            Chunk {
-                items: Vec::new(),
-                more: More::Unknown,
+            None
+        };
+        let fetched = warnings.items.len() + others.as_ref().map_or(0, |o| o.items.len());
+        // A limited list comes back in API (key) order: the sort finds the
+        // newest only when every matching event was fetched.
+        let complete =
+            warnings.more == More::None && others.as_ref().is_none_or(|o| o.more == More::None);
+        let counts = match &others {
+            Some(o) => {
+                let total = match (warnings.total(), o.total()) {
+                    (Some(w), Some(o)) => (w + o).to_string(),
+                    _ => format!("more than {fetched}"),
+                };
+                format!("{total} ({} Warning)", warnings.total_text())
             }
+            None => match warnings.total() {
+                Some(w) => format!("{w} Warning; other events not fetched"),
+                None => format!(
+                    "at least {} Warning; other events not fetched",
+                    warnings.items.len()
+                ),
+            },
         };
-        let total = match (warnings.total(), others.total()) {
-            (Some(w), Some(o)) => (w + o).to_string(),
-            _ => format!("more than {}", warnings.items.len() + others.items.len()),
-        };
-        let warning_total = warnings.total_text();
-        let events: Vec<Value> = warnings.items.into_iter().chain(others.items).collect();
+        let events: Vec<Value> = warnings
+            .items
+            .into_iter()
+            .chain(others.map(|o| o.items).unwrap_or_default())
+            .collect();
         let now = now_millis();
         let all_namespaces = namespace.is_none();
         let rows: Vec<Vec<String>> = events
@@ -1238,8 +1321,13 @@ impl ReadOnlyCluster {
         if let Some(fields) = &field_selector {
             header.push_str(&format!(" ({fields})"));
         }
-        header.push_str(&format!(": {total} ({warning_total} Warning)"));
-        if rows.len() < events.len() || total.starts_with("more") {
+        header.push_str(&format!(": {counts}"));
+        if !complete {
+            header.push_str(&format!(
+                ", showing {} of the first {fetched} returned (API order, not newest) — narrow with a namespace, kind or name",
+                rows.len()
+            ));
+        } else if rows.len() < events.len() {
             header.push_str(&format!(
                 ", showing the newest {} — narrow with a namespace, kind or name",
                 rows.len()
@@ -1375,9 +1463,9 @@ impl ReadOnlyCluster {
         previous: bool,
         tail_lines: u32,
     ) -> Result<String> {
-        let text = self
+        let tail = self
             .app
-            .pod_logs_tail(
+            .pod_logs_tail_read(
                 &self.cluster_id,
                 namespace,
                 pod,
@@ -1386,10 +1474,7 @@ impl ReadOnlyCluster {
                 previous,
             )
             .await?;
-        let (cut, text) = match text.strip_prefix(LOG_CUT_NOTE) {
-            Some(rest) => (true, rest.trim_start_matches('\n')),
-            None => (false, text.as_str()),
-        };
+        let text = tail.text.as_str();
         let received = text.lines().count();
         let mut header = format!("Logs of pod {namespace}/{pod}");
         if let Some(container) = container {
@@ -1401,9 +1486,14 @@ impl ReadOnlyCluster {
         header.push_str(&format!(
             ": {received} lines (tail_lines {tail_lines}), each with its timestamp"
         ));
-        if cut {
+        if tail.cut {
             header.push(' ');
             header.push_str(LOG_CUT_NOTE);
+        } else if tail.tail_lines < i64::from(tail_lines) {
+            header.push_str(&format!(
+                ", reduced to the newest {} lines to stay under 1 MiB",
+                tail.tail_lines
+            ));
         }
         if received == 0 {
             return Ok(format!("{header}\n(no log lines)"));
@@ -1565,6 +1655,23 @@ mod tests {
             SECRET_MARKER
         );
         assert_eq!(copied["metadata"]["annotations"]["team"], "a");
+        for copy in [
+            // JSON inside a JSON string.
+            r#"{"manifest":"{\"kind\":\"Secret\",\"data\":{\"PASSWORD\":\"aHVudGVyMg==\"}}"}"#,
+            // YAML.
+            "apiVersion: v1\nkind: Secret\ndata:\n  PASSWORD: aHVudGVyMg==\n",
+            "- kind: Secret\n  stringData:\n    PASSWORD: hunter2\n",
+        ] {
+            assert!(embeds_secret_copy(&json!(copy)), "{copy}");
+        }
+        for plain in [
+            "team-a",
+            "metadata: x",
+            "the data is fine",
+            "{\"kind\":\"Pod\"}",
+        ] {
+            assert!(!embeds_secret_copy(&json!(plain)), "{plain}");
+        }
     }
 
     #[test]

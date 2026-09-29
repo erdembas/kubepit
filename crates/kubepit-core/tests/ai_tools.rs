@@ -4,6 +4,7 @@
 
 mod support;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -151,6 +152,39 @@ fn configmap_page(req: &Request) -> Reply {
 }
 
 /// The events of `web-1`, honouring the `type` clause of the field selector.
+/// `warnings` Warning events of pod `web-1` (the newest last in API order)
+/// and no others, served in chunks: `limit` cuts the list and a continue
+/// token says there is more (a field selector: no count).
+fn many_events(req: &Request, warnings: usize) -> Reply {
+    let fields = param(&req.path, "fieldSelector").unwrap_or_default();
+    if fields.contains("type!=Warning") {
+        return list("Event", Vec::new());
+    }
+    let all: Vec<Value> = (0..warnings)
+        .map(|i| {
+            let mut e = event(
+                &format!("w{i:04}"),
+                "Warning",
+                "BackOff",
+                &format!("2024-05-01T{:02}:{:02}:00Z", i / 60 % 24, i % 60),
+                &format!("back-off {i}"),
+            );
+            e["metadata"]["namespace"] = json!("busy");
+            e
+        })
+        .collect();
+    let limit = param(&req.path, "limit").and_then(|l| l.parse::<usize>().ok());
+    match limit.filter(|l| *l < all.len()) {
+        Some(limit) => Reply::Json(
+            200,
+            json!({"kind": "EventList", "apiVersion": "v1",
+                   "metadata": {"resourceVersion": "100", "continue": "next-page"},
+                   "items": all[..limit].to_vec()}),
+        ),
+        None => list("Event", all),
+    }
+}
+
 fn event_list(req: &Request) -> Reply {
     let all = vec![
         event(
@@ -368,6 +402,10 @@ fn cluster_router() -> Router {
                 configmap("big", json!({"notes": "ğüşiöç €".repeat(8_000)})),
             ),
             ("GET", "/api/v1/namespaces/shop/events") | ("GET", "/api/v1/events") => event_list(req),
+            // More Warnings than one chunk holds.
+            ("GET", "/api/v1/namespaces/busy/events") => many_events(req, 600),
+            // All Warnings fit one chunk, but more than the table shows.
+            ("GET", "/api/v1/namespaces/many/events") => many_events(req, 150),
             ("GET", "/apis/apps/v1/namespaces/shop/deployments") => list(
                 "Deployment",
                 vec![json!({"apiVersion": "apps/v1", "kind": "Deployment",
@@ -708,6 +746,24 @@ async fn oversized_log_tails_are_retried_with_fewer_lines() {
         .collect();
     assert_eq!(tails.len(), 2, "{tails:?}");
     assert!(tails[0] == 500 && tails[1] < 500, "{tails:?}");
+    let out = tools
+        .execute(&ToolInput::PodLogs {
+            namespace: "shop".into(),
+            pod: "chatty-1".into(),
+            container: None,
+            previous: false,
+            tail_lines: 500,
+        })
+        .await;
+    let header = out.text.lines().next().unwrap();
+    assert!(
+        header.contains(&format!(
+            "reduced to the newest {} lines to stay under 1 MiB",
+            tails[1]
+        )),
+        "{header}"
+    );
+    assert!(!header.contains("may be missing"), "{header}");
 
     // A server that ignores tailLines: still cut, and said so up front.
     let flood = app
@@ -875,6 +931,91 @@ async fn kinds_resolve_through_discovery() {
         .lock()
         .iter()
         .any(|r| r.path_only() == "/apis/apps/v1/namespaces/shop/deployments"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn event_headers_only_claim_newest_when_every_chunk_is_complete() {
+    let (server, _dir, _app, tools) = tools_for_fake_cluster().await;
+    let events = |namespace: &str| ToolInput::Events {
+        namespace: Some(namespace.into()),
+        kind: None,
+        name: None,
+    };
+    // 600 Warnings: one chunk of 500 in API order; the rest is not fetched.
+    let busy = tools.execute(&events("busy")).await;
+    assert!(!busy.is_error, "{}", busy.text);
+    let header = busy.text.lines().next().unwrap();
+    assert!(
+        header.contains("at least 500 Warning; other events not fetched"),
+        "{header}"
+    );
+    assert!(
+        header.contains("showing 100 of the first 500 returned (API order, not newest)"),
+        "{header}"
+    );
+    assert!(!header.contains("newest 100"), "{header}");
+    assert!(!header.contains("more than"), "{header}");
+    let busy_requests = server
+        .log
+        .lock()
+        .iter()
+        .filter(|r| r.path_only() == "/api/v1/namespaces/busy/events")
+        .count();
+    assert_eq!(busy_requests, 1, "the non-Warning chunk is skipped");
+
+    // 150 Warnings, all fetched: the table really shows the newest.
+    let many = tools.execute(&events("many")).await;
+    let header = many.text.lines().next().unwrap();
+    assert!(
+        header.contains(": 150 Warning; other events not fetched"),
+        "{header}"
+    );
+    assert!(header.contains("showing the newest 100"), "{header}");
+    assert!(!header.contains("API order"), "{header}");
+    assert!(many.text.lines().nth(2).unwrap().contains("back-off 149"));
+
+    // Everything fits: no note at all.
+    let shop = tools.execute(&events("shop")).await;
+    let header = shop.text.lines().next().unwrap();
+    assert!(header.ends_with(": 3 (2 Warning)"), "{header}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_timed_out_tool_lets_the_connect_finish() {
+    let slow_once = Arc::new(AtomicBool::new(true));
+    let inner = cluster_router();
+    let router: Router = Arc::new(move |req: &Request, log: &Log| {
+        if req.path_only() == "/version" && slow_once.swap(false, Ordering::SeqCst) {
+            // Blocks one worker thread; the runtime has others.
+            std::thread::sleep(Duration::from_millis(800));
+        }
+        inner(req, log)
+    });
+    let server = start(router).await;
+    let (_dir, app, recorder, id) = setup(&server.url, false);
+    let tools =
+        ReadOnlyCluster::new(app.clone(), id.clone()).with_timeout(Duration::from_millis(200));
+    let out = tools.execute(&list_of("cm")).await;
+    assert!(out.is_error && out.text.contains("timed out"), "{out:?}");
+    // The connect was not dropped: it completes in the background.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let connected = recorder
+            .statuses
+            .lock()
+            .iter()
+            .any(|s| s.state == kubepit_core::types::ConnState::Connected);
+        if connected {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the connect never finished"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let tools = ReadOnlyCluster::new(app, id);
+    assert!(!tools.execute(&list_of("deploy")).await.is_error);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
