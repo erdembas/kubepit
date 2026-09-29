@@ -145,14 +145,12 @@ export function MapTab({
   return (
     <TopologyMap
       label={i18n.t('Relationships of {name}', { name: obj.metadata.name })}
-      graph={data.graph}
+      model={data.model}
       rootId={rootId}
       hops={hops}
       selectedId={null}
       showNamespace={!gvk.namespaced && !isNamespace}
       persistKey="details"
-      active={isActive}
-      synced={data.synced}
       errors={data.errors}
       fitKey={`${clusterId}|${rootId ?? scopeKey}|${hops}`}
       focusRequest={null}

@@ -1117,10 +1117,19 @@ git commit -m "perf(core): page resource lists, the cluster overview and metrics
   - `type EngineTask = { kind: 'health'; input: HealthInput; locale: Locale } | { kind: 'netpol'; input: NpInput } | { kind: 'topology'; input: TopologyInput; view: ViewOptions }`.
   - `runEngine<T>(task: EngineTask): Promise<T>`. It uses a lazily created module worker (`new Worker(new URL('./engineWorker.ts', import.meta.url), { type: 'module' })`). Without `Worker` (Node, tests) it runs inline.
   - The worker calls `setLocale(task.locale, false)` before health scans. Only engines named by the gate move to the worker.
+- **As built** (the gate fired for the map only, so only topology moved; health and netpol stay on the main thread and `EngineTask` has no `health`/`netpol` kinds):
+  - A stateless `{ kind: 'topology'; input; view }` would clone the whole watch cache per build: ≈ 60 ms to serialise the all-namespaces `m` input and ≈ 35 ms to receive its graph, both on the main thread and more than the build. So the engine keeps one **topology session** per map with a mirror of the watched lists:
+    - `EngineTask` = `{ kind: 'topology-data'; session; delta: TopologyDelta }` (one-way; per-slot upserts/removes, or a whole slot) | `{ kind: 'topology'; session; view: ViewOptions; withGraph; graphRev; timed }` → `TopologyEngineResult` (`view`, `graphRev`, `graph` only when asked for and changed, `buildMs`/`viewMs` when timed) | `{ kind: 'topology-dispose'; session }`.
+    - Files: `lib/perf/worker/engine.ts` (the pure `EngineHost`, used by the worker and inline), `engineWorker.ts`, `client.ts` (`runEngine`, `postEngine`, `acquireEngine`, `stopEngine`, `engineGeneration`, `EngineLost`, `IDLE_MS`), and `components/workbench/topology/topologyModel.ts` (`TopologyModel`, `topologyDelta`).
+  - `useTopologyData` streams the deltas as batches arrive and asks for rebuilds with the `CoalescedMemo` token (Task 16a). `TopologyMap` takes the model instead of a graph and asks it for views; the fit follows the view that comes back.
+  - One request in flight for data changes; view changes go at once and stale replies are dropped by sequence number. An inactive map sends nothing, keeps its last result and releases the engine; the worker is terminated `IDLE_MS` (10 s) after the last release. A dead worker rejects pending requests with `EngineLost`; the models send their sessions again, to the inline engine from then on.
+  - The graph only comes back while the reachability overlay is on (`withGraph`).
+  - Probe ids: `map:build`, `map:view` = engine time in the worker (comparable with the benches); `map:roundtrip` (new) = request → reply on the main thread; `map:layout` unchanged (main thread).
+  - Tests: `lib/perf/worker/client.test.ts` (inline fallback, deltas, lazy module worker, idle termination, failure fallback), `components/workbench/topology/topologyModel.test.ts` (deltas, streaming, bounded builds while syncing, coalescing, stale replies, inactive, lost sessions, `withGraph`).
 
-- [ ] **Step 1: Check the gate.** It fires if the probe's long tasks > 50 ms during `health`, `map` or netpol scenarios at `m` point at that engine (a matching `recordDuration` id in the same frame).
+- [x] **Step 1: Check the gate.** It fires if the probe's long tasks > 50 ms during `health`, `map` or netpol scenarios at `m` point at that engine (a matching `recordDuration` id in the same frame). _Fired for the map only (spec, Gates)._
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 ```ts
 it('inline fallback returns what the engine returns', async () => {
@@ -1129,11 +1138,11 @@ it('inline fallback returns what the engine returns', async () => {
 });
 ```
 
-- [ ] **Step 3: Run the test to verify it fails, implement, then run to verify it passes.** Run: `pnpm --filter @kubepit/desktop test -- src/lib/perf/worker && pnpm --filter @kubepit/desktop build`. Expected: PASS, and the build emits the worker chunk. The Tauri CSP already allows `worker-src 'self' blob:`.
+- [x] **Step 3: Run the test to verify it fails, implement, then run to verify it passes.** Run: `pnpm --filter @kubepit/desktop test -- src/lib/perf/worker && pnpm --filter @kubepit/desktop build`. Expected: PASS, and the build emits the worker chunk. The Tauri CSP already allows `worker-src 'self' blob:`. _Verified: `tauri.conf.json` has `worker-src 'self' blob:`; the build emits `assets/engineWorker-<hash>.js` (≈ 29 kB, an IIFE, so it also runs where module workers are not supported)._
 
-- [ ] **Step 4: Re-run `pnpm perf:ui -- --preset m --scenarios health,map`.** Expected: no long task > 50 ms from the moved engines. Record the After value.
+- [x] **Step 4: Re-run `pnpm perf:ui -- --preset m --scenarios health,map`.** Expected: no long task > 50 ms from the moved engines. Record the After value. _Map at `m`: no long task at all (was 18–20, max 223–321 ms); After values in the spec's Results._
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/src docs/superpowers/specs

@@ -103,6 +103,7 @@ Deterministic structural probes (request counts per path) are ordinary tests, no
    - FPS during a programmatic scroll;
    - long tasks;
    - map build/view/layout and health scan durations;
+     - since H5 (plan Task 16) the map is built and its view derived in the engine worker: `map:build` and `map:view` are the engine's own time there, comparable with the benches, and `map:roundtrip` (added then) is request → reply on the main thread, clones and queueing included. `map:layout` stays on the main thread;
    - heap samples and watch-cache statistics.
 
    It is exposed as `window.__kubepitPerf`, with helpers to connect and open views.
