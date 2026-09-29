@@ -420,6 +420,8 @@ pub enum HistoryKind {
     Changes,
     /// Stored recommendation scans.
     Recommendations,
+    /// The assistant request log (`ai_log`).
+    Ai,
     All,
 }
 
@@ -447,6 +449,8 @@ pub struct HistoryStatus {
     pub changes: HistoryTableStatus,
     /// Rows of stored recommendation scans; `oldest_ts` is the oldest run.
     pub recommendations: HistoryTableStatus,
+    /// Rows of the assistant request log; `oldest_ts` is the oldest run.
+    pub ai: HistoryTableStatus,
     /// Writes dropped because the writer queue was full.
     pub dropped: u64,
     /// Connected clusters whose events and changes are being persisted now.
@@ -461,6 +465,66 @@ pub struct HistoryStatus {
 pub const MAX_AI_REQUEST_BYTES: usize = 256 * 1024;
 /// Largest response text kept per `ai_log` row.
 pub const MAX_AI_RESPONSE_BYTES: usize = 64 * 1024;
+/// Largest tool-call list (serialized) kept per `ai_log` row.
+pub const MAX_AI_TOOLS_BYTES: usize = 64 * 1024;
+/// Longest error message kept per `ai_log` row.
+pub const MAX_AI_ERROR_BYTES: usize = 8 * 1024;
+
+/// `text` cut to at most `max` bytes on a character boundary, followed by
+/// `\n[truncated: N bytes]` (the bytes left out) when anything was cut.
+pub fn cap_ai_body(mut text: String, max: usize) -> String {
+    if text.len() <= max {
+        return text;
+    }
+    let mut cut = max;
+    while !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let dropped = text.len() - cut;
+    text.truncate(cut);
+    text.push_str(&format!("\n[truncated: {dropped} bytes]"));
+    text
+}
+
+/// The tool-call list within [`MAX_AI_TOOLS_BYTES`]: the leading calls
+/// that fit plus `{"truncated": N}` for the rest (any other oversized value
+/// becomes `{"truncated_bytes": N}`).
+fn cap_ai_tools(tools: Value) -> Value {
+    let size = serde_json::to_string(&tools).map_or(0, |t| t.len());
+    if size <= MAX_AI_TOOLS_BYTES {
+        return tools;
+    }
+    let Value::Array(calls) = tools else {
+        return serde_json::json!({ "truncated_bytes": size });
+    };
+    let total = calls.len();
+    // Room for the brackets and the marker.
+    let mut used: usize = 64;
+    let mut kept = Vec::new();
+    for call in calls {
+        let len = serde_json::to_string(&call).map_or(usize::MAX, |t| t.len() + 1);
+        if used.saturating_add(len) > MAX_AI_TOOLS_BYTES {
+            break;
+        }
+        used += len;
+        kept.push(call);
+    }
+    let dropped = total - kept.len();
+    kept.push(serde_json::json!({ "truncated": dropped }));
+    Value::Array(kept)
+}
+
+impl AiLogRecord {
+    /// The record within the `ai_log` caps (request, response, tool calls
+    /// and error), cut on character boundaries.
+    pub fn capped(mut self) -> Self {
+        self.request = cap_ai_body(self.request, MAX_AI_REQUEST_BYTES);
+        self.response = cap_ai_body(self.response, MAX_AI_RESPONSE_BYTES);
+        self.error = self.error.map(|e| cap_ai_body(e, MAX_AI_ERROR_BYTES));
+        self.tools = cap_ai_tools(self.tools);
+        self
+    }
+}
 
 /// How an assistant run ended, as logged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -599,5 +663,53 @@ mod tests {
         let partial: AiLogFilter = serde_json::from_str(r#"{"text": "oom"}"#).unwrap();
         assert_eq!(partial.limit, 100);
         assert_eq!(partial.text.as_deref(), Some("oom"));
+        assert_eq!(serde_json::to_value(HistoryKind::Ai).unwrap(), "ai");
+        assert_eq!(
+            serde_json::from_str::<HistoryKind>("\"ai\"").unwrap(),
+            HistoryKind::Ai
+        );
+    }
+
+    #[test]
+    fn ai_bodies_are_capped_on_character_boundaries() {
+        assert_eq!(cap_ai_body("short".into(), 10), "short");
+        let capped = cap_ai_body("ğ".repeat(10), 5); // 2 bytes each
+        assert_eq!(capped, "ğğ\n[truncated: 16 bytes]");
+        let record = AiLogRecord {
+            ts: 1,
+            cluster_id: None,
+            cluster_name: None,
+            provider_id: "anthropic".into(),
+            model: "claude-opus-5".into(),
+            intent: AiIntent::Chat,
+            outcome: AiLogOutcome::Error,
+            error: Some("e".repeat(MAX_AI_ERROR_BYTES + 1)),
+            duration_ms: 1,
+            usage: AiUsage::default(),
+            cost: None,
+            tool_calls: 400,
+            request: "€".repeat(MAX_AI_REQUEST_BYTES),
+            response: "r".repeat(MAX_AI_RESPONSE_BYTES),
+            tools: Value::Array(
+                (0..400)
+                    .map(|i| serde_json::json!({"id": i, "input": {"query": "x".repeat(400)}}))
+                    .collect(),
+            ),
+        }
+        .capped();
+        assert!(record.request.len() <= MAX_AI_REQUEST_BYTES + 32);
+        assert!(record.request.ends_with("bytes]"));
+        assert_eq!(
+            record.response.len(),
+            MAX_AI_RESPONSE_BYTES,
+            "at the cap: kept"
+        );
+        assert!(record.error.unwrap().contains("[truncated: 1 bytes]"));
+        let tools = record.tools.as_array().unwrap();
+        assert!(serde_json::to_string(&record.tools).unwrap().len() <= MAX_AI_TOOLS_BYTES);
+        let marker = tools.last().unwrap()["truncated"].as_u64().unwrap();
+        assert_eq!(marker as usize + tools.len() - 1, 400);
+        let odd = cap_ai_tools(serde_json::json!({"blob": "y".repeat(MAX_AI_TOOLS_BYTES)}));
+        assert!(odd["truncated_bytes"].as_u64().unwrap() > MAX_AI_TOOLS_BYTES as u64);
     }
 }

@@ -8,7 +8,7 @@ import type {
   SavedPortForwardInput,
   Settings,
 } from '@/types';
-import { demoForwards } from './app';
+import { demoForwards, writeBackendOwned } from './app';
 import { mockEmit, sleep } from './bus';
 import {
   DEMO_BUSY_PORTS,
@@ -191,7 +191,10 @@ register({
   kubeconfig_storage_set: async ({ keychain }: MockArgs) => {
     await sleep(400);
     const current = handlers.settings_get!({}) as Settings;
-    return handlers.settings_set!({ settings: { ...current, keychain_kubeconfigs: !!keychain } });
+    // The one command that flips it (`settings_set` keeps the stored value).
+    return writeBackendOwned(() =>
+      handlers.settings_set!({ settings: { ...current, keychain_kubeconfigs: !!keychain } }),
+    );
   },
 });
 

@@ -845,16 +845,22 @@ mod tests {
     fn migration_two_applies_on_fresh_and_version_one_databases() {
         let dir = tempfile::tempdir().unwrap();
         let fresh = dir.path().join("fresh.db");
-        assert_eq!(db::schema_version(&db::open(&fresh).unwrap()).unwrap(), 2);
+        // Later migrations (3: the assistant log) apply after this one.
+        let latest = db::latest_version();
+        assert!(latest >= 2);
+        assert_eq!(
+            db::schema_version(&db::open(&fresh).unwrap()).unwrap(),
+            latest
+        );
 
         let v1 = database_with_only_migration_one(dir.path());
         assert_eq!(db::schema_version(&v1).unwrap(), 1);
-        assert_eq!(db::migrate(&v1).unwrap(), 2);
+        assert_eq!(db::migrate(&v1).unwrap(), latest);
         assert_eq!(count(&v1, "audit"), 1, "existing data kept");
         for table in ["rec_runs", "rec_rows", "rec_latest"] {
             assert_eq!(count(&v1, table), 0, "{table}");
         }
-        assert_eq!(db::migrate(&v1).unwrap(), 2, "applied once");
+        assert_eq!(db::migrate(&v1).unwrap(), latest, "applied once");
     }
 
     /// A database as a build with only migration 1 left it, with one audit entry.
