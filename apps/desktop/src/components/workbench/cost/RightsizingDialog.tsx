@@ -44,7 +44,14 @@ import { reviewSides } from '../dock/editor/review';
 import { GitOpsNotice } from '../gitops/ManagedNotice';
 import { rowFlags } from '../recommendations/listModel';
 import { errorText } from '../util';
-import { acknowledgementText, applyBlockedReason } from './rightsizingAck';
+import {
+  NO_ACK,
+  acknowledgementKey,
+  acknowledgementText,
+  applyControl,
+  isAcknowledged,
+  type AckState,
+} from './rightsizingAck';
 import { refreshRightsizing } from './useCost';
 import { CONFIDENCE_TONE } from './tones';
 
@@ -303,7 +310,9 @@ export function RightsizingDialog({
   const [live, setLive] = useState<KubeObject | null>(null);
   const [review, setReview] = useState<Review>({ status: 'loading' });
   const [busy, setBusy] = useState(false);
-  const [acknowledged, setAcknowledged] = useState(false);
+  // The tick holds the key of what it acknowledged; a changed recommendation clears it.
+  const [ack, setAck] = useState<AckState>(NO_ACK);
+  const ackKey = useMemo(() => acknowledgementKey(rec, changes), [rec, changes]);
   const seq = useRef(0);
   const target = useMemo(
     () => ({ kind: rec.kind, namespace: rec.namespace, name: rec.name }),
@@ -374,7 +383,7 @@ export function RightsizingDialog({
     }
   };
   const submit = () => {
-    if (blocked || busy) return;
+    if (!control.enabled) return;
     if (production) {
       useAppStore.getState().requestConfirm({
         title: i18n.t('Apply recommendation'),
@@ -395,15 +404,19 @@ export function RightsizingDialog({
     } else void apply();
   };
 
-  const blocked = applyBlockedReason({
+  const control = applyControl({
     gate:
       gate?.blocked || readOnly
         ? (gate?.message ?? i18n.t('Read-only cluster: changes are blocked'))
         : null,
     hasChanges: changes.length > 0,
-    reviewFailed: review.status === 'error',
-    unacknowledged: requireAck && !acknowledged,
+    review: review.status,
+    busy,
+    requireAck,
+    ack,
+    ackKey,
   });
+  const blocked = control.blocked;
   const delta = rec.monthly_delta;
 
   const dialog = (
@@ -428,7 +441,7 @@ export function RightsizingDialog({
           <Button
             variant="primary"
             size="sm"
-            disabled={!!blocked || busy || review.status !== 'ready'}
+            disabled={!control.enabled}
             onClick={submit}
             title={blocked ?? undefined}
             leftIcon={busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : undefined}
@@ -449,7 +462,11 @@ export function RightsizingDialog({
           </div>
         )}
         {requireAck && (
-          <Acknowledgement rec={rec} checked={acknowledged} onChange={setAcknowledged} />
+          <Acknowledgement
+            rec={rec}
+            checked={isAcknowledged(ack, ackKey)}
+            onChange={(checked) => setAck({ key: ackKey, checked })}
+          />
         )}
         <div className="flex flex-wrap items-center gap-2 text-[11.5px]">
           <Badge tone={CONFIDENCE_TONE[rec.confidence]}>{confidenceLabel(rec.confidence)}</Badge>

@@ -104,6 +104,15 @@ describe('batchTargets', () => {
     ).toEqual(['api']);
   });
 
+  it('leaves out rows the list already knows are denied by RBAC', () => {
+    const denied = (rec: { name: string }) =>
+      rec.name === 'api' ? "You don't have permission to patch deployments.apps in shop" : null;
+    expect(keys(batchTargets([web, api, db], all, clusterDef(), {}, denied))).toEqual([
+      'web',
+      'db',
+    ]);
+  });
+
   it('offers nothing on read-only, production or unknown clusters', () => {
     expect(batchTargets([web], all, clusterDef({ read_only: true }), {})).toEqual([]);
     expect(batchTargets([web], all, clusterDef({ environment: 'production' }), {})).toEqual([]);

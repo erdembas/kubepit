@@ -15,6 +15,7 @@ import {
   sourceLabel,
   verdictLabel,
 } from '@/lib/kube/rightsizing/model';
+import type { WorkloadRecommendation } from '@/types';
 import { MiniTable, Section } from '../details/primitives';
 import type { SectionProps } from '../details/sections/types';
 import { ChangeCell, RaisedTag, RightsizingDialog } from './RightsizingDialog';
@@ -24,7 +25,8 @@ import { useRightsizing } from './useCost';
 /** Compact right-sizing of one workload in its details panel. */
 export function RightsizingSection({ obj, ctx, isActive }: SectionProps) {
   i18n.useLocale();
-  const [applying, setApplying] = useState(false);
+  // The dialog reviews the recommendation as it was when opened, not the next poll.
+  const [applying, setApplying] = useState<WorkloadRecommendation | null>(null);
   const workload = useMemo(
     () =>
       isRightsizable(obj.kind) && obj.metadata.namespace
@@ -143,7 +145,7 @@ export function RightsizingSection({ obj, ctx, isActive }: SectionProps) {
               size="xs"
               variant="secondary"
               disabled={!rec.changed}
-              onClick={() => setApplying(true)}
+              onClick={() => setApplying(rec)}
             >
               {i18n.t('Review & apply')}
             </Button>
@@ -151,9 +153,9 @@ export function RightsizingSection({ obj, ctx, isActive }: SectionProps) {
           {applying && (
             <RightsizingDialog
               clusterId={ctx.clusterId}
-              rec={rec}
+              rec={applying}
               currency={data.currency}
-              onClose={() => setApplying(false)}
+              onClose={() => setApplying(null)}
             />
           )}
         </div>

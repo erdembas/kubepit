@@ -33,19 +33,26 @@ import {
 
 /**
  * The checked rows the batch may cover: shown (the tab, lenses and search
- * applied), checked, `one-click` on this cluster and not applied in this
- * session. Unknown, read-only and production clusters have none.
+ * applied), checked, `one-click` on this cluster, not applied in this
+ * session and not known to be denied by RBAC (`blocked`). Unknown,
+ * read-only and production clusters have none.
  */
 export function batchTargets(
   shown: readonly WorkloadRecommendation[],
   selected: ReadonlySet<string>,
   cluster: Pick<ClusterDef, 'read_only' | 'environment'> | undefined,
   applied: Readonly<Record<string, number>>,
+  blocked: (rec: WorkloadRecommendation) => string | null = () => null,
 ): WorkloadRecommendation[] {
   if (!cluster || !selected.size) return [];
   return shown.filter((rec) => {
     const key = workloadKey(rec);
-    return selected.has(key) && !(key in applied) && applyMode(rec, cluster) === 'one-click';
+    return (
+      selected.has(key) &&
+      !(key in applied) &&
+      applyMode(rec, cluster) === 'one-click' &&
+      !blocked(rec)
+    );
   });
 }
 

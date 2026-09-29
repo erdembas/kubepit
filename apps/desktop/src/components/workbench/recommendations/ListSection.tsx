@@ -223,10 +223,6 @@ export function RecommendationList({
     (rec: WorkloadRecommendation): ApplyMode => applyMode(rec, cluster ?? UNKNOWN_CLUSTER),
     [cluster],
   );
-  const oneClick = useMemo(
-    () => batchTargets(shown, selected, cluster, applied),
-    [shown, selected, cluster, applied],
-  );
   const applying = useApplyingKeys(clusterId);
 
   // Paging: back to the first page when the rows change; the open row is always rendered.
@@ -254,10 +250,18 @@ export function RecommendationList({
     };
   }, [rendered, modeOf]);
   const gates = useActionGates(clusterId, gateActions, !!cluster?.read_only);
-  const blockedOf = (rec: WorkloadRecommendation) => {
-    const gate = gates.get(rightsizeActionId(rec, named));
-    return gate?.reason === 'permission' ? gate.message : null;
-  };
+  const blockedOf = useCallback(
+    (rec: WorkloadRecommendation) => {
+      const gate = gates.get(rightsizeActionId(rec, named));
+      return gate?.reason === 'permission' ? gate.message : null;
+    },
+    [gates, named],
+  );
+  // The batch leaves out rows the list already knows are denied.
+  const oneClick = useMemo(
+    () => batchTargets(shown, selected, cluster, applied, blockedOf),
+    [shown, selected, cluster, applied, blockedOf],
+  );
 
   // Stable handlers keep the memoized rows from re-rendering.
   const anchor = useRef<string | null>(null);
