@@ -12,14 +12,14 @@
 
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use futures::AsyncReadExt;
 use k8s_openapi::api::core::v1::Pod;
 use kube::api::{Api, LogParams};
 use tokio::time::Instant;
 
 use crate::app::Kubepit;
-use crate::error::describe_kube_error;
+use crate::error::{describe_kube_error, kube_error};
 use crate::types::{LogChunk, LogOptions};
 
 /// Flush pending log text this long after its first byte arrived.
@@ -27,6 +27,43 @@ pub const LOG_FLUSH_INTERVAL: Duration = Duration::from_millis(50);
 /// Flush as soon as this much text is pending.
 pub const LOG_FLUSH_BYTES: usize = 64 * 1024;
 const READ_BUF: usize = 16 * 1024;
+/// Bytes [`Kubepit::pod_logs_tail`] reads at most.
+pub const MAX_TAIL_BYTES: i64 = 1024 * 1024;
+/// First line of a [`Kubepit::pod_logs_tail`] result cut by the byte limit.
+pub const LOG_CUT_NOTE: &str = "[the log was cut at 1 MiB; the newest lines may be missing]";
+
+/// A [`Kubepit::pod_logs_tail_read`] result.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogTail {
+    pub text: String,
+    /// `tailLines` of the read that produced `text`: fewer than requested
+    /// when the first read was cut by [`MAX_TAIL_BYTES`].
+    pub tail_lines: i64,
+    /// Even that read was cut: the newest lines may be missing.
+    pub cut: bool,
+}
+
+/// One non-following log read, at most [`MAX_TAIL_BYTES`] bytes.
+async fn read_log_bytes(
+    api: &Api<Pod>,
+    pod: &str,
+    params: LogParams,
+    namespace: &str,
+) -> Result<Vec<u8>> {
+    let what = || format!("failed to read the logs of pod {namespace}/{pod}");
+    let reader = api
+        .log_stream(pod, &params)
+        .await
+        .map_err(kube_error)
+        .with_context(what)?;
+    let mut bytes = Vec::new();
+    Box::pin(reader)
+        .take(MAX_TAIL_BYTES as u64)
+        .read_to_end(&mut bytes)
+        .await
+        .with_context(what)?;
+    Ok(bytes)
+}
 
 /// Byte buffer that only ever releases complete UTF-8 characters (invalid
 /// sequences are replaced lossily; an incomplete trailing sequence waits for
@@ -194,6 +231,77 @@ impl Kubepit {
     /// `pod_logs_stop`. Unknown ids are ignored.
     pub fn pod_logs_stop(&self, stream_id: &str) {
         self.log_streams.stop(stream_id);
+    }
+
+    /// The last `tail_lines` lines of a container's log, once (no follow),
+    /// with timestamps, at most [`MAX_TAIL_BYTES`]. When the text was still
+    /// cut by the limit it starts with [`LOG_CUT_NOTE`]; see
+    /// [`Self::pod_logs_tail_read`] for how a cut tail is read again.
+    pub async fn pod_logs_tail(
+        &self,
+        cluster_id: &str,
+        namespace: &str,
+        pod: &str,
+        container: Option<&str>,
+        tail_lines: i64,
+        previous: bool,
+    ) -> Result<String> {
+        let tail = self
+            .pod_logs_tail_read(cluster_id, namespace, pod, container, tail_lines, previous)
+            .await?;
+        if tail.cut {
+            return Ok(format!("{LOG_CUT_NOTE}\n{}", tail.text));
+        }
+        Ok(tail.text)
+    }
+
+    /// [`Self::pod_logs_tail`] with what was read (the assistant's
+    /// `get_pod_logs` tool). The server keeps the *first* bytes of a tail,
+    /// so a tail cut by the limit misses the newest lines: it is read again
+    /// with fewer lines (`tail_lines` then says how many), and `cut` stays
+    /// set only when that is still too large. A character cut by the limit
+    /// is dropped.
+    pub async fn pod_logs_tail_read(
+        &self,
+        cluster_id: &str,
+        namespace: &str,
+        pod: &str,
+        container: Option<&str>,
+        tail_lines: i64,
+        previous: bool,
+    ) -> Result<LogTail> {
+        let client = self.client(cluster_id).await?;
+        let api: Api<Pod> = Api::namespaced(client, namespace);
+        let read = |tail: i64| {
+            let options = LogOptions {
+                follow: false,
+                tail_lines: Some(tail),
+                since_seconds: None,
+                timestamps: true,
+                previous,
+            };
+            let mut params = log_params(container.map(str::to_string), &options);
+            params.limit_bytes = Some(MAX_TAIL_BYTES);
+            read_log_bytes(&api, pod, params, namespace)
+        };
+        let is_cut = |bytes: &[u8]| bytes.len() as i64 >= MAX_TAIL_BYTES;
+        let mut read_lines = tail_lines;
+        let mut bytes = read(tail_lines).await?;
+        if is_cut(&bytes) {
+            let complete = bytes.iter().filter(|b| **b == b'\n').count() as i64;
+            let fewer = (complete / 2).clamp(1, (tail_lines / 2).max(1));
+            if fewer < tail_lines {
+                bytes = read(fewer).await?;
+                read_lines = fewer;
+            }
+        }
+        let mut acc = Utf8Accumulator::default();
+        acc.push(&bytes);
+        Ok(LogTail {
+            text: acc.take_complete(),
+            tail_lines: read_lines,
+            cut: is_cut(&bytes),
+        })
     }
 }
 

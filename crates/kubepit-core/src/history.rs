@@ -15,9 +15,17 @@
 //!   listed in `Settings.history.persist_clusters`, while connected.
 //! - **Recommendation scans** ([`recommendations`]): stored scan runs and
 //!   their rows (migration 2).
-//! - **Retention**: audit and data retention in days, recommendation scans
-//!   by `Settings.recommendations.retention_days` and thinning, plus a size
-//!   cap, applied every ten minutes (and after a settings change).
+//! - **Assistant request log** (`ai_log`, migration 3): every assistant run
+//!   with the redacted payload exactly as sent (≤ 256 KiB), the answer
+//!   (≤ 64 KiB), tool calls, usage, cost and outcome — written only while
+//!   this process records and `Settings.ai.log_requests` is on
+//!   ([`Kubepit::ai_log_record`]).
+//! - **Retention**: audit and data retention in days (the assistant log
+//!   follows the audit retention), recommendation scans by
+//!   `Settings.recommendations.retention_days` and thinning, plus a size
+//!   cap (events and changes first, then scans, the assistant log, and the
+//!   audit log last), applied every ten minutes (and after a settings
+//!   change).
 //!
 //! Like alerts and the change journal, recording is opt-in per process
 //! ([`Kubepit::set_history_recording`]): the desktop shell enables it; tests
@@ -380,6 +388,7 @@ impl Kubepit {
             events: HistoryTableStatus::default(),
             changes: HistoryTableStatus::default(),
             recommendations: HistoryTableStatus::default(),
+            ai: HistoryTableStatus::default(),
             dropped: self
                 .history
                 .writer
@@ -398,15 +407,17 @@ impl Kubepit {
                 db::table_status(conn, "events", "last_ts")?,
                 db::table_status(conn, "changes", "ts")?,
                 recommendations::status(conn)?,
+                db::table_status(conn, "ai_log", "ts")?,
             ))
         });
         match tables {
-            Ok((audit, events, changes, recommendations)) => {
+            Ok((audit, events, changes, recommendations, ai)) => {
                 status.available = true;
                 status.audit = audit;
                 status.events = events;
                 status.changes = changes;
                 status.recommendations = recommendations;
+                status.ai = ai;
                 // Opening the reader may have created the file.
                 status.size_bytes = db::size_on_disk(&self.history.path);
             }
@@ -457,6 +468,36 @@ impl Kubepit {
         self.history
             .read(|conn| db::get_change(conn, cluster_id, id as i64))?
             .ok_or_else(|| anyhow!("change {id} is no longer in the history"))
+    }
+
+    /// Queue one assistant run for `ai_log` without waiting. Only while this
+    /// process records history and `Settings.ai.log_requests` is on; the
+    /// bodies are capped first ([`AiLogRecord::capped`]). False when nothing
+    /// was queued (off, database unavailable, queue full).
+    pub fn ai_log_record(&self, record: AiLogRecord) -> bool {
+        if !self.history.is_active() || !self.settings().ai.log_requests {
+            return false;
+        }
+        self.history.submit(WriteOp::Ai(Box::new(record.capped())))
+    }
+
+    /// `ai_log_list`: assistant runs matching `filter`, newest first, with
+    /// totals (`limit` is clamped to [`db::MAX_PAGE`]).
+    pub fn ai_log_list(&self, filter: &AiLogFilter) -> Result<AiLogPage> {
+        self.history.read(|conn| db::list_ai(conn, filter))
+    }
+
+    /// `ai_log_get`: one run with the request as sent, the answer and the
+    /// tool calls.
+    pub fn ai_log_get(&self, id: i64) -> Result<AiLogDetail> {
+        self.history
+            .read(|conn| db::get_ai(conn, id))?
+            .ok_or_else(|| anyhow!("assistant log entry {id} is no longer in the history"))
+    }
+
+    /// `ai_log_export`: the filtered runs as JSON lines, bodies included.
+    pub fn ai_log_export(&self, filter: &AiLogFilter) -> Result<String> {
+        self.history.read(|conn| db::export_ai(conn, filter))
     }
 
     /// `history_clear`: delete one kind of data (all clusters or one) and
