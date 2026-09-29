@@ -2214,15 +2214,15 @@ git commit -m "feat(ui): usage ranking of workload containers"
 
 Steps:
 
-- [ ] **Step 1: Implement the list, the row and the export helper; wire the header Export menu (JSON / YAML) to them**
+- [x] **Step 1: Implement the list, the row and the export helper; wire the header Export menu (JSON / YAML) to them**
 
-- [ ] **Step 2: Translate, run the checks**
+- [x] **Step 2: Translate, run the checks**
 
 Run: `pnpm i18n:check -- --fix`, add the Turkish, then `pnpm typecheck && pnpm i18n:check`.
 
 Expected: PASS.
 
-- [ ] **Step 3: Verify the demo**
+- [x] **Step 3: Verify the demo**
 
 Run: `pnpm dev:ui`.
 - The "Limit raised" lens shows only rows with `RaisedTag`.
@@ -2231,7 +2231,7 @@ Run: `pnpm dev:ui`.
   English comments.
 - Export JSON contains `"format": "kubepit.recommendations/v1"`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/desktop/src
