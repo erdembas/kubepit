@@ -4,24 +4,27 @@
   "budgets": {
     "watch/aggregator_initial_20k": {
       "group": "rust",
-      "value": 120000000,
+      "value": 90000000,
       "unit": "ns",
       "direction": "max",
-      "timing": true
+      "timing": true,
+      "note": "tightened from 120 ms in plan Task 23: final 27.9 ms (R1), 3.2× headroom; the pre-R1 170 ms fails it"
     },
     "watch/reset_batch_20k": {
       "group": "rust",
-      "value": 60000000,
+      "value": 5000000,
       "unit": "ns",
       "direction": "max",
-      "timing": true
+      "timing": true,
+      "note": "tightened from 60 ms in plan Task 23: final 1.10 ms (R1), 4.5× headroom; cloning the store again (pre-R1 64 ms) fails it"
     },
     "watch/steady_500": {
       "group": "rust",
-      "value": 3000000,
+      "value": 1000000,
       "unit": "ns",
       "direction": "max",
-      "timing": true
+      "timing": true,
+      "note": "tightened from 3 ms in plan Task 23: final 0.12 ms (R1), 8.5× headroom (quick runs reach 0.39 ms); the pre-R1 2.04 ms fails it"
     },
     "metrics_history/record_5k_pods_1k_nodes": {
       "group": "rust",
@@ -96,17 +99,19 @@
     },
     "fleet_search/matcher_substring_50k": {
       "group": "rust",
-      "value": 5000000,
+      "value": 2500000,
       "unit": "ns",
       "direction": "max",
-      "timing": true
+      "timing": true,
+      "note": "tightened from 5 ms in plan Task 23: final 0.76 ms (R1), 3.3× headroom; the pre-R1 6.0 ms fails it"
     },
     "fleet_search/matcher_glob_50k": {
       "group": "rust",
-      "value": 15000000,
+      "value": 4000000,
       "unit": "ns",
       "direction": "max",
-      "timing": true
+      "timing": true,
+      "note": "tightened from 15 ms in plan Task 23: final 1.29 ms (R1), 3.1× headroom; the pre-R1 6.5 ms fails it"
     },
     "fleet_search/matcher_regex_50k": {
       "group": "rust",

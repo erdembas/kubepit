@@ -1982,19 +1982,18 @@ in-memory demo backend.
     `window.__kubepitPerf`), blocks every request outside the preview
     server and refuses a Tauri page → `perf-results/ui.json`. WKWebView is
     measured by hand with the same probe in `pnpm tauri:dev`.
-- **Optimizations applied.** R1 (no gate): watch objects are converted by
-  value and shared between the aggregator's store and its batches, and
-  fleet search matches ASCII names in place. H6: acknowledged watch
-  batches and window-owned watches (see Kubernetes access). The spec's
-  Results table has every gate and its numbers.
 - **Budgets.** `perf/budgets.json` holds one budget per result id (group,
   value, unit, `max`/`min`, whether it is a timing, `per` for per-line
   budgets, `abs` for drifts), set for the reference machine (Apple
   M-series, macOS, on AC power). Ids listed as `informational` (other
   presets of a budgeted id) print without a budget. The spec's Results
-  table records the baseline, which budgets it misses and which gated
-  optimizations that fires; a missed budget stays as the target of its
-  gated task.
+  table records the baseline, which budgets it missed, which gated
+  optimizations that fired, and the final run (every budget met).
+  After R1, plan Task 23 tightened its five ids so that a revert fails:
+  `watch/aggregator_initial_20k` 90 ms, `watch/reset_batch_20k` 5 ms,
+  `watch/steady_500` 1 ms, `fleet_search/matcher_substring_50k` 2.5 ms and
+  `fleet_search/matcher_glob_50k` 4 ms. Each keeps at least 3× headroom.
+  The others stay the spec's targets until CI is calibrated.
 - **Compare.** `pnpm perf:compare -- [--slack N|ci] [--only rust,e2e,engines,ui,structural]`
   prints every budget with its value and exits 1 when one is missed or a
   budgeted result is missing. `--slack` multiplies timing budgets (divides
@@ -2008,18 +2007,66 @@ in-memory demo backend.
   `compare.mjs --slack ci --only rust,e2e,engines,structural`, and uploads
   the results. The compare step is `continue-on-error` until calibrated on
   a runner (the first run after the remote exists): the budgets are set on
-  an Apple M-series machine and a runner's speed is unknown (the three
-  Rust ids that missed at the baseline now have ≥ 75% headroom, plan R1).
-  It moves into
+  an Apple M-series machine and a runner's speed is unknown. Every timing
+  it checks has at least 2.3× headroom there (the least is
+  `prometheus/parse_200x240`), so at `ci_slack` 2.5 a runner up to ≈ 5.8×
+  slower passes. It moves into
   `ci.yml` as its `perf-guard` job when the CI plan lands.
   `.github/workflows/perf-nightly.yml` (03:00 UTC and manual) builds the UI,
   installs Chromium, runs `perf:ui` at `l` with churn 50 and the 30-minute
   soak, `ttfr,map,health` at `s` and `m`, and
   `compare.mjs --slack ci --only ui`. Neither uses secrets.
-- **Fixes applied** (the spec's Results and Gates tables have the numbers).
-  The Resource Map: its rebuilds are coalesced while the watches sync
-  (plan Task 16a), the graph and views are built in the engine worker
-  (Task 16, H5; health and netpol stay on the main thread, their gate did
-  not fire) and the cap is 800 nodes (Task 22); see "Resource map". The map
-  scenario's summary (`perf-results/ui.json` `raw.mapAll`) counts the
-  builds and the long tasks.
+- **Gates fired and fixes applied.** The spec's Results and Gates tables
+  have every number. Values are medians on the reference machine, shown
+  as baseline → final (plan Task 23).
+  - **R1** (no gate: three Rust budgets missed at the baseline). Watch
+    objects are converted by value and shared (`Arc`) between the
+    aggregator's store and its batches. Fleet search matches ASCII names
+    in place.
+    - `watch/aggregator_initial_20k`: 170 → 28 ms (budget 120, now 90 ms).
+    - `watch/reset_batch_20k`: 64 → 1.1 ms (60, now 5 ms).
+    - `fleet_search/matcher_substring_50k`: 6.0 → 0.76 ms (5, now 2.5 ms).
+    - Also faster: `watch/steady_500` 2.0 → 0.12 ms,
+      `fleet_search/matcher_glob_50k` 6.5 → 1.3 ms and
+      `e2e/watch_pods_synced_l` 0.60 → 0.45 s.
+  - **MAP-sync, Task 16a** (`ui/map_all_m` missed at 2.95 s, with 72–76
+    graph rebuilds while the watches synced). Data-only rebuilds are
+    coalesced to one per 250 ms during the sync (`CoalescedMemo`).
+    `ui/map_all_m`: 2.95 s (3.31 s on the same machine just before) →
+    0.55 s, 3 builds.
+  - **H5, Task 16** (long tasks at `m` came from the map engine only). The
+    topology engine runs in a worker, with one session per map; health
+    and netpol stay on the main thread. On the all-namespaces map at `m`,
+    long tasks over 50 ms fell from 19–20 (max 321 ms) to none from the
+    engine. The one left, 82–91 ms, is the main thread's first render of
+    the 800-node canvas. Final `ui/map_all_m`: 0.59 s.
+  - **H6, Task 17** (fired from the code: a closed window's watches
+    outlived it; the lag half did not fire, 13–25 ms ≪ 1 s).
+    Acknowledged watch batches, and window-owned watches stopped on
+    close; see Kubernetes access. It costs nothing measurable:
+    `e2e/watch_pods_synced_l` is 0.45 s with and without it,
+    `ui/apply_p95_l_churn50` went 8.6 → 8.4 ms and the watch lag p95 is
+    15 ms.
+  - **MAP, Task 22.** The cap went from 400 to 800 nodes; see "Resource
+    map". Build + view + layout takes 102 ms (the limit is 250 ms), and
+    panning still takes one pointer move per frame. At 1 200 nodes it
+    loses a third of them.
+  - **Not fired, so skipped:** H1, H2, H3, H4, H7, H8, H9 and H10. The
+    final run leaves each of them shut. H2 was not measured again, since
+    no change touched the watch scopes.
+
+  The map scenario's summary (`perf-results/ui.json` `raw.mapAll`) counts
+  the builds and the long tasks.
+- **Open checks.** The first three are manual: they need a `tauri dev`
+  window, WKWebView or a GitHub remote. The spec's Results has the steps.
+  - H6: in `pnpm tauri:dev`, close a secondary window and confirm in the
+    backend log that its watches stop at once.
+  - MAP: pan the 800-node map in WKWebView (`pnpm tauri:dev`,
+    `?scale=m&perf=1`, `__kubepitPerf.startFps()`/`stopFps()`).
+  - CI: calibrate `perf-guard.yml` on a GitHub runner (its first run after
+    the remote exists), then drop the compare step's `continue-on-error`.
+    The nightly's first run checks the `ui` budgets the same way.
+  - Soak follow-up (not manual). The 30-minute soak ran after the changes
+    (ratio 1.125 and 1.037, within 1.15). In both runs every view's heap
+    rose about 40 MiB around minute 28. A longer soak would show whether
+    it keeps growing.
