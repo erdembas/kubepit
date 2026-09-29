@@ -1976,9 +1976,9 @@ git commit -m "feat(demo): recommendation scans in the in-memory backend"
 
 Steps:
 
-- [ ] **Step 1: Implement the store, the model and the translation functions**
+- [x] **Step 1: Implement the store, the model and the translation functions**
 
-- [ ] **Step 2: Add the translations**
+- [x] **Step 2: Add the translations**
 
 Run: `pnpm i18n:check -- --fix`, then add the Turkish for every key it prints, for
 example:
@@ -1987,13 +1987,13 @@ example:
 - "OOM-killed in the window: memory never goes below the limit that killed it." →
   "Pencerede OOM ile sonlandı: bellek, sonlandıran sınırın altına inmez."
 
-- [ ] **Step 3: Run the checks**
+- [x] **Step 3: Run the checks**
 
 Run: `pnpm typecheck && pnpm i18n:check`
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/desktop/src
