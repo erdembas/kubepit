@@ -93,6 +93,18 @@ describe('SummarySection', () => {
     expect(html).toContain('Usage reaches 1.8× the request');
     expect(html).toContain('Saves about $40.00 a month');
   });
+
+  it('marks the workloads applied in this session', () => {
+    const spot = renderToStaticMarkup(
+      <ReviewSpotlight
+        list={rows}
+        onReview={() => {}}
+        applied={{ 'Deployment/data/batch': Date.now() }}
+      />,
+    );
+    expect(spot.match(/Applied, updated at the next scan/g)).toHaveLength(1);
+    expect(spot.indexOf('Applied, updated')).toBeGreaterThan(spot.indexOf('>batch<'));
+  });
 });
 
 describe('empty states', () => {

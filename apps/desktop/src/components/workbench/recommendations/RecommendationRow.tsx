@@ -1,7 +1,7 @@
 import * as i18n from '@/i18n';
 import { useLocaleMemo as useMemo } from '@/i18n';
 import { memo } from 'react';
-import { Check, TrendingDown, TrendingUp, Zap } from 'lucide-react';
+import { Check, Loader2, Lock, TrendingDown, TrendingUp, Zap } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Checkbox } from '@/components/ui/Choice';
@@ -52,35 +52,65 @@ export interface RecommendationRowProps {
   actions: boolean;
   /** Apply and review need the cluster connection. */
   connected: boolean;
+  /** A dry run or patch of this row is running: it cannot be applied again. */
+  applying?: boolean;
+  /** Why the user may not apply it (RBAC; null = allowed). */
+  blocked?: string | null;
   onToggle: (key: string, shift: boolean) => void;
   onOpen: (key: string) => void;
   onApply: (rec: WorkloadRecommendation) => void;
   onReview: (rec: WorkloadRecommendation) => void;
 }
 
-/** The action of a row: "Apply" (one-click), "Review & apply", "Review" (read-only cluster). */
+/**
+ * The action of a row: "Apply" (one-click), "Review & apply", "Review"
+ * (read-only cluster). A row being applied shows a spinner and waits; an
+ * RBAC denial disables it with the reason.
+ */
 function RowAction({
   rec,
   mode,
   connected,
+  applying = false,
+  blocked = null,
   onApply,
   onReview,
-}: Pick<RecommendationRowProps, 'rec' | 'mode' | 'connected' | 'onApply' | 'onReview'>) {
+}: Pick<
+  RecommendationRowProps,
+  'rec' | 'mode' | 'connected' | 'applying' | 'blocked' | 'onApply' | 'onReview'
+>) {
   if (mode === 'none') return null;
+  const denied = mode === 'read-only' ? null : blocked;
   const title = !connected
     ? i18n.t('Connect to the cluster to apply.')
-    : mode === 'read-only'
-      ? i18n.t('This cluster is read-only: you can review the change, but it cannot be applied.')
-      : undefined;
+    : denied
+      ? denied
+      : applying
+        ? i18n.t('Applying…')
+        : mode === 'read-only'
+          ? i18n.t(
+              'This cluster is read-only: you can review the change, but it cannot be applied.',
+            )
+          : undefined;
   return (
     <span title={title} className="shrink-0">
       <Button
         size="xs"
         variant="secondary"
-        disabled={!connected}
-        leftIcon={mode === 'one-click' ? <Zap className="text-accent h-3 w-3" /> : undefined}
+        disabled={!connected || !!denied || applying}
+        aria-busy={applying || undefined}
+        leftIcon={
+          applying ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : denied ? (
+            <Lock className="h-3 w-3" />
+          ) : mode === 'one-click' ? (
+            <Zap className="text-accent h-3 w-3" />
+          ) : undefined
+        }
         onClick={(e) => {
           e.stopPropagation();
+          if (applying) return;
           if (mode === 'one-click') onApply(rec);
           else onReview(rec);
         }}
@@ -112,6 +142,8 @@ export const RecommendationRow = memo(function RecommendationRow({
   applied,
   actions,
   connected,
+  applying = false,
+  blocked = null,
   onToggle,
   onOpen,
   onApply,
@@ -258,6 +290,8 @@ export const RecommendationRow = memo(function RecommendationRow({
               rec={rec}
               mode={mode}
               connected={connected}
+              applying={applying}
+              blocked={blocked}
               onApply={onApply}
               onReview={onReview}
             />

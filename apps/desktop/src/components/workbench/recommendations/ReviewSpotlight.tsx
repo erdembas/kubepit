@@ -1,6 +1,6 @@
 import * as i18n from '@/i18n';
 import { useLocaleMemo as useMemo } from '@/i18n';
-import { CircleCheck, Info, Siren } from 'lucide-react';
+import { Check, CircleCheck, Info, Siren } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { formatMoney } from '@/lib/cost';
@@ -26,12 +26,15 @@ function SpotlightItem({
   group,
   currency,
   active,
+  applied,
   onReview,
 }: {
   rec: WorkloadRecommendation;
   group: 'under' | 'over';
   currency: string;
   active: boolean;
+  /** Applied in this session; the next scan reflects it. */
+  applied: boolean;
   onReview: () => void;
 }) {
   i18n.useLocale();
@@ -76,6 +79,12 @@ function SpotlightItem({
               {i18n.t('Saves about {amount} a month', {
                 amount: formatMoney(-rec.monthly_delta, currency),
               })}
+            </span>
+          )}
+          {applied && (
+            <span className="text-status-running inline-flex items-center gap-1">
+              <Check className="h-3 w-3 shrink-0" />
+              {i18n.t('Applied, updated at the next scan')}
             </span>
           )}
         </div>
@@ -157,13 +166,15 @@ function Group({
 /**
  * The three riskiest under-provisioned workloads (confidence ≥ medium; an
  * OOM kill first), then the three largest high-confidence savings, each
- * with its change cells and "Review".
+ * with its change cells and "Review" (the drawer, where it is applied).
+ * Rows applied in this session say so until the next scan.
  */
 export function ReviewSpotlight({
   list,
   onReview,
   currency = 'USD',
   active = null,
+  applied,
   className,
 }: {
   list: readonly WorkloadRecommendation[];
@@ -171,6 +182,8 @@ export function ReviewSpotlight({
   currency?: string;
   /** `workloadKey` of the row open in the drawer. */
   active?: string | null;
+  /** `workloadKey` → when it was applied in this session. */
+  applied?: Readonly<Record<string, number>>;
   className?: string;
 }) {
   i18n.useLocale();
@@ -185,6 +198,7 @@ export function ReviewSpotlight({
         group={group}
         currency={currency}
         active={active === key}
+        applied={applied?.[key] != null}
         onReview={() => onReview(rec)}
       />
     );

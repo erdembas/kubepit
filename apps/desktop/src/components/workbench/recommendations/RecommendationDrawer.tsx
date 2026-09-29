@@ -4,6 +4,7 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -13,6 +14,7 @@ import {
 } from 'react';
 import {
   ArrowUpRight,
+  Check,
   Copy,
   Download,
   History,
@@ -39,6 +41,7 @@ import {
   workloadGvk,
 } from '@/lib/kube/rightsizing/model';
 import { useAppStore } from '@/store/useAppStore';
+import { useRecommendationsStore } from '@/store/useRecommendationsStore';
 import { navigateTo } from '@/store/useWorkbenchStore';
 import type {
   ClusterId,
@@ -46,6 +49,7 @@ import type {
   RightsizingReport,
   WorkloadRecommendation,
 } from '@/types';
+import { useActionGate } from '../access/gates';
 import { useActionDialogs } from '../actions/dialogStore';
 import { ContainerChanges } from '../cost/RightsizingDialog';
 import { CONFIDENCE_TONE, VERDICT_TONE } from '../cost/tones';
@@ -53,6 +57,7 @@ import { usePolled } from '../data/polled';
 import { saveExportFile } from '../table/exportStore';
 import { copyText, errorText, isTypingTarget, scrollParent } from '../util';
 import { RecommendationTrend } from './RecommendationTrend';
+import { rightsizeAction, useApplying } from './quickApply';
 import { ChartsNote, UsageHistoryCharts } from './UsageHistoryCharts';
 import {
   drawerAction,
@@ -556,7 +561,7 @@ export function RecommendationDrawer({
   past?: boolean;
   connected: boolean;
   onClose: () => void;
-  /** One-click apply of an eligible row (Task 26 adds the silent dry run; until then the review). */
+  /** One-click apply of an eligible row (`quickApply`: a silent dry run, else the review). */
   onApply: (rec: WorkloadRecommendation) => void;
   /** The review dialog (`RightsizingDialog`). */
   onReview: (rec: WorkloadRecommendation) => void;
@@ -568,9 +573,21 @@ export function RecommendationDrawer({
   const key = workloadKey(rec);
   const bodyRef = useRef<HTMLDivElement>(null);
   const tabsId = `rec-drawer${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
-  const action = drawerAction(applyMode(rec, cluster ?? { read_only: false, environment: null }), {
+  const mode = applyMode(rec, cluster ?? { read_only: false, environment: null });
+  const gate = useActionGate(
+    clusterId,
+    useMemo(
+      () => (mode === 'one-click' || mode === 'review' ? rightsizeAction(rec) : null),
+      [mode, rec],
+    ),
+    !!cluster?.read_only,
+  );
+  const applying = useApplying(clusterId, key);
+  const applied = useRecommendationsStore((s) => s.byCluster[clusterId]?.applied[key] != null);
+  const action = drawerAction(mode, {
     past,
     connected,
+    blocked: gate.reason === 'permission' ? gate.message : null,
   });
 
   useEffect(() => {
@@ -608,18 +625,33 @@ export function RecommendationDrawer({
             </Badge>
           )}
           <Delta rec={rec} currency={report.currency} />
-          {action.kind !== 'none' && (
-            <span className="ml-auto shrink-0" title={action.disabled ?? undefined}>
-              <Button
-                size="xs"
-                variant={action.kind === 'apply' ? 'primary' : 'secondary'}
-                disabled={!!action.disabled}
-                onClick={() => (action.kind === 'apply' ? onApply(rec) : onReview(rec))}
+          {action.kind !== 'none' &&
+            (applied && !past ? (
+              <span className="text-status-running ml-auto inline-flex shrink-0 items-center gap-1 text-[11px]">
+                <Check className="h-3 w-3 shrink-0" />
+                {i18n.t('Applied, updated at the next scan')}
+              </span>
+            ) : (
+              <span
+                className="ml-auto shrink-0"
+                title={action.disabled ?? (applying ? i18n.t('Applying…') : undefined)}
               >
-                {action.label}
-              </Button>
-            </span>
-          )}
+                <Button
+                  size="xs"
+                  variant={action.kind === 'apply' ? 'primary' : 'secondary'}
+                  disabled={!!action.disabled || applying}
+                  aria-busy={applying || undefined}
+                  leftIcon={applying ? <Loader2 className="h-3 w-3 animate-spin" /> : undefined}
+                  onClick={() => {
+                    if (applying) return;
+                    if (action.kind === 'apply') onApply(rec);
+                    else onReview(rec);
+                  }}
+                >
+                  {action.label}
+                </Button>
+              </span>
+            ))}
         </div>
         {past && (
           <p className="text-fg-dim flex min-w-0 items-center gap-1.5 text-[11px]">

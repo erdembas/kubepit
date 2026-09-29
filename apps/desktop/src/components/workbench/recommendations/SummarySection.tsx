@@ -1,10 +1,13 @@
 import { useMemo } from 'react';
 import { optimizationTotals, workloadKey } from '@/lib/kube/recommendations/model';
+import { useRecommendationsStore } from '@/store/useRecommendationsStore';
 import { CapacityOverview } from './CapacityOverview';
 import { ReviewSpotlight } from './ReviewSpotlight';
 import { AttentionTile, InventoryTile, OptimizationSummary } from './SummaryCards';
 import type { SectionProps } from './sectionProps';
 import { useRecommendationsView } from './viewState';
+
+const NO_APPLIED: Record<string, number> = {};
 
 /**
  * Body section 1 (spec §9.1): `OptimizationSummary` with the Attention and
@@ -17,6 +20,7 @@ import { useRecommendationsView } from './viewState';
 export function SummarySection({ clusterId, report, rows }: SectionProps) {
   const [view, update] = useRecommendationsView(clusterId);
   const totals = useMemo(() => optimizationTotals(rows), [rows]);
+  const applied = useRecommendationsStore((s) => s.byCluster[clusterId]?.applied ?? NO_APPLIED);
 
   return (
     <div className="grid gap-3 @3xl:grid-cols-2">
@@ -46,6 +50,7 @@ export function SummarySection({ clusterId, report, rows }: SectionProps) {
         list={rows}
         currency={report.currency}
         active={view.open}
+        applied={applied}
         onReview={(rec) => update({ open: workloadKey(rec) })}
       />
     </div>

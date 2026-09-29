@@ -403,11 +403,15 @@ export interface DrawerAction {
  * The drawer's apply button: "Apply" for one-click rows, "Review & apply"
  * otherwise, "Review" on read-only clusters (the dialog shows the dry run
  * and refuses to apply). A past run and a disconnected cluster apply
- * nothing.
+ * nothing; an RBAC denial (`blocked`) disables applying with its reason.
  */
 export function drawerAction(
   mode: ApplyMode,
-  { past, connected }: { past: boolean; connected: boolean },
+  {
+    past,
+    connected,
+    blocked = null,
+  }: { past: boolean; connected: boolean; blocked?: string | null },
 ): DrawerAction {
   if (mode === 'none') return { kind: 'none', label: i18n.t('No change'), disabled: null };
   const kind = mode === 'one-click' ? 'apply' : 'review';
@@ -421,6 +425,8 @@ export function drawerAction(
     ? i18n.t('A past scan is read-only: pick the latest scan to apply.')
     : !connected
       ? i18n.t('Connect to the cluster to apply.')
-      : null;
+      : mode !== 'read-only' && blocked
+        ? blocked
+        : null;
   return { kind, label, disabled };
 }

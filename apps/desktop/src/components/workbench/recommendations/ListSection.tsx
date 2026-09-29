@@ -26,11 +26,14 @@ import type {
   RightsizingReport,
   WorkloadRecommendation,
 } from '@/types';
+import { useActionGates } from '../access/gates';
 import { RightsizingDialog } from '../cost/RightsizingDialog';
 import { Card } from '../overview/charts';
 import { useEvent } from '../util';
+import { BatchApplyDialog } from './BatchApplyDialog';
 import { ExportFormatMenu, useClusterName } from './ExportMenu';
 import { RecommendationRow, ROW_GRID } from './RecommendationRow';
+import { batchTargets } from './batchApply';
 import { exportRecommendations, workloadRefs } from './exportRecommendations';
 import {
   VERDICT_FILTERS,
@@ -42,6 +45,13 @@ import {
   type ScopedSelection,
   type SelectionScope,
 } from './listModel';
+import {
+  NAMED_GATE_LIMIT,
+  rightsizeAction,
+  rightsizeActionId,
+  useApplyingKeys,
+  useQuickApply,
+} from './quickApply';
 import type { SectionProps } from './sectionProps';
 import { updateRecommendationsView, useRecommendationsView } from './viewState';
 
@@ -79,7 +89,11 @@ export interface RecommendationListProps {
   onApply: (rec: WorkloadRecommendation) => void;
   /** "Review & apply" (`review`) or "Review" (`read-only`): the review dialog. */
   onReview: (rec: WorkloadRecommendation) => void;
-  /** "Apply {n} high-confidence" for the checked `one-click` rows; the action shows only when set. */
+  /**
+   * "Apply {n} high-confidence" for the checked rows still shown that are
+   * `one-click` and not applied in this session (`batchTargets`); the action
+   * shows only when set.
+   */
   onBatchApply?: (recs: WorkloadRecommendation[]) => void;
 }
 
@@ -209,18 +223,45 @@ export function RecommendationList({
     (rec: WorkloadRecommendation): ApplyMode => applyMode(rec, cluster ?? UNKNOWN_CLUSTER),
     [cluster],
   );
-  const oneClick = useMemo(
-    () => targets.filter((rec) => modeOf(rec) === 'one-click'),
-    [targets, modeOf],
-  );
+  const applying = useApplyingKeys(clusterId);
 
   // Paging: back to the first page when the rows change; the open row is always rendered.
   const pageKey = `${view.filter}|${view.lenses.join(',')}|${view.sort}|${deferredQuery}|${rows.length}`;
   const [paging, setPaging] = useState({ key: pageKey, limit: PAGE });
   const openIndex = view.open ? keys.indexOf(view.open) : -1;
   const limit = Math.max(paging.key === pageKey ? paging.limit : PAGE, openIndex + 1);
-  const rendered = shown.length > limit ? shown.slice(0, limit) : shown;
+  const rendered = useMemo(
+    () => (shown.length > limit ? shown.slice(0, limit) : shown),
+    [shown, limit],
+  );
   const hidden = shown.length - rendered.length;
+
+  // RBAC: `patch` on the rendered rows that can apply (per kind and namespace for many rows).
+  const { gateActions, named } = useMemo(() => {
+    const candidates = rendered.filter((rec) => {
+      const mode = modeOf(rec);
+      return mode === 'one-click' || mode === 'review';
+    });
+    const named = candidates.length <= NAMED_GATE_LIMIT;
+    const byId = new Map(candidates.map((rec) => [rightsizeActionId(rec, named), rec]));
+    return {
+      gateActions: [...byId.values()].map((rec) => rightsizeAction(rec, { named })),
+      named,
+    };
+  }, [rendered, modeOf]);
+  const gates = useActionGates(clusterId, gateActions, !!cluster?.read_only);
+  const blockedOf = useCallback(
+    (rec: WorkloadRecommendation) => {
+      const gate = gates.get(rightsizeActionId(rec, named));
+      return gate?.reason === 'permission' ? gate.message : null;
+    },
+    [gates, named],
+  );
+  // The batch leaves out rows the list already knows are denied.
+  const oneClick = useMemo(
+    () => batchTargets(shown, selected, cluster, applied, blockedOf),
+    [shown, selected, cluster, applied, blockedOf],
+  );
 
   // Stable handlers keep the memoized rows from re-rendering.
   const anchor = useRef<string | null>(null);
@@ -355,6 +396,8 @@ export function RecommendationList({
                     applied={key in applied}
                     actions={!readOnlyRun}
                     connected={connected}
+                    applying={applying.has(key)}
+                    blocked={blockedOf(rec)}
                     onToggle={onToggle}
                     onOpen={open}
                     onApply={apply}
@@ -437,18 +480,21 @@ export function RecommendationList({
 
 /**
  * Body section 3 (spec §9.1): the `RecommendationList` over `rows`, the
- * checkbox selection (of the run and report version shown) and the review
- * dialog. Opening a row sets the view's `open`, which the drawer beside it
- * shows. Every apply goes through the audited `RightsizingDialog` (dry run,
- * read-only refusal, typed confirmation on production); Task 26 plugs
- * one-click (`quickApply`) into `onApply` and the batch dialog into
- * `onBatchApply` here.
+ * checkbox selection (of the run and report version shown) and the apply
+ * flows. Opening a row sets the view's `open`, which the drawer beside it
+ * shows. "Apply" of a one-click row is `quickApply` (a silent dry run,
+ * then the patch); anything it refuses opens the audited
+ * `RightsizingDialog` (dry-run diff, acknowledgement below high confidence,
+ * read-only refusal, typed confirmation on production), as "Review &
+ * apply" does. The selection bar's batch opens `BatchApplyDialog`. A past
+ * run or a disconnected cluster applies nothing.
  */
 export function ListSection({ clusterId, report, rows, runId, past, connected }: SectionProps) {
   i18n.useLocale();
   const scope: SelectionScope = { clusterId, runId, report };
   const [stored, setSelection] = useState<ScopedSelection>(() => ({ scope, keys: NO_KEYS }));
   const [reviewing, setReviewing] = useState<WorkloadRecommendation | null>(null);
+  const [batch, setBatch] = useState<WorkloadRecommendation[] | null>(null);
 
   // Another cluster, run or report version starts with no checks (reset during render).
   const selection = scopedSelection(stored, scope);
@@ -469,6 +515,14 @@ export function ListSection({ clusterId, report, rows, runId, past, connected }:
     [clusterId],
   );
   const onReview = useCallback((rec: WorkloadRecommendation) => setReviewing(rec), []);
+  const onApply = useQuickApply(clusterId, { past, connected }, onReview);
+  const onBatchApply = useCallback(
+    (recs: WorkloadRecommendation[]) => {
+      if (past || !connected || !recs.length) return;
+      setBatch(recs);
+    },
+    [past, connected],
+  );
 
   return (
     <>
@@ -482,18 +536,28 @@ export function ListSection({ clusterId, report, rows, runId, past, connected }:
         selected={selection.keys}
         onSelect={onSelect}
         onOpen={onOpen}
-        onApply={onReview}
+        onApply={onApply}
         onReview={onReview}
+        onBatchApply={onBatchApply}
       />
       {reviewing && (
         <RightsizingDialog
           clusterId={clusterId}
           rec={reviewing}
           currency={report.currency}
+          requireAck={reviewing.confidence !== 'high'}
           onApplied={() =>
             useRecommendationsStore.getState().markApplied(clusterId, workloadKey(reviewing))
           }
           onClose={() => setReviewing(null)}
+        />
+      )}
+      {batch && (
+        <BatchApplyDialog
+          clusterId={clusterId}
+          recs={batch}
+          currency={report.currency}
+          onClose={() => setBatch(null)}
         />
       )}
     </>

@@ -2338,15 +2338,15 @@ git commit -m "feat(ui): recommendation drawer with usage charts, history and YA
 
 Steps:
 
-- [ ] **Step 1: Implement `quickApply`, the acknowledgement and the batch dialog, and wire the buttons**
+- [x] **Step 1: Implement `quickApply`, the acknowledgement and the batch dialog, and wire the buttons**
 
-- [ ] **Step 2: Translate, run the checks**
+- [x] **Step 2: Translate, run the checks**
 
 Run: `pnpm i18n:check -- --fix`, add the Turkish, then `pnpm typecheck && pnpm i18n:check`.
 
 Expected: PASS.
 
-- [ ] **Step 3: Verify the demo**
+- [x] **Step 3: Verify the demo**
 
 Run: `pnpm dev:ui`.
 - On staging-gke, "Apply" on a high-confidence row without a raise: the toast appears and
@@ -2356,7 +2356,7 @@ Run: `pnpm dev:ui`.
 - prod-eu-west-1 (production) always opens the review with the typed name.
 - On a read-only demo cluster Apply is blocked with the read-only note.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/desktop/src
