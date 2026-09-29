@@ -1319,7 +1319,10 @@ history") and re-evaluated for the UI with the current settings.
   summary group alert for the cluster (`scan::plan_saving_alerts`; groups
   are `kind: Workload`, cluster-wide, `namespace/name` listed), so a large
   cluster never floods the shared 500-entry alert history; a group opens
-  the cluster's Recommendations view. The previous run is read before the new one replaces the
+  the cluster's Recommendations view. Only workloads in namespaces the
+  alert filters allow are counted before planning, since a cluster-wide
+  group passes the book's namespace filter by itself; a repeated group
+  within the cooldown adds the workloads it did not list yet. The previous run is read before the new one replaces the
   latest pointer, and the alerts are raised once the pointer names the new
   run, through `AlertCenter::raise` (filters, mutes, snoozes, bursts). The
   message is an English data string with the share only ("Requests could

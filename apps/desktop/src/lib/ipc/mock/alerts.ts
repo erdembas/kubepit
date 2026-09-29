@@ -137,7 +137,7 @@ export function raiseAlert(clusterId: string, object: AlertObjectRef, finding: F
  * One finding about several objects (a scan's summary of its new
  * savings), like `AlertCenter::raise_group` / `AlertBook::record_group`:
  * one group alert per bucket; a repeat within the cooldown takes the new
- * group and message.
+ * message and adds the objects it did not list yet.
  */
 export function raiseAlertGroup(
   clusterId: string,
@@ -159,13 +159,20 @@ export function raiseAlertGroup(
   let alert: Alert;
   let fresh = false;
   if (active) {
+    // Like `book.rs::merge_groups`: the objects it did not list yet, once.
+    const known = active.group!;
+    const overlap = listed.names.filter((n) => known.names.includes(n)).length;
+    const merged: AlertGroup = {
+      total: Math.max(known.total, known.total + Math.max(0, listed.total - overlap)),
+      names: [...new Set([...known.names, ...listed.names])].slice(0, GROUP_NAME_LIMIT),
+    };
     Object.assign(active, {
       count: active.count + 1,
       last_seen: now,
       message: finding.message,
-      group: listed,
+      group: merged,
     });
-    alert = { ...active, group: { ...listed } };
+    alert = { ...active, group: { ...merged, names: [...merged.names] } };
   } else {
     fresh = true;
     alert = {

@@ -24,6 +24,8 @@ let listen: typeof import('./bus').mockListen;
 let newSavings: typeof import('./recommendations').newSavings;
 let planSavingAlerts: typeof import('./recommendations').planSavingAlerts;
 let SAVING_ALERTS_PER_SCAN: number;
+let raiseAlertGroup: typeof import('./alerts').raiseAlertGroup;
+let DEFAULT_ALERT_SETTINGS: typeof import('@/lib/alerts/policy').DEFAULT_ALERT_SETTINGS;
 
 beforeAll(async () => {
   vi.useFakeTimers({ now: new Date('2026-09-28T10:30:00Z') });
@@ -33,6 +35,8 @@ beforeAll(async () => {
   invoke = (command, args = {}) => mock.mockInvoke(command, args);
   listen = (await import('./bus')).mockListen;
   ({ newSavings, planSavingAlerts, SAVING_ALERTS_PER_SCAN } = await import('./recommendations'));
+  ({ raiseAlertGroup } = await import('./alerts'));
+  ({ DEFAULT_ALERT_SETTINGS } = await import('@/lib/alerts/policy'));
 });
 
 afterAll(() => {
@@ -298,6 +302,18 @@ describe('demo recommendation scans', () => {
     );
     await scan();
     expect(saving.length).toBe(1);
+
+    // Every namespace excluded: even a summary raises nothing.
+    await invoke('settings_set', {
+      settings: {
+        ...settings,
+        recommendations: { ...settings.recommendations, alerts: true },
+        alerts: { ...settings.alerts, exclude_namespaces: ['*'] },
+      },
+    });
+    await invoke('history_clear', { kind: 'recommendations', clusterId: 'c-dev' });
+    await scan();
+    expect(saving.length).toBe(1);
     stop();
     await invoke('settings_set', { settings });
     await settle(invoke('cluster_disconnect', { id: 'c-dev' }));
@@ -350,6 +366,48 @@ describe('demo recommendation scans', () => {
     const first = planSavingAlerts(null, next);
     expect(first.length).toBe(1);
     expect(first[0]!.kind === 'group' && !first[0]!.more && first[0]!.workloads.length).toBe(9);
+
+    // Excluded namespaces never appear, single or grouped; all excluded, nothing.
+    const spread = {
+      ...report,
+      workloads: next.workloads.map((w, i) => ({
+        ...w,
+        namespace: i % 2 ? 'kube-system' : 'shop',
+      })),
+    };
+    const alerts = { ...DEFAULT_ALERT_SETTINGS, exclude_namespaces: ['kube-*'] };
+    const named = (plan: ReturnType<typeof planSavingAlerts>) =>
+      plan.flatMap((p) => (p.kind === 'one' ? [p.workload] : p.workloads));
+    for (const plan of [
+      planSavingAlerts({ ...spread, workloads: [] }, spread, alerts),
+      planSavingAlerts(null, spread, alerts),
+    ]) {
+      expect(named(plan).length).toBe(5);
+      expect(named(plan).every((w) => w.namespace === 'shop')).toBe(true);
+    }
+    const none = { ...DEFAULT_ALERT_SETTINGS, exclude_namespaces: ['*'] };
+    expect(planSavingAlerts(null, spread, none)).toEqual([]);
+    expect(planSavingAlerts({ ...spread, workloads: [] }, spread, none)).toEqual([]);
+  });
+
+  it('merges a repeated group alert within the cooldown', async () => {
+    const seen: AlertNotice[] = [];
+    const stop = await listen<AlertNotice>('alerts://new', (n) => {
+      if (n.alert.condition === 'more') seen.push(n);
+    });
+    const object = { group: '', version: '', kind: 'Workload', namespace: null, name: '' };
+    const finding = {
+      reason: 'RightsizingSaving' as const,
+      container: null,
+      condition: 'more',
+      message: 'm',
+    };
+    raiseAlertGroup('c-staging', object, finding, { total: 2, names: ['a/x', 'a/y'] });
+    raiseAlertGroup('c-staging', object, finding, { total: 2, names: ['a/y', 'b/z'] });
+    stop();
+    expect(seen.map((n) => n.fresh)).toEqual([true, false]);
+    expect(seen[1]!.alert.group).toEqual({ total: 3, names: ['a/x', 'a/y', 'b/z'] });
+    expect(seen[1]!.alert.id).toBe(seen[0]!.alert.id);
   });
 
   it('charts usage with gaps and refuses odd pod names', async () => {

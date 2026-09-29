@@ -1,4 +1,5 @@
 import type {
+  AlertSettings,
   ClusterDef,
   ClusterRecommendationSummary,
   ClusterStatus,
@@ -19,6 +20,7 @@ import type {
   WorkloadRef,
   WorkloadUsageHistory,
 } from '@/types';
+import { DEFAULT_ALERT_SETTINGS, alertSettingsOf, namespaceAllowed } from '@/lib/alerts/policy';
 import { healthVerdict, workloadGvk } from '@/lib/kube/rightsizing/model';
 import { mockEmit, sleep } from './bus';
 import { collect, effectiveSettings, pricingOf, savedStrategy, usageSource } from './cost';
@@ -465,12 +467,16 @@ export type SavingAlertPlan =
 export function planSavingAlerts(
   previous: RightsizingReport | null,
   next: RightsizingReport,
+  alerts: AlertSettings = DEFAULT_ALERT_SETTINGS,
 ): SavingAlertPlan[] {
-  const found = newSavings(previous, next).sort(
-    (a, b) =>
-      a.monthly_delta - b.monthly_delta ||
-      `${a.namespace}/${a.kind}/${a.name}`.localeCompare(`${b.namespace}/${b.kind}/${b.name}`),
-  );
+  // Only namespaces the alert filters allow: a cluster-wide group passes them by itself.
+  const found = newSavings(previous, next)
+    .filter((w) => namespaceAllowed(alerts, w.namespace))
+    .sort(
+      (a, b) =>
+        a.monthly_delta - b.monthly_delta ||
+        `${a.namespace}/${a.kind}/${a.name}`.localeCompare(`${b.namespace}/${b.kind}/${b.name}`),
+    );
   if (!found.length) return [];
   if (!previous) return [{ kind: 'group', more: false, workloads: found }];
   const plan: SavingAlertPlan[] = found
@@ -488,7 +494,8 @@ function alertNewSavings(
   next: RightsizingReport,
 ) {
   if (!settings()?.alerts) return;
-  for (const item of planSavingAlerts(previous, next)) {
+  const filters = alertSettingsOf(handlers.settings_get?.({}) as Settings | undefined);
+  for (const item of planSavingAlerts(previous, next, filters)) {
     if (item.kind === 'group') {
       const total = item.workloads.length;
       raiseAlertGroup(

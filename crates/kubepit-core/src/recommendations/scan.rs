@@ -48,7 +48,7 @@ use serde::Serialize;
 
 use super::types::{RecommendationScanStatus, ScanState, ScanTrigger};
 use crate::alerts::book::GROUP_NAME_LIMIT;
-use crate::alerts::{AlertGroup, AlertObjectRef, AlertReason, Finding};
+use crate::alerts::{AlertGroup, AlertObjectRef, AlertReason, AlertSettings, Finding};
 use crate::app::Kubepit;
 use crate::history::recommendations::{self as rec, ScanBegin, ScanOutcome, ERROR_STOPPED};
 use crate::history::HistoryKind;
@@ -366,11 +366,18 @@ fn saving_group(workloads: &[&WorkloadRecommendation], condition: Option<&str>) 
 ///   alert for the cluster, not one per workload;
 /// - otherwise the [`SAVING_ALERTS_PER_SCAN`] largest one by one, and one
 ///   group alert for the rest.
+///
+/// Only workloads in namespaces `alerts` allows count (its include and
+/// exclude globs), so no alert, single or grouped, names a workload of an
+/// excluded namespace: a cluster-wide group passes the book's namespace
+/// filter by itself.
 pub(crate) fn plan_saving_alerts(
     previous: Option<&RightsizingReport>,
     next: &RightsizingReport,
+    alerts: &AlertSettings,
 ) -> Vec<SavingAlert> {
     let mut new = saving_alerts(previous, next);
+    new.retain(|w| alerts.namespace_allowed(Some(&w.namespace)));
     if new.is_empty() {
         return Vec::new();
     }
@@ -419,7 +426,7 @@ impl Kubepit {
             Ok(rec::scan(conn, cluster_id, run.id)?.map(|stored| stored.report))
         });
         match previous {
-            Ok(previous) => plan_saving_alerts(previous.as_ref(), report),
+            Ok(previous) => plan_saving_alerts(previous.as_ref(), report, &self.settings().alerts),
             Err(e) => {
                 tracing::warn!(cluster = %cluster_id, "saving alerts skipped: {e:#}");
                 Vec::new()
@@ -1263,6 +1270,75 @@ mod tests {
         workload(name, Confidence::High, (1000.0, 200.0), (1000.0, -delta))
     }
 
+    /// Alert settings that allow every namespace.
+    fn every() -> AlertSettings {
+        AlertSettings::default()
+    }
+
+    #[test]
+    fn excluded_namespaces_never_appear_in_saving_alerts() {
+        let in_ns = |ns: &str, name: &str, delta: f64| WorkloadRecommendation {
+            namespace: ns.into(),
+            ..saving(name, delta)
+        };
+        let previous = with(vec![in_ns("shop", "old", 900.0)]);
+        let next = with(vec![
+            in_ns("shop", "old", 900.0),
+            in_ns("kube-system", "dns", 990.0),
+            in_ns("shop", "a", 800.0),
+            in_ns("team-a", "b", 700.0),
+            in_ns("kube-public", "c", 650.0),
+            in_ns("shop", "d", 600.0),
+            in_ns("team-a", "e", 550.0),
+            in_ns("shop", "f", 540.0),
+            in_ns("kube-system", "g", 530.0),
+            in_ns("team-b", "h", 520.0),
+        ]);
+        let filters = AlertSettings {
+            exclude_namespaces: vec!["kube-*".into()],
+            ..AlertSettings::default()
+        };
+        let named = |plan: &[SavingAlert]| -> Vec<String> {
+            plan.iter()
+                .flat_map(|a| match &a.group {
+                    Some(group) => group.names.clone(),
+                    None => vec![format!(
+                        "{}/{}",
+                        a.object.namespace.as_deref().unwrap_or(""),
+                        a.object.name
+                    )],
+                })
+                .collect()
+        };
+        let capped = plan_saving_alerts(Some(&previous), &next, &filters);
+        assert_eq!(
+            named(&capped),
+            ["shop/a", "team-a/b", "shop/d", "team-a/e", "shop/f", "team-b/h"]
+        );
+        assert_eq!(capped.last().unwrap().group.as_ref().unwrap().total, 1);
+        let summary = plan_saving_alerts(None, &next, &filters);
+        assert_eq!(summary.len(), 1);
+        assert_eq!(summary[0].group.as_ref().unwrap().total, 7);
+        assert!(named(&summary).iter().all(|n| !n.starts_with("kube-")));
+        // Include globs narrow it the same way.
+        let only_team = AlertSettings {
+            include_namespaces: vec!["team-*".into()],
+            ..AlertSettings::default()
+        };
+        assert_eq!(
+            named(&plan_saving_alerts(Some(&previous), &next, &only_team)),
+            ["team-a/b", "team-a/e", "team-b/h"]
+        );
+
+        // Everything excluded: nothing at all.
+        let none = AlertSettings {
+            exclude_namespaces: vec!["*".into()],
+            ..AlertSettings::default()
+        };
+        assert!(plan_saving_alerts(Some(&previous), &next, &none).is_empty());
+        assert!(plan_saving_alerts(None, &next, &none).is_empty());
+    }
+
     #[test]
     fn a_scan_alerts_its_five_largest_new_savings_and_groups_the_rest() {
         let previous = with(vec![saving("old", 900.0)]);
@@ -1277,7 +1353,7 @@ mod tests {
             saving("g", 950.0),
             saving("h", 500.0),
         ]);
-        let plan = plan_saving_alerts(Some(&previous), &next);
+        let plan = plan_saving_alerts(Some(&previous), &next, &every());
         assert_eq!(plan.len(), SAVING_ALERTS_PER_SCAN + 1);
         let singles: Vec<&str> = plan[..5].iter().map(|a| a.object.name.as_str()).collect();
         assert_eq!(singles, ["d", "g", "b", "e", "c"], "largest saving first");
@@ -1307,10 +1383,10 @@ mod tests {
             saving("a", 510.0),
             saving("b", 800.0),
         ]);
-        let plan = plan_saving_alerts(Some(&previous), &few);
+        let plan = plan_saving_alerts(Some(&previous), &few, &every());
         assert_eq!(plan.len(), 2);
         assert!(plan.iter().all(|a| a.group.is_none()));
-        assert!(plan_saving_alerts(Some(&few), &few).is_empty());
+        assert!(plan_saving_alerts(Some(&few), &few, &every()).is_empty());
     }
 
     #[test]
@@ -1318,7 +1394,7 @@ mod tests {
         let many: Vec<WorkloadRecommendation> = (0..60)
             .map(|i| saving(&format!("w{i:02}"), 500.0 + f64::from(i)))
             .collect();
-        let plan = plan_saving_alerts(None, &with(many));
+        let plan = plan_saving_alerts(None, &with(many), &every());
         assert_eq!(plan.len(), 1);
         let summary = &plan[0];
         assert_eq!(summary.finding.condition, None);
@@ -1332,10 +1408,10 @@ mod tests {
         assert_eq!(group.names.len(), GROUP_NAME_LIMIT);
         assert_eq!(group.names[0], "shop/w59", "largest saving first");
         // One saving is still a summary; none is nothing.
-        let one = plan_saving_alerts(None, &with_big_saving());
+        let one = plan_saving_alerts(None, &with_big_saving(), &every());
         assert_eq!(one.len(), 1);
         assert_eq!(one[0].group.as_ref().unwrap().total, 1);
-        assert!(plan_saving_alerts(None, &medium_confidence_saving()).is_empty());
+        assert!(plan_saving_alerts(None, &medium_confidence_saving(), &every()).is_empty());
     }
 
     /// Records every alert.
@@ -1493,6 +1569,16 @@ mod tests {
         let last = &raised.last().unwrap().alert;
         assert_eq!(last.condition.as_deref(), Some(SAVING_ALERT_MORE));
         assert_eq!(last.group.as_ref().map(|g| g.total), Some(2));
+
+        // The namespace filters apply to summaries too: every namespace
+        // excluded, a scan without a previous run raises nothing.
+        let mut settings = app.settings();
+        settings.alerts.exclude_namespaces = vec!["*".into()];
+        app.set_settings(settings).unwrap();
+        app.history_clear(HistoryKind::Recommendations, Some(&cluster.id))
+            .unwrap();
+        store_success(&app, &cluster, savings(&next)).await;
+        assert_eq!(alerts().len(), 2 + SAVING_ALERTS_PER_SCAN + 1);
     }
 
     #[test]
