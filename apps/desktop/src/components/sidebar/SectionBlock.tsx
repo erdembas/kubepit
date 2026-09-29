@@ -1,10 +1,10 @@
 import * as i18n from '@/i18n';
 import { useState } from 'react';
-import { WorkspaceGroupHeader } from '@/components/ui/WorkspaceGroupHeader';
 import { SectionOverflowMenu } from '../SectionMenus';
 import { useAppStore } from '@/store/useAppStore';
 import { sectionColor } from '@/lib/sectionColors';
 import { readDrag, endDrag, getActiveDrag } from './dnd';
+import { TreeGroupHeader } from './TreeGroupHeader';
 import { useDragActive } from './useDragActive';
 import type { Section } from '@/types';
 
@@ -86,7 +86,7 @@ export function SectionBlock({
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
-      className="animate-slide-in relative mx-2 my-2 rounded-xl"
+      className="animate-slide-in relative mx-2 mb-1 rounded-lg"
       style={{
         outline: '1px dashed',
         outlineOffset: '-2px',
@@ -94,16 +94,16 @@ export function SectionBlock({
         transition: 'outline-color 150ms',
       }}
     >
-      <WorkspaceGroupHeader
-        name={section.name}
+      <TreeGroupHeader
+        label={section.name}
         color={meta.solid}
         collapsed={collapsed}
         onToggle={onToggle}
-        count={total}
+        total={total}
         running={running}
         actions={<SectionOverflowMenu section={section} />}
       />
-      {!collapsed && <div className="border-border/60 ml-3 border-l pb-1 pl-1">{children}</div>}
+      {!collapsed && <div className="border-border/50 ml-3.5 border-l pb-1 pl-1">{children}</div>}
     </section>
   );
 }

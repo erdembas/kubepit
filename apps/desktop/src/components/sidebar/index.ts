@@ -1,8 +1,5 @@
-export { WorkspaceHeader } from './WorkspaceHeader';
-export { CreateActionsFooter } from './CreateActionsFooter';
 export { CollapsedClusterList } from './CollapsedClusterList';
 export { GroupedClusterList } from './GroupedClusterList';
-export { SidebarHomeButton } from './SidebarHomeButton';
 export { SidebarSectionLayout } from './SidebarSectionLayout';
 export { SectionBlock } from './SectionBlock';
 export { UnassignedBlock } from './UnassignedBlock';

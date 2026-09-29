@@ -49,7 +49,7 @@ export function SectionBody({
   const reorderEnabled = bucketId != null;
 
   return (
-    <ul className="mx-1 space-y-0.5">
+    <ul className="space-y-px">
       {items.map((item, idx) => {
         const key = itemKey(item.kind, item.ref.id);
         const row = (

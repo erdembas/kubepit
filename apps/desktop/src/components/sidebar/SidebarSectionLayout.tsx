@@ -43,12 +43,14 @@ export function SidebarSectionLayout({
 
   if (!hasSections) {
     return (
-      <FlatItems
-        items={itemsBySection.get(UNASSIGNED) ?? []}
-        bucketId={searching ? null : UNASSIGNED}
-        emptyMessage={emptyMessage}
-        {...commonProps}
-      />
+      <div className="px-2">
+        <FlatItems
+          items={itemsBySection.get(UNASSIGNED) ?? []}
+          bucketId={searching ? null : UNASSIGNED}
+          emptyMessage={emptyMessage}
+          {...commonProps}
+        />
+      </div>
     );
   }
 

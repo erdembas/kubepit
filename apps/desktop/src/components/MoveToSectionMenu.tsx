@@ -21,21 +21,38 @@ const POPOVER_W = 240;
 interface Props {
   itemId: string;
   currentSectionId: SectionId | null;
+  /** Controlled mode (opened from a context menu): no trigger, anchored to `anchorRef`. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  anchorRef?: React.RefObject<HTMLElement | null>;
 }
 
-export function MoveToSectionMenu({ itemId, currentSectionId }: Props) {
+export function MoveToSectionMenu({
+  itemId,
+  currentSectionId,
+  open: openProp,
+  onOpenChange,
+  anchorRef,
+}: Props) {
   i18n.useLocale();
   const sections = useAppStore((s) => s.sections);
   const assignCluster = useAppStore((s) => s.assignClusterToSection);
 
-  const [open, setOpen] = useState(false);
+  const controlled = openProp !== undefined;
+  const [openState, setOpenState] = useState(false);
+  const open = controlled ? openProp : openState;
+  const setOpen = (next: boolean | ((prev: boolean) => boolean)) => {
+    const value = typeof next === 'function' ? next(open) : next;
+    if (controlled) onOpenChange?.(value);
+    else setOpenState(value);
+  };
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
   const [color, setColor] = useState<SectionColor>('blue');
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const { popoverRef, pos } = usePopoverPosition(open, triggerRef);
+  const { popoverRef, pos } = usePopoverPosition(open, anchorRef ?? triggerRef);
   useClickOutsideClose(open, [wrapRef, popoverRef], () => setOpen(false));
 
   // Reset the inline-create form each time the popover opens and suggest
@@ -176,6 +193,8 @@ export function MoveToSectionMenu({ itemId, currentSectionId }: Props) {
       </div>
     </div>
   );
+
+  if (controlled) return popover ? createPortal(popover, document.body) : null;
 
   return (
     <div ref={wrapRef} className="relative inline-flex">
