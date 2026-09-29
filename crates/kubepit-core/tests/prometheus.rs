@@ -9,6 +9,7 @@ use std::sync::Arc;
 use kubepit_core::cost::{CostConfig, CostSourceConfig};
 use kubepit_core::prometheus::access::{PrometheusAccess, PrometheusAuth};
 use kubepit_core::prometheus::workload_stats::{BatchFailure, StatScope};
+use kubepit_core::recommendations::ScanState;
 use kubepit_core::rightsizing::collect::{SourceAbort, SourceAbortKind};
 use kubepit_core::rightsizing::{RightsizingNoteKind, RightsizingRequest, RightsizingSource};
 use kubepit_core::types::{
@@ -942,16 +943,38 @@ async fn credentials_never_reach_a_detected_service() {
 /// Statistics answers of a shared Prometheus: every series of the cluster
 /// `production`, except the pod owners (Q11) with `mismatch`, which come
 /// back for `staging` (a source that ignored the selector), and with
-/// `fail_owners`, which fail.
-fn stats_router(mismatch: Arc<AtomicBool>, fail_owners: Arc<AtomicBool>) -> Router {
+/// `fail_owners`, which fail. With `empty_checked` the memory max (Q5) and
+/// the pod owners (Q11) answer no series at all. The cluster holds the
+/// Deployment `shop/web`.
+fn stats_router(
+    mismatch: Arc<AtomicBool>,
+    fail_owners: Arc<AtomicBool>,
+    empty_checked: Arc<AtomicBool>,
+) -> Router {
     let detection = stack_router(Arc::default());
     Arc::new(move |req: &Request, log: &Log| {
+        match req.path_only() {
+            "/apis/apps/v1/deployments" => {
+                return list_of("DeploymentList", vec![deployment_web()])
+            }
+            "/apis/apps/v1/statefulsets"
+            | "/apis/apps/v1/daemonsets"
+            | "/apis/batch/v1/cronjobs"
+            | "/apis/autoscaling/v2/horizontalpodautoscalers"
+            | "/api/v1/pods" => return list_of("List", vec![]),
+            _ => {}
+        }
         if req.path_only() != format!("{OPERATED}/api/v1/query") {
             return detection(req, log);
         }
         let q = param(&req.path, "query").unwrap_or_default();
         if q == "1" {
             return scalar_one();
+        }
+        let checked = q.contains("kube_pod_owner")
+            || q.contains("max_over_time(container_memory_working_set_bytes");
+        if checked && empty_checked.load(Ordering::SeqCst) {
+            return success("vector", json!([]));
         }
         if q.contains("kube_pod_owner") && fail_owners.load(Ordering::SeqCst) {
             return Reply::Json(
@@ -984,7 +1007,13 @@ fn stats_router(mismatch: Arc<AtomicBool>, fail_owners: Arc<AtomicBool>) -> Rout
 async fn statistics_batches_carry_the_selector_and_fail_closed() {
     let mismatch = Arc::new(AtomicBool::new(false));
     let fail_owners = Arc::new(AtomicBool::new(false));
-    let server = start(stats_router(mismatch.clone(), fail_owners.clone())).await;
+    let empty_checked = Arc::new(AtomicBool::new(false));
+    let server = start(stats_router(
+        mismatch.clone(),
+        fail_owners.clone(),
+        empty_checked.clone(),
+    ))
+    .await;
     let (_dir, app, _recorder, id) = setup(&server.url, true);
     let mut def = app.cluster_def(&id).unwrap();
     def.prometheus_access = shared_access();
@@ -1051,5 +1080,69 @@ async fn statistics_batches_carry_the_selector_and_fail_closed() {
             }
         ),
         "{err:?}"
+    );
+
+    // Answered, but neither the memory max nor the owners hold a series:
+    // nothing proves the batch is this cluster's, so it is not used.
+    fail_owners.store(false, Ordering::SeqCst);
+    empty_checked.store(true, Ordering::SeqCst);
+    let err = app
+        .prometheus_stats_batch(&id, &scope, &|| {})
+        .await
+        .unwrap_err();
+    assert_eq!(err, BatchFailure::Unverified);
+    assert_eq!(err.to_string(), "cluster-label-unverified");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_unverified_shared_source_fails_the_scan_and_keeps_the_last_good() {
+    let empty_checked = Arc::new(AtomicBool::new(false));
+    let server = start(stats_router(
+        Arc::default(),
+        Arc::default(),
+        empty_checked.clone(),
+    ))
+    .await;
+    let (_dir, app, _recorder, id) = setup(&server.url, true);
+    let mut def = app.cluster_def(&id).unwrap();
+    def.prometheus_access = shared_access();
+    app.cluster_update(def).unwrap();
+    app.cluster_connect(&id).await.unwrap();
+
+    let good = app.recommendations_run_for_tests(&id).await.unwrap();
+    let status = app.recommendations_status(&id);
+    assert_eq!(status.state, ScanState::Success, "{status:?}");
+
+    // Every batch unverified: the collection is abandoned, typed, and the
+    // scan fails with the code instead of storing the fallback.
+    empty_checked.store(true, Ordering::SeqCst);
+    let outcome = app
+        .compute_rightsizing(&id, &RightsizingRequest::default(), &|_| {})
+        .await
+        .unwrap();
+    assert_eq!(
+        outcome.source_abort,
+        Some(SourceAbort {
+            kind: SourceAbortKind::AllBatchesFailed,
+            detail: "cluster-label-unverified".into(),
+        })
+    );
+    let failed = app.recommendations_run_for_tests(&id).await.unwrap();
+    let status = app.recommendations_status(&id);
+    assert_eq!(
+        (status.state, status.run_id, status.error.as_deref()),
+        (
+            ScanState::Failed,
+            Some(failed),
+            Some("cluster-label-unverified")
+        )
+    );
+    let read = app.history_rec_latest_for_tests(&id);
+    let scan = read.scan.expect("the last good result stays");
+    assert_eq!(scan.run.id, good);
+    assert_eq!(scan.report.source, RightsizingSource::Prometheus);
+    assert_eq!(
+        read.last_failure.unwrap().error.as_deref(),
+        Some("cluster-label-unverified")
     );
 }

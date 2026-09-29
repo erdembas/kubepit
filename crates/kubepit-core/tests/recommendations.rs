@@ -76,6 +76,11 @@ struct Fixture {
     fail_q1_now: Arc<AtomicBool>,
     /// The cluster runs kube-prometheus-stack's Prometheus.
     prometheus: bool,
+    /// A shared Prometheus: every series carries `cluster` with this value.
+    cluster_label: Option<&'static str>,
+    /// The memory max (Q5) and pod owners (Q11) hold no series for this
+    /// namespace, so a shared source cannot prove it is this cluster's.
+    unverified_for: Option<&'static str>,
 }
 
 fn base() -> Fixture {
@@ -98,6 +103,8 @@ fn base() -> Fixture {
         restricted: false,
         fail_q1_now: Arc::default(),
         prometheus: true,
+        cluster_label: None,
+        unverified_for: None,
     }
 }
 
@@ -259,9 +266,17 @@ fn prometheus(f: &Fixture, req: &Request) -> Reply {
         .unwrap_or(0);
     let mut series = Vec::new();
     for ns in f.namespaces.iter().filter(|ns| named(ns)) {
+        if matches!(n, 5 | 11) && f.unverified_for == Some(*ns) {
+            continue;
+        }
         match answer(n, ns, f, ksm, end) {
             Some(list) => series.extend(list),
             None => return prom_error("query timed out"),
+        }
+    }
+    if let Some(cluster) = f.cluster_label {
+        for (labels, _) in &mut series {
+            labels["cluster"] = json!(cluster);
         }
     }
     vector(duplicated(series))
@@ -1195,4 +1210,65 @@ async fn source_change_hides_results_and_scans_need_a_connection() {
     let err = app.recommendations_scan(&id).await.unwrap_err().to_string();
     assert!(err.contains("connect"), "{err}");
     assert_eq!(server.log.lock().len(), sent, "never connects on its own");
+}
+
+/// A cluster in a shared Prometheus (`cluster="production"`).
+fn shared(app: &Kubepit, id: &str) {
+    let mut def = app.cluster_def(id).unwrap();
+    def.prometheus_access = PrometheusAccess {
+        cluster_labels: [("cluster".to_string(), "production".to_string())].into(),
+        ..Default::default()
+    };
+    app.cluster_update(def).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unverified_namespaces_are_left_out_and_nothing_verified_fails() {
+    // "a|b" is too large and splits; "a" proves itself, "b" answers no
+    // memory or owner series: b is listed as failed, the scan succeeds.
+    let ScanApp { app, id, _dir, .. } = scan_app(Fixture {
+        namespaces: vec!["a", "b"],
+        fail_q1_multi: true,
+        cluster_label: Some("production"),
+        unverified_for: Some("b"),
+        ..base()
+    })
+    .await;
+    shared(&app, &id);
+    let run = app.recommendations_run_for_tests(&id).await.unwrap();
+    let status = app.recommendations_status(&id);
+    assert_eq!(status.state, ScanState::Success, "{status:?}");
+    let scan = app.history_rec_latest_for_tests(&id).scan.unwrap();
+    assert_eq!(scan.run.id, run);
+    let report = scan.report;
+    assert!(
+        report.notes.iter().any(|n| {
+            n.kind == RightsizingNoteKind::NamespaceFailed && n.detail.as_deref() == Some("b")
+        }),
+        "{:?}",
+        report.notes
+    );
+    let row = |ns: &str| report.workloads.iter().find(|w| w.namespace == ns).unwrap();
+    assert!(row("a").containers[0].usage.is_some());
+    assert!(row("b").containers[0].usage.is_none());
+
+    // Nothing verified at all: abandoned, and the scan fails with the code.
+    let ScanApp { app, id, _dir, .. } = scan_app(Fixture {
+        cluster_label: Some("production"),
+        unverified_for: Some("apps"),
+        ..base()
+    })
+    .await;
+    shared(&app, &id);
+    let run = app.recommendations_run_for_tests(&id).await.unwrap();
+    let status = app.recommendations_status(&id);
+    assert_eq!(
+        (status.state, status.run_id, status.error.as_deref()),
+        (
+            ScanState::Failed,
+            Some(run),
+            Some("cluster-label-unverified")
+        )
+    );
+    assert!(app.history_rec_latest_for_tests(&id).scan.is_none());
 }
