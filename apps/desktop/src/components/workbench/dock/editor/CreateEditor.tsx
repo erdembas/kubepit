@@ -162,11 +162,12 @@ export const CreateEditor = memo(function CreateEditor({
     (mode: ApplyMode = 'apply') => startDryRun(yamlRef.current, mode, namespace),
     [namespace, startDryRun],
   );
-  // A manifest handed over by a wizard opens straight in the dry-run review.
+  // A manifest handed over by a wizard (create) or the assistant (apply)
+  // opens straight in the dry-run review.
   useEffect(() => {
     if (!tab.review) return;
-    useDockStore.getState().updateTab(clusterId, tab.id, { review: false });
-    startDryRun(tab.yaml, 'create', tab.namespace ?? namespace);
+    useDockStore.getState().updateTab(clusterId, tab.id, { review: false, reviewMode: undefined });
+    startDryRun(tab.yaml, tab.reviewMode ?? 'create', tab.namespace ?? namespace);
     // Once, when the tab opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

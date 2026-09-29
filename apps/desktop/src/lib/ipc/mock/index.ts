@@ -35,6 +35,10 @@ import './cost';
 // Recommendation scans: wraps settings_set and the cluster lifecycle (after './app',
 // './connectivity'); shows its stored scans in the history (`provideRecommendationHistory`).
 import './recommendations';
+// Assistant: wraps settings_set (ai.clusters stays read-only) and the cluster
+// lifecycle (after './recommendations'); its request log shows in the history
+// (`provideAiHistory`).
+import './ai';
 // Registered last: it wraps every mutating command to derive the demo audit log.
 import './history';
 

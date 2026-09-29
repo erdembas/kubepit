@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { builderQuery, type LokiBuilder } from '@/lib/logs/logql';
 import type { LokiRangeKey } from '@/lib/logs/loki';
 import type { PromRangeKey } from '@/lib/prometheus';
-import type { ClusterId, Gvk, ManifestSource, TerminalSpec } from '@/types';
+import type { ApplyMode, ClusterId, Gvk, ManifestSource, TerminalSpec } from '@/types';
 import { useAppStore } from './useAppStore';
 
 /**
@@ -40,6 +40,11 @@ export type DockTab =
       namespace: string | null;
       /** Start with the dry-run review of `yaml` (manifests handed over by wizards). */
       review?: boolean;
+      /**
+       * Mode of that first review: `create` (default, wizards) or `apply` for
+       * assistant fixes, whose partial manifests are server-side applied.
+       */
+      reviewMode?: ApplyMode;
     }
   | {
       id: string;
@@ -417,11 +422,12 @@ export const dock = {
       container: container ?? containers[0] ?? null,
       previous,
     }),
+  /** Create editor; `review` opens the dry-run review of `yaml` at once (`reviewMode` implies it). */
   create: (
     clusterId: ClusterId,
     namespace: string | null,
     yaml = '',
-    opts: { review?: boolean } = {},
+    opts: { review?: boolean; reviewMode?: ApplyMode } = {},
   ) =>
     useDockStore.getState().openTab(clusterId, {
       kind: 'editor',
@@ -429,7 +435,8 @@ export const dock = {
       title: 'Create resource',
       yaml,
       namespace,
-      ...(opts.review ? { review: true } : {}),
+      ...(opts.review || opts.reviewMode ? { review: true } : {}),
+      ...(opts.reviewMode ? { reviewMode: opts.reviewMode } : {}),
     }),
   edit: (clusterId: ClusterId, gvk: Gvk, namespace: string | null, name: string) =>
     useDockStore.getState().openTab(clusterId, {

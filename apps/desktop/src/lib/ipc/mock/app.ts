@@ -180,7 +180,9 @@ async function connect(id: string): Promise<ClusterStatus> {
   return status;
 }
 
-const defaultSettings: Settings = {
+// A fresh copy every time: the store is changed in place by some demo code,
+// and must never write through to the shared default objects.
+const defaultSettings = (): Settings => ({
   kubectl_path: null,
   helm_path: null,
   shell_path: null,
@@ -191,7 +193,7 @@ const defaultSettings: Settings = {
   node_shell_image: 'docker.io/library/alpine:3.20',
   debug_image: 'docker.io/library/busybox:1.36',
   auto_check_updates: true,
-  alerts: DEFAULT_ALERT_SETTINGS,
+  alerts: structuredClone(DEFAULT_ALERT_SETTINGS),
   keychain_kubeconfigs: false,
   change_journal: true,
   change_journal_disabled: [],
@@ -208,22 +210,56 @@ const defaultSettings: Settings = {
     alerts: false,
   },
   // The Rust defaults: the assistant stays off until the user turns it on.
-  ai: DEFAULT_AI_SETTINGS,
-};
+  ai: structuredClone(DEFAULT_AI_SETTINGS),
+});
 
 // Saved like the demo workspace, so a demo window opened later starts from
 // the settings the others saved (and never broadcasts stale defaults).
 const SETTINGS_KEY = 'kubepit.demo.settings';
 let settings: Settings = (() => {
+  const defaults = defaultSettings();
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    return raw
-      ? { ...defaultSettings, ...(JSON.parse(raw) as Partial<Settings>) }
-      : defaultSettings;
+    if (!raw) return defaults;
+    const saved = JSON.parse(raw) as Partial<Settings>;
+    // Settings saved by an older demo lack the newer `ai` fields.
+    return { ...defaults, ...saved, ai: { ...defaults.ai, ...saved.ai } };
   } catch {
-    return defaultSettings;
+    return defaults;
   }
 })();
+
+let ownedWrite = false;
+
+/**
+ * Runs `write` (a `settings_set` call) as a backend-owned write: the fields
+ * `settings_set` otherwise keeps as stored (`keychain_kubeconfigs`,
+ * `ai.clusters`, `ai.production_acknowledged`, like `app.rs`) take the
+ * given values. Only their dedicated commands use it
+ * (`kubeconfig_storage_set`, `ai_cluster_set`, cluster removal).
+ */
+export function writeBackendOwned<T>(write: () => T): T {
+  ownedWrite = true;
+  try {
+    return write();
+  } finally {
+    ownedWrite = false;
+  }
+}
+
+function keepBackendOwned(next: Settings): Settings {
+  if (ownedWrite) return next;
+  const ai = next.ai ?? settings.ai;
+  return {
+    ...next,
+    keychain_kubeconfigs: settings.keychain_kubeconfigs,
+    ai: {
+      ...ai,
+      clusters: [...(settings.ai?.clusters ?? [])],
+      production_acknowledged: [...(settings.ai?.production_acknowledged ?? [])],
+    },
+  };
+}
 
 // Every demo window runs its own backend: keep this one's settings in step
 // with the ones another window saves, like the one shared desktop backend.
@@ -332,7 +368,7 @@ register({
   }),
   settings_get: () => settings,
   settings_set: ({ settings: next }: MockArgs) => {
-    settings = next as Settings;
+    settings = keepBackendOwned(next as Settings);
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
     } catch {

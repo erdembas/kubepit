@@ -82,6 +82,26 @@ function recommendationTable(): HistoryTableStatus {
   return recommendationHistory?.table() ?? { rows: 0, oldest_ts: null };
 }
 
+/**
+ * The demo assistant's request log (`mock/ai.ts`) as the history sees it:
+ * rows and the oldest request for the status, and how to clear them.
+ */
+export interface AiHistory {
+  table(): HistoryTableStatus;
+  clear(clusterId: string | null): void;
+}
+
+let aiHistory: AiHistory | null = null;
+
+/** Show the demo assistant's request log in the history status and clears. */
+export function provideAiHistory(source: AiHistory) {
+  aiHistory = source;
+}
+
+function aiTable(): HistoryTableStatus {
+  return aiHistory?.table() ?? { rows: 0, oldest_ts: null };
+}
+
 function settings(): Settings | undefined {
   return handlers.settings_get?.({}) as Settings | undefined;
 }
@@ -961,7 +981,8 @@ function sizeBytes() {
     audit.length * 3_000 +
     events * 1_400 +
     (persistedChanges?.length ?? 0) * 4_000 +
-    recommendationTable().rows * 800
+    recommendationTable().rows * 800 +
+    aiTable().rows * 12_000
   );
 }
 
@@ -988,6 +1009,7 @@ function status(): HistoryStatus {
     events: table(events),
     changes: table(changes),
     recommendations: recommendationTable(),
+    ai: aiTable(),
     dropped: 0,
     persisting: clusters()
       .filter((c) => s.persist_clusters.includes(c.id) && statuses()[c.id]?.state === 'connected')
@@ -1117,7 +1139,7 @@ register({
     const k = kind as HistoryKind;
     const scope = (clusterId as string | null) ?? '*';
     const kinds: HistoryKind[] =
-      k === 'all' ? ['audit', 'events', 'changes', 'recommendations'] : [k];
+      k === 'all' ? ['audit', 'events', 'changes', 'recommendations', 'ai'] : [k];
     seedAudit();
     for (const each of kinds) {
       cleared.add(`${each}|${scope}`);
@@ -1126,6 +1148,7 @@ register({
           if (scope === '*' || audit[i]!.entry.cluster_id === scope) audit.splice(i, 1);
       }
       if (each === 'recommendations') recommendationHistory?.clear(scope === '*' ? null : scope);
+      if (each === 'ai') aiHistory?.clear(scope === '*' ? null : scope);
     }
     return status();
   },

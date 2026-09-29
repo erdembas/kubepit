@@ -883,7 +883,8 @@ export interface HistoryChangePage {
   next_cursor: number | null;
 }
 
-export type HistoryKind = 'audit' | 'events' | 'changes' | 'recommendations' | 'all';
+/** `ai`: the assistant request log (`ai_log`). */
+export type HistoryKind = 'audit' | 'events' | 'changes' | 'recommendations' | 'ai' | 'all';
 
 export interface HistoryTableStatus {
   rows: number;
@@ -904,6 +905,8 @@ export interface HistoryStatus {
   changes: HistoryTableStatus;
   /** Rows of stored recommendation scans; `oldest_ts` is the oldest run. */
   recommendations: HistoryTableStatus;
+  /** Rows of the assistant request log (`ai_log`); `oldest_ts` is the oldest request. */
+  ai: HistoryTableStatus;
   /** Writes dropped because the writer queue was full. */
   dropped: number;
   /** Connected clusters whose events and changes are persisted right now. */
