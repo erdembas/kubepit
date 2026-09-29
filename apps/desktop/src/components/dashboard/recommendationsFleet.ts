@@ -73,6 +73,11 @@ export interface CurrencyAmount {
   amount: number;
 }
 
+/** Clusters whose shown summary has a saving (the ones `fleetSavings` adds up). */
+export function savingClusters(rows: readonly FleetRecommendationRow[]): number {
+  return rows.filter(({ summary }) => !!summary && summary.monthly_savings > 0).length;
+}
+
 /** Monthly savings of the shown summaries, per currency (largest first). */
 export function fleetSavings(rows: readonly FleetRecommendationRow[]): CurrencyAmount[] {
   const totals = new Map<string, number>();

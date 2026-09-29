@@ -24,6 +24,7 @@ import {
   fleetRecommendationRows,
   fleetSavings,
   fleetTop,
+  savingClusters,
   type FleetRecommendationRow,
   type FleetTopEntry,
 } from './recommendationsFleet';
@@ -92,7 +93,7 @@ export function RecommendationsFleetCard({ visible }: { visible: boolean }) {
             ? i18n.plural(
                 '{amount} a month could be saved across {count} cluster',
                 '{amount} a month could be saved across {count} clusters',
-                rows.length,
+                savingClusters(rows),
                 {
                   amount: savings
                     .map((s) => formatMoney(s.amount, s.currency, { compact: true }))

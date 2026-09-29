@@ -7,7 +7,12 @@ import type {
   RecommendationSummary,
   SummaryEntry,
 } from '@/types';
-import { fleetRecommendationRows, fleetSavings, fleetTop } from './recommendationsFleet';
+import {
+  fleetRecommendationRows,
+  fleetSavings,
+  fleetTop,
+  savingClusters,
+} from './recommendationsFleet';
 
 const NOW = Date.UTC(2026, 8, 29, 12);
 const HOUR = 3_600_000;
@@ -152,6 +157,20 @@ describe('fleet recommendations', () => {
       { currency: 'USD', amount: 15.5 },
     ]);
     expect(fleetSavings([])).toEqual([]);
+  });
+
+  it('counts only the clusters whose shown summary saves something', () => {
+    // dev, prod and ro save; broken has no summary, moved's source changed.
+    expect(rows.length).toBe(5);
+    expect(savingClusters(rows)).toBe(3);
+    const none = fleetRecommendationRows(
+      [cluster('d')],
+      [fleetEntry('d', { run: run('d', NOW, { summary: summary({ monthly_savings: 0 }) }) })],
+      {},
+      60,
+      NOW,
+    );
+    expect(savingClusters(none)).toBe(0);
   });
 
   it('merges the spotlights by monthly delta, at most five, with stable ties', () => {
