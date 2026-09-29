@@ -194,8 +194,17 @@ pub(crate) fn new_contexts(
 ) -> Vec<KubeconfigNewContext> {
     let registered: HashSet<(PathBuf, &str)> = clusters
         .iter()
-        .filter(|c| !c.managed)
-        .map(|c| (norm(Path::new(&c.kubeconfig_path)), c.context.as_str()))
+        // Imported copies still count as registered at their original path.
+        // This is discovery identity only: managed copies never follow changes
+        // to that file, and pasted configs have no source-file identity.
+        .filter(|c| !c.managed || c.source_kubeconfig_path.is_some())
+        .map(|c| {
+            let source = c
+                .source_kubeconfig_path
+                .as_deref()
+                .unwrap_or(&c.kubeconfig_path);
+            (norm(Path::new(source)), c.context.as_str())
+        })
         .collect();
     let mut out = Vec::new();
     let mut paths = changed.to_vec();
@@ -458,6 +467,7 @@ mod tests {
             name: context.into(),
             context: context.into(),
             kubeconfig_path: path.to_string_lossy().to_string(),
+            source_kubeconfig_path: None,
             managed,
             tags: vec![],
             environment: None,
@@ -545,5 +555,60 @@ mod tests {
         // `other.yaml` did not change; `prod` is registered.
         assert_eq!(names, vec![("/k/config", "stg"), ("/k/new.yaml", "n1")]);
         assert_eq!(found[0].server.as_deref(), Some("https://stg"));
+    }
+
+    #[test]
+    fn imported_source_identity_suppresses_duplicates_without_watching_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("source.yaml");
+        let other = dir.path().join("other.yaml");
+        std::fs::write(&file, TWO_CONTEXTS).unwrap();
+        std::fs::write(&other, TWO_CONTEXTS).unwrap();
+        let file = norm(&file);
+        let other = norm(&other);
+        let managed = dir.path().join("managed.yaml");
+        let mut imported = cluster(&managed, "copied", true);
+        imported.source_kubeconfig_path = Some(file.to_string_lossy().to_string());
+        let registered = [
+            imported.clone(),
+            cluster(&file, "legacy", false),
+            // Pasted configs never claim a discovery source, even if their
+            // stored path happens to match a source being scanned.
+            cluster(&file, "pasted", true),
+        ];
+        let after: Snapshot = [
+            (
+                file.clone(),
+                ["copied", "legacy", "pasted", "fresh"]
+                    .into_iter()
+                    .map(|name| (name.to_string(), None))
+                    .collect(),
+            ),
+            (other.clone(), [("copied".to_string(), None)].into()),
+        ]
+        .into();
+        let found = new_contexts(
+            &[file.clone(), other.clone()],
+            &Snapshot::new(),
+            &after,
+            &registered,
+        );
+        let actual: HashSet<(&str, &str)> = found
+            .iter()
+            .map(|c| (c.path.as_str(), c.context.as_str()))
+            .collect();
+        assert_eq!(
+            actual,
+            [
+                (file.to_str().unwrap(), "fresh"),
+                (file.to_str().unwrap(), "pasted"),
+                (other.to_str().unwrap(), "copied"),
+            ]
+            .into()
+        );
+
+        let targets = Targets::compute(&DiscoveryRoots::default(), &[], &[imported]);
+        assert!(!targets.is_relevant(&file));
+        assert!(!targets.is_relevant(&managed));
     }
 }

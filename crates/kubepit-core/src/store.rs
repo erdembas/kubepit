@@ -202,6 +202,7 @@ mod tests {
             name: id.into(),
             context: "ctx".into(),
             kubeconfig_path: "/tmp/config".into(),
+            source_kubeconfig_path: None,
             managed: false,
             tags: vec![],
             environment: None,

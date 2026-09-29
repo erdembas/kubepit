@@ -278,8 +278,21 @@ async fn watching_reports_new_contexts_and_rotated_credentials() {
     let config = kube.join("config");
     std::fs::write(&config, kubeconfig_for(&server.url)).unwrap();
 
+    // Existing linked registrations retain file-watching behavior; newly
+    // imported files are private managed snapshots instead.
+    let paths = Paths::new(dir.path().join("kubepit"));
+    paths.ensure_dirs().unwrap();
+    std::fs::write(
+        paths.clusters_file(),
+        serde_json::to_vec(&json!([{
+            "id": "legacy-cluster", "name": "Legacy", "context": "fake",
+            "kubeconfig_path": config.to_string_lossy(), "managed": false
+        }]))
+        .unwrap(),
+    )
+    .unwrap();
     let (app, events) = open(&dir);
-    let cluster = add_file_cluster(&app, &config);
+    let cluster = app.cluster_list().remove(0);
     let status = app.cluster_connect(&cluster.id).await.unwrap();
     assert_eq!(status.state, ConnState::Connected);
     let roots_home = home.clone();
@@ -339,4 +352,39 @@ async fn watching_reports_new_contexts_and_rotated_credentials() {
         .contains("rotated-token"));
 
     app.stop_kubeconfig_watch();
+}
+
+#[tokio::test]
+async fn imported_file_connects_after_source_removal_and_reimport_drops_the_old_connection() {
+    let server = start(router()).await;
+    let replacement = start(router()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let (app, _) = open(&dir);
+    let source = dir.path().join("config");
+    std::fs::write(&source, kubeconfig_for(&server.url)).unwrap();
+    let cluster = add_file_cluster(&app, &source);
+    std::fs::remove_file(&source).unwrap();
+    let status = app.cluster_connect(&cluster.id).await.unwrap();
+    assert_eq!(status.state, ConnState::Connected, "{:?}", status.error);
+    assert_eq!(status.server.as_deref(), Some(server.url.as_str()));
+    std::fs::write(&source, kubeconfig_for(&replacement.url)).unwrap();
+    let imported = app
+        .cluster_reimport_kubeconfig(
+            &cluster.id,
+            kubepit_core::types::KubeconfigImport {
+                kubeconfig_path: Some(source.to_string_lossy().to_string()),
+                context: "fake".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(imported.id, cluster.id);
+    assert_eq!(
+        app.cluster_statuses()[&cluster.id].state,
+        ConnState::Disconnected
+    );
+    let status = app.cluster_connect(&cluster.id).await.unwrap();
+    assert_eq!(status.state, ConnState::Connected, "{:?}", status.error);
+    assert_eq!(status.server.as_deref(), Some(replacement.url.as_str()));
+    app.cluster_disconnect(&cluster.id);
 }

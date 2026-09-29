@@ -64,6 +64,7 @@ pub struct Kubepit {
     pub(crate) openapi: OpenApiCache,
     // Connectivity: OS credential store, saved port forwards, kubeconfig watcher.
     pub(crate) secrets: Arc<dyn SecretStore>,
+    pub(crate) kubeconfig_mutations: parking_lot::Mutex<()>,
     pub(crate) saved_forwards: SavedForwards,
     pub(crate) kubeconfig_watch: parking_lot::Mutex<Option<crate::kubeconfig_watch::WatchHandle>>,
     // Change timeline: per-cluster change journals.
@@ -121,6 +122,7 @@ impl Kubepit {
             loki: LokiCache::default(),
             openapi: OpenApiCache::default(),
             secrets,
+            kubeconfig_mutations: parking_lot::Mutex::new(()),
             saved_forwards,
             kubeconfig_watch: parking_lot::Mutex::new(None),
             change_journals: ChangeJournals::default(),

@@ -63,16 +63,42 @@ watches stopped with the window that created them
 | `settings.json`         | backend  | `Settings`                                          |
 | `workspace.json`        | frontend | `WorkspaceSnapshot` (sections, ordering) — opaque   |
 | `manifests.json`        | backend  | recently opened local manifest sources (≤ 12)       |
-| `kubeconfigs/<id>.yaml` | backend  | pasted kubeconfigs (`managed: true`), mode 0600     |
+| `kubeconfigs/<storage-id>.yaml` | backend | imported kubeconfigs (`managed: true`), mode 0600 |
 | `run/<id>.kubeconfig`   | backend  | single-context kubeconfig for kubectl/helm/terminal |
 | `port_forwards.json`    | backend  | `SavedPortForward[]` (saved port forwards)          |
 | `history.db`            | backend  | audit log, events / changes, scans, assistant request log (SQLite)         |
 | `actions.json`          | backend  | `CustomActionsFile` (custom actions, see below)     |
 
-With `settings.keychain_kubeconfigs` the pasted kubeconfigs live in the OS
+With `settings.keychain_kubeconfigs` managed kubeconfigs live in the OS
 credential store instead of `kubeconfigs/` (see Connectivity).
 
 Kubepit never rewrites a user's kubeconfig files.
+
+File imports keep a managed, single-context copy of the chosen context, cluster and
+user. File-backed CA certificates, client certificates, private keys and tokens are
+embedded before storage; relative exec commands are resolved against the source
+folder. The imported connection therefore does not depend on the original config
+or its certificate/token files. Exec authentication still requires its external
+program and credentials. Normal pasted configs retain their existing managed
+storage behavior.
+
+`KubeconfigSource` exposes cluster names/server addresses and user names alongside
+contexts, never credential contents. A file with clusters but no contexts can be
+imported by choosing a cluster and user and providing a context name; an existing
+context is never silently overwritten. `current-context` is only a name suggestion
+when it does not refer to a defined context.
+
+`cluster_kubeconfig_source` inspects a registered source, including OS-keychain
+storage. `cluster_reimport_kubeconfig` replaces or repairs its source while keeping
+the cluster ID and settings. It stages a new managed credential revision before
+switching the registry and disconnects the old connection. Validation or storage
+failure leaves the previous registry and credential intact. The edit dialog uses
+these commands to repair an existing cluster without deleting and adding it again.
+
+`ClusterDef.source_kubeconfig_path` records the original file for duplicate/import
+notices only; connections always use `kubeconfig_path`. New imports are snapshots:
+source-file changes do not alter them. Legacy linked entries remain linked until
+explicitly reimported; they are not silently migrated on startup.
 
 Layout prefs, saved table views and bookmarks live in the webview's
 localStorage (`kubepit.workbench.v1`, `kubepit.views.v1`,
@@ -1900,10 +1926,11 @@ v3, so CRDs work like builtins.
 - **Kubeconfig watching** (`kubeconfig_watch.rs`): `notify` watches the
   directories of every file discovery reads (`$KUBECONFIG`,
   `~/.kube/config`, the files in `~/.kube`, sync paths) and of every
-  registered cluster's file, debounced by 500 ms. A change re-runs
+  legacy linked cluster's file, debounced by 500 ms. A change re-runs
   discovery, reports contexts that appeared in the changed files and are
   not registered, regenerates the `run/<id>.kubeconfig` of clusters sourced
-  from them and flags connected clusters whose kubeconfig changed, all in
+  from those linked files and flags connected clusters whose kubeconfig changed,
+  all in
   one `kubeconfig://changed` event. The UI shows a small notice
   (`components/connectivity/ConnectivityHost.tsx`) that opens the discover
   dialog preselected or reconnects. User files are only read; the watch set
@@ -1921,10 +1948,12 @@ v3, so CRDs work like builtins.
   `settings.keychain_kubeconfigs`, changed only by `kubeconfig_storage_set`
   (the regular settings save keeps it). Managed kubeconfigs then live in
   the macOS Keychain / Windows Credential Manager / Secret Service under
-  service `io.github.erdembas.kubepit`, key `kubeconfig/<id>`, through the
+  service `io.github.erdembas.kubepit`, key `kubeconfig/<storage-id>`, through the
   `SecretStore` trait (`KeyringSecretStore` in the app, `MemorySecretStore`
   in tests, `DisabledSecretStore` behind `Kubepit::open`, so tests never
-  reach the OS). Values larger than a store's entry limit (Windows: 2.5 KB)
+  reach the OS). The storage ID comes from the managed filename; original
+  entries retain the cluster ID, while replacements get a new revision ID. Values
+  larger than a store's entry limit (Windows: 2.5 KB)
   are chunked; the header is written last. Toggling migrates entry by entry
   (copy, verify, delete the original) and moves everything back if one
   entry fails; reads fall back to the other location. In keychain mode

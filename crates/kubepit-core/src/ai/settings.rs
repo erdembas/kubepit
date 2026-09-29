@@ -852,6 +852,7 @@ mod tests {
             name: id.into(),
             context: "c".into(),
             kubeconfig_path: "/k".into(),
+            source_kubeconfig_path: None,
             managed: false,
             tags: vec![],
             environment: production.then_some(ClusterEnvironment::Production),

@@ -799,6 +799,10 @@ wrapAfter('cluster_disconnect', (args) => {
   stopScan(String(args.id));
   syncSchedules();
 });
+wrapAfter('cluster_reimport_kubeconfig', (args) => {
+  stopScan(String(args.id));
+  syncSchedules();
+});
 wrapAfter('cluster_remove', (args) => {
   const id = String(args.id);
   stopScan(id);

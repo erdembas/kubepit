@@ -1,9 +1,10 @@
 //! Cluster registry: add / update / remove / export.
 //!
-//! A cluster is "context X in kubeconfig file Y". Existing files are
-//! referenced by absolute path and never modified; pasted kubeconfigs are
-//! stored under `kubeconfigs/<id>.yaml` (mode 0600) — or in the OS credential
-//! store in keychain mode (`credentials.rs`) — and flagged `managed`.
+//! A cluster is "context X in kubeconfig file Y". Imported files and pasted
+//! kubeconfigs are stored under `kubeconfigs/<storage-id>.yaml` (mode 0600) —
+//! or in the OS credential store in keychain mode (`credentials.rs`) — and
+//! flagged `managed`. Legacy linked sources are never rewritten or migrated
+//! without an explicit reimport.
 //! After every change the full list is emitted on `cluster://list`, and the
 //! derived `run/<id>.kubeconfig` is regenerated.
 
@@ -19,12 +20,14 @@ use crate::objects::now_millis;
 use crate::paths::{atomic_write, expand_tilde};
 use crate::prometheus::access::{overlapping_sources, PrometheusAccess};
 use crate::proxy;
-use crate::types::{ClusterDef, ClusterEnvironment, ClusterInput, LokiConfig, PrometheusConfig};
+use crate::types::{
+    ClusterDef, ClusterEnvironment, ClusterInput, KubeconfigImport, KubeconfigSource, LokiConfig,
+    PrometheusConfig,
+};
 
-/// Where a new cluster's kubeconfig comes from.
-enum Origin {
-    File(PathBuf),
-    Pasted(String),
+struct PreparedKubeconfig {
+    text: String,
+    source_path: Option<String>,
 }
 
 fn non_blank(v: &Option<String>) -> Option<&str> {
@@ -90,7 +93,62 @@ fn ensure_disjoint_sources<'a>(
     Ok(())
 }
 
-fn validate_input(index: usize, input: &ClusterInput) -> Result<(Origin, Sources)> {
+fn prepare_kubeconfig(
+    input: &KubeconfigImport,
+    stored: Option<(Kubeconfig, Option<String>)>,
+    preserve_pasted: bool,
+) -> Result<PreparedKubeconfig> {
+    let context = input.context.trim();
+    if context.is_empty() {
+        bail!("a context name is required");
+    }
+    let (mut kc, source_path, pasted) = match (
+        non_blank(&input.kubeconfig_path),
+        non_blank(&input.kubeconfig_text),
+    ) {
+        (Some(_), Some(_)) => bail!("set either kubeconfig_path or kubeconfig_text, not both"),
+        (Some(raw), None) => {
+            let path = resolve_kubeconfig_path(raw)?;
+            let kc = kubeconfig::load(&path)?;
+            (kc, Some(path.to_string_lossy().to_string()), false)
+        }
+        (None, Some(text)) => (kubeconfig::load_text(text)?, None, true),
+        (None, None) => {
+            let (kc, source_path) =
+                stored.context("a kubeconfig path or pasted kubeconfig is required")?;
+            (kc, source_path, false)
+        }
+    };
+    if let Some(mapping) = &input.create_context {
+        kubeconfig::create_context(&mut kc, context, mapping)?;
+    }
+    // Validate the complete selected mapping, not only the context's name.
+    let mut single = kubeconfig::single_context(&kc, context)?;
+    let server = kubeconfig::server_for_context(&single, context);
+    if server
+        .as_deref()
+        .is_none_or(|server| server.trim().is_empty())
+    {
+        bail!("context \"{context}\" has no server");
+    }
+    // Pasted sources have no source directory. Preserve the existing paste
+    // contract; file imports and repairs must carry portable credentials.
+    if pasted && preserve_pasted && input.create_context.is_none() {
+        return Ok(PreparedKubeconfig {
+            text: input.kubeconfig_text.clone().unwrap_or_default(),
+            source_path,
+        });
+    }
+    if !pasted || !preserve_pasted {
+        kubeconfig::embed_credentials(&mut single)?;
+    }
+    Ok(PreparedKubeconfig {
+        text: kubeconfig::to_yaml(&single)?,
+        source_path,
+    })
+}
+
+fn validate_input(index: usize, input: &ClusterInput) -> Result<(PreparedKubeconfig, Sources)> {
     let label = if input.name.trim().is_empty() {
         format!("cluster #{} ({})", index + 1, input.context)
     } else {
@@ -126,30 +184,18 @@ fn validate_input(index: usize, input: &ClusterInput) -> Result<(Origin, Sources
         .prometheus_access
         .ensure_source(&sources.prometheus)
         .with_context(|| label.clone())?;
-    let origin = match (
-        non_blank(&input.kubeconfig_path),
-        non_blank(&input.kubeconfig_text),
-    ) {
-        (Some(_), Some(_)) => {
-            bail!("{label}: set either kubeconfig_path or kubeconfig_text, not both")
-        }
-        (None, None) => bail!("{label}: a kubeconfig path or pasted kubeconfig is required"),
-        (Some(raw), None) => {
-            let path = resolve_kubeconfig_path(raw).with_context(|| label.clone())?;
-            let kc = kubeconfig::load(&path)
-                .with_context(|| format!("{label}: failed to read {}", path.display()))?;
-            kubeconfig::ensure_context(&kc, &input.context).with_context(|| label.clone())?;
-            Origin::File(path)
-        }
-        (None, Some(_)) => {
-            let text = input.kubeconfig_text.clone().unwrap_or_default();
-            let kc = kubeconfig::load_text(&text)
-                .with_context(|| format!("{label}: the pasted kubeconfig is invalid"))?;
-            kubeconfig::ensure_context(&kc, &input.context).with_context(|| label.clone())?;
-            Origin::Pasted(text)
-        }
-    };
-    Ok((origin, sources))
+    let prepared = prepare_kubeconfig(
+        &KubeconfigImport {
+            kubeconfig_path: input.kubeconfig_path.clone(),
+            kubeconfig_text: input.kubeconfig_text.clone(),
+            context: input.context.clone(),
+            create_context: input.create_context.clone(),
+        },
+        None,
+        true,
+    )
+    .with_context(|| label)?;
+    Ok((prepared, sources))
 }
 
 impl Kubepit {
@@ -159,13 +205,14 @@ impl Kubepit {
     }
 
     /// `cluster_add`: validates every input first (all-or-nothing, including
-    /// its Prometheus, Loki and cost settings), then stores pasted
+    /// its Prometheus, Loki and cost settings), then stores managed
     /// kubeconfigs and appends the new definitions.
     pub fn cluster_add(&self, inputs: Vec<ClusterInput>) -> Result<Vec<ClusterDef>> {
+        let _guard = self.kubeconfig_mutations.lock();
         if inputs.is_empty() {
             return Ok(Vec::new());
         }
-        let validated: Vec<(ClusterInput, Origin, Sources)> = inputs
+        let validated: Vec<(ClusterInput, PreparedKubeconfig, Sources)> = inputs
             .into_iter()
             .enumerate()
             .map(|(i, input)| {
@@ -177,16 +224,10 @@ impl Kubepit {
         let mut written: Vec<(String, PathBuf)> = Vec::new();
         let mut defs: Vec<ClusterDef> = Vec::new();
         let write_result: Result<()> = (|| {
-            for (input, origin, sources) in validated {
+            for (input, prepared, sources) in validated {
                 let id = uuid::Uuid::new_v4().to_string();
-                let (kubeconfig_path, managed) = match origin {
-                    Origin::File(path) => (path, false),
-                    Origin::Pasted(text) => {
-                        let path = self.store_managed(&id, &text)?;
-                        written.push((id.clone(), path.clone()));
-                        (path, true)
-                    }
-                };
+                let kubeconfig_path = self.store_managed(&id, &prepared.text)?;
+                written.push((id.clone(), kubeconfig_path.clone()));
                 let context = input.context.trim().to_string();
                 let name = match input.name.trim() {
                     "" => context.clone(),
@@ -197,7 +238,8 @@ impl Kubepit {
                     name,
                     context,
                     kubeconfig_path: kubeconfig_path.to_string_lossy().to_string(),
-                    managed,
+                    source_kubeconfig_path: prepared.source_path,
+                    managed: true,
                     tags: clean_tags(input.tags),
                     environment: input.environment,
                     color: input.color.filter(|c| !c.trim().is_empty()),
@@ -251,6 +293,7 @@ impl Kubepit {
     /// `managed` and `last_connected_at` are owned by the backend. Changing
     /// the context or kubeconfig path drops the live connection.
     pub fn cluster_update(&self, cluster: ClusterDef) -> Result<ClusterDef> {
+        let _guard = self.kubeconfig_mutations.lock();
         let existing = self.cluster_def(&cluster.id)?;
         let kubeconfig_path =
             if existing.managed || cluster.kubeconfig_path.trim() == existing.kubeconfig_path {
@@ -277,6 +320,7 @@ impl Kubepit {
             },
             context,
             kubeconfig_path,
+            source_kubeconfig_path: existing.source_kubeconfig_path.clone(),
             managed: existing.managed,
             tags: clean_tags(cluster.tags),
             environment: cluster.environment,
@@ -322,6 +366,14 @@ impl Kubepit {
                 .iter_mut()
                 .find(|c| c.id == stored.id)
                 .ok_or_else(|| anyhow!("cluster {} is not registered", stored.id))?;
+            // Metadata validation can wait on a keychain read. A reimport
+            // committed meanwhile must not be overwritten with the old path.
+            if slot.kubeconfig_path != existing.kubeconfig_path
+                || slot.context != existing.context
+                || slot.managed != existing.managed
+            {
+                bail!("the cluster source changed; reopen its settings and try again");
+            }
             *slot = stored;
             Ok(())
         })?;
@@ -356,19 +408,94 @@ impl Kubepit {
         Ok(next)
     }
 
+    /// Metadata only, including keychain-backed sources; never returns credentials.
+    pub fn cluster_kubeconfig_source(&self, id: &str) -> Result<KubeconfigSource> {
+        let cluster = self.cluster_def(id)?;
+        let source = self.load_cluster_source(&cluster)?;
+        Ok(kubeconfig::source_from(cluster.kubeconfig_path, &source))
+    }
+
+    /// Stage a fresh managed source, atomically switch the registry pointer, then
+    /// retire the old source. A failed write never overwrites the working copy.
+    pub fn cluster_reimport_kubeconfig(
+        &self,
+        id: &str,
+        input: KubeconfigImport,
+    ) -> Result<ClusterDef> {
+        let _guard = self.kubeconfig_mutations.lock();
+        let existing = self.cluster_def(id)?;
+        let stored = if non_blank(&input.kubeconfig_path).is_none()
+            && non_blank(&input.kubeconfig_text).is_none()
+        {
+            Some((
+                self.load_cluster_source(&existing)?,
+                existing
+                    .source_kubeconfig_path
+                    .clone()
+                    .or_else(|| (!existing.managed).then(|| existing.kubeconfig_path.clone())),
+            ))
+        } else {
+            None
+        };
+        let prepared = prepare_kubeconfig(&input, stored, false)?;
+        let storage_id = uuid::Uuid::new_v4().to_string();
+        let path = self.store_managed(&storage_id, &prepared.text)?;
+        let committed = self.store.update_clusters(|list| {
+            let slot = list
+                .iter_mut()
+                .find(|cluster| cluster.id == id)
+                .with_context(|| format!("cluster {id} is not registered"))?;
+            if slot.kubeconfig_path != existing.kubeconfig_path || slot.context != existing.context
+            {
+                bail!("the cluster source changed; reopen its settings and try again");
+            }
+            slot.context = input.context.trim().to_string();
+            slot.kubeconfig_path = path.to_string_lossy().to_string();
+            slot.source_kubeconfig_path = prepared.source_path;
+            slot.managed = true;
+            Ok(slot.clone())
+        });
+        let (updated, list) = match committed {
+            Ok(committed) => committed,
+            Err(error) => {
+                self.delete_managed(&storage_id, &path);
+                return Err(error);
+            }
+        };
+        self.cluster_disconnect(id);
+        self.remove_run_kubeconfig(id);
+        if existing.managed {
+            self.delete_managed(&existing.id, &PathBuf::from(&existing.kubeconfig_path));
+        }
+        if !self.run_kubeconfig_is_transient(&updated) {
+            if let Err(error) = self.write_run_kubeconfig(&updated) {
+                tracing::warn!(cluster = %updated.name, "could not write run kubeconfig: {error:#}");
+            }
+        }
+        self.sink.cluster_list(&list);
+        Ok(updated)
+    }
+
     /// `cluster_remove`: disconnect, stop its work, delete node-shell pods,
     /// the managed kubeconfig and the run kubeconfig, and drop it from the
     /// assistant's cluster lists. Idempotent.
     pub async fn cluster_remove(&self, id: &str) -> Result<()> {
-        let Some(existing) = self.store.cluster(id) else {
+        if self.store.cluster(id).is_none() {
             // Tidies a leftover of an earlier removal (see below).
             self.ai_forget_removed_cluster(id);
             return Ok(());
-        };
+        }
         self.cleanup_cluster_node_shells(id).await;
         self.forget_connection(id);
         // Its stored recommendation scans go too (after its scan stopped).
         self.forget_recommendations(id).await;
+        // Reimport/migration may run while asynchronous cleanup is pending.
+        // Reload under the mutation lock and delete the latest revision only;
+        // no lock is held across an await.
+        let _guard = self.kubeconfig_mutations.lock();
+        let Some(existing) = self.store.cluster(id) else {
+            return Ok(());
+        };
         let removed_id = id.to_string();
         let ((), list) = self.store.update_clusters(move |list| {
             list.retain(|c| c.id != removed_id);
@@ -423,6 +550,10 @@ impl Kubepit {
         Ok(path)
     }
 }
+
+#[cfg(test)]
+#[path = "cluster/import_tests.rs"]
+mod import_tests;
 
 /// Fixtures shared by tests in other modules.
 #[cfg(test)]
@@ -508,7 +639,12 @@ mod tests {
         let added = app.cluster_add(vec![from_file, pasted]).unwrap();
         assert_eq!(added.len(), 2);
         assert_eq!(added[0].name, "prod");
-        assert!(!added[0].managed);
+        assert!(added[0].managed);
+        assert_eq!(
+            added[0].source_kubeconfig_path.as_deref(),
+            file.canonicalize().unwrap().to_str()
+        );
+        assert_ne!(added[0].kubeconfig_path, file.to_string_lossy());
         assert_eq!(added[0].tags, vec!["prod"]);
         assert!(added[0].created_at > 0);
         assert!(added[1].managed);

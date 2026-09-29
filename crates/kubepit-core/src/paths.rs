@@ -8,7 +8,7 @@
 //! | `clusters.json`         | registered clusters (`ClusterDef[]`)              |
 //! | `settings.json`         | user preferences                                  |
 //! | `workspace.json`        | opaque UI snapshot owned by the frontend          |
-//! | `kubeconfigs/<id>.yaml` | pasted kubeconfigs (`managed: true`), mode 0600   |
+//! | `kubeconfigs/<storage-id>.yaml` | imported/pasted kubeconfigs, mode 0600    |
 //! | `run/<id>.kubeconfig`   | generated single-context kubeconfig, mode 0600    |
 //! | `port_forwards.json`    | saved port forwards (`SavedPortForward[]`)        |
 //! | `history.db`            | audit log, persisted events / changes (SQLite)    |
@@ -103,7 +103,7 @@ impl Paths {
         self.root.join("run")
     }
 
-    /// Where a pasted kubeconfig for cluster `id` is stored.
+    /// Where the managed kubeconfig for storage `id` is stored.
     pub fn managed_kubeconfig(&self, id: &str) -> Result<PathBuf> {
         validate_id(id)?;
         Ok(self.kubeconfigs_dir().join(format!("{id}.yaml")))

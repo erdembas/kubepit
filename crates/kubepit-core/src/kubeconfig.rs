@@ -15,11 +15,14 @@ use std::collections::HashSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
+use base64::{engine::general_purpose::STANDARD, Engine};
 use kube::config::{Kubeconfig, NamedAuthInfo, NamedCluster, NamedContext};
 
 use crate::paths::expand_tilde;
-use crate::types::{KubeconfigContext, KubeconfigSource};
+use crate::types::{
+    KubeconfigCluster, KubeconfigContext, KubeconfigContextInput, KubeconfigSource,
+};
 
 /// Files found by scanning a directory are skipped above this size: real
 /// kubeconfigs are a few KB, anything larger is a cache or a binary.
@@ -30,12 +33,21 @@ const EXPLICIT_MAX_BYTES: u64 = 16 * 1024 * 1024;
 /// Read a kubeconfig from disk (multi-document files are merged, relative
 /// file references become absolute).
 pub fn load(path: &Path) -> Result<Kubeconfig> {
-    Kubeconfig::read_from(path).map_err(|e| anyhow!("{e}"))
+    let metadata = std::fs::metadata(path)
+        .with_context(|| format!("cannot read kubeconfig {}", path.display()))?;
+    if !metadata.is_file() || metadata.len() > EXPLICIT_MAX_BYTES {
+        bail!("kubeconfig must be a file no larger than 16 MiB");
+    }
+    // YAML errors can contain source lines (including tokens and private keys).
+    Kubeconfig::read_from(path).map_err(|_| anyhow!("invalid kubeconfig file"))
 }
 
 /// Parse pasted kubeconfig text.
 pub fn load_text(text: &str) -> Result<Kubeconfig> {
-    Kubeconfig::from_yaml(text).map_err(|e| anyhow!("{e}"))
+    if text.len() as u64 > EXPLICIT_MAX_BYTES {
+        bail!("kubeconfig text is too large (maximum 16 MiB)");
+    }
+    Kubeconfig::from_yaml(text).map_err(|_| anyhow!("invalid kubeconfig YAML"))
 }
 
 /// `kubeconfig_parse_file`: never fails; problems land in `error`.
@@ -59,7 +71,7 @@ pub fn parse_file(path: &Path) -> KubeconfigSource {
     match load(path) {
         Ok(kc) => {
             let mut source = source_from(path_str, &kc);
-            if source.contexts.is_empty() {
+            if source.contexts.is_empty() && source.clusters.is_empty() {
                 source.error = Some("No contexts found in this kubeconfig".to_string());
             }
             source
@@ -73,7 +85,7 @@ pub fn parse_text(text: &str) -> KubeconfigSource {
     match load_text(text) {
         Ok(kc) => {
             let mut source = source_from(String::new(), &kc);
-            if source.contexts.is_empty() {
+            if source.contexts.is_empty() && source.clusters.is_empty() {
                 source.error = Some("No contexts found in the pasted kubeconfig".to_string());
             }
             source
@@ -86,6 +98,8 @@ fn source_error(path: String, error: String) -> KubeconfigSource {
     KubeconfigSource {
         path,
         contexts: Vec::new(),
+        clusters: Vec::new(),
+        users: Vec::new(),
         current_context: None,
         error: Some(error),
     }
@@ -113,6 +127,22 @@ pub fn source_from(path: String, kc: &Kubeconfig) -> KubeconfigSource {
     KubeconfigSource {
         path,
         contexts,
+        clusters: kc
+            .clusters
+            .iter()
+            .map(|named| KubeconfigCluster {
+                name: named.name.clone(),
+                server: named
+                    .cluster
+                    .as_ref()
+                    .and_then(|cluster| cluster.server.clone()),
+            })
+            .collect(),
+        users: kc
+            .auth_infos
+            .iter()
+            .map(|named| named.name.clone())
+            .collect(),
         current_context: kc.current_context.clone().filter(|c| !c.is_empty()),
         error: None,
     }
@@ -227,7 +257,7 @@ fn scan_dir(dir: &Path, seen: &mut HashSet<PathBuf>, out: &mut Vec<KubeconfigSou
         let Ok(kc) = load(&canonical) else {
             continue;
         };
-        if kc.contexts.is_empty() {
+        if kc.contexts.is_empty() && kc.clusters.is_empty() {
             continue;
         }
         seen.insert(canonical.clone());
@@ -321,9 +351,119 @@ pub fn single_context(kc: &Kubeconfig, context: &str) -> Result<Kubeconfig> {
     })
 }
 
+/// Add an explicitly selected cluster/user mapping to an in-memory copy.
+pub fn create_context(
+    kc: &mut Kubeconfig,
+    name: &str,
+    input: &KubeconfigContextInput,
+) -> Result<()> {
+    if name.trim().is_empty() {
+        bail!("a context name is required");
+    }
+    if find_context(kc, name).is_some() {
+        bail!("context \"{name}\" already exists; choose it or use a different name");
+    }
+    let cluster = find_cluster(kc, &input.cluster)
+        .and_then(|named| named.cluster.as_ref())
+        .with_context(|| format!("cluster \"{}\" is not defined", input.cluster))?;
+    if cluster
+        .server
+        .as_deref()
+        .is_none_or(|server| server.trim().is_empty())
+    {
+        bail!("cluster \"{}\" has no server", input.cluster);
+    }
+    if let Some(user) = input.user.as_deref() {
+        if find_user(kc, user)
+            .and_then(|named| named.auth_info.as_ref())
+            .is_none()
+        {
+            bail!("user \"{user}\" is not defined");
+        }
+    }
+    kc.contexts.push(NamedContext {
+        name: name.to_string(),
+        context: Some(kube::config::Context {
+            cluster: input.cluster.clone(),
+            user: input.user.clone(),
+            namespace: input
+                .namespace
+                .clone()
+                .filter(|namespace| !namespace.trim().is_empty()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    Ok(())
+}
+
+/// Make a selected file-backed context independent of credential files. Loading
+/// the source first resolves relative paths against its directory. Inline data
+/// wins over files, as it does in Kubernetes clients; unused paths are removed.
+pub fn embed_credentials(kc: &mut Kubeconfig) -> Result<()> {
+    fn read(path: &str, kind: &str) -> Result<Vec<u8>> {
+        let path = Path::new(path);
+        if !path.is_absolute() {
+            bail!("{kind} uses a relative path; import the original kubeconfig file instead");
+        }
+        let metadata = std::fs::metadata(path)
+            .with_context(|| format!("cannot read {kind} file {}", path.display()))?;
+        if !metadata.is_file() || metadata.len() > EXPLICIT_MAX_BYTES {
+            bail!("{kind} must be a file no larger than 16 MiB");
+        }
+        std::fs::read(path).with_context(|| format!("cannot read {kind} file {}", path.display()))
+    }
+    for named in &mut kc.clusters {
+        if let Some(cluster) = &mut named.cluster {
+            if cluster.certificate_authority_data.is_none() {
+                if let Some(path) = &cluster.certificate_authority {
+                    cluster.certificate_authority_data =
+                        Some(STANDARD.encode(read(path, "certificate authority")?));
+                }
+            }
+            cluster.certificate_authority = None;
+        }
+    }
+    for named in &mut kc.auth_infos {
+        if let Some(user) = &mut named.auth_info {
+            if user.client_certificate_data.is_none() {
+                if let Some(path) = &user.client_certificate {
+                    user.client_certificate_data =
+                        Some(STANDARD.encode(read(path, "client certificate")?));
+                }
+            }
+            user.client_certificate = None;
+            if user.client_key_data.is_none() {
+                if let Some(path) = &user.client_key {
+                    user.client_key_data = Some(STANDARD.encode(read(path, "client key")?).into());
+                }
+            }
+            user.client_key = None;
+            if user.token.is_none() {
+                if let Some(path) = &user.token_file {
+                    let token = String::from_utf8(read(path, "token")?)
+                        .map_err(|_| anyhow!("token file is not UTF-8"))?;
+                    if token.trim().is_empty() {
+                        bail!("token file is empty");
+                    }
+                    user.token = Some(token.trim().to_string().into());
+                }
+            }
+            user.token_file = None;
+        }
+    }
+    Ok(())
+}
+
 /// Serialise a kubeconfig as YAML.
 pub fn to_yaml(kc: &Kubeconfig) -> Result<String> {
-    serde_yaml::to_string(kc).context("failed to serialise kubeconfig")
+    let text = serde_yaml::to_string(kc).context("failed to serialise kubeconfig")?;
+    // Base64 embedding expands the input. Refuse it before storing a source
+    // that our readers would reject, especially before retiring an old copy.
+    if text.len() as u64 > EXPLICIT_MAX_BYTES {
+        bail!("generated kubeconfig is too large (maximum 16 MiB)");
+    }
+    Ok(text)
 }
 
 #[cfg(test)]
@@ -389,6 +529,51 @@ contexts:
         assert!(empty.error.unwrap().contains("No contexts"));
         let missing = parse_file(Path::new("/definitely/not/here/kubeconfig"));
         assert!(missing.error.is_some());
+    }
+
+    #[test]
+    fn parser_diagnostics_never_include_credential_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("invalid-config");
+        for text in [
+            "users: [{name: test, user: {token: {do-not-leak-secret: value}}}]",
+            "users: [{name: test, user: {client-key-data: [do-not-leak-secret}}]",
+        ] {
+            std::fs::write(&path, text).unwrap();
+            for source in [parse_text(text), parse_file(&path)] {
+                let error = source.error.unwrap();
+                assert!(error.contains("invalid kubeconfig"));
+                assert!(!error.contains("do-not-leak-secret"));
+            }
+        }
+    }
+
+    #[test]
+    fn directory_discovery_includes_contextless_cluster_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let kube = dir.path().join(".kube");
+        std::fs::create_dir(&kube).unwrap();
+        std::fs::write(kube.join("contextless.yaml"),
+            "clusters: [{name: demo, cluster: {server: 'https://demo.example.test'}}]\nusers: [{name: identity, user: {token: private-token}}]\ncontexts: []"
+        ).unwrap();
+        let sources = discover_with(Some(dir.path()), None, &[]);
+        assert_eq!(sources.len(), 1);
+        assert!(sources[0].error.is_none());
+        assert_eq!(sources[0].clusters[0].name, "demo");
+        assert_eq!(sources[0].users, ["identity"]);
+        assert!(!serde_json::to_string(&sources)
+            .unwrap()
+            .contains("private-token"));
+    }
+
+    #[test]
+    fn inline_credentials_take_precedence_without_reading_unused_files() {
+        let mut kc = load_text("clusters: [{name: c, cluster: {server: 'https://example.test', certificate-authority: missing-ca, certificate-authority-data: Y2E=}}]\nusers: [{name: u, user: {token: inline-token, tokenFile: missing-token, client-certificate: missing-cert, client-certificate-data: Y2VydA==, client-key: missing-key, client-key-data: a2V5}}]").unwrap();
+        embed_credentials(&mut kc).unwrap();
+        let yaml = to_yaml(&kc).unwrap();
+        assert!(yaml.contains("inline-token"));
+        assert!(!yaml.contains("missing-"));
+        assert!(!yaml.contains("tokenFile"));
     }
 
     #[test]

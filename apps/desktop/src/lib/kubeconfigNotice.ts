@@ -1,3 +1,4 @@
+import { sourcePathOf } from './kubeconfigImport';
 import * as i18n from '@/i18n/core';
 import type {
   ClusterDef,
@@ -38,7 +39,7 @@ export function pendingNotice(
   statuses: Record<ClusterId, ClusterStatus>,
 ): { newContexts: KubeconfigNewContext[]; reconnect: ClusterDef[] } {
   if (!notice) return { newContexts: [], reconnect: [] };
-  const registered = new Set(clusters.map((c) => contextKey(c.kubeconfig_path, c.context)));
+  const registered = new Set(clusters.map((c) => contextKey(sourcePathOf(c), c.context)));
   return {
     newContexts: notice.new_contexts.filter((c) => !registered.has(contextKey(c.path, c.context))),
     reconnect: clusters.filter(

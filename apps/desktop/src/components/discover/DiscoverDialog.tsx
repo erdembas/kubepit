@@ -13,6 +13,7 @@ import {
   guessEnvironment,
   prettyContextName,
 } from '@/lib/clusterMeta';
+import { sourcePathOf, kubeconfigErrorMessage } from '@/lib/kubeconfigImport';
 import { cn } from '@/lib/cn';
 import { ipc, isTauri } from '@/lib/ipc';
 import { sectionColor } from '@/lib/sectionColors';
@@ -41,18 +42,19 @@ export function DiscoverDialog() {
   const [error, setError] = useState<string | null>(null);
 
   const existing = useMemo(
-    () => new Set(clusters.map((c) => key(c.kubeconfig_path, c.context))),
+    () => new Set(clusters.map((c) => key(sourcePathOf(c), c.context))),
     [clusters],
   );
 
   const scan = () => {
     setSources(null);
+    setError(null);
     void ipc
       .kubeconfigDiscover()
       .then(setSources)
       .catch((e) => {
         setSources([]);
-        setError(String(e));
+        setError(kubeconfigErrorMessage(e));
       });
   };
   useEffect(scan, []);
@@ -79,11 +81,16 @@ export function DiscoverDialog() {
 
   const addFile = async () => {
     if (!isTauri) return;
-    const { open } = await import('@tauri-apps/plugin-dialog');
-    const picked = await open({ multiple: false, directory: false });
-    if (typeof picked !== 'string') return;
-    const parsed = await ipc.kubeconfigParseFile(picked);
-    setSources((prev) => [parsed, ...(prev ?? []).filter((s) => s.path !== parsed.path)]);
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const picked = await open({ multiple: false, directory: false });
+      if (typeof picked !== 'string') return;
+      const parsed = await ipc.kubeconfigParseFile(picked);
+      setSources((prev) => [parsed, ...(prev ?? []).filter((s) => s.path !== parsed.path)]);
+      setError(parsed.error ? kubeconfigErrorMessage(parsed.error) : null);
+    } catch (cause) {
+      setError(kubeconfigErrorMessage(cause));
+    }
   };
 
   const toggle = (path: string, context: string) => {
@@ -156,7 +163,7 @@ export function DiscoverDialog() {
       );
       close();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(kubeconfigErrorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -213,7 +220,9 @@ export function DiscoverDialog() {
             {i18n.t('Add file…')}
           </Button>
           <span className="text-fg-dim ml-auto text-[11px]">
-            {i18n.t('Kubepit only reads these files; it never modifies them.')}
+            {i18n.t(
+              'Selected connections are imported as private copies. Your source files are not changed.',
+            )}
           </span>
         </div>
 
@@ -251,8 +260,28 @@ export function DiscoverDialog() {
                 {source.error ? (
                   <p className="text-status-error flex items-center gap-2 px-3 py-2.5 text-[11.5px]">
                     <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                    {source.error}
+                    {kubeconfigErrorMessage(source.error)}
                   </p>
+                ) : source.contexts.length === 0 ? (
+                  <div className="space-y-2 px-3 py-3">
+                    <p className="text-fg-dim text-[12px]">
+                      {i18n.t(
+                        'This kubeconfig has no contexts. Choose a cluster and user to create a connection.',
+                      )}
+                    </p>
+                    <Button
+                      size="sm"
+                      disabled={source.clusters.length === 0}
+                      onClick={() => {
+                        useAppStore
+                          .getState()
+                          .openClusterEditor({ mode: 'add', kubeconfigPath: source.path });
+                        close();
+                      }}
+                    >
+                      {i18n.t('Create a connection…')}
+                    </Button>
+                  </div>
                 ) : (
                   <ul className="divide-border/50 divide-y">
                     {source.contexts.map((c) => {

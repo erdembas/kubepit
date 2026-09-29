@@ -72,7 +72,9 @@ export interface ClusterDef {
   context: string;
   /** Absolute path of the kubeconfig file that holds `context`. */
   kubeconfig_path: string;
-  /** True when Kubepit owns the file (pasted kubeconfig stored under ~/.kubepit/kubeconfigs). */
+  /** Import provenance only; connections use the managed copy. */
+  source_kubeconfig_path?: string | null;
+  /** True when Kubepit owns the imported single-context kubeconfig. */
   managed: boolean;
   tags: string[];
   environment: ClusterEnvironment | null;
@@ -108,13 +110,25 @@ export interface ClusterDef {
   proxy_url?: string | null;
 }
 
-export interface ClusterInput {
-  name: string;
+export interface KubeconfigCreateContext {
+  cluster: string;
+  /** null uses anonymous authentication. */
+  user: string | null;
+  namespace: string | null;
+}
+
+export interface KubeconfigImportInput {
+  /** Existing context, or the name to create when create_context is supplied. */
   context: string;
-  /** Existing kubeconfig on disk. Exactly one of path/text must be set. */
+  /** Source file is read once and copied; it is never changed. */
   kubeconfig_path?: string | null;
-  /** Pasted kubeconfig. Stored as a managed file. */
+  /** Pasted source. Exactly one source is required for add; neither reuses an edited cluster's source. */
   kubeconfig_text?: string | null;
+  create_context?: KubeconfigCreateContext | null;
+}
+
+export interface ClusterInput extends KubeconfigImportInput {
+  name: string;
   tags: string[];
   environment: ClusterEnvironment | null;
   color: string | null;
@@ -175,6 +189,10 @@ export interface KubeconfigSource {
   /** Absolute path, or '' for pasted text. */
   path: string;
   contexts: KubeconfigContext[];
+  /** Named connection targets, without credentials. */
+  clusters: { name: string; server: string | null }[];
+  /** Authentication entry names only; never tokens or certificate material. */
+  users: string[];
   current_context: string | null;
   error: string | null;
 }

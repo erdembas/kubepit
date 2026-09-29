@@ -4,6 +4,7 @@ import type {
   ClusterInput,
   ClusterStatus,
   KubeconfigSource,
+  KubeconfigImportInput,
   PortForward,
   PortForwardRequest,
   Settings,
@@ -11,6 +12,8 @@ import type {
   TerminalOutput,
   WorkspaceSnapshot,
 } from '@/types';
+import * as i18n from '@/i18n/core';
+import { importedKubeconfigSource, parseKubeconfigText } from './kubeconfig';
 import { DEFAULT_AI_SETTINGS } from '@/lib/ai/defaults';
 import { DEFAULT_ALERT_SETTINGS } from '@/lib/alerts/policy';
 import { DEFAULT_HISTORY_SETTINGS } from '@/lib/history/audit';
@@ -303,63 +306,110 @@ export const demoForwards = {
   },
 };
 
-const discovered: KubeconfigSource[] = [
-  {
-    path: '~/.kube/config',
-    current_context: 'kind-kubepit',
-    error: null,
-    contexts: [
-      {
-        name: 'kind-kubepit',
-        cluster: 'kind-kubepit',
-        user: 'kind-kubepit',
-        namespace: null,
-        server: 'https://127.0.0.1:52341',
-      },
-      {
-        name: 'minikube',
-        cluster: 'minikube',
-        user: 'minikube',
-        namespace: 'default',
-        server: 'https://192.168.49.2:8443',
-      },
-      {
-        name: 'docker-desktop',
-        cluster: 'docker-desktop',
-        user: 'docker-desktop',
-        namespace: null,
-        server: 'https://kubernetes.docker.internal:6443',
-      },
-    ],
-  },
-  {
-    path: '~/.kube/acme-eks.yaml',
-    current_context: null,
-    error: null,
-    contexts: [
-      {
-        name: 'arn:aws:eks:eu-west-1:123456789012:cluster/prod-eu-west-1',
-        cluster: 'prod-eu-west-1',
-        user: 'aws-prod',
-        namespace: null,
-        server: 'https://A1B2C3.gr7.eu-west-1.eks.amazonaws.com',
-      },
-      {
-        name: 'arn:aws:eks:eu-central-1:123456789012:cluster/analytics',
-        cluster: 'analytics',
-        user: 'aws-analytics',
-        namespace: 'airflow',
-        server: 'https://9Z8Y7X.sk1.eu-central-1.eks.amazonaws.com',
-      },
-    ],
-  },
-  {
-    path: '~/.kube/old-cluster.conf',
-    current_context: null,
-    error: 'invalid kubeconfig: missing "clusters"',
-    contexts: [],
-  },
-];
+const discovered: KubeconfigSource[] = (
+  [
+    {
+      path: '~/.kube/config',
+      current_context: 'kind-kubepit',
+      error: null,
+      contexts: [
+        {
+          name: 'kind-kubepit',
+          cluster: 'kind-kubepit',
+          user: 'kind-kubepit',
+          namespace: null,
+          server: 'https://127.0.0.1:52341',
+        },
+        {
+          name: 'minikube',
+          cluster: 'minikube',
+          user: 'minikube',
+          namespace: 'default',
+          server: 'https://192.168.49.2:8443',
+        },
+        {
+          name: 'docker-desktop',
+          cluster: 'docker-desktop',
+          user: 'docker-desktop',
+          namespace: null,
+          server: 'https://kubernetes.docker.internal:6443',
+        },
+      ],
+    },
+    {
+      path: '~/.kube/acme-eks.yaml',
+      current_context: null,
+      error: null,
+      contexts: [
+        {
+          name: 'arn:aws:eks:eu-west-1:123456789012:cluster/prod-eu-west-1',
+          cluster: 'prod-eu-west-1',
+          user: 'aws-prod',
+          namespace: null,
+          server: 'https://A1B2C3.gr7.eu-west-1.eks.amazonaws.com',
+        },
+        {
+          name: 'arn:aws:eks:eu-central-1:123456789012:cluster/analytics',
+          cluster: 'analytics',
+          user: 'aws-analytics',
+          namespace: 'airflow',
+          server: 'https://9Z8Y7X.sk1.eu-central-1.eks.amazonaws.com',
+        },
+      ],
+    },
+    {
+      path: '~/.kube/old-cluster.conf',
+      current_context: null,
+      error: 'invalid kubeconfig file',
+      contexts: [],
+    },
+  ] as Omit<KubeconfigSource, 'clusters' | 'users'>[]
+).map((source) => ({
+  ...source,
+  clusters: [
+    ...new Map(
+      source.contexts.map((context) => [
+        context.cluster,
+        { name: context.cluster, server: context.server },
+      ]),
+    ).values(),
+  ],
+  users: [...new Set(source.contexts.map((context) => context.user).filter(Boolean))],
+}));
+discovered.push({
+  path: '~/.kube/contextless-demo.yaml',
+  current_context: 'missing-demo-context',
+  error: null,
+  contexts: [],
+  clusters: [
+    { name: 'demo-east', server: 'https://demo-east.invalid:6443' },
+    { name: 'demo-west', server: 'https://demo-west.invalid:6443' },
+  ],
+  users: ['demo-reader', 'demo-admin'],
+});
+const importedSources = new Map<string, KubeconfigSource>();
+function kubeconfigSourceFor(input: KubeconfigImportInput, current?: ClusterDef): KubeconfigSource {
+  const hasPath = input.kubeconfig_path != null;
+  const hasText = input.kubeconfig_text != null;
+  if (hasPath && hasText)
+    throw new Error(i18n.t('Choose either a kubeconfig file or pasted YAML.'));
+  if (hasText) return parseKubeconfigText(input.kubeconfig_text!);
+  if (hasPath) {
+    const found =
+      discovered.find((source) => source.path === input.kubeconfig_path) ??
+      [...importedSources.values()].find((source) => source.path === input.kubeconfig_path);
+    if (!found)
+      throw new Error(i18n.t('The kubeconfig file could not be found. Choose another file.'));
+    return found;
+  }
+  if (current) {
+    const imported = importedSources.get(current.id);
+    if (imported) return imported;
+    const found = discovered.find((source) => source.path === current.kubeconfig_path);
+    if (found) return found;
+  }
+  throw new Error(i18n.t('Choose a kubeconfig first.'));
+}
 
 function emitClusters() {
   mockEmit('cluster://list', clusters);
@@ -408,64 +458,87 @@ register({
     await sleep(350);
     return discovered;
   },
-  kubeconfig_parse_file: async ({ path }: MockArgs) =>
-    discovered.find((d) => d.path === path) ?? {
-      path,
-      current_context: null,
-      error: null,
-      contexts: [
-        {
-          name: 'picked-context',
-          cluster: 'picked',
-          user: 'picked',
-          namespace: null,
-          server: 'https://10.0.0.1:6443',
-        },
-      ],
-    },
-  kubeconfig_parse_text: ({ text }: MockArgs): KubeconfigSource => {
-    const names = [...String(text).matchAll(/^\s*-?\s*name:\s*(\S+)\s*$/gm)].map((m) => m[1]!);
-    const hasContexts = /contexts:/.test(String(text));
-    return {
-      path: '',
-      current_context: null,
-      error: hasContexts ? null : 'This does not look like a kubeconfig (no "contexts" found).',
-      contexts: hasContexts
-        ? [...new Set(names)].slice(0, 3).map((name) => ({
-            name,
-            cluster: name,
-            user: name,
-            namespace: null,
-            server: 'https://10.0.0.1:6443',
-          }))
-        : [],
+  kubeconfig_parse_file: ({ path }: MockArgs) =>
+    structuredClone(kubeconfigSourceFor({ context: '', kubeconfig_path: String(path) })),
+  kubeconfig_parse_text: ({ text }: MockArgs): KubeconfigSource =>
+    parseKubeconfigText(String(text)),
+  cluster_kubeconfig_source: ({ id }: MockArgs) => {
+    const cluster = clusters.find((item) => item.id === id);
+    if (!cluster) throw new Error(i18n.t('Cluster not found.'));
+    return structuredClone(kubeconfigSourceFor({ context: cluster.context }, cluster));
+  },
+  cluster_reimport_kubeconfig: ({ id, input }: MockArgs) => {
+    const current = clusters.find((item) => item.id === id);
+    if (!current) throw new Error(i18n.t('Cluster not found.'));
+    const request = input as KubeconfigImportInput;
+    const source = kubeconfigSourceFor(request, current);
+    const path = `~/.kubepit/kubeconfigs/${crypto.randomUUID()}.yaml`;
+    const imported = importedKubeconfigSource(source, request, path);
+    const provenance =
+      request.kubeconfig_text != null
+        ? null
+        : (request.kubeconfig_path ??
+          current.source_kubeconfig_path ??
+          (current.managed ? null : current.kubeconfig_path));
+    const next: ClusterDef = {
+      ...current,
+      context: imported.contexts[0]!.name,
+      kubeconfig_path: path,
+      source_kubeconfig_path: provenance,
+      managed: true,
     };
+    importedSources.set(current.id, imported);
+    clusters = clusters.map((item) => (item.id === current.id ? next : item));
+    setStatus({
+      id: current.id,
+      state: 'disconnected',
+      error: null,
+      connected_at: null,
+      version: null,
+      platform: null,
+      server: null,
+    });
+    forwards = forwards.filter((forward) => forward.cluster_id !== current.id);
+    mockEmit('portforward://changed', forwards);
+    emitClusters();
+    return next;
   },
   cluster_list: () => clusters,
   cluster_add: ({ inputs }: MockArgs) => {
-    const added = (inputs as ClusterInput[]).map((input) =>
-      def({
-        id: `c-${crypto.randomUUID().slice(0, 8)}`,
-        name: input.name,
-        context: input.context,
-        kubeconfig_path: input.kubeconfig_path ?? '~/.kubepit/kubeconfigs/pasted.yaml',
-        managed: !input.kubeconfig_path,
-        tags: input.tags,
-        environment: input.environment,
-        color: input.color,
-        default_namespace: input.default_namespace,
-        accessible_namespaces: input.accessible_namespaces,
-        read_only: input.read_only,
-        notes: input.notes,
-        proxy_url: input.proxy_url ?? null,
-        prometheus: input.prometheus ?? { mode: 'auto' },
-        prometheus_access: input.prometheus_access,
-        loki: input.loki,
-        cost: input.cost,
-        created_at: Date.now(),
-        last_connected_at: null,
-      }),
-    );
+    const prepared = (inputs as ClusterInput[]).map((input) => {
+      const id = `c-${crypto.randomUUID().slice(0, 8)}`;
+      const path = `~/.kubepit/kubeconfigs/${id}.yaml`;
+      const source = importedKubeconfigSource(kubeconfigSourceFor(input), input, path);
+      return {
+        source,
+        cluster: def({
+          id,
+          name: input.name,
+          context: source.contexts[0]!.name,
+          kubeconfig_path: path,
+          managed: true,
+          source_kubeconfig_path: input.kubeconfig_path ?? null,
+          tags: input.tags,
+          environment: input.environment,
+          color: input.color,
+          default_namespace: input.default_namespace,
+          accessible_namespaces: input.accessible_namespaces,
+          read_only: input.read_only,
+          notes: input.notes,
+          proxy_url: input.proxy_url ?? null,
+          prometheus: input.prometheus ?? { mode: 'auto' },
+          prometheus_access: input.prometheus_access,
+          loki: input.loki,
+          cost: input.cost,
+          created_at: Date.now(),
+          last_connected_at: null,
+        }),
+      };
+    });
+    const added = prepared.map(({ cluster, source }) => {
+      importedSources.set(cluster.id, source);
+      return cluster;
+    });
     for (const c of added) {
       statuses[c.id] = {
         id: c.id,
@@ -483,11 +556,23 @@ register({
     return added;
   },
   cluster_update: ({ cluster }: MockArgs) => {
-    clusters = clusters.map((c) => (c.id === cluster.id ? (cluster as ClusterDef) : c));
+    const current = clusters.find((item) => item.id === cluster.id);
+    if (!current) throw new Error(i18n.t('Cluster not found.'));
+    const next: ClusterDef = {
+      ...cluster,
+      id: current.id,
+      created_at: current.created_at,
+      last_connected_at: current.last_connected_at,
+      managed: current.managed,
+      source_kubeconfig_path: current.source_kubeconfig_path,
+      kubeconfig_path: current.managed ? current.kubeconfig_path : cluster.kubeconfig_path,
+    };
+    clusters = clusters.map((item) => (item.id === next.id ? next : item));
     emitClusters();
-    return cluster;
+    return next;
   },
   cluster_remove: ({ id }: MockArgs) => {
+    importedSources.delete(String(id));
     clusters = clusters.filter((c) => c.id !== id);
     delete statuses[id];
     emitClusters();

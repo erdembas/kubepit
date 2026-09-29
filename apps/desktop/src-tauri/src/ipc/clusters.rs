@@ -5,7 +5,8 @@ use std::path::PathBuf;
 
 use kubepit_core::kubeconfig;
 use kubepit_core::types::{
-    ApiResourceInfo, ClusterDef, ClusterInput, ClusterOverview, ClusterStatus, KubeconfigSource,
+    ApiResourceInfo, ClusterDef, ClusterInput, ClusterOverview, ClusterStatus, KubeconfigImport,
+    KubeconfigSource,
 };
 use tauri::State;
 
@@ -57,6 +58,25 @@ pub async fn cluster_update(
 ) -> IpcResult<ClusterDef> {
     let core = state.core.clone();
     blocking(move || core.cluster_update(cluster)).await
+}
+
+#[tauri::command]
+pub async fn cluster_kubeconfig_source(
+    id: String,
+    state: State<'_, AppState>,
+) -> IpcResult<KubeconfigSource> {
+    let core = state.core.clone();
+    blocking(move || core.cluster_kubeconfig_source(&id)).await
+}
+
+#[tauri::command]
+pub async fn cluster_reimport_kubeconfig(
+    id: String,
+    input: KubeconfigImport,
+    state: State<'_, AppState>,
+) -> IpcResult<ClusterDef> {
+    let core = state.core.clone();
+    blocking(move || core.cluster_reimport_kubeconfig(&id, input)).await
 }
 
 #[tauri::command]

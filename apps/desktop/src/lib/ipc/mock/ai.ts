@@ -786,9 +786,11 @@ function send(previewId: string, onEvent: (event: AiEvent) => void): string {
   return run.id;
 }
 
-/** Cancels the runs of a disconnected or removed cluster (`ai_stop_cluster`). */
+/** Invalidate the old target's runs, sessions and previews (`ai_stop_cluster`). */
 function stopCluster(clusterId: string) {
   for (const run of [...runs.values()]) if (run.session.clusterId === clusterId) cancel(run);
+  for (const session of [...sessions.values()])
+    if (session.clusterId === clusterId) endSession(session.id);
 }
 
 // -- Request log -------------------------------------------------------------------
@@ -956,4 +958,17 @@ for (const command of ['cluster_disconnect', 'cluster_remove'] as const) {
       return result;
     },
   });
+}
+
+// Invalidate only after a replacement succeeds; refused imports retain the old chat.
+{
+  const inner = handlers.cluster_reimport_kubeconfig;
+  if (inner)
+    register({
+      cluster_reimport_kubeconfig: async (args: MockArgs) => {
+        const result = await inner(args);
+        stopCluster(String(args.id));
+        return result;
+      },
+    });
 }

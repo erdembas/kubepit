@@ -292,7 +292,7 @@ export function KubeconfigCategory({ description }: { description: string }) {
 }
 
 /**
- * Connectivity: keep pasted kubeconfigs in the OS credential store. Applies
+ * Connectivity: keep imported kubeconfigs in the OS credential store. Applies
  * immediately (it migrates every managed kubeconfig), outside the draft.
  */
 function CredentialStorageSection() {
@@ -317,8 +317,8 @@ function CredentialStorageSection() {
         .pushToast(
           'success',
           next
-            ? i18n.t('Pasted kubeconfigs are now kept in the {store}.', { store: storeName })
-            : i18n.t('Pasted kubeconfigs are now kept as files.'),
+            ? i18n.t('Imported kubeconfigs are now kept in the {store}.', { store: storeName })
+            : i18n.t('Imported kubeconfigs are now kept as files.'),
         );
     } catch (e) {
       useAppStore.getState().pushToast('error', e instanceof Error ? e.message : String(e));
@@ -330,7 +330,7 @@ function CredentialStorageSection() {
     <SettingsSection
       title={i18n.t('Credential storage')}
       description={i18n.t(
-        'Where kubeconfigs you pasted into Kubepit are kept. Kubeconfig files on your disk are never moved.',
+        'Where copied and pasted kubeconfigs are kept. Your original files are never moved or modified.',
       )}
     >
       <Switch
@@ -340,7 +340,7 @@ function CredentialStorageSection() {
         label={
           <span className="inline-flex items-center gap-1.5">
             <KeyRound className="text-fg-dim h-3.5 w-3.5" />
-            {i18n.t('Keep pasted kubeconfigs in the {store}', { store: storeName })}
+            {i18n.t('Keep imported kubeconfigs in the {store}', { store: storeName })}
             {busy && <Loader2 className="text-fg-dim h-3 w-3 animate-spin" />}
           </span>
         }
@@ -350,8 +350,8 @@ function CredentialStorageSection() {
       />
       <p className="text-fg-dim mt-2 text-[11px]">
         {i18n.plural(
-          '{count} pasted kubeconfig is affected.',
-          '{count} pasted kubeconfigs are affected.',
+          '{count} imported kubeconfig is affected.',
+          '{count} imported kubeconfigs are affected.',
           managed,
         )}
       </p>
@@ -528,12 +528,12 @@ export function AboutCategory({ description }: { description: string }) {
       <SettingsSection title={i18n.t('Privacy')}>
         <ul className="text-fg-muted list-disc space-y-1 pl-5 text-[12px]">
           <li>{i18n.t('No account, no telemetry.')}</li>
+          <li>{i18n.t('Credentials are stored locally and sent only to your clusters.')}</li>
           <li>
             {i18n.t(
-              'Credentials stay in your kubeconfig files and are only sent to your clusters.',
+              'Imported kubeconfigs use your chosen local storage: protected files or the OS credential store.',
             )}
           </li>
-          <li>{i18n.t('Pasted kubeconfigs are stored with owner-only permissions.')}</li>
         </ul>
       </SettingsSection>
     </SettingsPageShell>

@@ -39,6 +39,9 @@ pub struct ClusterDef {
     pub name: String,
     pub context: String,
     pub kubeconfig_path: String,
+    /// Import provenance only; never used for connections or credential watching.
+    #[serde(default)]
+    pub source_kubeconfig_path: Option<String>,
     #[serde(default)]
     pub managed: bool,
     #[serde(default)]
@@ -89,6 +92,9 @@ pub struct ClusterInput {
     pub kubeconfig_path: Option<String>,
     #[serde(default)]
     pub kubeconfig_text: Option<String>,
+    /// Create this named context inside the managed copy, never in the source file.
+    #[serde(default)]
+    pub create_context: Option<KubeconfigContextInput>,
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
@@ -165,10 +171,40 @@ pub struct KubeconfigContext {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct KubeconfigCluster {
+    pub name: String,
+    pub server: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct KubeconfigContextInput {
+    pub cluster: String,
+    pub user: Option<String>,
+    pub namespace: Option<String>,
+}
+
+/// Replacement source for an existing cluster. With neither path nor text,
+/// use its current stored source; exactly one may otherwise be supplied.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct KubeconfigImport {
+    #[serde(default)]
+    pub kubeconfig_path: Option<String>,
+    #[serde(default)]
+    pub kubeconfig_text: Option<String>,
+    pub context: String,
+    #[serde(default)]
+    pub create_context: Option<KubeconfigContextInput>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct KubeconfigSource {
     /// Absolute path, or `""` for pasted text.
     pub path: String,
     pub contexts: Vec<KubeconfigContext>,
+    #[serde(default)]
+    pub clusters: Vec<KubeconfigCluster>,
+    #[serde(default)]
+    pub users: Vec<String>,
     pub current_context: Option<String>,
     pub error: Option<String>,
 }

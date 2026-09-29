@@ -34,6 +34,7 @@ import type {
   ClusterDef,
   ClusterId,
   ClusterInput,
+  KubeconfigImportInput,
   ClusterOverview,
   ClusterProxyInfo,
   ClusterStatus,
@@ -175,6 +176,10 @@ export const ipc = {
   clusterList: () => call<ClusterDef[]>('cluster_list'),
   clusterAdd: (inputs: ClusterInput[]) => call<ClusterDef[]>('cluster_add', { inputs }),
   clusterUpdate: (cluster: ClusterDef) => call<ClusterDef>('cluster_update', { cluster }),
+  clusterKubeconfigSource: (id: ClusterId) =>
+    call<KubeconfigSource>('cluster_kubeconfig_source', { id }),
+  clusterReimportKubeconfig: (id: ClusterId, input: KubeconfigImportInput) =>
+    call<ClusterDef>('cluster_reimport_kubeconfig', { id, input }),
   clusterRemove: (id: ClusterId) => call<void>('cluster_remove', { id }),
   clusterConnect: (id: ClusterId) => call<ClusterStatus>('cluster_connect', { id }),
   clusterDisconnect: (id: ClusterId) => call<void>('cluster_disconnect', { id }),

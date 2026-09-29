@@ -49,7 +49,8 @@ export type SettingsCategory =
   | 'tools'
   | 'about';
 
-export type ClusterEditorState = { mode: 'add' } | { mode: 'edit'; cluster: ClusterDef } | null;
+export type ClusterEditorState =
+  { mode: 'add'; kubeconfigPath?: string } | { mode: 'edit'; cluster: ClusterDef } | null;
 
 export interface ConfirmRequest {
   title: string;

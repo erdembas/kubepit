@@ -697,3 +697,44 @@ describe('demo assistant: unanswered tool consent', () => {
     expect(waiting.events.at(-1)).toMatchObject({ type: 'done', stop: 'cancelled' });
   });
 });
+
+describe('demo assistant: replaced cluster credentials', () => {
+  it('invalidates old previews, chats and pending tool consent only after successful reimport', async () => {
+    const first = await settle(
+      invoke<AiPreview>('ai_preview', { request: explainRequest('c-dev') }),
+    );
+    const waiting = await send(first.preview_id);
+    await waitFor(() => waiting.calls().some((c) => c.status === 'pending-approval'));
+    const preview = await settle(
+      invoke<AiPreview>('ai_preview', { request: chatRequest(null, 'chat', 'Which context?') }),
+    );
+    await expect(
+      invoke('cluster_reimport_kubeconfig', {
+        id: 'c-dev',
+        input: { context: 'missing', kubeconfig_path: '~/.kube/config' },
+      }),
+    ).rejects.toThrow();
+    // A rejected import leaves the old chat usable.
+    await settle(
+      invoke('ai_preview', { request: chatRequest(preview.session_id, 'chat', 'still here') }),
+    );
+    await invoke('cluster_reimport_kubeconfig', {
+      id: 'c-dev',
+      input: {
+        context: 'replacement',
+        kubeconfig_path: '~/.kube/contextless-demo.yaml',
+        create_context: { cluster: 'demo-east', user: 'demo-reader', namespace: null },
+      },
+    });
+    await waitFor(waiting.done);
+    expect(waiting.events.at(-1)).toMatchObject({ type: 'done', stop: 'cancelled' });
+    await expect(
+      settle(invoke('ai_send', { previewId: preview.preview_id, onEvent: () => {} }), 0),
+    ).rejects.toThrow();
+    await expect(
+      settle(
+        invoke('ai_preview', { request: chatRequest(preview.session_id, 'chat', 'old target') }),
+      ),
+    ).rejects.toThrow();
+  });
+});

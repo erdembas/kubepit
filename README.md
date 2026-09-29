@@ -18,7 +18,9 @@ and a React UI.
 ## What it does
 
 - **Many clusters, organised.** Import contexts from any kubeconfig (auto-discovery of
-  `$KUBECONFIG`, `~/.kube` and extra folders, or paste one), then group clusters into
+  `$KUBECONFIG`, `~/.kube` and extra folders, or paste one). File imports are copied
+  into Kubepit; files without contexts let you choose their cluster and user.
+  Then group clusters into
   colour-coded **sections**, **tag** them, label their **environment**
   (production/staging/testing/development/local) and filter or group the sidebar by any of it.
 - **Fleet dashboard.** Connection state, node and pod health, CPU/memory usage and
@@ -50,8 +52,10 @@ and a React UI.
 
 - No account, no telemetry.
 - State lives under `~/.kubepit/` as human-readable JSON.
-- Kubepit never modifies your kubeconfig files; pasted kubeconfigs are stored with
-  owner-only permissions.
+- Kubepit never modifies your original kubeconfig files. Imported and pasted
+  kubeconfigs use owner-only storage under `~/.kubepit/kubeconfigs/`, or the OS
+  keychain when enabled. Edit a cluster to replace its kubeconfig or repair a
+  missing context without losing its saved settings.
 
 ## Development
 

@@ -87,6 +87,8 @@ pub fn run() {
             ipc::cluster_list,
             ipc::cluster_add,
             ipc::cluster_update,
+            ipc::cluster_kubeconfig_source,
+            ipc::cluster_reimport_kubeconfig,
             ipc::cluster_remove,
             ipc::cluster_connect,
             ipc::cluster_disconnect,

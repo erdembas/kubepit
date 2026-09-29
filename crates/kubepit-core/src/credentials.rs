@@ -1,9 +1,11 @@
 //! Where a cluster's kubeconfig comes from, and what clients get from it.
 //!
-//! - User clusters reference their own kubeconfig file, which is only read.
-//! - Managed (pasted) kubeconfigs live in `kubeconfigs/<id>.yaml` (mode
-//!   0600), or — with `settings.keychain_kubeconfigs` — in the OS credential
-//!   store under `kubeconfig/<id>` ([`crate::secrets`]).
+//! - Legacy linked clusters reference their own kubeconfig file, which is only read.
+//! - New file imports are managed snapshots. Imported and pasted kubeconfigs
+//!   live in `kubeconfigs/<storage-id>.yaml` (mode 0600), or — with
+//!   `settings.keychain_kubeconfigs` — in the OS credential store under
+//!   `kubeconfig/<storage-id>` ([`crate::secrets`]). A reimport stages a fresh
+//!   storage id while keeping the registered cluster id unchanged.
 //!
 //! Reads look in the configured location first and fall back to the other
 //! one, so an interrupted migration never makes a cluster unusable.
@@ -38,6 +40,20 @@ pub fn secret_key(cluster_id: &str) -> String {
     format!("kubeconfig/{cluster_id}")
 }
 
+/// A reimport keeps the cluster id but stages a new immutable credential copy.
+/// Older managed paths use the cluster id itself, so their keys do not change.
+fn storage_id<'a>(paths: &Paths, path: &'a Path) -> Result<&'a str> {
+    if !paths.is_managed_path(path) {
+        bail!("managed kubeconfig path is outside the managed directory");
+    }
+    let id = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .context("managed kubeconfig path has no storage id")?;
+    crate::paths::validate_id(id)?;
+    Ok(id)
+}
+
 fn read_file(path: &Path) -> Result<Option<Vec<u8>>> {
     match std::fs::read(path) {
         Ok(bytes) => Ok(Some(bytes)),
@@ -60,7 +76,7 @@ impl CredentialSource {
     /// Raw bytes of a managed kubeconfig, from the file or the store.
     fn read_managed(&self, cluster: &ClusterDef) -> Result<Vec<u8>> {
         let path = PathBuf::from(&cluster.kubeconfig_path);
-        let key = secret_key(&cluster.id);
+        let key = secret_key(storage_id(&self.paths, &path)?);
         let store = self.secrets.as_ref();
         // Configured location first, the other one as a fallback.
         let order = if self.keychain {
@@ -164,7 +180,7 @@ impl Kubepit {
         Ok(proxy::effective(cluster.proxy_url.as_deref(), &single))
     }
 
-    /// Store a pasted kubeconfig for a new cluster; returns the path recorded
+    /// Store a managed kubeconfig at a fresh storage id; returns the path recorded
     /// in its `ClusterDef` (the file only exists in file mode).
     pub(crate) fn store_managed(&self, id: &str, text: &str) -> Result<PathBuf> {
         let path = self.paths().managed_kubeconfig(id)?;
@@ -180,6 +196,7 @@ impl Kubepit {
 
     /// Delete a managed kubeconfig wherever it is. Idempotent.
     pub(crate) fn delete_managed(&self, id: &str, path: &Path) {
+        let storage_id = storage_id(self.paths(), path).unwrap_or(id).to_string();
         if self.paths().is_managed_path(path) {
             let _ = std::fs::remove_file(path);
         } else {
@@ -188,7 +205,7 @@ impl Kubepit {
                 path.display()
             );
         }
-        if let Err(e) = delete_value(self.secrets.as_ref(), &secret_key(id)) {
+        if let Err(e) = delete_value(self.secrets.as_ref(), &secret_key(&storage_id)) {
             tracing::warn!("could not delete a stored kubeconfig: {e:#}");
         }
     }
@@ -204,7 +221,7 @@ impl Kubepit {
             return Ok(false);
         };
         let store = self.secrets.as_ref();
-        let key = secret_key(&cluster.id);
+        let key = secret_key(storage_id(self.paths(), &path)?);
         write_value(store, &key, &bytes)?;
         if read_value(store, &key)?.as_deref() != Some(bytes.as_slice()) {
             let _ = delete_value(store, &key);
@@ -221,7 +238,7 @@ impl Kubepit {
             return Ok(false);
         }
         let store = self.secrets.as_ref();
-        let key = secret_key(&cluster.id);
+        let key = secret_key(storage_id(self.paths(), &path)?);
         let Some(bytes) = read_value(store, &key)? else {
             return Ok(false);
         };
@@ -240,6 +257,7 @@ impl Kubepit {
     /// credential store (`true`) or in `kubeconfigs/` (`false`), migrating
     /// the existing ones. See the module docs for the guarantees.
     pub fn kubeconfig_storage_set(&self, keychain: bool) -> Result<Settings> {
+        let _guard = self.kubeconfig_mutations.lock();
         let settings = self.settings();
         if settings.keychain_kubeconfigs == keychain {
             return Ok(settings);
@@ -381,6 +399,8 @@ mod tests {
             }])
             .unwrap()
             .remove(0);
+        let imported_text = std::fs::read_to_string(&from_file.kubeconfig_path).unwrap();
+        assert!(from_file.managed);
         let a = pasted(&app, "dev");
         let b = pasted(&app, "prod");
         let run_a = app.paths().run_kubeconfig(&a.id).unwrap();
@@ -390,6 +410,13 @@ mod tests {
         assert!(settings.keychain_kubeconfigs);
         assert!(!Path::new(&a.kubeconfig_path).exists());
         assert!(!Path::new(&b.kubeconfig_path).exists());
+        assert!(!Path::new(&from_file.kubeconfig_path).exists());
+        assert_eq!(
+            read_value(secrets.as_ref(), &secret_key(&from_file.id))
+                .unwrap()
+                .unwrap(),
+            imported_text.as_bytes()
+        );
         // Chunked (the test store holds 256 bytes per entry).
         assert!(secrets.keys().len() > 2);
         assert_eq!(
@@ -426,6 +453,11 @@ mod tests {
             );
             assert!(app.paths().run_kubeconfig(&cluster.id).unwrap().exists());
         }
+        assert_eq!(
+            std::fs::read_to_string(&from_file.kubeconfig_path).unwrap(),
+            imported_text
+        );
+        assert_eq!(std::fs::read_to_string(user_file).unwrap(), TWO_CONTEXTS);
         assert!(secrets.keys().is_empty());
     }
 
@@ -571,22 +603,31 @@ mod tests {
             std::thread::spawn(move || app.kubeconfig_storage_set(true))
         };
         entered.recv_timeout(Duration::from_secs(10)).unwrap();
-        // While the first kubeconfig is being moved: disable one cluster,
-        // make one production (which forgets it), turn on local-only.
+        // While the first kubeconfig is being moved: settings still update,
+        // while registry edits wait for the credential migration to finish.
         app.ai_cluster_set(&a.id, false, false).unwrap();
         let mut def = app.cluster_def(&b.id).unwrap();
         def.environment = Some(crate::types::ClusterEnvironment::Production);
-        app.cluster_update(def).unwrap();
+        let editing = {
+            let app = app.clone();
+            std::thread::spawn(move || app.cluster_update(def))
+        };
         let mut settings = app.settings();
         settings.ai.local_only = true;
         app.set_settings(settings).unwrap();
         release.send(()).unwrap();
 
         let saved = mover.join().unwrap().unwrap();
+        assert!(saved.keychain_kubeconfigs);
+        assert!(saved.ai.local_only);
+        let mut expected = vec![b.id.clone(), c.id.clone()];
+        expected.sort();
+        assert_eq!(saved.ai.clusters, expected);
+        editing.join().unwrap().unwrap();
         let reopened = crate::store::Store::open(Paths::new(&home))
             .unwrap()
             .settings();
-        for settings in [saved, app.settings(), reopened] {
+        for settings in [app.settings(), reopened] {
             assert!(settings.keychain_kubeconfigs);
             assert!(settings.ai.local_only);
             assert_eq!(settings.ai.clusters, vec![c.id.clone()]);

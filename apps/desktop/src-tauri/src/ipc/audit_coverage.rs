@@ -105,6 +105,8 @@ const NOT_MUTATING: &[&str] = &[
     "cluster_list",
     "cluster_add",
     "cluster_update",
+    "cluster_kubeconfig_source",
+    "cluster_reimport_kubeconfig",
     "cluster_remove",
     "cluster_connect",
     "cluster_disconnect",
