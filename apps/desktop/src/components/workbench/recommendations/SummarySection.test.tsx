@@ -94,8 +94,11 @@ describe('SummarySection', () => {
 });
 
 describe('empty states', () => {
-  it('explains the capacity overview before a scan', () => {
-    const html = renderToStaticMarkup(<CapacityOverview list={[]} onNamespace={() => {}} />);
+  it('explains an empty capacity overview', () => {
+    const empty = renderToStaticMarkup(<CapacityOverview list={[]} onNamespace={() => {}} />);
+    expect(empty).toContain('No workloads in the namespaces in scope.');
+    const noUsage = workload('new', [container('app', [100, 100 * MiB], null)]);
+    const html = renderToStaticMarkup(<CapacityOverview list={[noUsage]} onNamespace={() => {}} />);
     expect(html).toContain('Namespace comparisons appear after the first scan.');
   });
 

@@ -55,6 +55,17 @@ export function barPercent(value: number, max: number): number {
   return Math.min(100, Math.max(1, (value / max) * 100));
 }
 
+/**
+ * Why the capacity overview has no bars: nothing in scope, no usage yet, or
+ * no request to compare with.
+ */
+export function capacityEmptyText(list: readonly WorkloadRecommendation[]): string {
+  if (!list.length) return i18n.t('No workloads in the namespaces in scope.');
+  if (!list.some((r) => r.containers.some((c) => c.usage)))
+    return i18n.t('Namespace comparisons appear after the first scan.');
+  return i18n.t('No container in scope has a request to compare.');
+}
+
 // -- Spotlight ------------------------------------------------------------------------
 
 export interface SpotlightReason {

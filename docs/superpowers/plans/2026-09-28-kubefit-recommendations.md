@@ -2148,22 +2148,22 @@ git commit -m "feat(ui): optimization summary, capacity overview and review spot
 
 Steps:
 
-- [ ] **Step 1: Implement the component**
+- [x] **Step 1: Implement the component**
 
-- [ ] **Step 2: Translate, run the checks**
+- [x] **Step 2: Translate, run the checks**
 
 Run: `pnpm i18n:check -- --fix`, add the Turkish, then `pnpm typecheck && pnpm i18n:check`.
 
 Expected: PASS.
 
-- [ ] **Step 3: Verify the demo**
+- [x] **Step 3: Verify the demo**
 
 Run: `pnpm dev:ui`.
 - Switch CPU / peak: the order changes.
 - A container with zero average stays listed; a container without data is not listed but
   is counted in the footer.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/desktop/src

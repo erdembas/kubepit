@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import * as i18n from '@/i18n/core';
 import {
   barPercent,
+  capacityEmptyText,
   lowConfidenceChanges,
   signedPercent,
   spotlightReason,
@@ -51,6 +52,18 @@ describe('barPercent', () => {
     expect(barPercent(300, 200)).toBe(100);
     expect(barPercent(5, 0)).toBe(0);
     expect(barPercent(Number.NaN, 10)).toBe(0);
+  });
+});
+
+describe('capacityEmptyText', () => {
+  it('tells an empty scope, a scan without usage and missing requests apart', () => {
+    expect(capacityEmptyText([])).toBe('No workloads in the namespaces in scope.');
+    const noUsage = workload('a', [container('a', [100, 100 * MiB], null)]);
+    expect(capacityEmptyText([noUsage])).toBe('Namespace comparisons appear after the first scan.');
+    const noRequests = workload('b', [container('b', [null, null], { memory_max: MiB })]);
+    expect(capacityEmptyText([noUsage, noRequests])).toBe(
+      'No container in scope has a request to compare.',
+    );
   });
 });
 

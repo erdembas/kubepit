@@ -8,7 +8,7 @@ import { memoryText } from '@/lib/kube/rightsizing/model';
 import type { WorkloadRecommendation } from '@/types';
 import { cpuWithUnit } from '../metrics/UsageHistory';
 import { Card, Legend } from '../overview/charts';
-import { barPercent, signedPercent, totalsChange } from './summaryModel';
+import { barPercent, capacityEmptyText, signedPercent, totalsChange } from './summaryModel';
 
 type Resource = 'cpu' | 'memory';
 
@@ -200,7 +200,7 @@ export function CapacityOverview({
     >
       {entries.length === 0 ? (
         <p className="text-fg-dim flex flex-1 items-center justify-center px-4 py-10 text-center text-[12px]">
-          {i18n.t('Namespace comparisons appear after the first scan.')}
+          {capacityEmptyText(list)}
         </p>
       ) : (
         <>
