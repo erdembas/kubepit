@@ -76,6 +76,8 @@ pub struct Kubepit {
     pub(crate) cost: crate::cost::CostState,
     // Recommendations: scan statuses, running scans (`recommendations/scan.rs`).
     pub(crate) recommendations: crate::recommendations::Recommendations,
+    // AI assistant: remote-egress opt-in (sessions and previews later).
+    pub(crate) ai: crate::ai::AiState,
 }
 
 impl Kubepit {
@@ -126,6 +128,7 @@ impl Kubepit {
             custom_actions,
             cost: crate::cost::CostState::default(),
             recommendations: crate::recommendations::Recommendations::default(),
+            ai: crate::ai::AiState::default(),
         };
         // Left behind by a crash while in keychain mode.
         app.remove_transient_run_kubeconfigs();
@@ -203,13 +206,18 @@ impl Kubepit {
             settings.terminal_font_size = Settings::default().terminal_font_size;
         }
         settings.alerts = settings.alerts.normalized();
-        // Only `kubeconfig_storage_set` flips this, because it migrates.
-        settings.keychain_kubeconfigs = self.settings().keychain_kubeconfigs;
         settings.change_journal_disabled.sort();
         settings.change_journal_disabled.dedup();
         settings.history = settings.history.normalized();
         settings.recommendations = settings.recommendations.normalized();
-        let saved = self.store.set_settings(settings)?;
+        settings.ai = settings.ai.normalized();
+        let saved = self.store.update_settings(move |current| {
+            // Only `kubeconfig_storage_set` flips this, because it migrates.
+            settings.keychain_kubeconfigs = current.keychain_kubeconfigs;
+            // Only `ai_cluster_set` (and cluster removal) change these.
+            settings.ai.clusters = std::mem::take(&mut current.ai.clusters);
+            *current = settings;
+        })?;
         self.apply_alert_settings(&saved.alerts);
         self.sync_change_journals();
         self.sync_history();

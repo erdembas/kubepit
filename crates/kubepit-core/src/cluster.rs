@@ -19,7 +19,7 @@ use crate::objects::now_millis;
 use crate::paths::{atomic_write, expand_tilde};
 use crate::prometheus::access::{overlapping_sources, PrometheusAccess};
 use crate::proxy;
-use crate::types::{ClusterDef, ClusterInput, LokiConfig, PrometheusConfig};
+use crate::types::{ClusterDef, ClusterEnvironment, ClusterInput, LokiConfig, PrometheusConfig};
 
 /// Where a new cluster's kubeconfig comes from.
 enum Origin {
@@ -311,6 +311,13 @@ impl Kubepit {
         if connection_changed {
             self.cluster_disconnect(&next.id);
         }
+        // Enabling the assistant on a production cluster needs a typed
+        // acknowledgement: a cluster that becomes production must get it.
+        if next.environment == Some(ClusterEnvironment::Production)
+            && existing.environment != Some(ClusterEnvironment::Production)
+        {
+            self.ai_forget_cluster(&next.id);
+        }
         // Secret values read for the old settings must not outlive them,
         // and scans of the new source start soon.
         if next.prometheus != existing.prometheus
@@ -348,6 +355,7 @@ impl Kubepit {
         }
         self.remove_run_kubeconfig(id);
         self.forget_saved_forwards(id);
+        self.ai_forget_cluster(id);
         self.sink.cluster_list(&list);
         Ok(())
     }

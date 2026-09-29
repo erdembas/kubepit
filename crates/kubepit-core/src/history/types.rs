@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::ai::{AiIntent, AiUsage};
 use crate::types::Gvk;
 
 /// Default retention of the own-action audit log.
@@ -452,6 +453,121 @@ pub struct HistoryStatus {
     pub persisting: Vec<String>,
 }
 
+// ---------------------------------------------------------------------------
+// Assistant request log (`ai_log`)
+// ---------------------------------------------------------------------------
+
+/// Largest request body kept per `ai_log` row (the redacted payload as sent).
+pub const MAX_AI_REQUEST_BYTES: usize = 256 * 1024;
+/// Largest response text kept per `ai_log` row.
+pub const MAX_AI_RESPONSE_BYTES: usize = 64 * 1024;
+
+/// How an assistant run ended, as logged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AiLogOutcome {
+    Ok,
+    Error,
+    Cancelled,
+    /// The model declined (`stop_reason: refusal`).
+    Refused,
+}
+
+/// One assistant run handed to the history writer. `request` is exactly
+/// what was sent (already redacted); bodies are capped on write.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AiLogRecord {
+    /// Epoch ms when the run started.
+    pub ts: i64,
+    pub cluster_id: Option<String>,
+    pub cluster_name: Option<String>,
+    pub provider_id: String,
+    pub model: String,
+    pub intent: AiIntent,
+    pub outcome: AiLogOutcome,
+    pub error: Option<String>,
+    pub duration_ms: i64,
+    pub usage: AiUsage,
+    pub cost: Option<f64>,
+    pub tool_calls: u32,
+    /// Serialized request bodies, as sent.
+    pub request: String,
+    /// The answer text.
+    pub response: String,
+    /// Tool calls with their inputs and statuses.
+    pub tools: Value,
+}
+
+/// One `ai_log` row without bodies (`ai_log_list`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AiLogEntry {
+    pub id: i64,
+    pub ts: i64,
+    pub cluster_id: Option<String>,
+    pub cluster_name: Option<String>,
+    pub provider_id: String,
+    pub model: String,
+    pub intent: AiIntent,
+    pub outcome: AiLogOutcome,
+    pub error: Option<String>,
+    pub duration_ms: i64,
+    pub usage: AiUsage,
+    pub cost: Option<f64>,
+    pub tool_calls: u32,
+}
+
+/// `ai_log_get`: one row with its bodies.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AiLogDetail {
+    pub entry: AiLogEntry,
+    pub request: String,
+    pub response: String,
+    pub tools: Value,
+}
+
+fn default_ai_log_limit() -> u32 {
+    100
+}
+
+/// `ai_log_list` / `ai_log_export` filter; empty lists match all.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AiLogFilter {
+    pub cluster_ids: Vec<String>,
+    /// Case-insensitive substring over cluster, model, intent and response.
+    pub text: Option<String>,
+    /// Epoch ms, inclusive.
+    pub since: Option<i64>,
+    /// `next_cursor` of the previous page (`"<ts>:<id>"`).
+    pub cursor: Option<String>,
+    pub limit: u32,
+}
+
+impl Default for AiLogFilter {
+    fn default() -> Self {
+        Self {
+            cluster_ids: Vec::new(),
+            text: None,
+            since: None,
+            cursor: None,
+            limit: default_ai_log_limit(),
+        }
+    }
+}
+
+/// A page of `ai_log`, newest first, with totals over every matching row.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AiLogPage {
+    pub entries: Vec<AiLogEntry>,
+    pub next_cursor: Option<String>,
+    /// Rows matching the filter (all pages).
+    pub total: u64,
+    /// Summed usage of the matching rows.
+    pub usage: AiUsage,
+    /// Summed cost of the rows that have one; `None` when none has.
+    pub cost: Option<f64>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -465,5 +581,23 @@ mod tests {
         }
         assert_eq!(AuditAction::CustomAction.as_str(), "custom-action");
         assert!(!AuditAction::CustomAction.revertible());
+    }
+
+    #[test]
+    fn ai_log_contract_spellings_and_defaults() {
+        let outcomes = [
+            AiLogOutcome::Ok,
+            AiLogOutcome::Error,
+            AiLogOutcome::Cancelled,
+            AiLogOutcome::Refused,
+        ];
+        assert_eq!(
+            serde_json::to_value(outcomes).unwrap(),
+            serde_json::json!(["ok", "error", "cancelled", "refused"])
+        );
+        assert_eq!(AiLogFilter::default().limit, 100);
+        let partial: AiLogFilter = serde_json::from_str(r#"{"text": "oom"}"#).unwrap();
+        assert_eq!(partial.limit, 100);
+        assert_eq!(partial.text.as_deref(), Some("oom"));
     }
 }
