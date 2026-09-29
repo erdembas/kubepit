@@ -2281,9 +2281,9 @@ git commit -m "feat(ui): recommendation list with lenses, sorting, selection and
 
 Steps:
 
-- [ ] **Step 1: Implement the drawer and both charts**
+- [x] **Step 1: Implement the drawer and both charts**
 
-- [ ] **Step 2: Translate, run the checks**
+- [x] **Step 2: Translate, run the checks**
 
 Run: `pnpm i18n:check -- --fix`, add the Turkish (reuse KubeFit's "Zaman kapsamı…" and
 "CPU, 5 dakikalık kullanım hızıdır…" paragraphs, adapted), then
@@ -2291,7 +2291,7 @@ Run: `pnpm i18n:check -- --fix`, add the Turkish (reuse KubeFit's "Zaman kapsam�
 
 Expected: PASS.
 
-- [ ] **Step 3: Verify the demo**
+- [x] **Step 3: Verify the demo**
 
 Run: `pnpm dev:ui`, open a row.
 - The Usage tab shows two charts with three dashed reference lines, and gaps break the
@@ -2300,7 +2300,7 @@ Run: `pnpm dev:ui`, open a row.
 - The YAML tab matches the exported fragment.
 - On staging (no Prometheus) the Usage tab shows the note.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/desktop/src
