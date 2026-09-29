@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { KubeObject, WatchBatch } from '@/types';
 import { applyBatch, batchFlush, batchPatch, routeBatch } from './watchBatch';
 import type { WatchSnapshot } from './watchCache';
@@ -41,7 +41,7 @@ describe('routeBatch', () => {
     routeBatch(batch({ seq: 7 }), false, r);
     expect(calls).toEqual(['ack 7']);
   });
-  it('acks even when applying throws', () => {
+  it('never throws: a failed apply is reported, acked and restarts the watch', () => {
     const { calls, route: r } = route();
     const failing = {
       ...r,
@@ -49,8 +49,14 @@ describe('routeBatch', () => {
         throw new Error('boom');
       },
     };
-    expect(() => routeBatch(batch({ seq: 2 }), true, failing)).toThrow('boom');
-    expect(calls).toEqual(['ack 2']);
+    const report = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(() => routeBatch(batch({ seq: 2 }), true, failing)).not.toThrow();
+      expect(calls).toEqual(['ack 2', 'restart']);
+      expect(report).toHaveBeenCalledOnce();
+    } finally {
+      report.mockRestore();
+    }
   });
   it('restarts a current watch the backend stopped, and only then', () => {
     const { calls, route: r } = route();

@@ -115,7 +115,10 @@ localStorage (`kubepit.workbench.v1`, `kubepit.views.v1`,
   (pending upserts are latest-wins) and sends nothing, so a slow webview
   gets fewer, larger batches instead of a growing IPC queue. Every batch is
   acked, including a superseded watch's (a restart or unsubscribe raced
-  it) and one whose apply threw. A watch whose batches get no ack for 60 s
+  it). `routeBatch` never throws: a Tauri channel whose `onmessage` throws
+  delivers nothing after that message, so a batch that fails to apply is
+  logged, acked, and restarts the watch (its rows may be half-applied).
+  A watch whose batches get no ack for 60 s
   stops; its last batch has `stopped` set, and a view that still
   subscribes restarts the watch when it runs again (a frozen webview). A
   hidden tab never holds a backend watch (`useWatch(..., enabled: false)`
