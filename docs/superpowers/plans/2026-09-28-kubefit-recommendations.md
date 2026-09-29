@@ -1967,8 +1967,9 @@ git commit -m "feat(demo): recommendation scans in the in-memory backend"
     - the input is never mutated;
   - `capacityByNamespace(list, resource, top = 5): NamespaceCapacity[]`;
   - `optimizationTotals(list): OptimizationTotals`;
-  - `type ApplyMode = 'one-click' | 'review' | 'blocked'` and `applyMode(rec, cluster:
-    Pick<ClusterDef, 'read_only' | 'environment'>): ApplyMode` (spec §8; the RBAC gate is
+  - `type ApplyMode = 'one-click' | 'review' | 'read-only' | 'none'` and `applyMode(rec,
+    cluster: Pick<ClusterDef, 'read_only' | 'environment'>): ApplyMode` (spec §8;
+    `read-only` keeps the review with apply refused, `none` = no change; the RBAC gate is
     checked by the caller);
   - `scanStateText(status)`;
   - `runErrorText(error)`, which translates the codes `app-restarted`, `stopped`,

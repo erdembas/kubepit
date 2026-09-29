@@ -12,10 +12,13 @@ import {
   SCAN_INTERVALS,
   intervalLabel,
   isScanning,
+  manualScanWait,
   runErrorText,
+  runTime,
   scanSourceLabel,
+  strategyText,
 } from '@/lib/kube/recommendations/model';
-import { reportDays, strategyLabel } from '@/lib/kube/rightsizing/model';
+import { reportDays } from '@/lib/kube/rightsizing/model';
 import { useAppStore } from '@/store/useAppStore';
 import { useRecommendationsStore } from '@/store/useRecommendationsStore';
 import type {
@@ -24,7 +27,6 @@ import type {
   RecommendationRun,
   RecommendationScanStatus,
   RecommendationScanView,
-  RightsizingReport,
 } from '@/types';
 import { useNow } from '../util';
 import { saveRecommendationSettings } from './saveSettings';
@@ -39,19 +41,6 @@ function scopeLabel(namespaces: readonly string[]) {
 }
 
 const dateTime = (ms: number) => i18n.date(ms, { dateStyle: 'medium', timeStyle: 'short' });
-
-/** When a run's results were collected. */
-export const runTime = (run: RecommendationRun) => run.finished_at ?? run.started_at;
-
-/** "Workload history (automatic)". */
-export function strategyText(report: RightsizingReport): string {
-  const info = report.strategies.find((s) => s.id === report.strategy) ?? {
-    id: report.strategy,
-    name: report.strategy,
-  };
-  const label = strategyLabel(info);
-  return report.strategy_auto ? i18n.t('{strategy} (automatic)', { strategy: label }) : label;
-}
 
 /**
  * "Scan now": disabled while disconnected, while a scan is queued or
@@ -71,9 +60,10 @@ export function ScanNowButton({
   const connected = useAppStore((s) => s.statuses[clusterId]?.state === 'connected');
   const scanning = isScanning(status);
   const availableAt = status?.manual_available_at ?? 0;
-  // Ticks only while the rate limit runs, so the button enables on time.
+  // Ticks while the rate limit runs: every render before `availableAt`
+  // keeps the ticker on, and the wall clock decides once it has passed.
   const now = useNow(1_000, availableAt > Date.now());
-  const wait = Math.ceil((availableAt - now) / 1000);
+  const wait = manualScanWait(availableAt, now);
   const reason = !connected
     ? i18n.t('Connect to the cluster to scan it.')
     : scanning

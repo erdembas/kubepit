@@ -6,13 +6,12 @@ import { formatMoney } from '@/lib/cost';
 import { cn } from '@/lib/cn';
 import { formatAge } from '@/lib/format';
 import { VIEW_KEYS } from '@/lib/kube/nav';
-import { runErrorText, scanSourceLabel } from '@/lib/kube/recommendations/model';
+import { runErrorText, runTime, scanSourceLabel } from '@/lib/kube/recommendations/model';
 import { reportDays, rightsizingTotals } from '@/lib/kube/rightsizing/model';
 import { useLatestRecommendations } from '@/store/useRecommendationsStore';
 import { useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { ClusterId } from '@/types';
 import { Card } from '../overview/charts';
-import { runTime } from '../recommendations/ScanHeader';
 import { useNow } from '../util';
 
 function Metric({

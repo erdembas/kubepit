@@ -5,12 +5,21 @@ import { Loader2, SlidersHorizontal, Sparkles, TriangleAlert, X } from 'lucide-r
 import { Button } from '@/components/ui/Button';
 import { useAppStore } from '@/store/useAppStore';
 import { useRecommendationsStore, useShownRecommendations } from '@/store/useRecommendationsStore';
-import type { RightsizingSettings } from '@/types';
+import { filterRecommendations } from '@/lib/kube/rightsizing/model';
+import type { RightsizingSettings, WorkloadRecommendation } from '@/types';
+import { DrawerSection } from './DrawerSection';
+import { ExportMenu } from './ExportMenu';
+import { ListSection } from './ListSection';
 import { RecommendationNotes } from './RecommendationNotes';
 import { ScanHeader, ScanNowButton } from './ScanHeader';
 import { SettingsCard } from './SettingsCard';
+import { SummarySection } from './SummarySection';
+import { UsageSection } from './UsageSection';
 import { saveRecommendationSettings } from './saveSettings';
+import type { SectionProps } from './sectionProps';
 import { useRecommendationsView } from './viewState';
+
+const NO_ROWS: WorkloadRecommendation[] = [];
 
 /** Nothing stored to show yet (or only failed scans). */
 function EmptyState({
@@ -53,9 +62,10 @@ function EmptyState({
  * The `@recommendations` view: stored, scheduled right-sizing scans. The
  * header controls the scans; the body shows the picked scan (the latest,
  * or a past run, read-only) for the workbench namespaces or the namespace
- * picked on the page, section by section (spec §9.1). Sections share the
- * scan through `useShownRecommendations` and the page state through
- * `useRecommendationsView`.
+ * picked on the page, section by section (spec §9.1): `SummarySection`,
+ * `UsageSection`, then `ListSection` with `DrawerSection` beside it, all
+ * fed the same `SectionProps`; `ExportMenu` sits in the header. Page state
+ * shared across sections lives in `useRecommendationsView`.
  */
 export function RecommendationsPage({
   clusterId,
@@ -81,6 +91,10 @@ export function RecommendationsPage({
   const scope = useMemo(
     () => (view.namespace ? [view.namespace] : namespaces),
     [view.namespace, namespaces],
+  );
+  const rows = useMemo(
+    () => (report ? filterRecommendations(report.workloads, 'all', scope, '') : NO_ROWS),
+    [report, scope],
   );
   const scanAction = <ScanNowButton clusterId={clusterId} status={status} variant="primary" />;
 
@@ -134,6 +148,15 @@ export function RecommendationsPage({
       <EmptyState failed={!!latest.last_failure} connected={connected} action={scanAction} />
     );
   } else {
+    const section: SectionProps = {
+      clusterId,
+      report,
+      rows,
+      runId: shown.runId,
+      past: shown.past,
+      connected,
+      namespaces: scope,
+    };
     body = (
       <div className="space-y-4">
         {view.namespace && (
@@ -150,11 +173,14 @@ export function RecommendationsPage({
             </button>
           </div>
         )}
-        {/* Sections, top to bottom (spec §9.1), fed the rows in `scope`
-            (`filterRecommendations(report.workloads, 'all', scope, '')`): */}
-        {/* 1. Optimization summary, capacity overview, review spotlight (grid gap-3 @3xl:grid-cols-2). */}
-        {/* 2. Usage ranking. */}
-        {/* 3. Recommendation list, the detail drawer docked beside it (an overlay below @3xl). */}
+        <SummarySection {...section} />
+        <UsageSection {...section} />
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <ListSection {...section} />
+          </div>
+          <DrawerSection {...section} />
+        </div>
       </div>
     );
   }
@@ -169,6 +195,9 @@ export function RecommendationsPage({
         status={status}
         loading={shown.loading && !!latest}
         settingsAction={settingsAction}
+        exportAction={
+          <ExportMenu clusterId={clusterId} runId={shown.runId} report={report} rows={rows} />
+        }
       />
       <div className="overlay-scroll min-h-0 flex-1 overflow-auto">
         <div className="@container mx-auto max-w-6xl space-y-4 p-5">

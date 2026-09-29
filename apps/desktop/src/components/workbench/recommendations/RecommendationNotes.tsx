@@ -1,12 +1,11 @@
 import * as i18n from '@/i18n';
 import type { ReactNode } from 'react';
 import { formatAge } from '@/lib/format';
-import { scanStale } from '@/lib/kube/recommendations/model';
+import { runTime, scanStale } from '@/lib/kube/recommendations/model';
 import { strategyLabel } from '@/lib/kube/rightsizing/model';
 import type { RecommendationLatest, RecommendationScanView, RightsizingReport } from '@/types';
 import { NoteBanner, rightsizingNoteText } from '../cost/CostNotes';
 import { useNow } from '../util';
-import { runTime } from './ScanHeader';
 
 /**
  * The automatic strategy fell back from `workload-history` because

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   ContainerRecommendation,
   RecommendationScanStatus,
@@ -11,6 +11,7 @@ import {
   capacityByNamespace,
   countLenses,
   intervalLabel,
+  manualScanWait,
   optimizationTotals,
   rankUsage,
   riskScore,
@@ -20,6 +21,8 @@ import {
   scanStateText,
   sortRecommendations,
   spotlight,
+  runTime,
+  strategyText,
   workloadKey,
 } from './model';
 
@@ -398,9 +401,14 @@ describe('apply mode (spec §8)', () => {
     expect(applyMode(raised, dev)).toBe('review');
   });
 
-  it('blocks read-only clusters and rows without changes', () => {
-    expect(applyMode(eligible, { read_only: true, environment: 'development' })).toBe('blocked');
-    expect(applyMode(workload('same'), dev)).toBe('blocked');
+  it('keeps the review on read-only clusters, where applying is refused', () => {
+    expect(applyMode(eligible, { read_only: true, environment: 'development' })).toBe('read-only');
+    expect(applyMode(eligible, { read_only: true, environment: 'production' })).toBe('read-only');
+  });
+
+  it('has nothing to apply for rows without changes, on any cluster', () => {
+    expect(applyMode(workload('same'), dev)).toBe('none');
+    expect(applyMode(workload('same'), { read_only: true, environment: null })).toBe('none');
   });
 });
 
@@ -465,5 +473,49 @@ describe('scan texts', () => {
     expect(scanStale(now - 3_600_000, true, 60, now)).toBe(false);
     expect(scanStale(now - 2.5 * 3_600_000, true, 60, now)).toBe(true);
     expect(scanStale(now, false, 60, now)).toBe(true);
+  });
+});
+
+describe('manual scan cooldown', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('counts down from the wall clock, so a stale tick never keeps the button disabled', () => {
+    vi.useFakeTimers({ now: 10_000 });
+    const tick = Date.now();
+    expect(manualScanWait(15_500, tick)).toBe(6);
+    vi.advanceTimersByTime(5_000);
+    // The component re-rendered at 15 000 without a new tick: still 1 s.
+    expect(manualScanWait(15_500, tick)).toBe(1);
+    vi.advanceTimersByTime(600);
+    // Past `manual_available_at` with the tick of 10 000 (the bug read 6 s).
+    expect(manualScanWait(15_500, tick)).toBe(0);
+    expect(manualScanWait(15_500, Date.now())).toBe(0);
+  });
+
+  it('is 0 without a rate limit', () => {
+    expect(manualScanWait(null, 0)).toBe(0);
+    expect(manualScanWait(undefined, 0)).toBe(0);
+    expect(manualScanWait(0, 0, 5)).toBe(0);
+  });
+});
+
+describe('run helpers', () => {
+  it('date a run by its end, else its start', () => {
+    const run = { started_at: 100, finished_at: 250 } as Parameters<typeof runTime>[0];
+    expect(runTime(run)).toBe(250);
+    expect(runTime({ ...run, finished_at: null })).toBe(100);
+  });
+
+  it('label the strategy, marking automatic choices', () => {
+    const report = {
+      strategy: 'workload-history',
+      strategy_auto: true,
+      strategies: [{ id: 'workload-history', name: 'Workload history' }],
+    } as unknown as Parameters<typeof strategyText>[0];
+    expect(strategyText(report)).toBe('Workload history (automatic)');
+    expect(strategyText({ ...report, strategy_auto: false })).toBe('Workload history');
+    expect(
+      strategyText({ ...report, strategy: 'future', strategies: [], strategy_auto: false }),
+    ).toBe('future');
   });
 });

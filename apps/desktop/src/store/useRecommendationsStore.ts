@@ -59,6 +59,8 @@ const TERMINAL: ReadonlySet<ScanState> = new Set(['success', 'failed', 'interrup
 
 interface RecommendationsState {
   byCluster: Record<ClusterId, ClusterRecs>;
+  /** Bumped by `forget`, so open views read the cluster again. */
+  generation: Record<ClusterId, number>;
   /**
    * Read the latest scan; with a picked run (`runId`, which also picks it;
    * `null` goes back to the latest) read that run too.
@@ -77,11 +79,18 @@ interface RecommendationsState {
   markApplied: (clusterId: ClusterId, key: string) => void;
   /** A `recommendations://scan` status: when a scan ended, reload the scan and the runs. */
   onScanEvent: (status: RecommendationScanStatus) => void;
+  /**
+   * Drops a cluster's entry (after its stored scans were cleared or the
+   * cluster was removed); answers still in flight are ignored and open
+   * views read it again.
+   */
+  forget: (clusterId: ClusterId) => void;
 }
 
 /** Sequence numbers per cluster, so an older answer never overwrites a newer one. */
 const latestSeq = new Map<ClusterId, number>();
 const pastSeq = new Map<ClusterId, number>();
+const runsSeq = new Map<ClusterId, number>();
 /** Bumped by every status applied; a read started before a newer status is dropped. */
 const statusSeq = new Map<ClusterId, number>();
 
@@ -92,6 +101,19 @@ const bump = (seqs: Map<ClusterId, number>, id: ClusterId) => {
 };
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+type ScanEndedListener = (status: RecommendationScanStatus) => void;
+const scanEndedListeners = new Set<ScanEndedListener>();
+
+/**
+ * Calls `listener` whenever a scan of any cluster ends (success, failure,
+ * interruption), also for clusters no view has loaded, e.g. for a fleet
+ * view. Returns the unsubscribe.
+ */
+export function onScanEnded(listener: ScanEndedListener): () => void {
+  scanEndedListeners.add(listener);
+  return () => void scanEndedListeners.delete(listener);
+}
 
 /**
  * What a stored scan's re-evaluation depends on besides the scan: the saved
@@ -165,15 +187,26 @@ export const useRecommendationsStore = create<RecommendationsState>()((set, get)
     // `next_at` and `scheduled` updates repeat the last state: only a new
     // (run, state) pair is a change.
     const changed = prev ? prev.run_id !== status.run_id || prev.state !== status.state : fromEvent;
-    const loaded = !!entry && entry.key !== null;
-    if (changed && loaded && TERMINAL.has(status.state)) {
-      void get().load(id);
-      void get().loadRuns(id);
+    if (!changed || !TERMINAL.has(status.state)) return;
+    if (entry && entry.key !== null) {
+      // The scan first, then the runs: the picker never lists the new run
+      // as a past one while the latest still names the previous run.
+      void get()
+        .load(id)
+        .then(() => get().loadRuns(id));
+    }
+    for (const listener of scanEndedListeners) {
+      try {
+        listener(status);
+      } catch (e) {
+        console.warn('scan-ended listener failed', e);
+      }
     }
   };
 
   return {
     byCluster: {},
+    generation: {},
     load: async (id, runId) => {
       if (runId !== undefined)
         patch(id, (e) => ({ runId, past: runId === e.runId ? e.past : null }));
@@ -181,11 +214,12 @@ export const useRecommendationsStore = create<RecommendationsState>()((set, get)
       await Promise.all([fetchLatest(id), picked != null ? fetchPast(id, picked) : null]);
     },
     loadRuns: async (id) => {
+      const seq = bump(runsSeq, id);
       try {
         const runs = await ipc.recommendationsRuns(id);
-        patch(id, { runs, runsLoaded: true });
+        if (runsSeq.get(id) === seq) patch(id, { runs, runsLoaded: true });
       } catch {
-        patch(id, { runsLoaded: true });
+        if (runsSeq.get(id) === seq) patch(id, { runsLoaded: true });
       }
     },
     loadStatus: async (id) => {
@@ -213,6 +247,13 @@ export const useRecommendationsStore = create<RecommendationsState>()((set, get)
     },
     markApplied: (id, key) => patch(id, (e) => ({ applied: { ...e.applied, [key]: Date.now() } })),
     onScanEvent: (status) => applyStatus(status, true),
+    forget: (id) => {
+      for (const seqs of [latestSeq, pastSeq, runsSeq, statusSeq]) bump(seqs, id);
+      set((s) => {
+        const { [id]: _dropped, ...byCluster } = s.byCluster;
+        return { byCluster, generation: { ...s.generation, [id]: (s.generation[id] ?? 0) + 1 } };
+      });
+    },
   };
 });
 
@@ -256,16 +297,17 @@ export function useLatestRecommendations(
   const key = useAppStore((s) => recommendationsKey(s, clusterId));
   const connection = useAppStore((s) => s.statuses[clusterId]?.state ?? null);
   const entry = useRecommendationsStore((s) => s.byCluster[clusterId]);
+  const generation = useRecommendationsStore((s) => s.generation[clusterId] ?? 0);
 
   useEffect(() => {
     if (!enabled) return;
     if (useRecommendationsStore.getState().byCluster[clusterId]?.key === key) return;
     void useRecommendationsStore.getState().load(clusterId);
-  }, [enabled, clusterId, key]);
+  }, [enabled, clusterId, key, generation]);
 
   useEffect(() => {
     if (enabled) void useRecommendationsStore.getState().loadStatus(clusterId);
-  }, [enabled, clusterId, connection]);
+  }, [enabled, clusterId, connection, generation]);
 
   return useMemo(() => {
     const latest = entry?.latest ?? null;

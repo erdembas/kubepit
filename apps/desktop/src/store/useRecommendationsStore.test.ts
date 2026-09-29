@@ -10,7 +10,7 @@ const ipc = vi.hoisted(() => ({
 
 vi.mock('@/lib/ipc', () => ({ ipc, events: { onRecommendationScan: vi.fn() } }));
 
-const { useRecommendationsStore } = await import('./useRecommendationsStore');
+const { onScanEnded, useRecommendationsStore } = await import('./useRecommendationsStore');
 
 const store = () => useRecommendationsStore.getState();
 const entry = (id = 'c1') => store().byCluster[id]!;
@@ -72,7 +72,7 @@ function latest(runId: number | null, startedAt?: number): RecommendationLatest 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 beforeEach(() => {
-  useRecommendationsStore.setState({ byCluster: {} });
+  useRecommendationsStore.setState({ byCluster: {}, generation: {} });
   for (const fn of Object.values(ipc)) fn.mockReset();
   ipc.recommendationsLatest.mockResolvedValue(latest(1));
   ipc.recommendationsRuns.mockResolvedValue([run(1)]);
@@ -194,5 +194,60 @@ describe('loading', () => {
     ipc.recommendationsLatest.mockResolvedValue(latest(3, 10_000));
     await store().load('c1');
     expect(entry().applied).toEqual({ 'Deployment/shop/api': 20_000 });
+  });
+});
+
+describe('scan-ended hook, ordering and forgetting', () => {
+  it('tells listeners about every ended scan, also of clusters no view loaded', async () => {
+    const seen: string[] = [];
+    const off = onScanEnded((s) => seen.push(`${s.cluster_id}:${s.state}:${s.run_id}`));
+    store().onScanEvent(status({ cluster_id: 'c9', state: 'running', run_id: 4 }));
+    store().onScanEvent(status({ cluster_id: 'c9', state: 'success', run_id: 4 }));
+    store().onScanEvent(status({ cluster_id: 'c9', state: 'success', run_id: 4, next_at: 5 }));
+    off();
+    store().onScanEvent(status({ cluster_id: 'c9', state: 'failed', run_id: 5 }));
+    expect(seen).toEqual(['c9:success:4']);
+    expect(ipc.recommendationsLatest).not.toHaveBeenCalled();
+  });
+
+  it('reads the runs only after the latest scan, so the new run is never listed as past', async () => {
+    await store().load('c1');
+    const order: string[] = [];
+    let answer!: (l: RecommendationLatest) => void;
+    ipc.recommendationsLatest.mockImplementation(
+      () => new Promise((resolve) => (answer = (l) => (order.push('latest'), resolve(l)))),
+    );
+    ipc.recommendationsRuns.mockImplementation(async () => (order.push('runs'), [run(2), run(1)]));
+    store().onScanEvent(status({ state: 'success', run_id: 2 }));
+    await flush();
+    expect(order).toEqual([]);
+    answer(latest(2));
+    await flush();
+    expect(order).toEqual(['latest', 'runs']);
+    expect(entry().runs.map((r) => r.id)).toEqual([2, 1]);
+  });
+
+  it('drops runs answers older than the newest request', async () => {
+    let first!: (runs: RecommendationRun[]) => void;
+    ipc.recommendationsRuns
+      .mockReturnValueOnce(new Promise((resolve) => (first = resolve)))
+      .mockResolvedValueOnce([run(3), run(2)]);
+    const a = store().loadRuns('c1');
+    await store().loadRuns('c1');
+    first([run(1)]);
+    await a;
+    expect(entry().runs.map((r) => r.id)).toEqual([3, 2]);
+  });
+
+  it('forget drops the entry, ignores answers in flight and bumps the generation', async () => {
+    await store().load('c1');
+    let late!: (l: RecommendationLatest) => void;
+    ipc.recommendationsLatest.mockReturnValueOnce(new Promise((resolve) => (late = resolve)));
+    const pending = store().load('c1');
+    store().forget('c1');
+    late(latest(9));
+    await pending;
+    expect(store().byCluster.c1).toBeUndefined();
+    expect(store().generation.c1).toBe(1);
   });
 });

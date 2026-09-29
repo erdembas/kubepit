@@ -2,15 +2,17 @@ import * as i18n from '@/i18n/core';
 import type {
   ClusterDef,
   RecommendationLens,
+  RecommendationRun,
   RecommendationScanStatus,
   RecommendationSummary,
   ResourceTotals,
   RightsizingConfidence,
+  RightsizingReport,
   RightsizingSource,
   WorkloadRecommendation,
   WorkloadRef,
 } from '@/types';
-import type { RightsizingFilter } from '../rightsizing/model';
+import { strategyLabel, type RightsizingFilter } from '../rightsizing/model';
 
 /**
  * Recommendations view model (pure). The backend stores, re-evaluates and
@@ -424,24 +426,59 @@ export function oneClickEligible(rec: WorkloadRecommendation): boolean {
 }
 
 /**
- * How a recommendation can be applied (spec §8): `one-click` (a silent dry
- * run, then apply) for eligible rows on writable non-production clusters;
- * `review` (the dialog, typed confirmation on production); `blocked` when
- * nothing changes or the cluster is read-only (a review may still show the
- * dry run, but never applies). The caller checks the RBAC gate.
+ * How a recommendation can be applied (spec §8):
+ * - `one-click`: a silent dry run, then apply (eligible rows on writable,
+ *   non-production clusters);
+ * - `review`: the dialog with the dry-run diff (typed confirmation on
+ *   production);
+ * - `read-only`: the cluster is read-only; the review still shows the dry
+ *   run, but applying is refused;
+ * - `none`: nothing changes.
+ *
+ * The caller checks the RBAC gate.
  */
-export type ApplyMode = 'one-click' | 'review' | 'blocked';
+export type ApplyMode = 'one-click' | 'review' | 'read-only' | 'none';
 
 export function applyMode(
   rec: WorkloadRecommendation,
   cluster: Pick<ClusterDef, 'read_only' | 'environment'>,
 ): ApplyMode {
-  if (!rec.changed || cluster.read_only) return 'blocked';
+  if (!rec.changed) return 'none';
+  if (cluster.read_only) return 'read-only';
   if (oneClickEligible(rec) && cluster.environment !== 'production') return 'one-click';
   return 'review';
 }
 
 // -- Scans ------------------------------------------------------------------------
+
+/** When a run's results were collected. */
+export function runTime(run: RecommendationRun): number {
+  return run.finished_at ?? run.started_at;
+}
+
+/** "Workload history (automatic)". */
+export function strategyText(report: RightsizingReport): string {
+  const info = report.strategies.find((s) => s.id === report.strategy) ?? {
+    id: report.strategy,
+    name: report.strategy,
+  };
+  const label = strategyLabel(info);
+  return report.strategy_auto ? i18n.t('{strategy} (automatic)', { strategy: label }) : label;
+}
+
+/**
+ * Whole seconds until "Scan now" is allowed again (0 = now). `lastTick` is
+ * the clock a component last rendered with; the wall clock wins when it is
+ * later, so a stale tick never keeps the button disabled.
+ */
+export function manualScanWait(
+  availableAt: number | null | undefined,
+  lastTick: number,
+  now = Date.now(),
+): number {
+  if (availableAt == null || availableAt <= now) return 0;
+  return Math.max(0, Math.ceil((availableAt - Math.max(lastTick, now)) / 1000));
+}
 
 /** "Prometheus · 7 days" / "metrics-server · last hour". */
 export function scanSourceLabel(source: RightsizingSource, days: number): string {

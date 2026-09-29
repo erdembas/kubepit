@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { create } from 'zustand';
 import type { RecSort } from '@/lib/kube/recommendations/model';
 import type { RightsizingFilter } from '@/lib/kube/rightsizing/model';
@@ -46,10 +47,22 @@ export const useRecommendationsViewStore = create<ViewStore>()((set) => ({
     })),
 }));
 
-/** The view state of a cluster and its updater. */
+/** Updates a cluster's view state (also from outside the view). */
+export function updateRecommendationsView(
+  clusterId: ClusterId,
+  patch: Partial<RecommendationsView>,
+): void {
+  useRecommendationsViewStore.getState().update(clusterId, patch);
+}
+
+/** The view state of a cluster and its updater (stable per cluster). */
 export function useRecommendationsView(
   clusterId: ClusterId,
 ): [RecommendationsView, (patch: Partial<RecommendationsView>) => void] {
   const view = useRecommendationsViewStore((s) => s.byCluster[clusterId] ?? DEFAULT_VIEW);
-  return [view, (patch) => useRecommendationsViewStore.getState().update(clusterId, patch)];
+  const update = useCallback(
+    (patch: Partial<RecommendationsView>) => updateRecommendationsView(clusterId, patch),
+    [clusterId],
+  );
+  return [view, update];
 }
