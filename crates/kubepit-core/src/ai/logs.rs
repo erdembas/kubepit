@@ -11,12 +11,21 @@
 //!    `Exception`, `Traceback`) are kept first — the most recent ones when
 //!    there are many — and the rest of the budget is filled from the tail.
 //! 3. Gaps are marked `… N lines omitted …` and the output starts with a
-//!    one-line summary; the whole output never exceeds `max_lines` lines.
+//!    one-line summary; the whole output never exceeds `max_lines` lines
+//!    (nor, with [`condense_log`], a byte budget: long lines such as JSON
+//!    records cannot push the newest lines out).
+//!
+//! Lines longer than [`MAX_LINE_CHARS`] characters are cut with
+//! `… [+N chars]`.
 
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
 use regex::Regex;
+
+/// Characters a condensed line keeps at most.
+pub const MAX_LINE_CHARS: usize = 500;
 
 /// UUIDs, hex words of at least 8 characters, and digit runs.
 static VARIABLE: LazyLock<Regex> = LazyLock::new(|| {
@@ -76,12 +85,24 @@ struct Entry<'a> {
     count: usize,
 }
 
+/// `line` cut to [`MAX_LINE_CHARS`] characters with `… [+N chars]`.
+fn cut_line(line: &str) -> Cow<'_, str> {
+    match line.char_indices().nth(MAX_LINE_CHARS) {
+        None => Cow::Borrowed(line),
+        Some((at, _)) => {
+            let rest = line[at..].chars().count();
+            Cow::Owned(format!("{}… [+{rest} chars]", &line[..at]))
+        }
+    }
+}
+
 impl Entry<'_> {
     fn render(&self) -> String {
+        let line = cut_line(self.line);
         if self.count > 1 {
-            format!("{} (×{})", self.line, self.count)
+            format!("{line} (×{})", self.count)
         } else {
-            self.line.to_string()
+            line.into_owned()
         }
     }
 }
@@ -106,50 +127,96 @@ fn dedupe(text: &str) -> Vec<Entry<'_>> {
     out
 }
 
-/// Lines (entries plus gap markers) the selection `picked` renders to.
-fn rendered_lines(picked: &BTreeSet<usize>) -> usize {
-    let mut lines = 0;
-    let mut next = 0;
-    for &i in picked {
-        if i != next {
-            lines += 1; // gap marker
-        }
-        lines += 1;
-        next = i + 1;
-    }
-    lines
+fn gap_marker(omitted: usize) -> String {
+    format!("… {omitted} lines omitted …")
 }
+
+/// The deduplicated log, rendered, with what a selection of it costs.
+struct Rendered<'a> {
+    entries: Vec<Entry<'a>>,
+    lines: Vec<String>,
+    /// `before[i]`: raw lines of `entries[..i]`.
+    before: Vec<usize>,
+}
+
+impl<'a> Rendered<'a> {
+    fn new(text: &'a str) -> Self {
+        let entries = dedupe(text);
+        let lines = entries.iter().map(Entry::render).collect();
+        let mut before = Vec::with_capacity(entries.len() + 1);
+        let mut sum = 0;
+        before.push(0);
+        for entry in &entries {
+            sum += entry.count;
+            before.push(sum);
+        }
+        Self {
+            entries,
+            lines,
+            before,
+        }
+    }
+
+    /// Lines and bytes (newlines included) of `picked` with its gap markers.
+    fn cost(&self, picked: &BTreeSet<usize>) -> (usize, usize) {
+        let (mut lines, mut bytes, mut next) = (0, 0, 0);
+        for &i in picked {
+            if i != next {
+                lines += 1;
+                bytes += gap_marker(self.before[i] - self.before[next]).len() + 1;
+            }
+            lines += 1;
+            bytes += self.lines[i].len() + 1;
+            next = i + 1;
+        }
+        (lines, bytes)
+    }
+}
+
+/// Room kept for the summary line when a byte budget applies.
+const SUMMARY_BYTES: usize = 160;
 
 /// Condense `text` to at most `max_lines` lines (see the module docs).
 pub fn condense_log_text(text: &str, max_lines: usize) -> String {
-    let entries = dedupe(text);
+    condense_log(text, max_lines, usize::MAX)
+}
+
+/// [`condense_log_text`] that also stays within `max_bytes`: errors take
+/// at most half of either budget and the tail fills the rest from the end,
+/// so the newest line survives whatever the line lengths.
+pub fn condense_log(text: &str, max_lines: usize, max_bytes: usize) -> String {
+    let log = Rendered::new(text);
     let raw_lines = text.lines().count();
-    if entries.len() <= max_lines {
-        return join(entries.iter().map(Entry::render));
+    let total = log.entries.len();
+    let all_bytes: usize = log.lines.iter().map(|l| l.len() + 1).sum();
+    if total <= max_lines && all_bytes.saturating_sub(1) <= max_bytes {
+        return log.lines.join("\n");
     }
     if max_lines < 2 {
-        return format!("… {raw_lines} lines omitted …")
+        return gap_marker(raw_lines)
             .lines()
             .take(max_lines)
+            .filter(|l| l.len() <= max_bytes)
             .collect();
     }
     // One line for the summary, the rest for entries and gap markers.
-    let budget = max_lines - 1;
-    let total = entries.len();
+    let line_budget = max_lines - 1;
+    let byte_budget = max_bytes.saturating_sub(SUMMARY_BYTES);
+    let fits = |picked: &BTreeSet<usize>, lines: usize, bytes: usize| {
+        let (l, b) = log.cost(picked);
+        l <= lines && b <= bytes
+    };
     let mut picked = BTreeSet::new();
-    // Errors take at most half of the budget, newest first, two lines each
-    // (the entry and a gap marker in the worst case).
-    let error_budget = budget / 2;
-    for (i, _) in entries
-        .iter()
-        .enumerate()
+    // Errors first, newest first, within half of each budget.
+    for i in (0..total)
         .rev()
-        .filter(|(_, e)| is_error_line(e.line))
+        .filter(|&i| is_error_line(log.entries[i].line))
     {
-        if (picked.len() + 1) * 2 > error_budget {
+        picked.insert(i);
+        if !fits(&picked, line_budget / 2, byte_budget / 2) {
+            picked.remove(&i);
             break;
         }
-        picked.insert(i);
     }
     // The tail fills the rest.
     for i in (0..total).rev() {
@@ -157,33 +224,41 @@ pub fn condense_log_text(text: &str, max_lines: usize) -> String {
             continue;
         }
         picked.insert(i);
-        if rendered_lines(&picked) > budget {
+        if !fits(&picked, line_budget, byte_budget) {
             picked.remove(&i);
             break;
         }
     }
     let errors = picked
         .iter()
-        .filter(|&&i| is_error_line(entries[i].line))
+        .filter(|&&i| is_error_line(log.entries[i].line))
         .count();
-    let shown: usize = picked.iter().map(|&i| entries[i].count).sum();
+    let shown: usize = picked.iter().map(|&i| log.entries[i].count).sum();
     let mut out = vec![format!(
         "… condensed: {shown} of {raw_lines} lines ({errors} error lines kept, repeats collapsed) …"
     )];
     let mut next = 0;
     for &i in &picked {
         if i != next {
-            let omitted: usize = entries[next..i].iter().map(|e| e.count).sum();
-            out.push(format!("… {omitted} lines omitted …"));
+            out.push(gap_marker(log.before[i] - log.before[next]));
         }
-        out.push(entries[i].render());
+        out.push(log.lines[i].clone());
         next = i + 1;
     }
-    join(out.into_iter())
+    keep_end(out.join("\n"), max_bytes)
 }
 
-fn join(lines: impl Iterator<Item = String>) -> String {
-    lines.collect::<Vec<_>>().join("\n")
+/// Safety net for budgets too small for the summary: the last `max` bytes,
+/// starting on a character boundary.
+fn keep_end(text: String, max: usize) -> String {
+    if text.len() <= max {
+        return text;
+    }
+    let mut start = text.len() - max;
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    text[start..].to_string()
 }
 
 #[cfg(test)]
@@ -277,5 +352,69 @@ mod tests {
                 "{cap}"
             );
         }
+        for bytes in [0, 10, 100, 300] {
+            let out = condense_log(&text, 50, bytes);
+            assert!(out.len() <= bytes, "{bytes}: {}", out.len());
+        }
+    }
+
+    #[test]
+    fn long_lines_are_cut_with_a_marker() {
+        let line = format!("{}{}", "é".repeat(MAX_LINE_CHARS), "x".repeat(1_500));
+        let out = condense_log_text(&format!("start\n{line}\nend"), 10);
+        let cut = out.lines().nth(1).unwrap();
+        assert!(cut.starts_with(&"é".repeat(MAX_LINE_CHARS)));
+        assert!(cut.ends_with("… [+1500 chars]"), "{cut}");
+        assert!(out.ends_with("end"));
+    }
+
+    /// 500 long, distinct JSON records: an early error, a crash at the end.
+    fn json_log() -> String {
+        (0..500)
+            .map(|i| {
+                let level = if i == 20 { "error" } else { "info" };
+                let msg = if i == 499 {
+                    "CRASH: out of memory".to_string()
+                } else {
+                    format!("handled request {} for tenant {}", word(i), word(i * 7))
+                };
+                format!(
+                    "2024-05-01T10:00:{:02}.000000000Z {{\"level\":\"{level}\",\"msg\":\"{msg}\",\"trace\":\"{}\"}}",
+                    i % 60,
+                    "t".repeat(300)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Letters only, so every record keeps its own line key.
+    fn word(mut i: usize) -> String {
+        let mut out = String::new();
+        loop {
+            out.push((b'a' + (i % 26) as u8) as char);
+            i /= 26;
+            if i == 0 {
+                return out;
+            }
+        }
+    }
+
+    #[test]
+    fn the_byte_budget_keeps_the_newest_lines() {
+        let text = json_log();
+        assert!(text.len() > 150_000);
+        let out = condense_log(&text, 199, 30_000);
+        assert!(out.len() <= 30_000, "{}", out.len());
+        assert!(out.lines().count() <= 199);
+        assert!(
+            out.contains("CRASH: out of memory"),
+            "the last line survives"
+        );
+        assert!(out.lines().last().unwrap().contains("CRASH"));
+        assert!(out.contains("\"level\":\"error\""), "errors are kept");
+        assert!(out.starts_with("… condensed:"));
+        // Without a byte budget only the line cap applies.
+        assert!(condense_log_text(&text, 199).len() > 30_000);
     }
 }

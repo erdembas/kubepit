@@ -283,7 +283,7 @@ fn node_view(source: &Map<String, Value>) -> Map<String, Value> {
 
 /// Safety net for Secret annotations that copy the object (tools similar
 /// to `last-applied-configuration`).
-fn embeds_secret_data(value: &Value) -> bool {
+pub(crate) fn embeds_secret_data(value: &Value) -> bool {
     value
         .as_str()
         .is_some_and(|s| s.contains("\"data\"") || s.contains("\"stringData\""))

@@ -14,30 +14,42 @@
 //!   like `../secrets/x` would address another resource); selectors travel
 //!   only as query parameters.
 //! - **No secret values.** Secret-like kinds (`history::redact::secret_like`)
-//!   come back as metadata plus key names; list rows never carry values.
+//!   come back as metadata plus key names, their annotation values replaced
+//!   by `__SECRET__` (tools such as kapp copy the whole object into an
+//!   annotation); they are listed metadata-only. On other kinds annotation
+//!   values that embed `data` / `stringData` are replaced too.
 //!   `managedFields` and the last-applied annotation are dropped. The
 //!   session still redacts every result before it is shown or sent.
-//! - **Bounded.** Lists ≤ [`MAX_LIST_ROWS`] rows, events ≤ [`MAX_EVENTS`],
-//!   logs condensed to ≤ [`MAX_LOG_OUTPUT_LINES`] lines, PromQL ≤
-//!   [`MAX_PROM_SERIES`] summarized series, and every result ≤
-//!   [`MAX_TOOL_RESULT_BYTES`], cut on a character boundary.
+//! - **Bounded.** Lists fetch one chunk of [`MAX_LIST_ROWS`] + 1 objects
+//!   (never the whole collection); events one chunk of Warnings, then one
+//!   of the rest; logs are condensed to ≤ [`MAX_LOG_OUTPUT_LINES`] lines
+//!   within the byte cap; PromQL ≤ [`MAX_PROM_SERIES`] summarized series;
+//!   every result ≤ [`MAX_TOOL_RESULT_BYTES`], cut on a character boundary;
+//!   every call ≤ [`TOOL_TIMEOUT`].
 //! - `query_prometheus` is offered only when the caller says Prometheus is
 //!   available ([`tool_specs`]) and refused unless the cluster's Prometheus
 //!   status is `available` ([`ReadOnlyCluster::prometheus_available`]).
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
+use kube::api::ListParams;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use super::logs::condense_log_text;
+use super::logs::condense_log;
 use super::provider::ToolSpec;
 use super::types::AiSectionFormat;
 use crate::app::Kubepit;
+use crate::change_journal::normalize::embeds_secret_data;
+use crate::error::kube_error;
 use crate::history::redact::secret_like;
-use crate::objects::{event_time_millis, now_millis, timestamp_millis};
+use crate::logs::LOG_CUT_NOTE;
+use crate::objects::{
+    api_resource, dynamic_api, event_time_millis, now_millis, timestamp_millis, to_kube_object,
+};
 use crate::types::{ApiResourceInfo, Gvk, PrometheusRange, PrometheusState};
 
 /// Largest tool result (bytes) handed back to the session.
@@ -68,6 +80,12 @@ const TOP_PODS: usize = 20;
 const MAX_MESSAGE_CHARS: usize = 300;
 /// Appended when a result is cut at [`MAX_TOOL_RESULT_BYTES`].
 const TRUNCATED: &str = "\n… truncated";
+/// Longest a tool call may take (connect, discovery and reads).
+pub const TOOL_TIMEOUT: Duration = Duration::from_secs(30);
+/// Events of one type (Warning, the rest) fetched at most per call.
+const EVENT_FETCH_LIMIT: u32 = 500;
+/// What replaces an annotation value that may hold secret material.
+const SECRET_MARKER: &str = "__SECRET__";
 
 pub const GET_EVENTS: &str = "get_events";
 pub const GET_METRICS: &str = "get_metrics";
@@ -396,6 +414,16 @@ fn object_name(value: &str, field: &str) -> Result<String, String> {
     Ok(value.to_string())
 }
 
+/// An involved object's name for the Events field selector: an object name
+/// without `,`, `=` or `!`, which would add selector clauses.
+fn event_object_name(value: &str) -> Result<String, String> {
+    let name = object_name(value, "name")?;
+    if name.contains([',', '=', '!']) {
+        return Err(format!("name {name:?} is not a valid object name"));
+    }
+    Ok(name)
+}
+
 /// A kind, plural or short name, optionally `name.group`.
 fn kind_name(value: &str) -> Result<String, String> {
     let value = value.trim();
@@ -436,7 +464,7 @@ pub fn parse_input(name: &str, input: &Value) -> Result<ToolInput, String> {
                     .transpose()?,
                 kind: optional(a.kind).map(|v| kind_name(&v)).transpose()?,
                 name: optional(a.name)
-                    .map(|v| object_name(&v, "name"))
+                    .map(|v| event_object_name(&v))
                     .transpose()?,
             })
         }
@@ -608,7 +636,10 @@ fn str_at<'a>(value: &'a Value, pointer: &str) -> Option<&'a str> {
 const LAST_APPLIED: &str = "kubectl.kubernetes.io/last-applied-configuration";
 
 /// Metadata without `managedFields` and the last-applied annotation.
-fn clean_metadata(object: &mut Value) {
+/// Annotation values become `__SECRET__` when they may hold secret
+/// material: every value of a Secret-like object (`secretish`), and on
+/// other kinds values that embed `data` / `stringData` (object copies).
+fn clean_metadata(object: &mut Value, secretish: bool) {
     let Some(meta) = object.get_mut("metadata").and_then(Value::as_object_mut) else {
         return;
     };
@@ -616,6 +647,11 @@ fn clean_metadata(object: &mut Value) {
     let empty = match meta.get_mut("annotations").and_then(Value::as_object_mut) {
         Some(annotations) => {
             annotations.remove(LAST_APPLIED);
+            for value in annotations.values_mut() {
+                if secretish || embeds_secret_data(value) {
+                    *value = json!(SECRET_MARKER);
+                }
+            }
             annotations.is_empty()
         }
         None => false,
@@ -641,7 +677,7 @@ pub fn secret_summary(object: &Value) -> Value {
     keys.sort();
     keys.dedup();
     let mut metadata = json!({"metadata": object.get("metadata").cloned().unwrap_or(json!({}))});
-    clean_metadata(&mut metadata);
+    clean_metadata(&mut metadata, true);
     let mut out = Map::new();
     for key in ["apiVersion", "kind"] {
         if let Some(v) = object.get(key) {
@@ -668,15 +704,9 @@ fn is_secret_like(info: &ApiResourceInfo, object: &Value) -> bool {
             .is_some_and(secret_like)
 }
 
-/// The status column of a list row (never a value of a Secret-like kind).
-fn row_status(object: &Value, secretish: bool) -> String {
-    if secretish {
-        let mut keys = Vec::new();
-        object_keys(object.get("data"), &mut keys);
-        object_keys(object.pointer("/spec/encryptedData"), &mut keys);
-        let kind = str_at(object, "/type").unwrap_or("-");
-        return format!("{kind}, keys: {}", keys.len());
-    }
+/// The status column of a list row (Secret-like kinds are listed
+/// metadata-only and show `-`).
+fn row_status(object: &Value) -> String {
     let status = object.get("status").unwrap_or(&Value::Null);
     if object.get("kind").and_then(Value::as_str) == Some("Pod") {
         let phase = str_at(object, "/status/phase").unwrap_or("Unknown");
@@ -804,6 +834,46 @@ pub fn resolve_kind<'a>(
         .map(|(r, _)| r)
 }
 
+/// How many objects a limited list left out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum More {
+    None,
+    Exact(usize),
+    /// The server has more but does not say how many (selectors).
+    Unknown,
+}
+
+/// One chunk of a list: at most `limit` objects fetched.
+struct Chunk {
+    items: Vec<Value>,
+    /// Objects beyond `items` (the server's `remainingItemCount`).
+    more: More,
+}
+
+impl Chunk {
+    /// Objects matching, when known.
+    fn total(&self) -> Option<usize> {
+        match self.more {
+            More::None => Some(self.items.len()),
+            More::Exact(n) => Some(self.items.len() + n),
+            More::Unknown => None,
+        }
+    }
+
+    fn total_text(&self) -> String {
+        self.total()
+            .map_or(format!("more than {}", self.items.len()), |n| n.to_string())
+    }
+}
+
+fn more_of(remaining: Option<i64>, continue_token: Option<&str>) -> More {
+    match (remaining, continue_token.filter(|t| !t.is_empty())) {
+        (Some(n), _) if n > 0 => More::Exact(n as usize),
+        (_, Some(_)) => More::Unknown,
+        _ => More::None,
+    }
+}
+
 fn events_gvk() -> Gvk {
     Gvk {
         group: String::new(),
@@ -822,6 +892,7 @@ fn events_gvk() -> Gvk {
 pub struct ReadOnlyCluster {
     app: Arc<Kubepit>,
     cluster_id: String,
+    timeout: Duration,
 }
 
 impl ReadOnlyCluster {
@@ -829,7 +900,14 @@ impl ReadOnlyCluster {
         Self {
             app,
             cluster_id: cluster_id.into(),
+            timeout: TOOL_TIMEOUT,
         }
+    }
+
+    /// Another limit per call than [`TOOL_TIMEOUT`] (tests).
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
     }
 
     pub fn cluster_id(&self) -> &str {
@@ -846,9 +924,21 @@ impl ReadOnlyCluster {
         )
     }
 
-    /// Run one tool. Failures (RBAC, missing objects, bad kinds) come back
-    /// as an error result for the model, never as a panic or a mutation.
+    /// Run one tool. Failures (RBAC, missing objects, bad kinds, a call
+    /// slower than the timeout) come back as an error result for the model,
+    /// never as a panic or a mutation.
     pub async fn execute(&self, input: &ToolInput) -> ToolOutput {
+        match tokio::time::timeout(self.timeout, self.run(input)).await {
+            Ok(output) => output,
+            Err(_) => ToolOutput::error(format!(
+                "{} timed out after {:?}",
+                input.name(),
+                self.timeout
+            )),
+        }
+    }
+
+    async fn run(&self, input: &ToolInput) -> ToolOutput {
         let result = match input {
             ToolInput::Events {
                 namespace,
@@ -922,19 +1012,17 @@ impl ReadOnlyCluster {
         let info = self.resolve(kind).await?;
         let gvk = info.gvk();
         let namespace = namespace.filter(|_| gvk.namespaced);
-        let list = self
-            .app
-            .resource_list(
-                &self.cluster_id,
-                &gvk,
-                namespace,
-                label_selector,
-                field_selector,
-            )
-            .await?;
+        let secretish = secret_like(&info.kind);
+        let mut params = ListParams::default().limit(MAX_LIST_ROWS as u32 + 1);
+        if let Some(labels) = label_selector {
+            params = params.labels(labels);
+        }
+        if let Some(fields) = field_selector {
+            params = params.fields(fields);
+        }
+        let chunk = self.list_chunk(&gvk, namespace, &params, secretish).await?;
         let now = now_millis();
-        let total = list.items.len();
-        let rows: Vec<Vec<String>> = list
+        let rows: Vec<Vec<String>> = chunk
             .items
             .iter()
             .take(MAX_LIST_ROWS)
@@ -944,7 +1032,11 @@ impl ReadOnlyCluster {
                     str_at(item, "/metadata/namespace")
                         .unwrap_or("-")
                         .to_string(),
-                    row_status(item, is_secret_like(&info, item)),
+                    if secretish || is_secret_like(&info, item) {
+                        "-".to_string()
+                    } else {
+                        row_status(item)
+                    },
                     age(timestamp_millis(item, "/metadata/creationTimestamp"), now),
                 ]
             })
@@ -960,12 +1052,20 @@ impl ReadOnlyCluster {
                 header.push_str(&format!(", {label} {value}"));
             }
         }
-        header.push_str(&format!(": {total} objects"));
-        if total > MAX_LIST_ROWS {
+        header.push_str(&format!(": {} objects", chunk.total_text()));
+        let hidden = match chunk.total() {
+            Some(total) if total > rows.len() => Some(format!("{} more", total - rows.len())),
+            Some(_) => None,
+            None => Some("more exist".to_string()),
+        };
+        if let Some(hidden) = hidden {
             header.push_str(&format!(
-                " (showing {MAX_LIST_ROWS}; {} more — narrow with a namespace, label_selector or field_selector)",
-                total - MAX_LIST_ROWS
+                " (showing {}; {hidden} — narrow with a namespace, label_selector or field_selector)",
+                rows.len()
             ));
+        }
+        if secretish {
+            header.push_str(" (metadata only: types, keys and values are not listed)");
         }
         if rows.is_empty() {
             return Ok(header);
@@ -974,6 +1074,68 @@ impl ReadOnlyCluster {
             "{header}\n{}",
             table(&["NAME", "NAMESPACE", "STATUS", "AGE"], &rows)
         ))
+    }
+
+    /// One chunk of a list (`params` carries the limit and selectors, which
+    /// travel as query parameters). `metadata_only` lists partial objects,
+    /// so Secret-like bodies (Helm releases can be large) never load.
+    async fn list_chunk(
+        &self,
+        gvk: &Gvk,
+        namespace: Option<&str>,
+        params: &ListParams,
+        metadata_only: bool,
+    ) -> Result<Chunk> {
+        let client = self.app.client(&self.cluster_id).await?;
+        let ar = api_resource(gvk);
+        let api = dynamic_api(client, &ar, gvk.namespaced, namespace);
+        let what = || format!("failed to list {}", gvk.plural);
+        if metadata_only {
+            let list = api
+                .list_metadata(params)
+                .await
+                .map_err(kube_error)
+                .with_context(what)?;
+            let more = more_of(
+                list.metadata.remaining_item_count,
+                list.metadata.continue_.as_deref(),
+            );
+            let items = list
+                .items
+                .into_iter()
+                .map(|o| json!({"metadata": serde_json::to_value(&o.metadata).unwrap_or_default()}))
+                .collect();
+            return Ok(Chunk { items, more });
+        }
+        let list = api
+            .list(params)
+            .await
+            .map_err(kube_error)
+            .with_context(what)?;
+        let more = more_of(
+            list.metadata.remaining_item_count,
+            list.metadata.continue_.as_deref(),
+        );
+        let items = list
+            .items
+            .into_iter()
+            .map(|o| to_kube_object(o, &ar))
+            .collect();
+        Ok(Chunk { items, more })
+    }
+
+    /// Events matching `fields`, one chunk, newest first.
+    async fn event_chunk(&self, namespace: Option<&str>, fields: &str) -> Result<Chunk> {
+        let params = ListParams::default()
+            .fields(fields)
+            .limit(EVENT_FETCH_LIMIT);
+        let mut chunk = self
+            .list_chunk(&events_gvk(), namespace, &params, false)
+            .await?;
+        chunk
+            .items
+            .sort_by_key(|e| std::cmp::Reverse(event_time_millis(e)));
+        Ok(chunk)
     }
 
     async fn get(&self, kind: &str, namespace: Option<&str>, name: &str) -> Result<String> {
@@ -987,7 +1149,7 @@ impl ReadOnlyCluster {
         let doc = if is_secret_like(&info, &object) {
             secret_summary(&object)
         } else {
-            clean_metadata(&mut object);
+            clean_metadata(&mut object, false);
             object
         };
         serde_yaml::to_string(&doc).context("failed to render YAML")
@@ -1013,28 +1175,30 @@ impl ReadOnlyCluster {
             fields.push(format!("involvedObject.name={name}"));
         }
         let field_selector = (!fields.is_empty()).then(|| fields.join(","));
-        let list = self
-            .app
-            .resource_list(
-                &self.cluster_id,
-                &events_gvk(),
-                namespace,
-                None,
-                field_selector.as_deref(),
-            )
+        let with_type = |clause: &str| match &field_selector {
+            Some(fields) => format!("{fields},{clause}"),
+            None => clause.to_string(),
+        };
+        // Warnings first; the rest only while there is room. Each is one
+        // limited chunk, never the whole collection.
+        let warnings = self
+            .event_chunk(namespace, &with_type("type=Warning"))
             .await?;
-        let mut events = list.items;
-        events.sort_by_key(|e| {
-            (
-                str_at(e, "/type") != Some("Warning"),
-                std::cmp::Reverse(event_time_millis(e)),
-            )
-        });
-        let total = events.len();
-        let warnings = events
-            .iter()
-            .filter(|e| str_at(e, "/type") == Some("Warning"))
-            .count();
+        let others = if warnings.items.len() < MAX_EVENTS {
+            self.event_chunk(namespace, &with_type("type!=Warning"))
+                .await?
+        } else {
+            Chunk {
+                items: Vec::new(),
+                more: More::Unknown,
+            }
+        };
+        let total = match (warnings.total(), others.total()) {
+            (Some(w), Some(o)) => (w + o).to_string(),
+            _ => format!("more than {}", warnings.items.len() + others.items.len()),
+        };
+        let warning_total = warnings.total_text();
+        let events: Vec<Value> = warnings.items.into_iter().chain(others.items).collect();
         let now = now_millis();
         let all_namespaces = namespace.is_none();
         let rows: Vec<Vec<String>> = events
@@ -1074,11 +1238,11 @@ impl ReadOnlyCluster {
         if let Some(fields) = &field_selector {
             header.push_str(&format!(" ({fields})"));
         }
-        header.push_str(&format!(": {total} ({warnings} Warning)"));
-        if total > MAX_EVENTS {
+        header.push_str(&format!(": {total} ({warning_total} Warning)"));
+        if rows.len() < events.len() || total.starts_with("more") {
             header.push_str(&format!(
-                ", showing {MAX_EVENTS}; {} more",
-                total - MAX_EVENTS
+                ", showing the newest {} — narrow with a namespace, kind or name",
+                rows.len()
             ));
         }
         if rows.is_empty() {
@@ -1222,6 +1386,10 @@ impl ReadOnlyCluster {
                 previous,
             )
             .await?;
+        let (cut, text) = match text.strip_prefix(LOG_CUT_NOTE) {
+            Some(rest) => (true, rest.trim_start_matches('\n')),
+            None => (false, text.as_str()),
+        };
         let received = text.lines().count();
         let mut header = format!("Logs of pod {namespace}/{pod}");
         if let Some(container) = container {
@@ -1233,10 +1401,15 @@ impl ReadOnlyCluster {
         header.push_str(&format!(
             ": {received} lines (tail_lines {tail_lines}), each with its timestamp"
         ));
+        if cut {
+            header.push(' ');
+            header.push_str(LOG_CUT_NOTE);
+        }
         if received == 0 {
             return Ok(format!("{header}\n(no log lines)"));
         }
-        let condensed = condense_log_text(&text, MAX_LOG_OUTPUT_LINES - 1);
+        let room = MAX_TOOL_RESULT_BYTES.saturating_sub(header.len() + 1);
+        let condensed = condense_log(text, MAX_LOG_OUTPUT_LINES - 1, room);
         Ok(format!("{header}\n{condensed}"))
     }
 
@@ -1376,7 +1549,22 @@ mod tests {
         assert_eq!(summary["metadata"]["labels"]["app"], "shop");
         assert!(summary["metadata"].get("annotations").is_none());
         assert!(summary["metadata"].get("managedFields").is_none());
-        assert_eq!(row_status(&secret, true), "Opaque, keys: 1");
+        let annotated = secret_summary(&json!({"kind": "Secret", "metadata": {"annotations": {
+            "kapp.k14s.io/original": "{\"data\":{\"PASSWORD\":\"aHVudGVyMg==\"}}",
+            "owner": "team-a"}}}));
+        assert_eq!(
+            annotated["metadata"]["annotations"]["kapp.k14s.io/original"],
+            SECRET_MARKER
+        );
+        assert_eq!(annotated["metadata"]["annotations"]["owner"], SECRET_MARKER);
+        let mut copied = json!({"kind": "ConfigMap", "metadata": {"annotations": {
+            "ci/snapshot": "{\"stringData\":{\"PASSWORD\":\"hunter2\"}}", "team": "a"}}});
+        clean_metadata(&mut copied, false);
+        assert_eq!(
+            copied["metadata"]["annotations"]["ci/snapshot"],
+            SECRET_MARKER
+        );
+        assert_eq!(copied["metadata"]["annotations"]["team"], "a");
     }
 
     #[test]
@@ -1384,17 +1572,14 @@ mod tests {
         let pod = json!({"kind": "Pod", "status": {"phase": "Running", "containerStatuses": [
             {"ready": false, "restartCount": 4, "state": {"waiting": {"reason": "CrashLoopBackOff"}}},
             {"ready": true, "restartCount": 0, "state": {"running": {}}}]}});
-        assert_eq!(
-            row_status(&pod, false),
-            "Running 1/2 CrashLoopBackOff restarts=4"
-        );
+        assert_eq!(row_status(&pod), "Running 1/2 CrashLoopBackOff restarts=4");
         let node = json!({"kind": "Node", "status": {"conditions": [
             {"type": "Ready", "status": "False", "reason": "KubeletNotReady"}]}});
-        assert_eq!(row_status(&node, false), "NotReady (KubeletNotReady)");
+        assert_eq!(row_status(&node), "NotReady (KubeletNotReady)");
         let deploy =
             json!({"kind": "Deployment", "spec": {"replicas": 3}, "status": {"readyReplicas": 2}});
-        assert_eq!(row_status(&deploy, false), "2/3 ready");
-        assert_eq!(row_status(&json!({"kind": "ConfigMap"}), false), "-");
+        assert_eq!(row_status(&deploy), "2/3 ready");
+        assert_eq!(row_status(&json!({"kind": "ConfigMap"})), "-");
     }
 
     #[test]

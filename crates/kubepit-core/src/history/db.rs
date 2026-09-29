@@ -114,7 +114,9 @@ CREATE INDEX changes_ts ON changes (ts);
     (3, AI_LOG_MIGRATION),
 ];
 
-/// Migration 3: the assistant request log (spec §7.4).
+/// Migration 3: the assistant request log (spec §7.4). Deviation from the
+/// spec's column order: `search` comes before the large `request` /
+/// `response` / `tools` bodies, so a `LIKE` over it reads no overflow pages.
 const AI_LOG_MIGRATION: &str = r#"
 CREATE TABLE ai_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL,
@@ -122,8 +124,8 @@ CREATE TABLE ai_log (
   intent TEXT NOT NULL, outcome TEXT NOT NULL, error TEXT, duration_ms INTEGER NOT NULL,
   input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL,
   cache_read_tokens INTEGER NOT NULL, cache_write_tokens INTEGER NOT NULL,
-  cost REAL, tool_calls INTEGER NOT NULL,
-  request TEXT NOT NULL, response TEXT NOT NULL, tools TEXT NOT NULL, search TEXT NOT NULL
+  cost REAL, tool_calls INTEGER NOT NULL, search TEXT NOT NULL,
+  request TEXT NOT NULL, response TEXT NOT NULL, tools TEXT NOT NULL
 );
 CREATE INDEX ai_log_ts ON ai_log (ts DESC, id DESC);
 "#;
@@ -527,8 +529,14 @@ fn ai_search(record: &AiLogRecord) -> String {
         .to_lowercase()
 }
 
+/// Largest token count stored per column (2^40): millions of rows can
+/// still be summed without overflowing SQLite's 64-bit `SUM`.
+pub const MAX_STORED_TOKENS: i64 = 1 << 40;
+
 fn sql_count(value: u64) -> i64 {
-    i64::try_from(value).unwrap_or(i64::MAX)
+    i64::try_from(value)
+        .unwrap_or(i64::MAX)
+        .min(MAX_STORED_TOKENS)
 }
 
 /// Insert one assistant run (bodies already capped by the caller).
@@ -1095,9 +1103,18 @@ struct AiExportLine<'a> {
     tools: &'a Value,
 }
 
+/// Largest assistant log export (bytes) before the marker line.
+pub const MAX_AI_EXPORT_BYTES: usize = 64 * 1024 * 1024;
+
 /// The filtered runs as JSON lines, newest first, bodies included (the
-/// record of what left the machine). The cursor and limit are ignored.
+/// record of what left the machine). The cursor and limit are ignored. At
+/// most [`MAX_AI_EXPORT_BYTES`]: then a last line
+/// `{"truncated":true,"exported":N,"total":M}` says how much is missing.
 pub fn export_ai(conn: &Connection, filter: &AiLogFilter) -> Result<String> {
+    export_ai_within(conn, filter, MAX_AI_EXPORT_BYTES)
+}
+
+fn export_ai_within(conn: &Connection, filter: &AiLogFilter, max_bytes: usize) -> Result<String> {
     let mut args = Vec::new();
     let clause = ai_where(filter, &mut args);
     args.push(Sql::Integer(i64::from(MAX_EXPORT)));
@@ -1106,14 +1123,32 @@ pub fn export_ai(conn: &Connection, filter: &AiLogFilter) -> Result<String> {
          ORDER BY ts DESC, id DESC LIMIT ?"
     ))?;
     let mut out = String::new();
-    for detail in stmt.query_map(params_from_iter(args.iter()), ai_detail)? {
+    let rows = stmt.query_map(params_from_iter(args.iter()), ai_detail)?;
+    for (exported, detail) in (0_u64..).zip(rows) {
         let detail = detail?;
-        out.push_str(&serde_json::to_string(&AiExportLine {
+        let line = serde_json::to_string(&AiExportLine {
             entry: &detail.entry,
             request: &detail.request,
             response: &detail.response,
             tools: &detail.tools,
-        })?);
+        })?;
+        if out.len() + line.len() + 1 > max_bytes {
+            let mut count_args = Vec::new();
+            let clause = ai_where(filter, &mut count_args);
+            let total: i64 = conn.query_row(
+                &format!("SELECT COUNT(*) FROM ai_log WHERE {clause}"),
+                params_from_iter(count_args.iter()),
+                |r| r.get(0),
+            )?;
+            let total = sql_u64(total).min(u64::from(MAX_EXPORT));
+            out.push_str(
+                &serde_json::json!({"truncated": true, "exported": exported, "total": total})
+                    .to_string(),
+            );
+            out.push('\n');
+            break;
+        }
+        out.push_str(&line);
         out.push('\n');
     }
     Ok(out)
@@ -2083,6 +2118,95 @@ mod tests {
             .collect::<rusqlite::Result<_>>()
             .unwrap();
         assert_eq!(columns.len(), 20);
-        assert!(columns.iter().any(|c| c == "search"));
+        // The search text and the small columns come before the bodies, so
+        // a LIKE scan does not walk their overflow pages.
+        let at = |name: &str| columns.iter().position(|c| c == name).unwrap();
+        for small in ["search", "tool_calls", "cost", "error"] {
+            assert!(at(small) < at("request"), "{small}: {columns:?}");
+        }
+        assert!(at("request") < at("response") && at("response") < at("tools"));
+    }
+
+    #[test]
+    fn ai_log_cursor_pages_through_timestamp_ties() {
+        let (_dir, mut conn) = temp_db();
+        // Five rows, three of them at the same instant.
+        let ts = [1_000, 2_000, 2_000, 2_000, 3_000];
+        let rows: Vec<AiLogRecord> = ts
+            .iter()
+            .enumerate()
+            .map(|(i, ts)| ai_record(*ts, Some("c1"), i as u64 + 1, None))
+            .collect();
+        insert_ai_rows(&mut conn, &rows);
+        for limit in [1, 2] {
+            let mut filter = AiLogFilter {
+                limit,
+                ..AiLogFilter::default()
+            };
+            let mut seen = Vec::new();
+            loop {
+                let page = list_ai(&conn, &filter).unwrap();
+                assert!(page.entries.len() <= limit as usize);
+                assert_eq!(page.total, 5);
+                seen.extend(page.entries.iter().map(|e| (e.ts, e.usage.input_tokens)));
+                match page.next_cursor {
+                    Some(cursor) => filter.cursor = Some(cursor),
+                    None => break,
+                }
+            }
+            // Newest first; ties newest insert first; every row once.
+            assert_eq!(
+                seen,
+                vec![(3_000, 5), (2_000, 4), (2_000, 3), (2_000, 2), (1_000, 1)],
+                "limit {limit}"
+            );
+        }
+    }
+
+    #[test]
+    fn huge_token_counts_cannot_overflow_the_totals() {
+        let (_dir, mut conn) = temp_db();
+        let huge = |ts| AiLogRecord {
+            usage: AiUsage {
+                input_tokens: u64::MAX,
+                output_tokens: u64::MAX,
+                cache_read_tokens: u64::MAX,
+                cache_write_tokens: u64::MAX,
+            },
+            ..ai_record(ts, None, 0, None)
+        };
+        let rows: Vec<AiLogRecord> = (0..8).map(huge).collect();
+        insert_ai_rows(&mut conn, &rows);
+        let page = list_ai(&conn, &AiLogFilter::default()).unwrap();
+        assert_eq!(page.total, 8);
+        assert_eq!(page.entries[0].usage.input_tokens, MAX_STORED_TOKENS as u64);
+        assert_eq!(page.usage.output_tokens, 8 * MAX_STORED_TOKENS as u64);
+    }
+
+    #[test]
+    fn ai_export_is_capped_with_a_marker_line() {
+        let (_dir, mut conn) = temp_db();
+        let rows: Vec<AiLogRecord> = (0..10)
+            .map(|i| AiLogRecord {
+                response: "r".repeat(1_000),
+                ..ai_record(i, Some("c1"), 1, None)
+            })
+            .collect();
+        insert_ai_rows(&mut conn, &rows);
+        let full = export_ai(&conn, &AiLogFilter::default()).unwrap();
+        assert_eq!(full.lines().count(), 10, "under the cap: no marker");
+        let capped = export_ai_within(&conn, &AiLogFilter::default(), 3_500).unwrap();
+        assert!(capped.len() <= 3_500 + 200, "{}", capped.len());
+        let lines: Vec<Value> = capped
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let marker = lines.last().unwrap();
+        assert_eq!(marker["truncated"], true);
+        let exported = marker["exported"].as_u64().unwrap();
+        assert_eq!(exported as usize, lines.len() - 1);
+        assert!((1..10).contains(&exported), "{exported}");
+        assert_eq!(marker["total"], 10);
+        assert_eq!(lines[0]["ts"], 9, "newest first");
     }
 }

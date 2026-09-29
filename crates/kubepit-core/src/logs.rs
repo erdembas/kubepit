@@ -29,6 +29,30 @@ pub const LOG_FLUSH_BYTES: usize = 64 * 1024;
 const READ_BUF: usize = 16 * 1024;
 /// Bytes [`Kubepit::pod_logs_tail`] reads at most.
 pub const MAX_TAIL_BYTES: i64 = 1024 * 1024;
+/// First line of a [`Kubepit::pod_logs_tail`] result cut by the byte limit.
+pub const LOG_CUT_NOTE: &str = "[the log was cut at 1 MiB; the newest lines may be missing]";
+
+/// One non-following log read, at most [`MAX_TAIL_BYTES`] bytes.
+async fn read_log_bytes(
+    api: &Api<Pod>,
+    pod: &str,
+    params: LogParams,
+    namespace: &str,
+) -> Result<Vec<u8>> {
+    let what = || format!("failed to read the logs of pod {namespace}/{pod}");
+    let reader = api
+        .log_stream(pod, &params)
+        .await
+        .map_err(kube_error)
+        .with_context(what)?;
+    let mut bytes = Vec::new();
+    Box::pin(reader)
+        .take(MAX_TAIL_BYTES as u64)
+        .read_to_end(&mut bytes)
+        .await
+        .with_context(what)?;
+    Ok(bytes)
+}
 
 /// Byte buffer that only ever releases complete UTF-8 characters (invalid
 /// sequences are replaced lossily; an incomplete trailing sequence waits for
@@ -200,7 +224,10 @@ impl Kubepit {
 
     /// The last `tail_lines` lines of a container's log, once (no follow),
     /// with timestamps, at most [`MAX_TAIL_BYTES`] (the assistant's
-    /// `get_pod_logs` tool). A character cut by the byte limit is dropped.
+    /// `get_pod_logs` tool). The server keeps the *first* bytes of the
+    /// tail, so a tail cut by the limit misses the newest lines: it is read
+    /// again with fewer lines, and when that is still cut the text starts
+    /// with [`LOG_CUT_NOTE`]. A character cut by the limit is dropped.
     pub async fn pod_logs_tail(
         &self,
         cluster_id: &str,
@@ -212,29 +239,34 @@ impl Kubepit {
     ) -> Result<String> {
         let client = self.client(cluster_id).await?;
         let api: Api<Pod> = Api::namespaced(client, namespace);
-        let options = LogOptions {
-            follow: false,
-            tail_lines: Some(tail_lines),
-            since_seconds: None,
-            timestamps: true,
-            previous,
+        let read = |tail: i64| {
+            let options = LogOptions {
+                follow: false,
+                tail_lines: Some(tail),
+                since_seconds: None,
+                timestamps: true,
+                previous,
+            };
+            let mut params = log_params(container.map(str::to_string), &options);
+            params.limit_bytes = Some(MAX_TAIL_BYTES);
+            read_log_bytes(&api, pod, params, namespace)
         };
-        let mut params = log_params(container.map(str::to_string), &options);
-        params.limit_bytes = Some(MAX_TAIL_BYTES);
-        let reader = api
-            .log_stream(pod, &params)
-            .await
-            .map_err(kube_error)
-            .with_context(|| format!("failed to read the logs of pod {namespace}/{pod}"))?;
-        let mut bytes = Vec::new();
-        Box::pin(reader)
-            .take(MAX_TAIL_BYTES as u64)
-            .read_to_end(&mut bytes)
-            .await
-            .with_context(|| format!("failed to read the logs of pod {namespace}/{pod}"))?;
+        let cut = |bytes: &[u8]| bytes.len() as i64 >= MAX_TAIL_BYTES;
+        let mut bytes = read(tail_lines).await?;
+        if cut(&bytes) {
+            let complete = bytes.iter().filter(|b| **b == b'\n').count() as i64;
+            let fewer = (complete / 2).clamp(1, (tail_lines / 2).max(1));
+            if fewer < tail_lines {
+                bytes = read(fewer).await?;
+            }
+        }
         let mut acc = Utf8Accumulator::default();
         acc.push(&bytes);
-        Ok(acc.take_complete())
+        let text = acc.take_complete();
+        if cut(&bytes) {
+            return Ok(format!("{LOG_CUT_NOTE}\n{text}"));
+        }
+        Ok(text)
     }
 }
 

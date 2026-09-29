@@ -5,6 +5,7 @@
 mod support;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use kubepit_core::ai::tools::{
     parse_input, tool_specs, PromToolRange, ReadOnlyCluster, ToolInput, DEFAULT_TAIL_LINES,
@@ -70,9 +71,167 @@ fn secret() -> Value {
                         "creationTimestamp": "2024-05-01T10:00:00Z",
                         "labels": {"app": "shop"},
                         "managedFields": [{"manager": "kubectl"}],
-                        "annotations": {"kubectl.kubernetes.io/last-applied-configuration":
-                            format!("{{\"data\":{{\"PASSWORD\":\"{PASSWORD_B64}\"}}}}")}},
+                        "annotations": {
+                            "kubectl.kubernetes.io/last-applied-configuration":
+                                format!("{{\"data\":{{\"PASSWORD\":\"{PASSWORD_B64}\"}}}}"),
+                            // kapp keeps a copy of the object, values included.
+                            "kapp.k14s.io/original":
+                                format!("{{\"kind\":\"Secret\",\"data\":{{\"PASSWORD\":\"{PASSWORD_B64}\"}}}}"),
+                            "owner": format!("team {PASSWORD}")}},
            "data": {"PASSWORD": PASSWORD_B64}, "stringData": {"USER": PASSWORD}})
+}
+
+/// A ConfigMap whose annotation carries a copy of a Secret (a CI snapshot).
+fn copied_configmap() -> Value {
+    let mut cm = configmap("copied", json!({"LOG_LEVEL": "debug"}));
+    cm["metadata"]["annotations"] = json!({
+        "ci.example.com/snapshot":
+            format!("{{\"kind\":\"Secret\",\"stringData\":{{\"PASSWORD\":\"{PASSWORD}\"}}}}"),
+        "team": "checkout"
+    });
+    cm
+}
+
+/// The list as `list_metadata` asks for it (`as=PartialObjectMetadataList`):
+/// metadata only.
+fn metadata_list(items: Vec<Value>) -> Reply {
+    Reply::Json(
+        200,
+        json!({"kind": "PartialObjectMetadataList", "apiVersion": "meta.k8s.io/v1",
+               "metadata": {"resourceVersion": "100"},
+               "items": items.into_iter().map(|i| json!({
+                   "kind": "PartialObjectMetadata", "apiVersion": "meta.k8s.io/v1",
+                   "metadata": i["metadata"].clone()})).collect::<Vec<_>>()}),
+    )
+}
+
+/// Minimal percent-decoding of a query parameter.
+fn param(path: &str, key: &str) -> Option<String> {
+    let query = path.split_once('?')?.1;
+    let raw = query
+        .split('&')
+        .find_map(|p| p.strip_prefix(&format!("{key}=")))?;
+    let bytes = raw.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            out.push(u8::from_str_radix(&raw[i + 1..i + 3], 16).unwrap());
+            i += 3;
+        } else if bytes[i] == b'+' {
+            out.push(b' ');
+            i += 1;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    Some(String::from_utf8(out).unwrap())
+}
+
+/// 1 000 ConfigMaps, served in chunks like the API server: `limit` cuts
+/// the list; without selectors `remainingItemCount` tells the rest.
+fn configmap_page(req: &Request) -> Reply {
+    let all: Vec<Value> = (0..1000)
+        .map(|i| configmap(&format!("cfg-{i:04}"), json!({"k": "v"})))
+        .collect();
+    let limit = param(&req.path, "limit").and_then(|l| l.parse::<usize>().ok());
+    let Some(limit) = limit.filter(|l| *l < all.len()) else {
+        return list("ConfigMap", all);
+    };
+    let mut meta = json!({"resourceVersion": "100", "continue": "next-page"});
+    if param(&req.path, "labelSelector").is_none() {
+        meta["remainingItemCount"] = json!(all.len() - limit);
+    }
+    Reply::Json(
+        200,
+        json!({"kind": "ConfigMapList", "apiVersion": "v1", "metadata": meta,
+               "items": all[..limit].to_vec()}),
+    )
+}
+
+/// The events of `web-1`, honouring the `type` clause of the field selector.
+fn event_list(req: &Request) -> Reply {
+    let all = vec![
+        event(
+            "e1",
+            "Normal",
+            "Pulled",
+            "2024-05-01T10:09:00Z",
+            "Pulled image shop/web:1.4",
+        ),
+        event(
+            "e2",
+            "Warning",
+            "BackOff",
+            "2024-05-01T10:05:00Z",
+            "Back-off restarting failed container app\nin pod web-1",
+        ),
+        event(
+            "e3",
+            "Warning",
+            "Unhealthy",
+            "2024-05-01T10:07:00Z",
+            "Readiness probe failed: HTTP probe failed with statuscode: 503",
+        ),
+    ];
+    let fields = param(&req.path, "fieldSelector").unwrap_or_default();
+    let items = all
+        .into_iter()
+        .filter(|e| {
+            let warning = e["type"] == "Warning";
+            if fields.contains("type!=Warning") {
+                !warning
+            } else if fields.contains("type=Warning") {
+                warning
+            } else {
+                true
+            }
+        })
+        .collect();
+    list("Event", items)
+}
+
+/// `lines` log lines of about `width` bytes; line `i` starts with `line i`.
+fn wide_log(lines: usize, width: usize) -> Vec<String> {
+    (0..lines)
+        .map(|i| {
+            format!(
+                "2024-05-01T10:{:02}:{:02}.000000000Z line {i} {}",
+                i / 60 % 60,
+                i % 60,
+                word(i).repeat(width / word(i).len())
+            )
+        })
+        .collect()
+}
+
+/// The last `tailLines` lines of `lines` (all without the parameter).
+fn tail(req: &Request, lines: &[String]) -> Reply {
+    let n = param(&req.path, "tailLines")
+        .and_then(|n| n.parse::<usize>().ok())
+        .unwrap_or(lines.len())
+        .min(lines.len());
+    Reply::Text(lines[lines.len() - n..].join("\n") + "\n")
+}
+
+/// 500 long JSON records (with timestamps); the last one is the crash.
+fn json_log() -> String {
+    (0..500)
+        .map(|i| {
+            let msg = if i == 499 {
+                "CRASH: out of memory".to_string()
+            } else {
+                format!("handled request {} for tenant {}", word(i), word(i * 7))
+            };
+            format!(
+                "2024-05-01T10:00:{:02}.000000000Z {{\"level\":\"info\",\"msg\":\"{msg}\",\"trace\":\"{}\"}}",
+                i % 60,
+                "t".repeat(300)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn sealed_secret() -> Value {
@@ -183,31 +342,32 @@ fn cluster_router() -> Router {
             ("GET", "/api/v1/namespaces/shop/pods") => list("Pod", vec![pod()]),
             ("GET", "/api/v1/namespaces/shop/pods/web-1") => Reply::Json(200, pod()),
             ("GET", "/api/v1/namespaces/shop/pods/web-1/log") => Reply::Text(pod_log()),
+            ("GET", "/api/v1/namespaces/shop/pods/json-1/log") => Reply::Text(json_log()),
+            // 500 lines of ~2.6 KB: more than the 1 MiB read limit.
+            ("GET", "/api/v1/namespaces/shop/pods/chatty-1/log") => tail(req, &wide_log(500, 2_600)),
+            // Ignores tailLines: always over the read limit.
+            ("GET", "/api/v1/namespaces/shop/pods/flood-1/log") => {
+                Reply::Text(wide_log(500, 2_600).join("\n"))
+            }
+            ("GET", "/api/v1/namespaces/shop/secrets")
+                if req.header("accept").is_some_and(|a| a.contains("as=PartialObjectMetadataList")) =>
+            {
+                metadata_list(vec![secret()])
+            }
             ("GET", "/api/v1/namespaces/shop/secrets") => list("Secret", vec![secret()]),
+            ("GET", "/api/v1/namespaces/shop/configmaps/copied") => Reply::Json(200, copied_configmap()),
+            // Never answers (the body never ends).
+            ("GET", "/api/v1/namespaces/slow/configmaps") => Reply::Stream(vec![]),
             ("GET", "/api/v1/namespaces/shop/secrets/db") => Reply::Json(200, secret()),
             ("GET", "/apis/bitnami.com/v1alpha1/namespaces/shop/sealedsecrets/db") => {
                 Reply::Json(200, sealed_secret())
             }
-            ("GET", "/api/v1/namespaces/shop/configmaps") => list(
-                "ConfigMap",
-                (0..1000)
-                    .map(|i| configmap(&format!("cfg-{i:04}"), json!({"k": "v"})))
-                    .collect(),
-            ),
+            ("GET", "/api/v1/namespaces/shop/configmaps") => configmap_page(req),
             ("GET", "/api/v1/namespaces/shop/configmaps/big") => Reply::Json(
                 200,
                 configmap("big", json!({"notes": "ğüşiöç €".repeat(8_000)})),
             ),
-            ("GET", "/api/v1/namespaces/shop/events") | ("GET", "/api/v1/events") => list(
-                "Event",
-                vec![
-                    event("e1", "Normal", "Pulled", "2024-05-01T10:09:00Z", "Pulled image shop/web:1.4"),
-                    event("e2", "Warning", "BackOff", "2024-05-01T10:05:00Z",
-                          "Back-off restarting failed container app\nin pod web-1"),
-                    event("e3", "Warning", "Unhealthy", "2024-05-01T10:07:00Z",
-                          "Readiness probe failed: HTTP probe failed with statuscode: 503"),
-                ],
-            ),
+            ("GET", "/api/v1/namespaces/shop/events") | ("GET", "/api/v1/events") => event_list(req),
             ("GET", "/apis/apps/v1/namespaces/shop/deployments") => list(
                 "Deployment",
                 vec![json!({"apiVersion": "apps/v1", "kind": "Deployment",
@@ -330,7 +490,7 @@ async fn tools_only_issue_get_requests() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn secret_values_never_appear_in_tool_results() {
-    let (_server, _dir, _app, tools) = tools_for_fake_cluster().await;
+    let (server, _dir, _app, tools) = tools_for_fake_cluster().await;
     let get = tools
         .execute(&ToolInput::Get {
             kind: "Secret".into(),
@@ -363,9 +523,45 @@ async fn secret_values_never_appear_in_tool_results() {
     assert!(get.text.contains("USER"), "stringData key names stay");
     assert!(get.text.contains("app: shop"), "labels stay");
     assert_eq!(get.format, AiSectionFormat::Yaml);
+    // Annotations of Secret-like objects keep their keys, never values.
+    let doc: Value = serde_yaml::from_str(&get.text).unwrap();
+    let annotations = &doc["metadata"]["annotations"];
+    assert_eq!(annotations["kapp.k14s.io/original"], "__SECRET__");
+    assert_eq!(annotations["owner"], "__SECRET__");
+    assert!(annotations
+        .get("kubectl.kubernetes.io/last-applied-configuration")
+        .is_none());
     assert!(sealed.text.contains("PASSWORD"));
-    assert!(list.text.contains("db") && list.text.contains("Opaque"));
+    assert!(list.text.contains("db"));
     assert_eq!(list.format, AiSectionFormat::Text);
+    // Secret-like kinds are listed metadata-only and in a limited chunk.
+    let log = server.log.lock();
+    let request = log
+        .iter()
+        .find(|r| r.path_only() == "/api/v1/namespaces/shop/secrets")
+        .expect("the list request");
+    let accept = request.header("accept").unwrap_or_default();
+    assert!(accept.contains("as=PartialObjectMetadataList"), "{accept}");
+    assert!(request.path.contains("limit=201"), "{}", request.path);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn annotations_that_embed_secret_data_are_redacted_on_any_kind() {
+    let (_server, _dir, _app, tools) = tools_for_fake_cluster().await;
+    let out = tools
+        .execute(&ToolInput::Get {
+            kind: "ConfigMap".into(),
+            namespace: Some("shop".into()),
+            name: "copied".into(),
+        })
+        .await;
+    assert!(!out.is_error, "{}", out.text);
+    assert!(!out.text.contains(PASSWORD), "{}", out.text);
+    let doc: Value = serde_yaml::from_str(&out.text).unwrap();
+    let annotations = &doc["metadata"]["annotations"];
+    assert_eq!(annotations["ci.example.com/snapshot"], "__SECRET__");
+    assert_eq!(annotations["team"], "checkout", "plain annotations stay");
+    assert_eq!(doc["data"]["LOG_LEVEL"], "debug", "ConfigMap data stays");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -452,18 +648,113 @@ async fn pod_logs_are_tailed_and_condensed() {
         "error lines are kept"
     );
     assert!(out.text.contains("job"), "the tail is kept");
+    assert!(
+        out.text.contains(&format!("job {} finished", word(499))),
+        "the last line is kept"
+    );
     assert!(out
         .text
         .starts_with("Logs of pod shop/web-1, previous instance"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn results_are_capped() {
+async fn long_log_lines_keep_the_newest_line_within_the_cap() {
     let (_server, _dir, _app, tools) = tools_for_fake_cluster().await;
+    let out = tools
+        .execute(&ToolInput::PodLogs {
+            namespace: "shop".into(),
+            pod: "json-1".into(),
+            container: None,
+            previous: false,
+            tail_lines: 500,
+        })
+        .await;
+    assert!(!out.is_error, "{}", out.text);
+    assert!(
+        out.text.len() <= MAX_TOOL_RESULT_BYTES,
+        "{}",
+        out.text.len()
+    );
+    assert!(
+        !out.text.ends_with("… truncated"),
+        "fits without the hard cut"
+    );
+    assert!(out.text.lines().count() <= 200);
+    let last = out.text.lines().last().unwrap();
+    assert!(last.contains("CRASH: out of memory"), "{last}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn oversized_log_tails_are_retried_with_fewer_lines() {
+    let (server, _dir, app, tools) = tools_for_fake_cluster().await;
+    let text = app
+        .pod_logs_tail(tools.cluster_id(), "shop", "chatty-1", None, 500, false)
+        .await
+        .unwrap();
+    assert!(text.len() < 1024 * 1024);
+    assert!(text
+        .trim_end()
+        .lines()
+        .last()
+        .unwrap()
+        .contains("line 499 "));
+    assert!(!text.contains("newest lines may be missing"));
+    let tails: Vec<usize> = server
+        .log
+        .lock()
+        .iter()
+        .filter(|r| r.path_only().ends_with("/chatty-1/log"))
+        .filter_map(|r| param(&r.path, "tailLines")?.parse().ok())
+        .collect();
+    assert_eq!(tails.len(), 2, "{tails:?}");
+    assert!(tails[0] == 500 && tails[1] < 500, "{tails:?}");
+
+    // A server that ignores tailLines: still cut, and said so up front.
+    let flood = app
+        .pod_logs_tail(tools.cluster_id(), "shop", "flood-1", None, 500, false)
+        .await
+        .unwrap();
+    assert!(flood.len() <= 1024 * 1024 + 200);
+    assert!(
+        flood.starts_with("[the log was cut at 1 MiB; the newest lines may be missing]"),
+        "{}",
+        &flood[..200]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn results_are_capped() {
+    let (server, _dir, _app, tools) = tools_for_fake_cluster().await;
     let out = tools.execute(&list_configmaps()).await; // 1 000 items
     assert!(!out.is_error, "{}", out.text);
     assert!(out.text.len() <= MAX_TOOL_RESULT_BYTES && out.text.contains("800 more"));
+    assert!(out.text.contains("1000 objects"), "{}", &out.text[..200]);
     assert!(out.text.contains("cfg-0199") && !out.text.contains("cfg-0200"));
+    // Only one chunk of 201 is fetched, not the whole collection.
+    let requests: Vec<String> = server
+        .log
+        .lock()
+        .iter()
+        .filter(|r| r.path_only() == "/api/v1/namespaces/shop/configmaps")
+        .map(|r| r.path.clone())
+        .collect();
+    assert_eq!(requests.len(), 1, "{requests:?}");
+    assert!(requests[0].contains("limit=201"), "{}", requests[0]);
+
+    // With a selector the server does not count the rest.
+    let selected = tools
+        .execute(&ToolInput::List {
+            kind: "ConfigMap".into(),
+            namespace: Some("shop".into()),
+            label_selector: Some("app=web".into()),
+            field_selector: None,
+        })
+        .await;
+    assert!(
+        selected.text.contains("more than 201 objects"),
+        "{}",
+        &selected.text[..300]
+    );
 
     // A huge object of multi-byte text: cut on a character boundary.
     let big = tools
@@ -538,17 +829,27 @@ async fn events_are_warnings_first_and_filtered_by_object() {
     );
     assert!(lines.len() <= MAX_EVENTS + 2);
     let log = server.log.lock();
-    let request = log
+    let requests: Vec<&str> = log
         .iter()
-        .find(|r| r.path_only() == "/api/v1/namespaces/shop/events")
-        .expect("core events, not events.k8s.io");
-    assert!(
-        request
-            .path
-            .contains("fieldSelector=involvedObject.kind%3DPod%2CinvolvedObject.name%3Dweb-1"),
-        "{}",
-        request.path
+        .filter(|r| r.path_only() == "/api/v1/namespaces/shop/events")
+        .map(|r| r.path.as_str())
+        .collect();
+    assert_eq!(requests.len(), 2, "Warnings, then the rest: {requests:?}");
+    for request in &requests {
+        assert!(
+            request
+                .contains("fieldSelector=involvedObject.kind%3DPod%2CinvolvedObject.name%3Dweb-1"),
+            "{request}"
+        );
+        assert!(request.contains("limit="), "{request}");
+    }
+    assert_eq!(
+        param(requests[0], "fieldSelector").unwrap(),
+        "involvedObject.kind=Pod,involvedObject.name=web-1,type=Warning"
     );
+    assert!(param(requests[1], "fieldSelector")
+        .unwrap()
+        .ends_with(",type!=Warning"));
     assert!(!log
         .iter()
         .any(|r| r.path.starts_with("/apis/events.k8s.io/v1/")));
@@ -574,6 +875,26 @@ async fn kinds_resolve_through_discovery() {
         .lock()
         .iter()
         .any(|r| r.path_only() == "/apis/apps/v1/namespaces/shop/deployments"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn slow_reads_time_out() {
+    let (_server, _dir, app, tools) = tools_for_fake_cluster().await;
+    // Warm the connection and discovery so only the list can hang.
+    assert!(!tools.execute(&list_of("deploy")).await.is_error);
+    let tools =
+        ReadOnlyCluster::new(app, tools.cluster_id()).with_timeout(Duration::from_millis(500));
+    let started = std::time::Instant::now();
+    let out = tools
+        .execute(&ToolInput::List {
+            kind: "ConfigMap".into(),
+            namespace: Some("slow".into()),
+            label_selector: None,
+            field_selector: None,
+        })
+        .await;
+    assert!(out.is_error && out.text.contains("timed out"), "{out:?}");
+    assert!(started.elapsed() < Duration::from_secs(5));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -729,6 +1050,14 @@ fn inputs_are_validated_strictly() {
     )
     .is_err());
     assert!(parse_input("list_resources", &json!({"kind": "pods/log"})).is_err());
+    // Event names go into a field selector: no extra clauses.
+    for name in ["web-1,type=Normal", "a=b", "web!", "a\\b"] {
+        assert!(
+            parse_input("get_events", &json!({"name": name})).is_err(),
+            "{name}"
+        );
+    }
+    assert!(parse_input("get_events", &json!({"name": "web-1.17c8a"})).is_ok());
     let control = json!({"kind": "Pod", "label_selector": "app=web\nrole=db"});
     assert!(parse_input("list_resources", &control).is_err());
     let huge = json!({"kind": "Pod", "label_selector": "a".repeat(2000)});
