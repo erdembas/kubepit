@@ -2,10 +2,12 @@ import * as i18n from '@/i18n';
 import {
   Fragment,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   type RefObject,
 } from 'react';
@@ -58,6 +60,7 @@ import {
   exportFileName,
   hpaTargets,
   hpaText,
+  trapTarget,
   yamlKey,
 } from './drawerModel';
 
@@ -83,18 +86,37 @@ interface ViewportRect {
   height: number;
 }
 
+/** Docked (`display: contents` wrapper) rather than laid over the page. */
+const isDocked = (wrapper: HTMLElement) => getComputedStyle(wrapper).display === 'contents';
+
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
+
+/** The visible elements Tab reaches inside `root`. */
+function focusablesIn(root: HTMLElement): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
+    (el) => el.getClientRects().length > 0,
+  );
+}
+
 /**
- * The page's scroll viewport on screen: the overlay covers exactly it (not
- * the window's title bar or navigator) and the docked drawer is at most
- * its height.
+ * The page's scroll viewport on screen (the overlay covers exactly it, not
+ * the window's title bar or navigator; the docked drawer is at most its
+ * height) and whether the container query docks the drawer, re-read
+ * whenever the viewport resizes.
  */
-function useViewportRect(ref: RefObject<HTMLElement | null>): ViewportRect | null {
+function useViewportRect(ref: RefObject<HTMLElement | null>): {
+  rect: ViewportRect | null;
+  docked: boolean;
+} {
   const [rect, setRect] = useState<ViewportRect | null>(null);
+  const [docked, setDocked] = useState(true);
   useClientLayoutEffect(() => {
     const el = ref.current;
     const viewport = el ? scrollParent(el) : null;
-    if (!viewport) return;
+    if (!el || !viewport) return;
     const measure = () => {
+      setDocked(isDocked(el));
       const r = viewport.getBoundingClientRect();
       setRect((prev) =>
         prev &&
@@ -115,17 +137,15 @@ function useViewportRect(ref: RefObject<HTMLElement | null>): ViewportRect | nul
       window.removeEventListener('resize', measure);
     };
   }, [ref]);
-  return rect;
+  return { rect, docked };
 }
-
-/** Docked (`display: contents` wrapper) rather than laid over the page. */
-const isDocked = (wrapper: HTMLElement) => getComputedStyle(wrapper).display === 'contents';
 
 /**
  * The drawer's chrome. From `@3xl` of the page it is a sticky panel in the
  * list's flex row; below, an overlay over the page's scroll viewport with a
- * backdrop. Escape closes it (unless a dialog, menu or text field has the
- * key); the overlay takes focus when it opens and gives it back on close.
+ * backdrop, a modal dialog that keeps Tab inside. Escape closes it (unless
+ * another dialog, a menu or a text field has the key); the overlay takes
+ * focus when it opens and gives it back on close.
  * `openKey` is the open row, so a row opened from above the list scrolls
  * the docked panel into view.
  */
@@ -143,7 +163,7 @@ export function DrawerFrame({
   i18n.useLocale();
   const wrapperRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLElement>(null);
-  const rect = useViewportRect(wrapperRef);
+  const { rect, docked } = useViewportRect(wrapperRef);
   const paneFocused = usePaneFocused();
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -158,12 +178,10 @@ export function DrawerFrame({
       const inside = e.target instanceof Node && panel.contains(e.target);
       if (isTypingTarget(e.target) && !inside) return;
       if (useAppStore.getState().confirm || useActionDialogs.getState().dialog) return;
-      if (
-        document.querySelector(
-          '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]',
-        )
-      )
-        return;
+      const others = document.querySelectorAll(
+        '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]',
+      );
+      if ([...others].some((el) => !panel.contains(el))) return;
       closeRef.current();
     };
     window.addEventListener('keydown', onKey);
@@ -183,6 +201,23 @@ export function DrawerFrame({
         previous.focus({ preventScroll: true });
     };
   }, []);
+
+  // Narrowed into the overlay while open: the modal takes the focus.
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!docked && panel && !panel.contains(document.activeElement))
+      panel.focus({ preventScroll: true });
+  }, [docked]);
+
+  const trapTab = (e: ReactKeyboardEvent<HTMLElement>) => {
+    const panel = panelRef.current;
+    if (docked || e.key !== 'Tab' || !panel) return;
+    const items = focusablesIn(panel);
+    const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const target = trapTarget(items, active, e.shiftKey);
+    if (target || !items.length) e.preventDefault();
+    target?.focus();
+  };
 
   useEffect(() => {
     const panel = panelRef.current;
@@ -212,8 +247,11 @@ export function DrawerFrame({
       <aside
         ref={panelRef}
         tabIndex={-1}
+        role={docked ? undefined : 'dialog'}
+        aria-modal={docked ? undefined : true}
         aria-label={label}
         style={panelStyle}
+        onKeyDown={trapTab}
         className={cn(
           'bg-surface border-border @container absolute inset-y-0 right-0 flex w-full max-w-[26rem] flex-col overflow-hidden border-l shadow-2xl outline-none',
           'motion-safe:animate-in motion-safe:slide-in-from-right motion-safe:duration-200',
@@ -463,9 +501,11 @@ function YamlTab({
       </div>
     );
   const save = () =>
-    void saveExportFile(exportFileName(rec), text, 'yaml').catch((e: unknown) =>
-      useAppStore.getState().pushToast('error', errorText(e)),
-    );
+    void saveExportFile(exportFileName(rec), text, 'yaml')
+      .then((path) => {
+        if (path) useAppStore.getState().pushToast('success', i18n.t('Saved {path}', { path }));
+      })
+      .catch((e: unknown) => useAppStore.getState().pushToast('error', errorText(e)));
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -527,6 +567,7 @@ export function RecommendationDrawer({
   const cluster = useAppStore((s) => s.clusters.find((c) => c.id === clusterId));
   const key = workloadKey(rec);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const tabsId = `rec-drawer${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const action = drawerAction(applyMode(rec, cluster ?? { read_only: false, environment: null }), {
     past,
     connected,
@@ -592,9 +633,22 @@ export function RecommendationDrawer({
         )}
       </header>
       <div className="border-border/60 border-b px-3 py-2">
-        <Tabs tabs={tabs} value={tab} onChange={setTab} className="max-w-full overflow-x-auto" />
+        <Tabs
+          tabs={tabs}
+          value={tab}
+          onChange={setTab}
+          idBase={tabsId}
+          className="max-w-full overflow-x-auto"
+        />
       </div>
-      <div ref={bodyRef} className="overlay-scroll min-h-0 flex-1 overflow-auto px-4 py-3">
+      <div
+        ref={bodyRef}
+        role="tabpanel"
+        id={`${tabsId}-panel-${tab}`}
+        aria-labelledby={`${tabsId}-tab-${tab}`}
+        tabIndex={0}
+        className="overlay-scroll min-h-0 flex-1 overflow-auto px-4 py-3 outline-none"
+      >
         {tab === 'changes' ? (
           <ChangesTab rec={rec} report={report} />
         ) : tab === 'usage' ? (

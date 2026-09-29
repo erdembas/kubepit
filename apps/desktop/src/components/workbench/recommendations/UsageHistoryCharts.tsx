@@ -249,7 +249,7 @@ function HowToRead({
         </p>
         <p>
           {i18n.t(
-            'Gaps are intervals without samples: they are neither counted as zero nor joined in the chart. The dashed lines are the current request and limit and the recommended request of the scan, not how the requests changed over time.',
+            'Missing samples are never counted as zero: the line breaks where no sample arrived for more than two and a half points. The dashed lines are the current request and limit and the recommended request of the scan, not how the requests changed over time.',
           )}
         </p>
       </div>
@@ -444,7 +444,11 @@ export function UsageHistoryCharts({
         </div>
         <p className="text-fg-dim text-[10.5px] tabular-nums">
           {data
-            ? `${i18n.date(data.start, WINDOW_FORMAT)} – ${i18n.date(data.end, WINDOW_FORMAT)} · ${stepText(data.step_secs)}`
+            ? i18n.t('{from} – {to} · {step}', {
+                from: i18n.date(data.start, WINDOW_FORMAT),
+                to: i18n.date(data.end, WINDOW_FORMAT),
+                step: stepText(data.step_secs),
+              })
             : i18n.plural('Last {count} day', 'Last {count} days', days)}
         </p>
       </div>

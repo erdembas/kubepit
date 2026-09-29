@@ -73,6 +73,9 @@ export function reportVersion(report: RightsizingReport): number {
 
 const run = (runId: number | null) => (runId == null ? 'latest' : String(runId));
 
+// Keys start with `${clusterId}|` like every poll of the workbench: the header's
+// Refresh refetches them and a disconnect drops them.
+
 /**
  * Usage history of one container: live from Prometheus, so a re-evaluation
  * keeps it; another scan (other pods behind the row) or run refetches.
@@ -85,7 +88,7 @@ export function usageHistoryKey(
   runId: number | null,
   report: Pick<RightsizingReport, 'computed_at'>,
 ): string {
-  return `recs|usage|${clusterId}|${workloadKey(rec)}|${container}|${days}|${run(runId)}|${report.computed_at}`;
+  return `${clusterId}|recs-usage|${workloadKey(rec)}|${container}|${days}|${run(runId)}|${report.computed_at}`;
 }
 
 /** The trend across stored scans: a new latest run adds a point. */
@@ -95,7 +98,7 @@ export function trendKey(
   runId: number | null,
   latestRunId: number | null,
 ): string {
-  return `recs|trend|${clusterId}|${workloadKey(rec)}|${run(runId)}|${latestRunId ?? 0}`;
+  return `${clusterId}|recs-trend|${workloadKey(rec)}|${run(runId)}|${latestRunId ?? 0}`;
 }
 
 /** The exported fragment follows the re-evaluated recommendation. */
@@ -105,7 +108,7 @@ export function yamlKey(
   runId: number | null,
   report: RightsizingReport,
 ): string {
-  return `recs|yaml|${clusterId}|${workloadKey(rec)}|${run(runId)}|${reportVersion(report)}`;
+  return `${clusterId}|recs-yaml|${workloadKey(rec)}|${run(runId)}|${reportVersion(report)}`;
 }
 
 /** `deployment-shop-checkout.yaml`. */
@@ -233,10 +236,11 @@ export function trendSeries(
 }
 
 /**
- * The spacing the trend chart joins points across: scans are hourly (or
- * the scan interval) for 48 hours, then one per day, so the widest gap
- * between neighbours, between an hour and a day. A missing day still
- * breaks the line.
+ * The sample interval of the trend chart: scans are hourly (or the scan
+ * interval) for 48 hours, then one per day, so the widest gap between
+ * neighbours, between an hour and a day. The chart breaks the line only
+ * where neighbours are more than 2.5 intervals apart: with daily points,
+ * a gap of more than two and a half days without a kept scan.
  */
 export function trendInterval(points: readonly Pick<RecommendationTrendPoint, 'at'>[]): number {
   let widest = 0;
@@ -367,6 +371,22 @@ export function hpaTargets(hpa: HpaInfo): string[] {
         : i18n.t('Memory target {percent} of the request', { percent }),
     ];
   });
+}
+
+// -- Focus ------------------------------------------------------------------------
+
+/**
+ * Where Tab moves inside a focus trap: past the last item to the first,
+ * before the first (or from the container itself) to the last; null lets
+ * the browser move within the items.
+ */
+export function trapTarget<T>(items: readonly T[], active: T | null, backwards: boolean): T | null {
+  if (!items.length) return null;
+  const first = items[0]!;
+  const last = items[items.length - 1]!;
+  const inside = active != null && items.includes(active);
+  if (backwards) return !inside || active === first ? last : null;
+  return !inside || active === last ? first : null;
 }
 
 // -- Apply ------------------------------------------------------------------------

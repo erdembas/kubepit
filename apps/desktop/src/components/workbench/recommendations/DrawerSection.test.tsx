@@ -151,6 +151,12 @@ describe('RecommendationDrawer', () => {
     expect(html).toContain('kube-state-metrics owners');
     for (const tab of ['Changes', 'Usage', 'History', 'YAML'])
       expect(html).toMatch(new RegExp(`role="tab"[^>]*>${tab}<`));
+    // The body is the selected tab's panel, labelled by it.
+    const tabId = /role="tab" id="([^"]+)" aria-controls="([^"]+)" aria-selected="true"/.exec(html);
+    expect(tabId).not.toBeNull();
+    expect(html).toContain(
+      `role="tabpanel" id="${tabId![2]}" aria-labelledby="${tabId![1]}" tabindex="0"`,
+    );
     // High confidence, nothing raised, not production: one-click Apply.
     expect(html).toMatch(/<button[^>]*>Apply<\/button>/);
   });

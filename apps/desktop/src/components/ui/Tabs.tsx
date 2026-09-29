@@ -14,9 +14,15 @@ interface Props<K extends string> {
   value: K;
   onChange: (key: K) => void;
   className?: string;
+  /**
+   * Ids for a tab panel: tabs get `${idBase}-tab-${key}` and the selected
+   * one `aria-controls="${idBase}-panel-${key}"`, the id the caller gives
+   * its `role="tabpanel"` (labelled by the tab).
+   */
+  idBase?: string;
 }
 
-export function Tabs<K extends string>({ tabs, value, onChange, className }: Props<K>) {
+export function Tabs<K extends string>({ tabs, value, onChange, className, idBase }: Props<K>) {
   i18n.useLocale();
   return (
     <div
@@ -32,6 +38,8 @@ export function Tabs<K extends string>({ tabs, value, onChange, className }: Pro
           <button
             key={tab.key}
             role="tab"
+            id={idBase ? `${idBase}-tab-${tab.key}` : undefined}
+            aria-controls={idBase && active ? `${idBase}-panel-${tab.key}` : undefined}
             aria-selected={active}
             onClick={() => onChange(tab.key)}
             className={cn(

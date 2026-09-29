@@ -8,6 +8,7 @@ import type {
 } from '@/types';
 import {
   cpuValueText,
+  trapTarget,
   drawerAction,
   evidenceRows,
   exportFileName,
@@ -136,6 +137,15 @@ describe('pickContainer', () => {
 
 describe('poll keys', () => {
   const rec = workload();
+  it('start with the cluster, like every poll the header refreshes and a disconnect drops', () => {
+    const r1 = report([rec]);
+    for (const key of [
+      usageHistoryKey('c1', rec, 'app', 7, null, r1),
+      trendKey('c1', rec, null, 1),
+      yamlKey('c1', rec, null, r1),
+    ])
+      expect(key.startsWith('c1|recs-')).toBe(true);
+  });
   it('separate runs and scans, and keep re-evaluations for live usage', () => {
     const r1 = report([rec]);
     const key = usageHistoryKey('c1', rec, 'app', 7, null, r1);
@@ -253,7 +263,7 @@ describe('trend', () => {
     expect(memory.usage[0]).toEqual({ t: 0, v: 70 });
     expect(trendSeries(points, 'other', 'cpu').request).toEqual([]);
   });
-  it('joins hourly and daily points but breaks on missing days', () => {
+  it('uses the widest spacing between an hour and a day as the interval', () => {
     expect(trendInterval([])).toBe(HOUR);
     expect(trendInterval([{ at: 0 }, { at: 15 * 60_000 }])).toBe(HOUR);
     expect(trendInterval([{ at: 0 }, { at: HOUR }, { at: DAY + HOUR }])).toBe(DAY);
@@ -334,6 +344,21 @@ describe('evidence', () => {
       'Scaled by the HorizontalPodAutoscaler web up to 10 replicas.',
     );
     expect(hpaTargets(hpa)).toEqual(['CPU target 70% of the request']);
+  });
+});
+
+describe('trapTarget', () => {
+  const items = ['a', 'b', 'c'];
+  it('wraps Tab at both ends and lets the browser move in between', () => {
+    expect(trapTarget(items, 'c', false)).toBe('a');
+    expect(trapTarget(items, 'a', true)).toBe('c');
+    expect(trapTarget(items, 'b', false)).toBeNull();
+    expect(trapTarget(items, 'b', true)).toBeNull();
+  });
+  it('brings focus back in from outside the items', () => {
+    expect(trapTarget(items, null, false)).toBe('a');
+    expect(trapTarget(items, 'panel', true)).toBe('c');
+    expect(trapTarget([], 'a', false)).toBeNull();
   });
 });
 
