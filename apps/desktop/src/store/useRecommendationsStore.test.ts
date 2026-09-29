@@ -11,6 +11,7 @@ const ipc = vi.hoisted(() => ({
 vi.mock('@/lib/ipc', () => ({ ipc, events: { onRecommendationScan: vi.fn() } }));
 
 const { onScanEnded, useRecommendationsStore } = await import('./useRecommendationsStore');
+const { rightsizingOrigin } = await import('@/lib/kube/recommendations/model');
 
 const store = () => useRecommendationsStore.getState();
 const entry = (id = 'c1') => store().byCluster[id]!;
@@ -120,6 +121,26 @@ describe('scan events', () => {
     await flush();
     expect(ipc.recommendationsLatest).not.toHaveBeenCalled();
     expect(entry('c2').status?.run_id).toBe(7);
+  });
+
+  it('leave right-sizing elsewhere pending until the scans were read, not live', async () => {
+    const origin = (id: string) => {
+      const e = store().byCluster[id]!;
+      return rightsizingOrigin({
+        report: e.latest?.scan?.report ?? null,
+        latest: e.latest,
+        error: e.error,
+      }).origin;
+    };
+    // A status event (as on connect) creates the entry before any read.
+    store().onScanEvent(status({ cluster_id: 'c2', state: 'idle' }));
+    expect(entry('c2').loading).toBe(false);
+    expect(origin('c2')).toBe('pending');
+    ipc.recommendationsLatest.mockResolvedValueOnce(latest(null));
+    await store().load('c2');
+    expect(origin('c2')).toBe('live');
+    await store().load('c1');
+    expect(origin('c1')).toBe('stored');
   });
 
   it('treat a first read of the status as the baseline, not as a change', async () => {

@@ -236,6 +236,30 @@ export function trendSeries(
 }
 
 /**
+ * The workload's recommended request per stored scan: the sum over the
+ * containers that have one (the details' sparklines). A scan without any
+ * leaves a gap.
+ */
+export function trendTotals(
+  points: readonly RecommendationTrendPoint[],
+  resource: 'cpu' | 'memory',
+): SeriesPoint[] {
+  const out: SeriesPoint[] = [];
+  for (const p of points) {
+    let sum = 0;
+    let any = false;
+    for (const c of p.containers) {
+      const v = resource === 'cpu' ? c.cpu_recommended : c.memory_recommended;
+      if (v == null || !Number.isFinite(v)) continue;
+      sum += v;
+      any = true;
+    }
+    if (any) out.push({ t: p.at, v: sum });
+  }
+  return out;
+}
+
+/**
  * The sample interval of the trend chart: scans are hourly (or the scan
  * interval) for 48 hours, then one per day, so the widest gap between
  * neighbours, between an hour and a day. The chart breaks the line only

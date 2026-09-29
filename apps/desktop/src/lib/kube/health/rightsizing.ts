@@ -1,14 +1,38 @@
 import * as i18n from '@/i18n/core';
 import { formatMoney } from '@/lib/cost';
-import type { KubeObject } from '@/types';
+import { formatPercent } from '@/lib/format';
+import type { ContainerRecommendation, KubeObject, WorkloadRecommendation } from '@/types';
 import { cpuText, healthVerdict, memoryText, reportDays } from '../rightsizing/model';
 import { makeFinding, nsKey, type Emit } from './context';
 import type { HealthInput } from './types';
 
 /**
- * Efficiency findings from the right-sizing report (when one was loaded):
- * only large, confident deltas (`healthVerdict`), one finding per workload,
- * so the report never floods the Health view.
+ * The container of `rec` that `workload-cpu-throttled` reports: among those
+ * flagged `cpu-throttled` whose own confidence is not low, the most
+ * throttled (the first on a tie or without a measured ratio).
+ */
+export function throttledContainer(rec: WorkloadRecommendation): ContainerRecommendation | null {
+  let pick: ContainerRecommendation | null = null;
+  for (const c of rec.containers) {
+    if (c.confidence === 'low' || !c.warnings.some((w) => w.code === 'cpu-throttled')) continue;
+    if (!pick || (c.evidence?.throttle_ratio ?? 0) > (pick.evidence?.throttle_ratio ?? 0)) pick = c;
+  }
+  return pick;
+}
+
+/** "8.3%": the measured ratio, else the flag's detail (the backend's rounding). */
+function throttledPercent(c: ContainerRecommendation): string {
+  const ratio = c.evidence?.throttle_ratio;
+  if (ratio != null && Number.isFinite(ratio)) return formatPercent(ratio * 100);
+  return c.warnings.find((w) => w.code === 'cpu-throttled')?.detail ?? '—';
+}
+
+/**
+ * Efficiency findings from the right-sizing report (when one was loaded;
+ * the latest stored scan, else the live report): only large, confident
+ * deltas (`healthVerdict`) and CPU throttling measured with at least
+ * medium confidence, at most one finding per rule and workload, so the
+ * report never floods the Health view.
  */
 export function rightsizingFindings(input: HealthInput, emit: Emit) {
   const report = input.rightsizing;
@@ -20,12 +44,26 @@ export function rightsizingFindings(input: HealthInput, emit: Emit) {
   add('Deployment', input.deployments);
   add('StatefulSet', input.statefulSets);
   add('DaemonSet', input.daemonSets);
+  add('CronJob', input.cronJobs);
   const days = reportDays(report);
   for (const rec of report.workloads) {
-    const verdict = healthVerdict(rec);
-    if (!verdict) continue;
     const obj = byKey.get(`${rec.kind}|${nsKey(rec.namespace, rec.name)}`);
     if (!obj) continue;
+    const throttled = throttledContainer(rec);
+    if (throttled)
+      emit(
+        makeFinding(
+          'workload-cpu-throttled',
+          obj,
+          i18n.t('Container {container} is throttled in {percent} of CPU periods.', {
+            container: throttled.name,
+            percent: throttledPercent(throttled),
+          }),
+          throttled.name,
+        ),
+      );
+    const verdict = healthVerdict(rec);
+    if (!verdict) continue;
     if (verdict === 'over') {
       const percent = i18n.number(-rec.monthly_delta / rec.monthly_current, {
         style: 'percent',

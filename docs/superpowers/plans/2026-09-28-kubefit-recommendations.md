@@ -2396,15 +2396,15 @@ git commit -m "feat(ui): one-click apply for high confidence, acknowledged revie
 
 Steps:
 
-- [ ] **Step 1: Implement the section, the Health input switch and the new rule**
+- [x] **Step 1: Implement the section, the Health input switch and the new rule**
 
-- [ ] **Step 2: Translate, run the checks**
+- [x] **Step 2: Translate, run the checks**
 
 Run: `pnpm i18n:check -- --fix`, add the Turkish, then `pnpm typecheck && pnpm i18n:check`.
 
 Expected: PASS.
 
-- [ ] **Step 3: Verify the demo**
+- [x] **Step 3: Verify the demo**
 
 Run: `pnpm dev:ui`.
 - A Deployment's details show "From the scan …", flags and a sparkline.
@@ -2412,7 +2412,7 @@ Run: `pnpm dev:ui`.
 - Health lists "Workloads throttled by their CPU limit" for the throttled demo workload.
 - The overprovisioned findings still appear.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/desktop/src

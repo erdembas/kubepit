@@ -14,7 +14,8 @@ import { perfNow, recordSince } from '@/lib/perf/probe';
 import { useHealthIgnores, useHealthOptIns, useHealthStore } from '@/store/useHealthStore';
 import type { ApiResourceInfo, Gvk } from '@/types';
 import { restartWatch, useWatch, type WatchSnapshot } from '../data/watchCache';
-import { useRightsizing } from '../cost/useCost';
+import { useStoredOrLiveRightsizing } from '../cost/useCost';
+import { reportVersion } from '../recommendations/drawerModel';
 import { useNow } from '../util';
 import { hasListIssue, scanLists } from './scanLists';
 
@@ -178,8 +179,9 @@ export function useHealthScan(
     helmReleases: useWatch(clusterId, gvks.helmReleases, namespaces, enabled),
     fluxProviders: useWatch(clusterId, gvks.fluxProviders, namespaces, enabled),
   };
-  // Cost insight: right-sizing findings (efficiency) when a report is available.
-  const rightsizing = useRightsizing(clusterId, namespaces, null, enabled).data;
+  // Cost insight: right-sizing findings (efficiency) from the latest stored
+  // scan, else the live report (computed only when no scan exists).
+  const rightsizing = useStoredOrLiveRightsizing(clusterId, namespaces, null, enabled).report;
   const kinds = Object.keys(snaps) as HealthKind[];
   const watched = kinds.filter((k) => gvks[k]);
   const settled = watched.filter((k) => snaps[k].synced || snaps[k].status === 'error');
@@ -198,7 +200,8 @@ export function useHealthScan(
     locale,
     nonce,
     Math.floor(clock / 60_000),
-    rightsizing?.computed_at ?? 0,
+    // A re-evaluated stored scan keeps its `computed_at`: its object is new.
+    rightsizing ? reportVersion(rightsizing) : 0,
     // Whether a list has an error changes what loaded (a retrying error does not).
     ...kinds.map(
       (k) =>

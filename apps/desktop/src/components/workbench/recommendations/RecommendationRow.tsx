@@ -19,7 +19,7 @@ import {
 import type { WorkloadRecommendation } from '@/types';
 import { ChangeCell, RaisedTag } from '../cost/RightsizingDialog';
 import { CONFIDENCE_TONE, VERDICT_TONE } from '../cost/tones';
-import { rowFlags, type FlagTone } from './listModel';
+import { rowFlags, type FlagTone, type RowFlag } from './listModel';
 
 /**
  * Columns of the list at `@3xl` and wider (checkbox, workload, request
@@ -35,6 +35,21 @@ const FLAG_TONE: Record<FlagTone, string> = {
   warning: 'bg-status-starting/10 text-status-starting',
   neutral: 'bg-fg/6 text-fg-muted',
 };
+
+/** One flag chip of `rowFlags`: the short label, the caveat as its tooltip. */
+export function FlagChip({ flag }: { flag: RowFlag }) {
+  return (
+    <span
+      title={flag.detail}
+      className={cn(
+        'rounded px-1.5 py-px text-[10px] font-medium whitespace-nowrap',
+        FLAG_TONE[flag.tone],
+      )}
+    >
+      {flag.label}
+    </span>
+  );
+}
 
 export interface RecommendationRowProps {
   rec: WorkloadRecommendation;
@@ -207,16 +222,7 @@ export const RecommendationRow = memo(function RecommendationRow({
             </Badge>
           )}
           {flags.map((f) => (
-            <span
-              key={f.code}
-              title={f.detail}
-              className={cn(
-                'rounded px-1.5 py-px text-[10px] font-medium whitespace-nowrap',
-                FLAG_TONE[f.tone],
-              )}
-            >
-              {f.label}
-            </span>
+            <FlagChip key={f.code} flag={f} />
           ))}
         </div>
       </div>

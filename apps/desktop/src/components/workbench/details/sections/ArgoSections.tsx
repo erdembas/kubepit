@@ -416,7 +416,7 @@ function History({ obj, gvk, ctx, readOnly }: SectionProps) {
         rows={history.slice(0, 20)}
         rowKey={(h) => String(h.id)}
         columns={[
-          { label: 'ID', cell: (h) => <span className="tabular-nums">{h.id}</span> },
+          { label: 'ID', lang: 'en', cell: (h) => <span className="tabular-nums">{h.id}</span> },
           {
             label: i18n.t('Revision'),
             cell: (h) => (
@@ -693,10 +693,12 @@ export function ArgoProjectSections({ obj, ctx }: SectionProps) {
           columns={[
             {
               label: i18n.t('Cluster'),
+              lang: 'en',
               cell: (d) => <MonoText>{asString(d.name) || asString(d.server) || '*'}</MonoText>,
             },
             {
               label: i18n.t('Namespace'),
+              lang: 'en',
               cell: (d) => <MonoText>{asString(d.namespace) || '*'}</MonoText>,
             },
           ]}

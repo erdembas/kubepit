@@ -25,6 +25,7 @@ import {
   trendKey,
   trendRange,
   trendSeries,
+  trendTotals,
   usageChartsState,
   usageHistoryKey,
   usageRefs,
@@ -268,6 +269,46 @@ describe('trend', () => {
     expect(trendInterval([{ at: 0 }, { at: 15 * 60_000 }])).toBe(HOUR);
     expect(trendInterval([{ at: 0 }, { at: HOUR }, { at: DAY + HOUR }])).toBe(DAY);
     expect(trendInterval([{ at: 0 }, { at: 5 * DAY }])).toBe(DAY);
+  });
+  it('sums the recommended requests of the workload per scan for the sparklines', () => {
+    const scan = (
+      at: number,
+      containers: Array<[number | null, number | null]>,
+    ): RecommendationTrendPoint => ({
+      ...point(at, null, false),
+      containers: containers.map(([cpu, memory], i) => ({
+        name: `c${i}`,
+        cpu_request: 500,
+        cpu_recommended: cpu,
+        memory_request: 100,
+        memory_recommended: memory,
+        cpu_p95: null,
+        memory_max: null,
+      })),
+    });
+    const points = [
+      scan(0, [
+        [100, 64],
+        [20, 32],
+      ]),
+      scan(HOUR, [
+        [null, 64],
+        [30, null],
+      ]),
+      scan(2 * HOUR, [[null, null]]),
+      scan(3 * HOUR, []),
+      scan(4 * HOUR, [[Number.NaN, 16]]),
+    ];
+    expect(trendTotals(points, 'cpu')).toEqual([
+      { t: 0, v: 120 },
+      { t: HOUR, v: 30 },
+    ]);
+    expect(trendTotals(points, 'memory')).toEqual([
+      { t: 0, v: 96 },
+      { t: HOUR, v: 64 },
+      { t: 4 * HOUR, v: 16 },
+    ]);
+    expect(trendTotals([], 'cpu')).toEqual([]);
   });
   it('pads a single scan', () => {
     expect(trendRange([{ at: 10 * HOUR }])).toEqual({ from: 9 * HOUR, to: 11 * HOUR });

@@ -1,14 +1,22 @@
 import { useMemo } from 'react';
 import { ipc } from '@/lib/ipc';
+import {
+  rightsizingOrigin,
+  workloadKey,
+  type RightsizingOrigin,
+} from '@/lib/kube/recommendations/model';
 import { useAppStore } from '@/store/useAppStore';
+import { useLatestRecommendations } from '@/store/useRecommendationsStore';
 import type {
   ClusterId,
   CostAggregate,
   CostReport,
   CostStatus,
   CostWindow,
+  RecommendationRun,
   RightsizingReport,
   RightsizingRequest,
+  WorkloadRecommendation,
   WorkloadRef,
 } from '@/types';
 import { refreshPolled, refreshPolledPrefix, usePolled } from '../data/polled';
@@ -127,6 +135,52 @@ export function useRightsizing(
     RIGHTSIZING_POLL_MS,
     enabled,
   );
+}
+
+export interface StoredOrLiveRightsizing {
+  origin: RightsizingOrigin;
+  /** The report read: the latest stored scan's or the live one (null while it loads). */
+  report: RightsizingReport | null;
+  /** With a workload: its row (null while loading, or when the report has none). */
+  rec: WorkloadRecommendation | null;
+  /** The stored scan's run (`stored` only). */
+  run: RecommendationRun | null;
+  /** The live report failed (`live` only). */
+  error: string | null;
+}
+
+/**
+ * Right-sizing outside the Recommendations view (spec §9.2): the latest
+ * stored scan when there is one (for a workload, when it has the
+ * workload's row; `rightsizingOrigin`), else the live report, which is
+ * computed only then.
+ */
+export function useStoredOrLiveRightsizing(
+  clusterId: ClusterId,
+  namespaces: readonly string[],
+  workload: WorkloadRef | null,
+  enabled = true,
+): StoredOrLiveRightsizing {
+  const stored = useLatestRecommendations(clusterId, enabled);
+  const { origin, rec: storedRec } = rightsizingOrigin(
+    stored,
+    workload ? workloadKey(workload) : undefined,
+  );
+  const live = useRightsizing(clusterId, namespaces, workload, enabled && origin === 'live');
+  const liveReport = origin === 'live' ? (live.data ?? null) : null;
+  return useMemo<StoredOrLiveRightsizing>(() => {
+    if (origin === 'stored')
+      return { origin, report: stored.report, rec: storedRec, run: stored.run, error: null };
+    if (origin === 'live')
+      return {
+        origin,
+        report: liveReport,
+        rec: workload ? (liveReport?.workloads[0] ?? null) : null,
+        run: null,
+        error: live.error,
+      };
+    return { origin, report: null, rec: null, run: null, error: null };
+  }, [origin, stored.report, stored.run, storedRec, liveReport, live.error, workload]);
 }
 
 /** Recompute every right-sizing report of the cluster (after an apply). */

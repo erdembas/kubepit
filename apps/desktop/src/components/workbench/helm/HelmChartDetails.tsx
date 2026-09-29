@@ -336,7 +336,11 @@ function ChartMetadata({ detail }: { detail: HelmChartDetail }) {
               label: i18n.t('Email'),
               cell: (r) => (r.email ? <Link href={`mailto:${r.email}`}>{r.email}</Link> : '—'),
             },
-            { label: i18n.t('URL'), cell: (r) => (r.url ? <Link href={r.url} /> : '—') },
+            {
+              label: i18n.t('URL'),
+              lang: 'en',
+              cell: (r) => (r.url ? <Link href={r.url} /> : '—'),
+            },
           ]}
         />
       </Section>
@@ -354,6 +358,7 @@ function ChartMetadata({ detail }: { detail: HelmChartDetail }) {
             },
             {
               label: i18n.t('Repository'),
+              lang: 'en',
               className: 'font-mono text-[11px] break-all',
               cell: (r) => r.repository ?? '—',
             },

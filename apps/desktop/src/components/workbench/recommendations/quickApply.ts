@@ -106,14 +106,22 @@ export function appliedInSession(clusterId: ClusterId, key: string): boolean {
 export type ApplyRefusal =
   'unknown-cluster' | 'read-only' | 'production' | 'not-one-click' | 'disconnected' | 'past-run';
 
+/** The Recommendations view shows a past run of the cluster (read-only). */
+export function viewShowsPastRun(clusterId: ClusterId): boolean {
+  return useRecommendationsStore.getState().byCluster[clusterId]?.runId != null;
+}
+
 /**
  * Checked before the dry run and again before the patch: the cluster is
- * known, writable, not production and connected, the latest scan is shown
- * and the row is `one-click` (`applyMode`, which mirrors `summary.rs`).
+ * known, writable, not production and connected, the caller shows the
+ * latest scan (`past`: by default, whether the Recommendations view shows
+ * a past run) and the row is `one-click` (`applyMode`, which mirrors
+ * `summary.rs`).
  */
 export function applyRefusal(
   clusterId: ClusterId,
   rec: WorkloadRecommendation,
+  past: boolean = viewShowsPastRun(clusterId),
 ): ApplyRefusal | null {
   const app = useAppStore.getState();
   const cluster = app.clusters.find((c) => c.id === clusterId);
@@ -122,7 +130,7 @@ export function applyRefusal(
   if (cluster.environment === 'production') return 'production';
   if (applyMode(rec, cluster) !== 'one-click') return 'not-one-click';
   if (app.statuses[clusterId]?.state !== 'connected') return 'disconnected';
-  if (useRecommendationsStore.getState().byCluster[clusterId]?.runId != null) return 'past-run';
+  if (past) return 'past-run';
   return null;
 }
 
@@ -230,15 +238,17 @@ async function runQuickApply(
   clusterId: ClusterId,
   rec: WorkloadRecommendation,
   key: string,
+  past: () => boolean,
 ): Promise<QuickApplyResult> {
-  if (applyRefusal(clusterId, rec)) return 'review';
+  if (applyRefusal(clusterId, rec, past())) return 'review';
   // The dialog's default: optional memory limit changes included.
   const changes = changesOf(rec);
   if (!changes.length) return 'review';
   const check = await dryRunCheck(clusterId, rec, changes);
   if (!check.ok) return 'review';
-  // The cluster may have turned read-only or disconnected during the dry run.
-  if (applyRefusal(clusterId, rec)) return 'review';
+  // The cluster may have turned read-only or disconnected (or the caller
+  // moved to a past run) during the dry run.
+  if (applyRefusal(clusterId, rec, past())) return 'review';
   const ok = await runMutation(
     () => ipc.rightsizingApply(clusterId, targetOf(rec), changes, false),
     i18n.t('Right-sized {name}', { name: rec.name }),
@@ -255,31 +265,38 @@ async function runQuickApply(
  * applied until the next scan. Anything else (a refusal, a failed or
  * suspicious dry run, a failed patch) returns `'review'`: the caller opens
  * `RightsizingDialog`. A row already applying returns the running apply;
- * a row applied in this session is not applied again.
+ * a row applied in this session is not applied again. `past` tells, when
+ * asked before the dry run and before the patch, whether the caller shows
+ * a past run (default: whether the Recommendations view does).
  */
 export function quickApply(
   clusterId: ClusterId,
   rec: WorkloadRecommendation,
+  { past = () => viewShowsPastRun(clusterId) }: { past?: () => boolean } = {},
 ): Promise<QuickApplyResult> {
   const key = workloadKey(rec);
   if (!isApplying(clusterId, key) && appliedInSession(clusterId, key))
     return Promise.resolve('applied');
-  return exclusiveApply(clusterId, key, () => runQuickApply(clusterId, rec, key));
+  return exclusiveApply(clusterId, key, () => runQuickApply(clusterId, rec, key, past));
 }
 
 /**
  * "Apply" of a one-click row in a view: `quickApply`, then `review(rec)`
  * when it needs the review, unless the view left or moved to another
  * cluster meanwhile. A past run or a disconnected cluster applies nothing.
+ * The refusals read the caller's `past` as it renders, so a view that
+ * always shows the latest scan (the workload details) is not affected by
+ * the run picked in the Recommendations view.
  */
 export function useQuickApply(
   clusterId: ClusterId,
   { past, connected }: { past: boolean; connected: boolean },
   review: (rec: WorkloadRecommendation) => void,
 ): (rec: WorkloadRecommendation) => void {
-  const live = useRef({ clusterId, mounted: true, review });
+  const live = useRef({ clusterId, mounted: true, review, past });
   live.current.clusterId = clusterId;
   live.current.review = review;
+  live.current.past = past;
   useEffect(() => {
     const state = live.current;
     state.mounted = true;
@@ -290,7 +307,7 @@ export function useQuickApply(
   return useCallback(
     (rec: WorkloadRecommendation) => {
       if (past || !connected) return;
-      void quickApply(clusterId, rec).then((result) => {
+      void quickApply(clusterId, rec, { past: () => live.current.past }).then((result) => {
         const state = live.current;
         if (result === 'review' && state.mounted && state.clusterId === clusterId)
           state.review(rec);

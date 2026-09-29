@@ -3,11 +3,14 @@ import type {
   ContainerRecommendation,
   RecommendationScanStatus,
   ResourceChange,
+  RightsizingReport,
   WorkloadRecommendation,
 } from '@/types';
 import {
   RECOMMENDATION_LENSES,
   applyMode,
+  rightsizingOrigin,
+  type StoredRightsizing,
   capacityByNamespace,
   countLenses,
   intervalLabel,
@@ -517,5 +520,64 @@ describe('run helpers', () => {
     expect(
       strategyText({ ...report, strategy: 'future', strategies: [], strategy_auto: false }),
     ).toBe('future');
+  });
+});
+
+describe('stored or live right-sizing (spec §9.2)', () => {
+  const report = (...names: string[]) =>
+    ({ workloads: names.map((n) => workload(n)) }) as unknown as RightsizingReport;
+  const latest = { scan: {}, source_changed: false, last_failure: null };
+  const stored = (over: Partial<StoredRightsizing> = {}): StoredRightsizing => ({
+    report: report('web', 'api'),
+    latest,
+    error: null,
+    ...over,
+  });
+
+  it('reads the latest stored scan when there is one', () => {
+    expect(rightsizingOrigin(stored())).toEqual({ origin: 'stored', rec: null });
+    // A failed reload keeps the scan read before.
+    expect(rightsizingOrigin(stored({ error: 'history.db is locked' })).origin).toBe('stored');
+  });
+
+  it('picks the workload row by its key, else falls back to the live report', () => {
+    const pick = rightsizingOrigin(stored(), 'Deployment/shop/api');
+    expect(pick.origin).toBe('stored');
+    expect(pick.rec?.name).toBe('api');
+    // A workload the scan does not have (created since, or unreadable namespace).
+    expect(rightsizingOrigin(stored(), 'Deployment/shop/new')).toEqual({
+      origin: 'live',
+      rec: null,
+    });
+    // Same name, other kind or namespace: not its row.
+    expect(rightsizingOrigin(stored(), 'StatefulSet/shop/api').origin).toBe('live');
+    expect(rightsizingOrigin(stored(), 'Deployment/other/api').origin).toBe('live');
+    expect(
+      rightsizingOrigin(stored({ report: report('batch') }), workloadKey(workload('batch'))).rec
+        ?.name,
+    ).toBe('batch');
+  });
+
+  it('falls back to the live report without a scan, after a source change or a failed read', () => {
+    const noScan = { scan: null, source_changed: false, last_failure: null };
+    expect(rightsizingOrigin(stored({ report: null, latest: noScan })).origin).toBe('live');
+    expect(
+      rightsizingOrigin(
+        stored({ report: null, latest: { ...noScan, source_changed: true } }),
+        'Deployment/shop/web',
+      ).origin,
+    ).toBe('live');
+    expect(
+      rightsizingOrigin(stored({ report: null, latest: null, error: 'history.db is locked' }))
+        .origin,
+    ).toBe('live');
+  });
+
+  it('waits until the stored scans were read before computing a live report', () => {
+    // Never read: before the first answer, or an entry a status event created.
+    expect(
+      rightsizingOrigin(stored({ report: null, latest: null }), 'Deployment/shop/web'),
+    ).toEqual({ origin: 'pending', rec: null });
+    expect(rightsizingOrigin(stored({ report: null, latest: null })).origin).toBe('pending');
   });
 });
