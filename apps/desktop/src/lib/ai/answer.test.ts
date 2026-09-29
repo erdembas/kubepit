@@ -64,11 +64,15 @@ describe('suggestions in assistant answers', () => {
   it('treats sh fences as kubectl only when the first command is kubectl', () => {
     expect(suggestionForCode('sh', 'helm list')).toBeNull();
     expect(
-      suggestionForCode('bash', '# look first\n$ kubectl get pods -A\nkubectl top pods'),
+      suggestionForCode('bash', '# look first\nkubectl get pods -A\nkubectl top pods'),
     ).toMatchObject({
       kind: 'kubectl',
       command: '# look first\nkubectl get pods -A\nkubectl top pods',
     });
+    // A `$ ` prompt anywhere makes it a console transcript: unprompted lines are output.
+    expect(
+      suggestionForCode('bash', '# look first\n$ kubectl get pods -A\nNAME   READY\nweb-1  1/1'),
+    ).toMatchObject({ command: 'kubectl get pods -A' });
     expect(suggestionForCode('kubectl', 'kubectl describe pod web-1')).toMatchObject({
       kind: 'kubectl',
     });
@@ -201,6 +205,112 @@ EOF`;
       command: 'kubectl get ns\nkubectl get pods',
     });
     expect(suggestionForCode('console', 'NAME  READY\nweb-1 1/1')).toBeNull();
+  });
+
+  it('strips `> ` from console continuations and heredocs, and never takes a here-string for a heredoc', () => {
+    const transcript = [
+      '$ kubectl apply -f - <<EOF',
+      '> apiVersion: v1',
+      '> kind: Namespace',
+      '> EOF',
+      'namespace/shop created',
+      '$ kubectl -n shop logs web-1 \\',
+      '> --previous',
+    ].join('\n');
+    expect(suggestionForCode('console', transcript)).toMatchObject({
+      command:
+        'kubectl apply -f - <<EOF\napiVersion: v1\nkind: Namespace\nEOF\nkubectl -n shop logs web-1 \\\n--previous',
+    });
+    const hereString = [
+      '$ kubectl apply -f - <<< manifest',
+      'configmap/x created',
+      '$ kubectl get pods',
+    ].join('\n');
+    expect(suggestionForCode('sh', hereString)).toMatchObject({
+      command: 'kubectl apply -f - <<< manifest\nkubectl get pods',
+    });
+  });
+
+  it('stays linear on long whitespace runs and refuses oversized fences', () => {
+    const started = performance.now();
+    suggestionForCode('sh', `kubectl get${' '.repeat(60_000)}pods`);
+    expect(performance.now() - started).toBeLessThan(50);
+    const huge = `apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: big\ndata:\n  blob: "${'x'.repeat(70_000)}"`;
+    expect(suggestionForCode('yaml', huge)).toBeNull();
+  });
+
+  it('refuses documents with more than 50 aliases, bomb or not', () => {
+    const withAliases = (n: number) =>
+      [
+        'apiVersion: v1',
+        'kind: ConfigMap',
+        'metadata:',
+        '  name: cfg',
+        '  labels: &l { app: web }',
+        'data:',
+        ...Array.from({ length: n }, (_, i) => `  k${i}: *l`),
+      ].join('\n');
+    expect(suggestionForCode('yaml', withAliases(10))).toMatchObject({ kind: 'manifest' });
+    expect(suggestionForCode('yaml', withAliases(51))).toBeNull();
+  });
+
+  it('checks the items of lists and blocks Secret-like objects by any value, refs excepted', () => {
+    const secretItem = `apiVersion: v1
+kind: List
+items:
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: web
+      namespace: shop
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: db
+      namespace: shop
+    data:
+      password: aHVudGVyMg==`;
+    expect(suggestionForCode('yaml', secretItem)).toMatchObject({
+      objects: [
+        { kind: 'Service', name: 'web' },
+        { kind: 'Secret', name: 'db' },
+      ],
+      blocked: 'secret',
+    });
+    const typedList = `apiVersion: v1
+kind: SecretList
+metadata:
+  name: all
+items:
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: db
+    stringData:
+      password: guess`;
+    expect(suggestionForCode('yaml', typedList)).toMatchObject({ blocked: 'secret' });
+    const sealedTemplate = `apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: db
+spec:
+  template:
+    type: kubernetes.io/basic-auth`;
+    expect(suggestionForCode('yaml', sealedTemplate)).toMatchObject({ blocked: 'secret' });
+    for (const kind of ['ExternalSecret', 'ClusterExternalSecret', 'PushSecret']) {
+      const refs = `apiVersion: external-secrets.io/v1beta1
+kind: ${kind}
+metadata:
+  name: db
+spec:
+  secretStoreRef:
+    name: vault
+  data:
+    - secretKey: password
+      remoteRef:
+        key: shop/db`;
+      expect(suggestionForCode('yaml', refs)).toMatchObject({ blocked: null });
+    }
   });
 
   it('skips empty queries and plain code', () => {
