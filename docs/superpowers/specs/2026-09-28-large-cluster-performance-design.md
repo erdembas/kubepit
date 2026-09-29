@@ -322,8 +322,9 @@ Filled in by plan Task 10 and each gated task.
 | `ui/scroll_long_task_max_l` | 100 ms | 0 ms ✓ | | |
 | `ui/apply_p95_l_churn50` | 16 ms | 8.6 ms ✓ | | H7: no |
 | Watch lag at `l`, churn 50 (`watch:apply` `latencyMs` p95; H6 gate, no budget id) | 1 s | 13–25 ms | | **H6: yes**, from the code (a closed window's watches outlive it) |
-| `ui/map_namespace_l` | 500 ms | 247 ms ✓ | | H3: no |
-| `ui/map_all_m` | 2.5 s | **2.95 s** (2.66–3.49) ✗ | | H5: yes (map) |
+| `ui/map_namespace_l` | 500 ms | 247 ms ✓ | 201 ms ✓ | H3: no |
+| `ui/map_all_m` | 2.5 s | **2.95 s** (2.66–3.49) ✗ | 0.59 s ✓ (0.51–0.59) | MAP-sync, H5: yes (map) |
+| Long tasks > 50 ms, all-namespaces map at `m` (no budget id) | — | 19–20, max 321 ms | 1, 81–87 ms (the first render of the 800-node canvas) | H5 |
 | `ui/health_scan_m` | 3 s | 79 ms ✓ | | H5: no (health) |
 | `ui/health_long_task_max_m` | 200 ms | 0 ms ✓ | | |
 | `ui/map_leave` (from the synced `l` map) | 200 ms | 33 ms ✓ | | |
@@ -338,6 +339,12 @@ Notes:
   - `fleet_search/matcher_substring_50k`: H10 reads only `e2e/fleet_search_l` (0.15 s). `NameMatcher::matches` allocates per name.
   - These budgets stay unchanged until a task is decided for them.
 - **`ui/map_all_m`.** Each run rebuilt the graph 72–76 times while the watches synced (about 1.0–1.5 s of `map:build` in total), so the time is mostly rebuilds, not one slow build. H5 only moves that work off the main thread.
+- **After: the map (plan Tasks 16a, 16, 22), 2026-09-29.** Same machine, shared with other agents; the median of 3 `pnpm perf:ui -- --preset m --scenarios map --port 4517` runs (1-minute load 8.4–8.8) and one `--preset l --scenarios map` run (load 8.1).
+  - Same-machine "before", at `be4e3a1` with the load at 7.5–13: `ui/map_all_m` 3.31 s (2.96–3.50), 76–79 rebuilds, 18–20 long tasks (max 223–286 ms); `ui/map_namespace_l` 260 ms.
+  - Task 16a (rebuilds coalesced, still on the main thread): 0.55 s (0.54–0.58), 3 rebuilds, 2 long tasks (max 128–138 ms). The demo sync itself takes ≈ 0.4 s; the rebuilds were starving it.
+  - Task 16 (engine worker, cap still 400): 0.57 s, 2 builds (in the worker), no long task.
+  - Task 22 (cap 800): 0.59 s (0.51–0.59), 2 builds, one long task of 81–87 ms per run. It is not the engine (`map:build` 42–44 ms and `map:view` 31–35 ms run in the worker): at cap 400 the same code has none, so it is the main thread's first render of twice as many nodes. No budget covers it.
+  - `ui/map_namespace_l`: 201 ms (2 builds, was 28 rebuilds).
 
 **Gates (plan Tasks 12–22)**, from the numbers above:
 
@@ -347,7 +354,8 @@ Notes:
 | H2 | 13 | no | The standard scenario on `m` (pods table `ns-0001`, then health, the map and netpol) never had one (cluster, kind) live with two scopes: every snapshot showed one scope per kind. Across the sequence, pods, services, namespaces, NetworkPolicies and DaemonSets ran `["ns-0001"]` in the table, health and map, and `[]` in netpol, one after another. The fix derives from a *live* cluster-wide entry, so it would not apply here. It only would with both views open at once (split panes), which the scenario does not do. |
 | H3 | 14 | no | `ui/map_namespace_l` 247 ms ≤ 500 ms, so the byte share was not needed. |
 | H4 | 15 | no | The metrics.k8s.io pods list at `l` (20 000) is unpaged. But RSS is 444 MB ≤ 700 MB, and the spec has no overview-latency budget. |
-| H5 | 16 | **yes: map only** | All-namespaces map on `m`: 19–20 long tasks > 50 ms (max 321 ms). From 2.5 s on, each long task of 55–89 ms holds one `map:build` (28–41 ms) and one `map:view` (20–26 ms), measured by polling the probe's sample counts between long tasks. Health (`m`): no long task > 50 ms. Netpol (`m`): none. Only the topology engine moves. |
+| H5 | 16 | **yes: map only** (done: no long task left from the engine; see the After notes) | All-namespaces map on `m`: 19–20 long tasks > 50 ms (max 321 ms). From 2.5 s on, each long task of 55–89 ms holds one `map:build` (28–41 ms) and one `map:view` (20–26 ms), measured by polling the probe's sample counts between long tasks. Health (`m`): no long task > 50 ms. Netpol (`m`): none. Only the topology engine moves. |
+| MAP-sync | 16a | **yes** (added after the baseline) | `ui/map_all_m` misses its budget and the map rebuilds its graph more than 10 times while syncing: 72–76. Done: rebuilds of data-only changes are coalesced to one per 250 ms during the initial sync (3 rebuilds, 0.55 s). |
 | H6 | 17 | **yes, from the code** (manual `tauri dev` check pending) | The lag half does not fire: churn 50 at `l`, arrival → commit (`latencyMs`) p95 13–25 ms ≪ 1 s. The window half fires from the code. The Chromium demo backend dies with its page, so it cannot be measured there. `apps/desktop/src-tauri/src/windows.rs:123-137` (`on_window_destroyed`) stops only the window's terminals. A `resource_watch` stops only when its sink returns `false` (`crates/kubepit-core/src/watch.rs:321-351`), that is, when `on_event.send(batch)` fails (`apps/desktop/src-tauri/src/ipc/resources.rs:45-46`). A quiet resource sends nothing, so its watch outlives the window until the next event. And Tauri 2.12 returns `Ok` for a send of ≥ 8 KB to a dead webview (`tauri/src/ipc/channel.rs:307-316`), so a busy watch with large batches may never stop. Task 17 will be implemented; confirm the window half in `pnpm tauri:dev` with the backend log. |
 | H7 | 18 | no | `ui/apply_p95_l_churn50` 8.6 ms ≤ 16 ms. |
 | H8 | 19 | no | `ui/soak_heap_ratio` 1.027 (health, minute 6 → 30; map 1.026, pods 1.023) ≤ 1.15. |

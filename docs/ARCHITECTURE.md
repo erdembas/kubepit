@@ -1862,3 +1862,10 @@ in-memory demo backend.
   installs Chromium, runs `perf:ui` at `l` with churn 50 and the 30-minute
   soak, `ttfr,map,health` at `s` and `m`, and
   `compare.mjs --slack ci --only ui`. Neither uses secrets.
+- **Fixes applied** (the spec's Results and Gates tables have the numbers).
+  The Resource Map: its rebuilds are coalesced while the watches sync
+  (plan Task 16a), the graph and views are built in the engine worker
+  (Task 16, H5; health and netpol stay on the main thread, their gate did
+  not fire) and the cap is 800 nodes (Task 22); see "Resource map". The map
+  scenario's summary (`perf-results/ui.json` `raw.mapAll`) counts the
+  builds and the long tasks.
