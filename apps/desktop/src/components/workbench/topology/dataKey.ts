@@ -84,10 +84,11 @@ export class CoalescedMemo<T> {
     if (prev && syncing && sameDeps(this.structure, structure)) {
       const wait = this.last + this.interval - this.now();
       if (wait > 0) {
+        // Rounded up: timers may fire up to a fraction of a millisecond early.
         this.timer ??= setTimeout(() => {
           this.timer = null;
           this.onDue();
-        }, wait);
+        }, Math.ceil(wait));
         return prev.value;
       }
     }

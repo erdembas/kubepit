@@ -28,6 +28,7 @@ const input = topologyInputFor('s', 'ns-0001');
 
 /** Everything in `input`, as the first delta of a session. */
 const fullDelta: TopologyDelta = {
+  reset: true,
   scope: { namespaces: input.namespaces, apiResources: input.apiResources, extra: null },
   slots: input.lists.map((l, slot) => ({
     slot,
@@ -143,6 +144,43 @@ describe('engine client', () => {
     client.postEngine({ kind: 'topology-data', session: 3, delta: fullDelta });
     client.postEngine({ kind: 'topology-dispose', session: 3 });
     await expect(client.runEngine(topology(3))).rejects.toThrow(SESSION_MISSING);
+  });
+
+  it('never builds a session from a patch alone, and replaces one on reset', async () => {
+    const client = await freshClient();
+    const patch: TopologyDelta = { ...fullDelta, reset: false };
+    // A lost session (a failed apply) must not come back holding only the next patch.
+    client.postEngine({ kind: 'topology-data', session: 4, delta: patch });
+    await expect(client.runEngine(topology(4))).rejects.toThrow(SESSION_MISSING);
+    const vanish = { ...fullDelta, slots: [fullDelta.slots[0]!] };
+    client.postEngine({ kind: 'topology-data', session: 4, delta: fullDelta });
+    client.postEngine({ kind: 'topology-data', session: 4, delta: vanish });
+    const result = await client.runEngine<TopologyEngineResult>(topology(4));
+    const only = { ...input, lists: [input.lists[0]!] };
+    expect(result.graph).toEqual(buildTopology(only));
+  });
+
+  it('forgets a session whose delta fails half-way', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const client = await freshClient();
+    client.postEngine({ kind: 'topology-data', session: 5, delta: fullDelta });
+    const broken: TopologyDelta = {
+      slots: [
+        {
+          slot: 0,
+          gvk: input.lists[0]!.gvk,
+          synced: true,
+          replace: false,
+          upserts: [{} as never],
+          removes: [],
+        },
+      ],
+    };
+    client.postEngine({ kind: 'topology-data', session: 5, delta: broken });
+    client.postEngine({ kind: 'topology-data', session: 5, delta: { slots: [] } });
+    await expect(client.runEngine(topology(5))).rejects.toThrow(SESSION_MISSING);
+    expect(logged).toHaveBeenCalledOnce();
+    logged.mockRestore();
   });
 
   it('starts one module worker lazily and answers through it', async () => {

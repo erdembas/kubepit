@@ -35,7 +35,13 @@ export interface TopologySlotDelta {
 }
 
 export interface TopologyDelta {
-  /** The graph scope and extra objects, when they changed. */
+  /**
+   * The whole input: the engine replaces the session with it. A delta
+   * without it patches the session, and is ignored when the engine does
+   * not hold one (its next request then fails with SESSION_MISSING).
+   */
+  reset?: boolean;
+  /** The graph scope and extra objects, when they changed (always with `reset`). */
   scope?: {
     namespaces: readonly string[] | null;
     apiResources: readonly ApiResourceInfo[] | null;
@@ -45,7 +51,7 @@ export interface TopologyDelta {
 }
 
 export type EngineTask =
-  /** Applies a delta to a session's mirror (created on first use). No reply. */
+  /** Applies a delta to a session's mirror (a `reset` delta creates or replaces it). No reply. */
   | { kind: 'topology-data'; session: number; delta: TopologyDelta }
   /** Builds the graph if its data changed, then derives the view. */
   | {
@@ -166,7 +172,10 @@ export class EngineHost {
     switch (task.kind) {
       case 'topology-data': {
         let session = this.sessions.get(task.session);
-        if (!session) this.sessions.set(task.session, (session = new TopologySession()));
+        if (task.delta.reset) this.sessions.set(task.session, (session = new TopologySession()));
+        // A patch for a session this engine lost (a failed apply) cannot be
+        // applied to anything: drop it; the next request asks for a reset.
+        if (!session) return null;
         try {
           session.apply(task.delta);
         } catch (error) {

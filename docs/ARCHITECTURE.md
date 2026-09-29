@@ -1262,7 +1262,14 @@ the watched lists:
 - `useTopologyData` hands it the live input (`setSource`), and the model
   streams what changed at once: per-slot deltas found by object identity
   (unchanged objects keep their identity across snapshots), so a batch
-  costs its own objects and a relisted slot is sent whole, in order.
+  costs its own objects. A slot a patch would not keep in order (a relist,
+  an object deleted and added again) is sent whole, so the engine's lists
+  equal the snapshots, order included. Whenever the engine's copy is new
+  or uncertain (the first delta, after an engine error, a lost worker or
+  leaving the view) the model sends a `reset`, which replaces the session;
+  the engine drops a patch for a session it does not hold (a delta that
+  failed half-way), and its next request fails with `SESSION_MISSING`, so
+  the model resets.
   Cloning the whole input per build would cost more on the main thread
   than the build itself (≈ 60 ms to serialise the all-namespaces input of
   the `m` scale cluster, ≈ 35 ms to receive its graph).

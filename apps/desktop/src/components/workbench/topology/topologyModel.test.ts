@@ -146,6 +146,26 @@ describe('topologyDelta', () => {
       extra: null,
     });
   });
+
+  it('sends a slot whole when a patch would not keep its order', () => {
+    const [p1, p2, p3, p4, p5] = [1, 2, 3, 4, 5].map((i) => pod(i));
+    const a = source([p1!, p2!, p3!, p4!, p5!]);
+    // p2 deleted and added again moves to the end in the watch map.
+    const moved = source([p1!, p3!, p4!, p5!, pod(2, 1)]);
+    expect(topologyDelta(a, moved)!.slots[0]).toMatchObject({ replace: true });
+    // So does p5 re-added after a new object.
+    const late = source([p1!, p2!, p3!, p4!, pod(6), pod(5, 1)]);
+    expect(topologyDelta(a, late)!.slots[0]).toMatchObject({ replace: true });
+    // An update in place, a delete and an append keep the order: a patch.
+    const kept = source([p1!, pod(2, 1), p4!, p5!, pod(6)]);
+    expect(topologyDelta(a, kept)!.slots[0]).toMatchObject({ replace: false, removes: ['uid-3'] });
+  });
+
+  it('makes the first delta a reset, even for an empty map', () => {
+    const empty: TopologySource = { ...source([]), slots: [null] };
+    expect(topologyDelta(null, empty)).toMatchObject({ reset: true, slots: [] });
+    expect(topologyDelta(source([pod(1)]), source([pod(1), pod(2)]))!.reset).toBeUndefined();
+  });
 });
 
 describe('TopologyModel', () => {

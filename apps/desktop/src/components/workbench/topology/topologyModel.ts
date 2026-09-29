@@ -93,7 +93,10 @@ const workerEngine: TopologyEngine = {
   generation: engineGeneration,
 };
 
-/** Retries after the engine lost the session, before giving up until the next change. */
+/**
+ * Automatic retries after the engine lost the session, before giving up
+ * until the next change (a new build or view resets the count).
+ */
 const MAX_RETRIES = 2;
 
 const sameGvk = (a: Gvk, b: Gvk) =>
@@ -111,17 +114,46 @@ function sameScope(a: TopologySource, b: TopologySource) {
 }
 
 /**
+ * Whether patching `a` into `b` in place (deletes, then sets: an existing
+ * key keeps its position, a new one is appended) yields `b`'s order: the
+ * objects in both keep their relative order and every new object comes
+ * after them. A watch map only breaks that when an object is deleted and
+ * added again (it moves to the end) or the list is relisted.
+ */
+function patchKeepsOrder(
+  a: ReadonlyMap<string, KubeObject>,
+  b: ReadonlyMap<string, KubeObject>,
+): boolean {
+  const survivors = a.keys();
+  let added = false;
+  for (const uid of b.keys()) {
+    if (!a.has(uid)) {
+      added = true;
+      continue;
+    }
+    if (added) return false;
+    let next = survivors.next();
+    while (!next.done && !b.has(next.value)) next = survivors.next();
+    if (next.done || next.value !== uid) return false;
+  }
+  return true;
+}
+
+/**
  * What changed from `prev` (what the engine holds; `null` for nothing) to
  * `next`, or `null` when nothing did. Unchanged objects keep their
  * identity across snapshots, so a slot costs one pass over its index and
  * sends only new, changed and removed objects. A slot that changed as a
- * whole (a relist, another kind) is sent whole, in order.
+ * whole (a relist, another kind) or whose order a patch would not keep is
+ * sent whole, in order, so the engine's lists always equal the snapshots,
+ * order included. Without `prev` the delta is a `reset`: the engine
+ * replaces whatever it held for the session.
  */
 export function topologyDelta(
   prev: TopologySource | null,
   next: TopologySource,
 ): TopologyDelta | null {
-  const delta: TopologyDelta = { slots: [] };
+  const delta: TopologyDelta = prev ? { slots: [] } : { reset: true, slots: [] };
   if (!prev || !sameScope(prev, next))
     delta.scope = {
       namespaces: next.namespaces,
@@ -132,6 +164,8 @@ export function topologyDelta(
   for (let slot = 0; slot < count; slot++) {
     const a = prev?.slots[slot] ?? null;
     const b = next.slots[slot] ?? null;
+    const whole = (gvk: Gvk, synced: boolean) =>
+      delta.slots.push({ slot, gvk, synced, replace: true, upserts: b!.items, removes: [] });
     if (!b) {
       if (a)
         delta.slots.push({
@@ -145,14 +179,7 @@ export function topologyDelta(
       continue;
     }
     if (!a || !sameGvk(a.gvk, b.gvk)) {
-      delta.slots.push({
-        slot,
-        gvk: b.gvk,
-        synced: b.synced,
-        replace: true,
-        upserts: b.items,
-        removes: [],
-      });
+      whole(b.gvk, b.synced);
       continue;
     }
     if (a.byUid === b.byUid) {
@@ -171,18 +198,11 @@ export function topologyDelta(
     const removes: string[] = [];
     for (const [uid, obj] of b.byUid) if (a.byUid.get(uid) !== obj) upserts.push(obj);
     for (const uid of a.byUid.keys()) if (!b.byUid.has(uid)) removes.push(uid);
-    if (upserts.length + removes.length >= b.items.length)
-      delta.slots.push({
-        slot,
-        gvk: b.gvk,
-        synced: b.synced,
-        replace: true,
-        upserts: b.items,
-        removes: [],
-      });
+    if (upserts.length + removes.length >= b.items.length || !patchKeepsOrder(a.byUid, b.byUid))
+      whole(b.gvk, b.synced);
     else delta.slots.push({ slot, gvk: b.gvk, synced: b.synced, replace: false, upserts, removes });
   }
-  return delta.scope || delta.slots.length ? delta : null;
+  return delta.reset || delta.scope || delta.slots.length ? delta : null;
 }
 
 let nextSession = 1;
@@ -258,6 +278,7 @@ export class TopologyModel {
   setBuild(token: TopologySource): void {
     if (token === this.build) return;
     this.build = token;
+    this.retries = 0;
     this.schedule();
   }
 
@@ -266,6 +287,7 @@ export class TopologyModel {
     this.view = view;
     this.tag = tag;
     this.viewRev++;
+    this.retries = 0;
     this.schedule();
   }
 
@@ -313,14 +335,12 @@ export class TopologyModel {
     const source = this.source;
     if (!source) return;
     if (this.sent && this.sent.generation !== this.engine.generation()) this.sent = null;
+    // A reset starts a new session, which numbers its graphs afresh: the
+    // graph held from the old one must not pass for one of the new.
+    if (!this.sent) this.graphRev = -1;
+    // Without `sent` this is a reset (never null): it creates or replaces the session.
     const delta = topologyDelta(this.sent?.source ?? null, source);
-    // The first message creates the session, even for an empty map.
-    if (delta || !this.sent)
-      this.engine.post({
-        kind: 'topology-data',
-        session: this.session,
-        delta: delta ?? { slots: [] },
-      });
+    if (delta) this.engine.post({ kind: 'topology-data', session: this.session, delta });
     this.sent = { source, generation: this.engine.generation() };
   }
 
@@ -361,7 +381,8 @@ export class TopologyModel {
     if (seq !== this.seq) return;
     this.inFlight = false;
     this.retries = 0;
-    this.shown = asked;
+    // The overlay may have been turned off meanwhile: then this result has no graph.
+    this.shown = { ...asked, withGraph: asked.withGraph && this.withGraph };
     let graph: TopoGraph | null = null;
     if (this.withGraph) {
       if (reply.graph) {
