@@ -176,7 +176,7 @@ export function RecommendationsPage({
         <SummarySection {...section} />
         <UsageSection {...section} />
         <div className="flex min-w-0 items-start gap-3">
-          <div className="min-w-0 flex-1">
+          <div className="@container min-w-0 flex-1">
             <ListSection {...section} />
           </div>
           <DrawerSection {...section} />
