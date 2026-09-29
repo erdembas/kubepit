@@ -32,7 +32,7 @@ const HISTORY_LIMIT = 500;
 const FIRST_ALERT_MS: [number, number] = [6_000, 12_000];
 const NEXT_ALERT_MS: [number, number] = [50_000, 110_000];
 
-interface Finding {
+export interface Finding {
   reason: AlertReason;
   container: string | null;
   condition: string | null;
@@ -121,6 +121,15 @@ function settings(): AlertSettings {
 
 function statuses(): Record<string, ClusterStatus> {
   return (handlers.cluster_statuses?.({}) as Record<string, ClusterStatus> | undefined) ?? {};
+}
+
+/**
+ * Raise a finding no demo watch makes (a recommendation scan's
+ * `RightsizingSaving`), like `AlertCenter::raise`: the same filters, book
+ * and event.
+ */
+export function raiseAlert(clusterId: string, object: AlertObjectRef, finding: Finding) {
+  emit(clusterId, object, finding);
 }
 
 function emit(clusterId: string, object: AlertObjectRef, finding: Finding) {

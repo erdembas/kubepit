@@ -19,6 +19,7 @@ import type {
   WorkloadRef,
   WorkloadUsageHistory,
 } from '@/types';
+import { healthVerdict, workloadGvk } from '@/lib/kube/rightsizing/model';
 import { mockEmit, sleep } from './bus';
 import { collect, effectiveSettings, pricingOf, savedStrategy, usageSource } from './cost';
 import { resolveStrategy, workloadRecommendations } from './fixtures/cost';
@@ -42,6 +43,7 @@ import {
   workloadCount,
 } from './fixtures/recommendations';
 import { DAY } from './fixtures/util';
+import { raiseAlert } from './alerts';
 import { provideRecommendationHistory } from './history';
 import { handlers, register, type MockArgs } from './registry';
 
@@ -397,6 +399,10 @@ async function runScan(clusterId: string, trigger: ScanTrigger) {
       return;
     }
     const report = collect(clusterId, source, { namespaces: [] }, startedAt);
+    const before = [...runsOf(clusterId)]
+      .reverse()
+      .find((r) => r !== run && r.run.status === 'success' && r.inputs);
+    const previous = before ? storedReport(clusterId, before) : null;
     const now = Date.now();
     run.inputs = {
       source,
@@ -413,6 +419,7 @@ async function runScan(clusterId: string, trigger: ScanTrigger) {
       strategy: report.strategy,
       rows_kept: true,
     });
+    alertNewSavings(clusterId, previous, report);
     end('success', null);
   } finally {
     if (token.cancelled && run && run.run.status === 'running') {
@@ -423,6 +430,45 @@ async function runScan(clusterId: string, trigger: ScanTrigger) {
       });
     }
     if (token.cancelled) end('interrupted', ERROR_STOPPED);
+  }
+}
+
+/**
+ * Like `scan.rs::saving_alerts`: the workloads of `next` with a large,
+ * high-confidence saving (the Health "over" threshold, `healthVerdict`)
+ * that `previous`, the latest successful run before it, did not have.
+ */
+export function newSavings(
+  previous: RightsizingReport | null,
+  next: RightsizingReport,
+): WorkloadRecommendation[] {
+  const key = (w: WorkloadRecommendation) => `${w.kind}/${w.namespace}/${w.name}`;
+  const before = new Set(
+    (previous?.workloads ?? []).filter((w) => healthVerdict(w) === 'over').map(key),
+  );
+  return next.workloads.filter((w) => healthVerdict(w) === 'over' && !before.has(key(w)));
+}
+
+/** A successful scan's alerts (`Settings.recommendations.alerts`; the alert filters apply). */
+function alertNewSavings(
+  clusterId: string,
+  previous: RightsizingReport | null,
+  next: RightsizingReport,
+) {
+  if (!settings()?.alerts) return;
+  for (const w of newSavings(previous, next)) {
+    const { group, version } = workloadGvk(w.kind);
+    const share = Math.min(100, Math.max(0, (-w.monthly_delta / w.monthly_current) * 100));
+    raiseAlert(
+      clusterId,
+      { group, version, kind: w.kind, namespace: w.namespace, name: w.name },
+      {
+        reason: 'RightsizingSaving',
+        container: null,
+        condition: null,
+        message: `Requests could shrink by ${Math.round(share)}%`,
+      },
+    );
   }
 }
 

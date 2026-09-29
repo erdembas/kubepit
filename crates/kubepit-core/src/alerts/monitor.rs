@@ -16,7 +16,6 @@ use super::detect::{Finding, SlimDeployment, SlimJob, SlimNode, SlimPod, Tracker
 use super::model::{AlertObjectRef, AlertSettings, WatchedKind};
 use crate::error::{watcher_error_code, watcher_error_message};
 use crate::events::EventSink;
-use crate::objects::now_millis;
 use crate::tasks::TaskRegistry;
 
 /// What every watcher task of one cluster shares.
@@ -30,18 +29,14 @@ pub(crate) struct MonitorCtx {
 impl MonitorCtx {
     /// Filter, record and announce one finding.
     fn raise(&self, object: AlertObjectRef, finding: Finding) {
-        let recorded = self
-            .settings
-            .read()
-            .records(finding.reason, object.namespace.as_deref());
-        if !recorded {
-            return;
-        }
-        let event = self
-            .book
-            .lock()
-            .record(&self.cluster_id, object, finding, now_millis());
-        self.sink.alert(&event);
+        super::record_finding(
+            &self.book,
+            &self.settings,
+            &*self.sink,
+            &self.cluster_id,
+            object,
+            finding,
+        );
     }
 }
 

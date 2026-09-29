@@ -422,6 +422,12 @@ notifications and the notification center (status bar bell → right panel
   Memory/Disk/PID pressure, Deployment `ProgressDeadlineExceeded`. The
   first list is the baseline and never alerts; a re-list after a desync
   compares against what was known.
+- **Findings without a watch.** `AlertCenter::raise` records a finding
+  through the same filters, book and sink, only while monitoring is on in
+  the process and the cluster is watched: the optional
+  `RightsizingSaving` (warning, no watched kind) that a successful
+  recommendation scan raises for a new high-confidence saving (see
+  "Recommendations").
 - **Book** (`alerts/book.rs`): settings filters (reasons, namespace globs)
   first, then dedupe per (cluster, object, reason[, condition]) with a
   10-minute sliding cooldown (`count` grows, no new notification), burst
@@ -1297,6 +1303,22 @@ history") and re-evaluated for the UI with the current settings.
   The fleet read also carries each cluster's `last_failure`
   (`rec::fleet_failures`: its newest failed or interrupted run when newer
   than its latest success, or of a cluster that never succeeded).
+- **Alerts (optional, off by default)**: with
+  `Settings.recommendations.alerts` on and alert monitoring on in the
+  process (the desktop app only), a stored success raises a
+  `RightsizingSaving` alert per workload with a large saving that the
+  cluster's previous successful run did not have (`scan::saving_alerts`:
+  high confidence, over-provisioned, savings ≥ 50 % of its monthly
+  requests and a container dropping ≥ 250m or ≥ 512 MiB, the Health
+  `workload-overprovisioned` thresholds), so a workload alerts once, not
+  at every scan. The previous run is read before the new one replaces the
+  latest pointer, and the alerts are raised once the pointer names the new
+  run, through `AlertCenter::raise` (filters, mutes, snoozes, bursts). The
+  message is an English data string with the share only ("Requests could
+  shrink by 62%"), never a source or Secret. Turned on in Settings →
+  History or as the `RightsizingSaving` reason in Settings →
+  Notifications (both set the opt-in; turning it on also re-enables the
+  reason).
 - **UI.** Stored scans are read through `store/useRecommendationsStore.ts`:
   per cluster the latest scan (`useLatestRecommendations`), a picked past
   run and the runs (`useShownRecommendations`) and the scan status, with
@@ -1367,7 +1389,10 @@ history") and re-evaluated for the UI with the current settings.
   the background when due; disconnecting stops a scan (interrupted,
   `stopped`); exports mirror `export.rs`; usage history is a deterministic
   daily rhythm with gaps; `history_clear` reaches the stored scans through
-  `provideRecommendationHistory`. The live `rightsizing_report` uses the
+  `provideRecommendationHistory`; saving alerts mirror `saving_alerts`
+  (`newSavings`, raised through `mock/alerts.ts#raiseAlert`; the seeded
+  runs already hold today's savings, so on dev-shared they show after a
+  Clear and a scan). The live `rightsizing_report` uses the
   same profiles (automatic strategy, aligned `window_end`, lenses,
   evidence and flags).
 

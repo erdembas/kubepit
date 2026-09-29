@@ -30,6 +30,10 @@
 //! Monitoring is opt-in per process ([`Kubepit::set_alert_monitoring`]): the
 //! desktop shell turns it on, tests and headless tools leave it off so no
 //! background watches run unless asked for.
+//!
+//! Findings that no watch detects go through [`AlertCenter::raise`] (the
+//! optional `RightsizingSaving` of recommendation scans): the same filters
+//! and book, and only while monitoring is on and the cluster is watched.
 
 pub mod book;
 pub mod detect;
@@ -44,14 +48,41 @@ use kube::Client;
 use parking_lot::{Mutex, RwLock};
 
 pub use book::AlertBook;
+pub use detect::Finding;
 pub use model::{
     Alert, AlertEvent, AlertGroup, AlertObjectRef, AlertReason, AlertSettings, AlertSeverity,
     WatchedKind,
 };
 
 use crate::app::Kubepit;
+use crate::events::EventSink;
+use crate::objects::now_millis;
 use crate::tasks::TaskRegistry;
 use monitor::{spawn_monitor, MonitorCtx};
+
+/// Filter, record and announce one finding: the settings' reason and
+/// namespace filters, then the book (dedupe, bursts), then the sink.
+/// Returns whether it was recorded.
+pub(crate) fn record_finding(
+    book: &Mutex<AlertBook>,
+    settings: &RwLock<AlertSettings>,
+    sink: &dyn EventSink,
+    cluster_id: &str,
+    object: AlertObjectRef,
+    finding: Finding,
+) -> bool {
+    let recorded = settings
+        .read()
+        .records(finding.reason, object.namespace.as_deref());
+    if !recorded {
+        return false;
+    }
+    let event = book
+        .lock()
+        .record(cluster_id, object, finding, now_millis());
+    sink.alert(&event);
+    true
+}
 
 /// Alert state owned by [`Kubepit`].
 pub struct AlertCenter {
@@ -82,6 +113,36 @@ impl AlertCenter {
     pub(crate) fn stop_all(&self) {
         self.monitors.stop_all();
         self.running.lock().clear();
+    }
+
+    /// Alert monitoring is on in this process
+    /// ([`Kubepit::set_alert_monitoring`]).
+    pub fn monitoring(&self) -> bool {
+        self.active.load(Ordering::SeqCst)
+    }
+
+    /// Raise a finding no watch detects (a recommendation scan's
+    /// `RightsizingSaving`) through the same filters, book and sink as the
+    /// monitors: only while monitoring is on in this process and alerts
+    /// are enabled for `cluster_id`. Returns whether it was recorded.
+    pub fn raise(
+        &self,
+        sink: &dyn EventSink,
+        cluster_id: &str,
+        object: AlertObjectRef,
+        finding: Finding,
+    ) -> bool {
+        if !self.monitoring() || !self.settings.read().monitors(cluster_id) {
+            return false;
+        }
+        record_finding(
+            &self.book,
+            &self.settings,
+            sink,
+            cluster_id,
+            object,
+            finding,
+        )
     }
 }
 

@@ -14,6 +14,7 @@ import { refreshPolled, usePolled } from '@/components/workbench/data/polled';
 import { useNow } from '@/components/workbench/util';
 import { clusterColor } from '@/lib/clusterMeta';
 import { formatAge, formatBytes } from '@/lib/format';
+import { alertSettingsOf, savingAlertsOn, withSavingAlerts } from '@/lib/alerts/policy';
 import { historySettings } from '@/lib/history/audit';
 import { SCAN_INTERVALS, intervalLabel, runTime } from '@/lib/kube/recommendations/model';
 import { ipc, isTauri } from '@/lib/ipc';
@@ -190,6 +191,13 @@ export function HistoryCategory({ description }: { description: string }) {
       <RecommendationHistory
         settings={draft.recommendations}
         onChange={(rec) => update('recommendations', rec)}
+        savingAlerts={savingAlertsOn(draft)}
+        alertsEnabled={alertSettingsOf(draft).enabled}
+        onSavingAlertsChange={(on) => {
+          const next = withSavingAlerts(draft, on);
+          update('recommendations', next.recommendations);
+          update('alerts', next.alerts);
+        }}
         table={s?.recommendations}
         onCleared={() => refreshPolled(STATUS_KEY)}
       />
@@ -304,19 +312,26 @@ export function HistoryCategory({ description }: { description: string }) {
 /**
  * The Recommendations block: stored scans (rows, oldest scan), how long
  * they are kept, the background-scan interval and the opt-in per cluster
- * (part of the page's draft, saved with it), and clearing one cluster's or
- * every cluster's scans right away. After a clear, open views read the
- * cluster again (`forget`) and the dashboard's fleet card re-reads the
- * fleet.
+ * and the alert on new high-confidence savings (part of the page's draft,
+ * saved with it), and clearing one cluster's or every cluster's scans
+ * right away. After a clear, open views read the cluster again (`forget`)
+ * and the dashboard's fleet card re-reads the fleet.
  */
 function RecommendationHistory({
   settings,
   onChange,
+  savingAlerts,
+  alertsEnabled,
+  onSavingAlertsChange,
   table,
   onCleared,
 }: {
   settings: RecommendationSettings;
   onChange: (next: RecommendationSettings) => void;
+  savingAlerts: boolean;
+  /** Settings → Notifications' master switch. */
+  alertsEnabled: boolean;
+  onSavingAlertsChange: (on: boolean) => void;
   table: HistoryTableStatus | undefined;
   onCleared: () => void;
 }) {
@@ -462,6 +477,20 @@ function RecommendationHistory({
           );
         })}
       </div>
+      <Switch
+        className="mt-4"
+        checked={savingAlerts}
+        disabled={!alertsEnabled}
+        onChange={onSavingAlertsChange}
+        label={i18n.t('Alert on new high-confidence savings')}
+        description={
+          alertsEnabled
+            ? i18n.t(
+                'When a scan finds a workload whose requests could shrink by half or more with high confidence, and the previous scan did not, an alert is raised. The filters and mutes of Settings → Notifications apply.',
+              )
+            : i18n.t('Alerts are turned off in Settings → Notifications.')
+        }
+      />
       <div className="mt-4 flex flex-wrap gap-2">
         <Button
           size="sm"

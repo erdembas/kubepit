@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type {
+  AlertNotice,
   ClusterDef,
   ClusterRecommendationSummary,
   RecommendationLatest,
@@ -19,6 +20,7 @@ type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>
 
 let invoke: Invoke;
 let listen: typeof import('./bus').mockListen;
+let newSavings: typeof import('./recommendations').newSavings;
 
 beforeAll(async () => {
   vi.useFakeTimers({ now: new Date('2026-09-28T10:30:00Z') });
@@ -27,6 +29,7 @@ beforeAll(async () => {
   const mock = await import('./index');
   invoke = (command, args = {}) => mock.mockInvoke(command, args);
   listen = (await import('./bus')).mockListen;
+  newSavings = (await import('./recommendations')).newSavings;
 });
 
 afterAll(() => {
@@ -245,6 +248,54 @@ describe('demo recommendation scans', () => {
     expect(latest.scan!.run.id).toBe(last.run_id);
     expect(latest.scan!.run.trigger).toBe('manual');
     expect(latest.scan!.report.window_end % 300_000).toBe(0);
+  });
+
+  it('alerts new high-confidence savings once, only when turned on', async () => {
+    const settings = await invoke<Settings>('settings_get');
+    const saving: AlertNotice[] = [];
+    const stop = await listen<AlertNotice>('alerts://new', (n) => {
+      if (n.alert.reason === 'RightsizingSaving') saving.push(n);
+    });
+    const scan = async () => {
+      await invoke('recommendations_scan', { clusterId: 'c-dev' });
+      await vi.advanceTimersByTimeAsync(10_000);
+      // Past the manual cooldown for the next one.
+      await vi.advanceTimersByTimeAsync(60_000);
+    };
+    await settle(invoke('cluster_connect', { id: 'c-dev' }));
+
+    // Off by default.
+    await scan();
+    expect(saving).toEqual([]);
+
+    await invoke('settings_set', {
+      settings: { ...settings, recommendations: { ...settings.recommendations, alerts: true } },
+    });
+    // The previous run has every saving this one finds: nothing new.
+    await scan();
+    expect(saving).toEqual([]);
+
+    // After a clear there is no previous run: every large saving is new, once.
+    await invoke('history_clear', { kind: 'recommendations', clusterId: 'c-dev' });
+    await scan();
+    const latest = await settle(
+      invoke<RecommendationLatest>('recommendations_latest', { clusterId: 'c-dev', runId: null }),
+    );
+    const expected = newSavings(null, latest.scan!.report).map((w) => w.name);
+    expect(expected.length).toBeGreaterThan(0);
+    const names = new Set(
+      saving.flatMap((n) => (n.alert.group ? n.alert.group.names : [n.alert.object.name])),
+    );
+    expect([...names].sort()).toEqual([...expected].sort());
+    const single = saving.find((n) => !n.alert.group)!;
+    expect(single.alert.message).toMatch(/^Requests could shrink by \d+%$/);
+    expect(single.alert.object.group).toBe('apps');
+    const count = saving.length;
+    await scan();
+    expect(saving.length).toBe(count);
+    stop();
+    await invoke('settings_set', { settings });
+    await settle(invoke('cluster_disconnect', { id: 'c-dev' }));
   });
 
   it('charts usage with gaps and refuses odd pod names', async () => {

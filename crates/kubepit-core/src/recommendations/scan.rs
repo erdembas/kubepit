@@ -28,6 +28,12 @@
 //!   change and at most every 250 ms while the progress moves. Every scan
 //!   ends with one terminal status (`success`, `failed` or `interrupted`,
 //!   without progress), emitted after its last progress.
+//! - **Alerts (optional).** When a success is stored, workloads with a
+//!   large high-confidence saving that the cluster's previous successful
+//!   run did not have raise a `RightsizingSaving` alert
+//!   ([`saving_alerts`]), only with `Settings.recommendations.alerts` on
+//!   and alert monitoring on in this process (the desktop app; never in
+//!   tests or other binaries unless they turn it on).
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -39,6 +45,7 @@ use parking_lot::Mutex;
 use serde::Serialize;
 
 use super::types::{RecommendationScanStatus, ScanState, ScanTrigger};
+use crate::alerts::{AlertObjectRef, AlertReason, Finding};
 use crate::app::Kubepit;
 use crate::history::recommendations::{self as rec, ScanBegin, ScanOutcome, ERROR_STOPPED};
 use crate::history::HistoryKind;
@@ -47,7 +54,10 @@ use crate::prometheus::access::PrometheusAccess;
 use crate::prometheus::matchers::CLUSTER_LABEL_MISMATCH;
 use crate::rightsizing::collect::{RightsizingOutcome, ScanProgress, SourceAbort, SourceAbortKind};
 use crate::rightsizing::summary::summarize;
-use crate::rightsizing::{RightsizingRequest, RightsizingSource};
+use crate::rightsizing::{
+    workload_gvk, Confidence, RightsizingReport, RightsizingRequest, RightsizingSource, Verdict,
+    WorkloadRecommendation,
+};
 use crate::types::{ClusterDef, PrometheusConfig};
 
 /// "Scan now" is refused this long after the last manual scan started.
@@ -213,6 +223,154 @@ pub(crate) fn scan_outcome(result: Option<Result<RightsizingOutcome>>) -> ScanOu
             settings: report.settings.clone(),
             report,
         },
+    }
+}
+
+/// A saving alerts when it is at least this share of the workload's
+/// monthly requests...
+pub const SAVING_ALERT_SHARE: f64 = 0.5;
+/// ...and one container's CPU request drops by this many millicores...
+pub const SAVING_ALERT_CPU_MILLICORES: f64 = 250.0;
+/// ...or its memory request by this many bytes (the thresholds of the
+/// Health `workload-overprovisioned` rule).
+pub const SAVING_ALERT_MEMORY_BYTES: f64 = 512.0 * 1024.0 * 1024.0;
+
+/// A high-confidence, over-provisioned workload whose saving is at least
+/// half its monthly requests, with a container whose request drops by at
+/// least 250m CPU or 512 MiB (the UI's `healthVerdict` "over").
+fn large_saving(w: &WorkloadRecommendation) -> bool {
+    let fall = |now: Option<f64>, next: Option<f64>| now.unwrap_or(0.0) - next.unwrap_or(0.0);
+    w.changed
+        && w.verdict == Verdict::Over
+        && w.confidence == Confidence::High
+        && w.monthly_current > 0.0
+        && -w.monthly_delta >= w.monthly_current * SAVING_ALERT_SHARE
+        && w.containers.iter().any(|c| {
+            fall(c.current.cpu_request, c.recommended.cpu_request) >= SAVING_ALERT_CPU_MILLICORES
+                || fall(c.current.memory_request, c.recommended.memory_request)
+                    >= SAVING_ALERT_MEMORY_BYTES
+        })
+}
+
+/// The workloads of `next` with a large saving (high confidence, ≥ 50 % of
+/// its monthly requests, a container dropping ≥ 250m or ≥ 512 MiB) that
+/// did not have one in `previous`, the cluster's latest successful run
+/// before `next` (`None`: there is none). A workload therefore alerts once,
+/// not at every scan, and again only after its saving went away and came
+/// back.
+pub fn saving_alerts<'a>(
+    previous: Option<&RightsizingReport>,
+    next: &'a RightsizingReport,
+) -> Vec<&'a WorkloadRecommendation> {
+    let key = |w: &WorkloadRecommendation| rec::row_key(&w.kind, &w.namespace, &w.name);
+    let before: HashSet<String> = previous
+        .map(|r| {
+            r.workloads
+                .iter()
+                .filter(|w| large_saving(w))
+                .map(key)
+                .collect()
+        })
+        .unwrap_or_default();
+    next.workloads
+        .iter()
+        .filter(|w| large_saving(w) && !before.contains(&key(w)))
+        .collect()
+}
+
+/// The alert of one workload with a new large saving. Its message is an
+/// English data string with the share only: never a source, Secret or any
+/// configuration.
+fn saving_alert(w: &WorkloadRecommendation) -> (AlertObjectRef, Finding) {
+    let (group, version) = workload_gvk(&w.kind)
+        .map(|g| (g.group, g.version))
+        .unwrap_or_else(|| (String::new(), "v1".to_string()));
+    let share = (-w.monthly_delta / w.monthly_current * 100.0).clamp(0.0, 100.0);
+    (
+        AlertObjectRef {
+            group,
+            version,
+            kind: w.kind.clone(),
+            namespace: Some(w.namespace.clone()),
+            name: w.name.clone(),
+        },
+        Finding {
+            reason: AlertReason::RightsizingSaving,
+            container: None,
+            condition: None,
+            message: format!("Requests could shrink by {share:.0}%"),
+        },
+    )
+}
+
+impl Kubepit {
+    /// Alerts on new savings are wanted: alert monitoring is on in this
+    /// process and `Settings.recommendations.alerts` is on.
+    fn saving_alerts_wanted(&self) -> bool {
+        self.alerts.monitoring() && self.settings().recommendations.alerts
+    }
+
+    /// The alerts a successful `outcome` of `cluster_id` raises, found
+    /// against the cluster's latest successful run before it is stored
+    /// (blocking: reads `history.db`). None unless wanted; when the
+    /// previous run cannot be read, none rather than old ones again.
+    pub(crate) fn new_saving_alerts(
+        &self,
+        cluster_id: &str,
+        outcome: &ScanOutcome,
+    ) -> Vec<(AlertObjectRef, Finding)> {
+        let ScanOutcome::Success { report, .. } = outcome else {
+            return Vec::new();
+        };
+        if !self.saving_alerts_wanted() {
+            return Vec::new();
+        }
+        let previous = self.history.rec_read(|conn| {
+            let Some(run) = rec::latest_run(conn, cluster_id)? else {
+                return Ok(None);
+            };
+            Ok(rec::scan(conn, cluster_id, run.id)?.map(|stored| stored.report))
+        });
+        match previous {
+            Ok(previous) => saving_alerts(previous.as_ref(), report)
+                .into_iter()
+                .map(saving_alert)
+                .collect(),
+            Err(e) => {
+                tracing::warn!(cluster = %cluster_id, "saving alerts skipped: {e:#}");
+                Vec::new()
+            }
+        }
+    }
+
+    /// Raise `alerts` of the stored run `run_id` through the alert center
+    /// (its filters, mutes and book), once the latest pointer names that
+    /// run (a run a clear deleted mid-scan is never stored: the writer
+    /// applies only a run's first finish). Returns how many were recorded.
+    pub(crate) fn raise_saving_alerts(
+        &self,
+        cluster_id: &str,
+        run_id: i64,
+        alerts: Vec<(AlertObjectRef, Finding)>,
+    ) -> usize {
+        if alerts.is_empty() {
+            return 0;
+        }
+        let latest = self
+            .history
+            .rec_read(|conn| rec::latest_run(conn, cluster_id))
+            .ok()
+            .flatten();
+        if latest.is_none_or(|run| run.id != run_id) {
+            return 0;
+        }
+        alerts
+            .into_iter()
+            .filter(|(object, finding)| {
+                self.alerts
+                    .raise(&*self.sink, cluster_id, object.clone(), finding.clone())
+            })
+            .count()
     }
 }
 
@@ -563,16 +721,23 @@ impl ScanTask {
                 } else {
                     outcome
                 };
+                // Against the previous latest run, before this one replaces it.
+                let alerts = app.new_saving_alerts(&cluster_id, &outcome);
                 let stored = app.history.rec_finish(run_id, outcome);
                 // Removed before or while it was stored: clean up after it.
                 let cleared = if gone || removed() {
                     app.history
                         .require_writer()
-                        .and_then(|w| w.clear(HistoryKind::Recommendations, Some(cluster_id)))
+                        .and_then(|w| {
+                            w.clear(HistoryKind::Recommendations, Some(cluster_id.clone()))
+                        })
                         .map(|()| false)
                 } else {
                     Ok(true)
                 };
+                if stored.is_ok() && matches!(cleared, Ok(true)) {
+                    app.raise_saving_alerts(&cluster_id, run_id, alerts);
+                }
                 drop(claim);
                 stored.and(cleared)
             })
@@ -633,7 +798,7 @@ mod tests {
     use super::*;
     use crate::cost::CostPlatform;
     use crate::prometheus::access::{KeyRef, KeyRefKind, PrometheusAuth, TunnelTls};
-    use crate::rightsizing::{strategy, RightsizingReport, RightsizingSettings};
+    use crate::rightsizing::{strategy, RightsizingSettings};
     use crate::types::PromScheme;
 
     fn report(source: RightsizingSource) -> RightsizingReport {
@@ -798,18 +963,7 @@ mod tests {
             .unwrap(),
         );
         // A registered cluster (never connected) whose scan collected a result.
-        let cluster = app
-            .cluster_add(vec![crate::types::ClusterInput {
-                name: "One".into(),
-                context: "one".into(),
-                kubeconfig_text: Some(
-                    "apiVersion: v1\nkind: Config\nclusters:\n- name: one\n  cluster:\n    server: http://127.0.0.1:9\ncontexts:\n- name: one\n  context:\n    cluster: one\n    user: u\nusers:\n- name: u\n  user:\n    token: t\ncurrent-context: one\n"
-                        .into(),
-                ),
-                ..Default::default()
-            }])
-            .unwrap()
-            .remove(0);
+        let cluster = register(&app);
         let run_id = app
             .history
             .rec_begin(ScanBegin {
@@ -866,6 +1020,275 @@ mod tests {
             (runs[0].id, runs[0].status),
             (run_id, crate::recommendations::RunStatus::Success)
         );
+    }
+
+    const MIB: f64 = 1024.0 * 1024.0;
+
+    /// A Deployment in `shop` whose one container goes from `cpu_now` to
+    /// `cpu_next` millicores (memory 1 GiB → 900 MiB, too little to count).
+    fn workload(
+        name: &str,
+        confidence: Confidence,
+        (cpu_now, cpu_next): (f64, f64),
+        (monthly_current, monthly_delta): (f64, f64),
+    ) -> WorkloadRecommendation {
+        use crate::rightsizing::math::change_of;
+        use crate::rightsizing::{Change, ContainerRecommendation, ResourceValues};
+        let current = ResourceValues {
+            cpu_request: Some(cpu_now),
+            memory_request: Some(1024.0 * MIB),
+            ..Default::default()
+        };
+        let recommended = ResourceValues {
+            cpu_request: Some(cpu_next),
+            memory_request: Some(900.0 * MIB),
+            ..Default::default()
+        };
+        WorkloadRecommendation {
+            kind: "Deployment".into(),
+            namespace: "shop".into(),
+            name: name.into(),
+            uid: format!("uid-{name}"),
+            replicas: 2,
+            confidence,
+            verdict: Verdict::Over,
+            coverage_hours: 168.0,
+            containers: vec![ContainerRecommendation {
+                name: "app".into(),
+                current,
+                recommended,
+                usage: None,
+                cpu: change_of(current.cpu_request, recommended.cpu_request),
+                memory: change_of(current.memory_request, recommended.memory_request),
+                memory_limit: Change::Unchanged,
+                cpu_limit: Change::Unchanged,
+                confidence,
+                warnings: Vec::new(),
+                cpu_limit_raised: false,
+                memory_limit_raised: false,
+                evidence: None,
+            }],
+            monthly_delta,
+            monthly_current,
+            changed: true,
+            pods: Vec::new(),
+            pods_truncated: false,
+            hpa: None,
+            lenses: Vec::new(),
+            cost_replicas: 2.0,
+        }
+    }
+
+    /// A high-confidence saving of 75 % with an 800m drop.
+    fn big(name: &str) -> WorkloadRecommendation {
+        workload(name, Confidence::High, (1000.0, 200.0), (40.0, -30.0))
+    }
+
+    fn with(workloads: Vec<WorkloadRecommendation>) -> RightsizingReport {
+        RightsizingReport {
+            workloads,
+            ..report(RightsizingSource::Prometheus)
+        }
+    }
+
+    fn with_big_saving() -> RightsizingReport {
+        with(vec![big("web")])
+    }
+
+    fn medium_confidence_saving() -> RightsizingReport {
+        with(vec![workload(
+            "web",
+            Confidence::Medium,
+            (1000.0, 200.0),
+            (40.0, -30.0),
+        )])
+    }
+
+    #[test]
+    fn new_large_savings_alert_once() {
+        assert_eq!(saving_alerts(None, &with_big_saving()).len(), 1);
+        assert!(saving_alerts(Some(&with_big_saving()), &with_big_saving()).is_empty());
+        assert!(saving_alerts(None, &medium_confidence_saving()).is_empty());
+
+        // A saving the previous run did not have (lost confidence, or a new
+        // workload) alerts; the others do not.
+        let next = with(vec![big("web"), big("api")]);
+        let names = |alerts: Vec<&WorkloadRecommendation>| -> Vec<String> {
+            alerts.into_iter().map(|w| w.name.clone()).collect()
+        };
+        assert_eq!(
+            names(saving_alerts(Some(&with_big_saving()), &next)),
+            ["api"]
+        );
+        assert_eq!(
+            names(saving_alerts(Some(&medium_confidence_saving()), &next)),
+            ["web", "api"]
+        );
+
+        // Below the thresholds: under half the monthly requests, a drop
+        // under 250m and 512 MiB, not over-provisioned, or unchanged.
+        let half = workload("half", Confidence::High, (1000.0, 200.0), (40.0, -19.0));
+        let small = workload("small", Confidence::High, (400.0, 200.0), (40.0, -30.0));
+        let mut under = big("under");
+        under.verdict = Verdict::Under;
+        let mut same = big("same");
+        same.changed = false;
+        let mut free = big("free");
+        free.monthly_current = 0.0;
+        assert!(saving_alerts(None, &with(vec![half, small, under, same, free])).is_empty());
+        // Memory alone counts too.
+        let mut memory = workload("memory", Confidence::High, (500.0, 400.0), (40.0, -30.0));
+        memory.containers[0].recommended.memory_request = Some(256.0 * MIB);
+        assert_eq!(saving_alerts(None, &with(vec![memory])).len(), 1);
+    }
+
+    #[test]
+    fn saving_alerts_name_the_workload_and_the_share_only() {
+        let (object, finding) = saving_alert(&big("web"));
+        assert_eq!(
+            object,
+            AlertObjectRef {
+                group: "apps".into(),
+                version: "v1".into(),
+                kind: "Deployment".into(),
+                namespace: Some("shop".into()),
+                name: "web".into(),
+            }
+        );
+        assert_eq!(finding.reason, AlertReason::RightsizingSaving);
+        assert_eq!(finding.message, "Requests could shrink by 75%");
+        assert_eq!((finding.container, finding.condition), (None, None));
+        let mut job = big("nightly");
+        job.kind = "CronJob".into();
+        assert_eq!(saving_alert(&job).0.group, "batch");
+    }
+
+    /// Records every alert.
+    #[derive(Default)]
+    struct Alerts(Mutex<Vec<crate::alerts::AlertEvent>>);
+
+    impl crate::events::EventSink for Alerts {
+        fn cluster_status(&self, _status: &crate::types::ClusterStatus) {}
+        fn cluster_list(&self, _clusters: &[ClusterDef]) {}
+        fn port_forwards(&self, _forwards: &[crate::types::PortForward]) {}
+        fn alert(&self, event: &crate::alerts::AlertEvent) {
+            self.0.lock().push(event.clone());
+        }
+    }
+
+    /// A registered cluster that is never connected.
+    fn register(app: &Kubepit) -> ClusterDef {
+        app.cluster_add(vec![crate::types::ClusterInput {
+            name: "One".into(),
+            context: "one".into(),
+            kubeconfig_text: Some(
+                "apiVersion: v1\nkind: Config\nclusters:\n- name: one\n  cluster:\n    server: http://127.0.0.1:9\ncontexts:\n- name: one\n  context:\n    cluster: one\n    user: u\nusers:\n- name: u\n  user:\n    token: t\ncurrent-context: one\n"
+                    .into(),
+            ),
+            ..Default::default()
+        }])
+        .unwrap()
+        .remove(0)
+    }
+
+    /// Store a successful scan of `cluster` the way a scan hands it off.
+    async fn store_success(app: &Arc<Kubepit>, cluster: &ClusterDef, report: RightsizingReport) {
+        let run_id = app
+            .history
+            .rec_begin(ScanBegin {
+                cluster_id: cluster.id.clone(),
+                started: now_millis(),
+                trigger: ScanTrigger::Schedule,
+                source_config: source_config(cluster),
+            })
+            .unwrap();
+        let mut task = ScanTask::new(app.clone(), app.recommendations.claim(&cluster.id).unwrap());
+        task.source_config = Some(source_config(cluster));
+        assert!(RunGuard::begun(&task.guard.slot(), run_id));
+        let outcome = ScanOutcome::Success {
+            summary: summarize(&report),
+            settings: report.settings.clone(),
+            report,
+        };
+        hand_off(task, run_id, outcome).await.unwrap();
+        let latest = app
+            .history
+            .rec_read(|conn| rec::latest_run(conn, &cluster.id))
+            .unwrap();
+        assert_eq!(latest.map(|r| r.id), Some(run_id), "stored");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn new_savings_alert_once_and_only_when_turned_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let sink = Arc::new(Alerts::default());
+        let app = Arc::new(
+            Kubepit::open(
+                crate::paths::Paths::new(dir.path().join("home")),
+                sink.clone(),
+            )
+            .unwrap(),
+        );
+        let cluster = register(&app);
+        let alerts = || sink.0.lock().clone();
+        let set_toggle = |on: bool| {
+            let mut settings = app.settings();
+            settings.recommendations.alerts = on;
+            app.set_settings(settings).unwrap();
+        };
+        let savings = |names: &[&str]| with(names.iter().map(|name| big(name)).collect::<Vec<_>>());
+
+        // Off by default in tests: neither monitoring nor the toggle.
+        store_success(&app, &cluster, savings(&["web"])).await;
+        set_toggle(true);
+        store_success(&app, &cluster, savings(&["web", "db"])).await;
+        assert!(alerts().is_empty(), "monitoring is off in this process");
+
+        // Both on: only the saving the previous scan did not have.
+        app.set_alert_monitoring(true);
+        store_success(&app, &cluster, savings(&["web", "db", "api"])).await;
+        let raised = alerts();
+        assert_eq!(raised.len(), 1, "{raised:?}");
+        let alert = &raised[0].alert;
+        assert!(raised[0].fresh);
+        assert_eq!(alert.reason, AlertReason::RightsizingSaving);
+        assert_eq!(alert.severity, crate::alerts::AlertSeverity::Warning);
+        assert_eq!(alert.cluster_id, cluster.id);
+        assert_eq!(
+            (alert.object.kind.as_str(), alert.object.name.as_str()),
+            ("Deployment", "api")
+        );
+        assert_eq!(alert.message, "Requests could shrink by 75%");
+        assert_eq!(
+            app.alerts_list().len(),
+            1,
+            "recorded in the notification center"
+        );
+
+        // A repeat raises nothing.
+        store_success(&app, &cluster, savings(&["web", "db", "api"])).await;
+        assert_eq!(alerts().len(), 1);
+
+        // The toggle off: nothing.
+        set_toggle(false);
+        store_success(&app, &cluster, savings(&["web", "db", "api", "cache"])).await;
+        assert_eq!(alerts().len(), 1);
+
+        // The alert filters apply: a disabled reason records nothing.
+        set_toggle(true);
+        let mut settings = app.settings();
+        settings.alerts.disabled_reasons = vec![AlertReason::RightsizingSaving];
+        app.set_settings(settings).unwrap();
+        store_success(&app, &cluster, savings(&["web", "queue"])).await;
+        assert_eq!(alerts().len(), 1);
+
+        // Monitoring off again: nothing.
+        let mut settings = app.settings();
+        settings.alerts.disabled_reasons.clear();
+        app.set_settings(settings).unwrap();
+        app.set_alert_monitoring(false);
+        store_success(&app, &cluster, savings(&["web", "search"])).await;
+        assert_eq!(alerts().len(), 1);
     }
 
     #[test]
