@@ -119,7 +119,12 @@ function SpotlightItem({
           </ul>
         )}
       </div>
-      <Button size="xs" variant="secondary" onClick={onReview} aria-pressed={active}>
+      <Button
+        size="xs"
+        variant="secondary"
+        onClick={onReview}
+        aria-current={active ? 'true' : undefined}
+      >
         {i18n.t('Review')}
       </Button>
     </li>

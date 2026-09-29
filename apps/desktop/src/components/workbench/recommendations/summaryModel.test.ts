@@ -92,7 +92,7 @@ describe('spotlightReason', () => {
     ]);
     expect(spotlightReason(rec)).toEqual({
       tone: 'warning',
-      text: 'Usage peaks at 1.8× the request',
+      text: 'Usage reaches 1.8× the request',
     });
   });
   it('falls back to an unset request, else nothing', () => {

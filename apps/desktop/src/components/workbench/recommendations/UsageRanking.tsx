@@ -9,7 +9,7 @@ import { memoryText } from '@/lib/kube/rightsizing/model';
 import type { WorkloadRecommendation } from '@/types';
 import { cpuWithUnit } from '../metrics/UsageHistory';
 import { Card } from '../overview/charts';
-import { Segmented } from './CapacityOverview';
+import { Segmented } from './Segmented';
 import { pageOf, searchRanking, type RankedRow } from './rankingModel';
 
 type Resource = 'cpu' | 'memory';
@@ -177,7 +177,9 @@ export function UsageRanking({
             )}
           >
             <span>#</span>
-            <span className="truncate">{i18n.t('Workload / container')}</span>
+            <span className="truncate">
+              {i18n.rich('Workload / {container}', { container: <span lang="en">container</span> })}
+            </span>
             <span className="hidden truncate @lg:block">{i18n.t('Namespace')}</span>
             <span className="truncate text-right">{valueLabel(resource, stat)}</span>
           </div>

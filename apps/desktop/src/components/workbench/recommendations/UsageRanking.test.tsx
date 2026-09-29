@@ -25,6 +25,7 @@ describe('UsageRanking', () => {
     expect(html).toMatch(/aria-pressed="true"[^>]*>Average<\/button>/);
     expect(html).toMatch(/aria-pressed="false"[^>]*>Peak<\/button>/);
     expect(html).toContain('Average memory');
+    expect(html).toContain('Workload / <span lang="en">container</span>');
   });
 
   it('ranks highest first, keeps zeros and counts containers without data', () => {

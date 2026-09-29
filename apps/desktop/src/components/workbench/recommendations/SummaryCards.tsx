@@ -1,11 +1,10 @@
 import * as i18n from '@/i18n';
-import { useLocaleMemo as useMemo } from '@/i18n';
 import { ArrowRight, Boxes, Gauge, TrendingDown, TrendingUp, TriangleAlert } from 'lucide-react';
 import { formatMoney } from '@/lib/cost';
 import { cn } from '@/lib/cn';
-import { optimizationTotals } from '@/lib/kube/recommendations/model';
+import type { OptimizationTotals } from '@/lib/kube/recommendations/model';
 import { memoryText } from '@/lib/kube/rightsizing/model';
-import type { ResourceTotals, WorkloadRecommendation } from '@/types';
+import type { ResourceTotals } from '@/types';
 import { cpuWithUnit } from '../metrics/UsageHistory';
 import { Card, StatTile } from '../overview/charts';
 import { signedPercent, totalsChange, type ChangeDirection } from './summaryModel';
@@ -108,21 +107,51 @@ function comparableText(totals: ResourceTotals, containers: number): string {
       );
 }
 
+/** A monthly amount the recommendations save or add (dim when zero). */
+function MonthlyAmount({
+  kind,
+  value,
+  format,
+  title,
+}: {
+  kind: 'savings' | 'increases';
+  value: number;
+  format: (v: number) => string;
+  title?: string;
+}) {
+  i18n.useLocale();
+  const Icon = kind === 'savings' ? TrendingDown : TrendingUp;
+  const amount = format(value);
+  return (
+    <span
+      title={title}
+      className={cn(
+        'inline-flex items-center gap-1 text-[11.5px] font-medium whitespace-nowrap tabular-nums',
+        value > 0 ? DIRECTION_TONE[kind === 'savings' ? 'decrease' : 'increase'] : 'text-fg-dim',
+      )}
+    >
+      <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      {kind === 'savings'
+        ? i18n.t('Savings {amount}', { amount })
+        : i18n.t('Increases {amount}', { amount })}
+    </span>
+  );
+}
+
 /**
- * CPU and memory requests Now → After over the comparable containers of
- * `list` (× the replicas behind costs), the monthly requests cost, and the
- * honest footnote.
+ * CPU and memory requests Now → After over the comparable containers
+ * (× the replicas behind costs), the monthly requests cost with what the
+ * recommendations save and add (additions include requests set where
+ * none existed), and the honest footnote.
  */
 export function OptimizationSummary({
-  list,
+  totals,
   currency,
 }: {
-  list: readonly WorkloadRecommendation[];
+  totals: OptimizationTotals;
   currency: string;
 }) {
   i18n.useLocale();
-  const totals = useMemo(() => optimizationTotals(list), [list]);
-  const monthlyAfter = totals.monthly_current - totals.monthly_savings + totals.monthly_increases;
   const money = (v: number) => formatMoney(v, currency, { compact: true });
 
   return (
@@ -147,12 +176,16 @@ export function OptimizationSummary({
         <span className="text-fg-dim text-[10.5px] font-semibold tracking-[0.12em] uppercase">
           {i18n.t('Monthly requests cost')}
         </span>
-        <span className="inline-flex items-center gap-1.5 text-[12px] tabular-nums">
-          <span className="text-fg-muted">{money(totals.monthly_current)}</span>
-          <ArrowRight className="text-fg-dim h-3 w-3 shrink-0" aria-hidden />
-          <span className="text-fg font-medium">{money(monthlyAfter)}</span>
+        <span className="text-fg-muted text-[12px] tabular-nums">
+          {i18n.t('{amount} now', { amount: money(totals.monthly_current) })}
         </span>
-        <ChangeText now={totals.monthly_current} after={monthlyAfter} format={money} />
+        <MonthlyAmount kind="savings" value={totals.monthly_savings} format={money} />
+        <MonthlyAmount
+          kind="increases"
+          value={totals.monthly_increases}
+          format={money}
+          title={i18n.t('Includes requests set where none existed.')}
+        />
       </div>
       <p className="border-border/60 text-fg-dim border-t px-4 py-2 text-[11px]">
         {i18n.t('Totals use requests × current replicas. They are not freed node capacity.')}

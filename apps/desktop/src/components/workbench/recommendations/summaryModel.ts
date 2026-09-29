@@ -100,7 +100,7 @@ export function spotlightReason(rec: WorkloadRecommendation): SpotlightReason | 
   if (ratio > 1)
     return {
       tone: 'warning',
-      text: i18n.t('Usage peaks at {ratio}× the request', {
+      text: i18n.t('Usage reaches {ratio}× the request', {
         ratio: i18n.number(ratio, { maximumFractionDigits: ratio < 10 ? 1 : 0 }),
       }),
     };

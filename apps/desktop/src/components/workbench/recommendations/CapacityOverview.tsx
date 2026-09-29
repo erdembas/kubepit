@@ -8,6 +8,7 @@ import { memoryText } from '@/lib/kube/rightsizing/model';
 import type { WorkloadRecommendation } from '@/types';
 import { cpuWithUnit } from '../metrics/UsageHistory';
 import { Card, Legend } from '../overview/charts';
+import { Segmented } from './Segmented';
 import { barPercent, capacityEmptyText, signedPercent, totalsChange } from './summaryModel';
 
 type Resource = 'cpu' | 'memory';
@@ -28,44 +29,6 @@ export function ResourceToggle({
     { key: 'memory', label: i18n.t('Memory') },
   ];
   return <Segmented value={value} options={options} onChange={onChange} label={label} />;
-}
-
-/** A small segmented control of the section cards (`aria-pressed` buttons). */
-export function Segmented<T extends string>({
-  value,
-  options,
-  onChange,
-  label,
-}: {
-  value: T;
-  options: ReadonlyArray<{ key: T; label: string }>;
-  onChange: (next: T) => void;
-  label: string;
-}) {
-  return (
-    <div
-      className="bg-fg/4 inline-flex shrink-0 gap-0.5 rounded-md p-0.5"
-      role="group"
-      aria-label={label}
-    >
-      {options.map((o) => (
-        <button
-          key={o.key}
-          type="button"
-          aria-pressed={value === o.key}
-          onClick={() => onChange(o.key)}
-          className={cn(
-            'rounded px-1.5 py-px text-[10.5px] transition-colors',
-            value === o.key
-              ? 'bg-surface-raised text-fg font-medium shadow-sm'
-              : 'text-fg-dim hover:text-fg',
-          )}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
 }
 
 function CapacityRow({
@@ -217,17 +180,25 @@ export function CapacityOverview({
             ))}
           </ul>
           <Legend
-            className="border-border/60 grid space-y-0 gap-x-6 gap-y-1 border-t px-4 py-2 @md:grid-cols-2"
+            className="border-border/60 border-t px-4 py-2"
             items={[
               {
                 key: 'current',
-                label: i18n.t('Current requests'),
+                label: i18n.plural(
+                  'Current requests of the namespace shown',
+                  'Current requests of the {count} namespaces shown',
+                  entries.length,
+                ),
                 value: format(sum((e) => e.current)),
                 fill: 'bg-fg/15',
               },
               {
                 key: 'recommended',
-                label: i18n.t('Recommended requests'),
+                label: i18n.plural(
+                  'Recommended requests of the namespace shown',
+                  'Recommended requests of the {count} namespaces shown',
+                  entries.length,
+                ),
                 value: format(sum((e) => e.recommended)),
                 fill: 'bg-accent',
               },

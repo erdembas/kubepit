@@ -67,6 +67,8 @@ describe('SummarySection', () => {
   it('summarizes CPU and memory Now → After with the footnote', () => {
     expect(html).toContain('Optimization summary');
     expect(html).toContain('3/3 containers comparable');
+    expect(html).toContain('Savings $40.00');
+    expect(html).toContain('Increases $0.00');
     expect(html).toContain(
       'Totals use requests × current replicas. They are not freed node capacity.',
     );
@@ -88,7 +90,7 @@ describe('SummarySection', () => {
     expect(html.indexOf('>api<')).toBeGreaterThan(-1);
     expect(html.indexOf('>api<')).toBeLessThan(html.indexOf('>web<'));
     expect(html).toContain('OOM-killed');
-    expect(html).toContain('Usage peaks at 1.8× the request');
+    expect(html).toContain('Usage reaches 1.8× the request');
     expect(html).toContain('Saves about $40.00 a month');
   });
 });

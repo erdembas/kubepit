@@ -21,7 +21,7 @@ export function SummarySection({ clusterId, report, rows }: SectionProps) {
   return (
     <div className="grid gap-3 @3xl:grid-cols-2">
       <div className="flex min-w-0 flex-col gap-3">
-        <OptimizationSummary list={rows} currency={report.currency} />
+        <OptimizationSummary totals={totals} currency={report.currency} />
         <div className="grid grid-cols-2 gap-3">
           <AttentionTile
             count={totals.under}
