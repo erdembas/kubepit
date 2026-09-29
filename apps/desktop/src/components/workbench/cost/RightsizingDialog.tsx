@@ -225,11 +225,14 @@ export function RightsizingDialog({
   clusterId,
   rec,
   currency,
+  onApplied,
   onClose,
 }: {
   clusterId: string;
   rec: WorkloadRecommendation;
   currency: string;
+  /** Called after the patch succeeded, before `onClose`. */
+  onApplied?: () => void;
   onClose: () => void;
 }) {
   i18n.useLocale();
@@ -307,6 +310,7 @@ export function RightsizingDialog({
     setBusy(false);
     if (ok) {
       refreshRightsizing(clusterId);
+      onApplied?.();
       onClose();
     }
   };
