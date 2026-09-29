@@ -423,8 +423,10 @@ notifications and the notification center (status bar bell → right panel
   first list is the baseline and never alerts; a re-list after a desync
   compares against what was known.
 - **Findings without a watch.** `AlertCenter::raise` records a finding
-  through the same filters, book and sink, only while monitoring is on in
-  the process and the cluster is watched: the optional
+  (and `raise_group` one finding about several objects as a single group
+  alert, `AlertBook::record_group`) through the same filters, book and
+  sink, only while monitoring is on in the process and the cluster is
+  watched: the optional
   `RightsizingSaving` (warning, no watched kind) that a successful
   recommendation scan raises for a new high-confidence saving (see
   "Recommendations").
@@ -1311,7 +1313,13 @@ history") and re-evaluated for the UI with the current settings.
   high confidence, over-provisioned, savings ≥ 50 % of its monthly
   requests and a container dropping ≥ 250m or ≥ 512 MiB, the Health
   `workload-overprovisioned` thresholds), so a workload alerts once, not
-  at every scan. The previous run is read before the new one replaces the
+  at every scan. A scan raises at most five of them one by one (the
+  largest savings) plus one group alert for the rest (`condition: more`),
+  and a scan without a previous run (the first, or after a Clear) a single
+  summary group alert for the cluster (`scan::plan_saving_alerts`; groups
+  are `kind: Workload`, cluster-wide, `namespace/name` listed), so a large
+  cluster never floods the shared 500-entry alert history; a group opens
+  the cluster's Recommendations view. The previous run is read before the new one replaces the
   latest pointer, and the alerts are raised once the pointer names the new
   run, through `AlertCenter::raise` (filters, mutes, snoozes, bursts). The
   message is an English data string with the share only ("Requests could
@@ -1389,10 +1397,11 @@ history") and re-evaluated for the UI with the current settings.
   the background when due; disconnecting stops a scan (interrupted,
   `stopped`); exports mirror `export.rs`; usage history is a deterministic
   daily rhythm with gaps; `history_clear` reaches the stored scans through
-  `provideRecommendationHistory`; saving alerts mirror `saving_alerts`
-  (`newSavings`, raised through `mock/alerts.ts#raiseAlert`; the seeded
-  runs already hold today's savings, so on dev-shared they show after a
-  Clear and a scan). The live `rightsizing_report` uses the
+  `provideRecommendationHistory`; saving alerts mirror `saving_alerts` and
+  the cap (`newSavings`, `planSavingAlerts`, raised through
+  `mock/alerts.ts#raiseAlert` / `raiseAlertGroup`; the seeded runs already
+  hold today's savings, so on dev-shared a Clear and a scan show the
+  summary alert). The live `rightsizing_report` uses the
   same profiles (automatic strategy, aligned `window_end`, lenses,
   evidence and flags).
 

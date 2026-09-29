@@ -62,6 +62,18 @@ describe('alerts for new high-confidence savings', () => {
         }),
       ),
     ).toBe('4 workloads request far more than they use in shop');
+    // A scan's own groups across the cluster: its summary and the rest beyond the cap.
+    const scanGroup = (condition: string | null) =>
+      alert({
+        object: { group: '', version: '', kind: 'Workload', namespace: null, name: '' },
+        condition,
+        group: { total: 12, names: ['shop/a'] },
+      });
+    expect(alertTitle(scanGroup(null))).toBe('12 workloads request far more than they use');
+    expect(alertTitle(scanGroup('more'))).toBe('12 more workloads request far more than they use');
+    expect(alertBody(scanGroup(null), 'prod')).toBe(
+      'prod · shop/a and 11 more · Requests could shrink by 75%',
+    );
     expect(alertBody(alert(), 'prod')).toBe(
       'prod · shop/deployment/web · Requests could shrink by 75%',
     );

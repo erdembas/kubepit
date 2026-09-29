@@ -33,7 +33,9 @@
 //!   run did not have raise a `RightsizingSaving` alert
 //!   ([`saving_alerts`]), only with `Settings.recommendations.alerts` on
 //!   and alert monitoring on in this process (the desktop app; never in
-//!   tests or other binaries unless they turn it on).
+//!   tests or other binaries unless they turn it on). A scan raises at
+//!   most [`SAVING_ALERTS_PER_SCAN`] of them plus one group alert for the
+//!   rest, and a scan without a previous run one summary alert.
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -45,7 +47,8 @@ use parking_lot::Mutex;
 use serde::Serialize;
 
 use super::types::{RecommendationScanStatus, ScanState, ScanTrigger};
-use crate::alerts::{AlertObjectRef, AlertReason, Finding};
+use crate::alerts::book::GROUP_NAME_LIMIT;
+use crate::alerts::{AlertGroup, AlertObjectRef, AlertReason, Finding};
 use crate::app::Kubepit;
 use crate::history::recommendations::{self as rec, ScanBegin, ScanOutcome, ERROR_STOPPED};
 use crate::history::HistoryKind;
@@ -278,29 +281,113 @@ pub fn saving_alerts<'a>(
         .collect()
 }
 
+/// New savings alerted one by one per scan (the largest); the rest share
+/// one group alert, so a large cluster never floods the shared alert
+/// history.
+pub const SAVING_ALERTS_PER_SCAN: usize = 5;
+/// `Finding.condition` of the group alert for the savings beyond
+/// [`SAVING_ALERTS_PER_SCAN`] (the first scan's summary has none).
+pub const SAVING_ALERT_MORE: &str = "more";
+/// `AlertObjectRef.kind` of a group alert about workloads of any kind.
+pub const SAVING_ALERT_GROUP_KIND: &str = "Workload";
+
+/// One alert a scan raises for its new savings.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SavingAlert {
+    pub object: AlertObjectRef,
+    pub finding: Finding,
+    /// Several workloads in one alert (`object.name` is empty).
+    pub group: Option<AlertGroup>,
+}
+
 /// The alert of one workload with a new large saving. Its message is an
 /// English data string with the share only: never a source, Secret or any
 /// configuration.
-fn saving_alert(w: &WorkloadRecommendation) -> (AlertObjectRef, Finding) {
+fn saving_alert(w: &WorkloadRecommendation) -> SavingAlert {
     let (group, version) = workload_gvk(&w.kind)
         .map(|g| (g.group, g.version))
         .unwrap_or_else(|| (String::new(), "v1".to_string()));
     let share = (-w.monthly_delta / w.monthly_current * 100.0).clamp(0.0, 100.0);
-    (
-        AlertObjectRef {
+    SavingAlert {
+        object: AlertObjectRef {
             group,
             version,
             kind: w.kind.clone(),
             namespace: Some(w.namespace.clone()),
             name: w.name.clone(),
         },
-        Finding {
+        finding: Finding {
             reason: AlertReason::RightsizingSaving,
             container: None,
             condition: None,
             message: format!("Requests could shrink by {share:.0}%"),
         },
-    )
+        group: None,
+    }
+}
+
+/// One group alert for `workloads` across the cluster (`namespace/name`,
+/// at most [`GROUP_NAME_LIMIT`] listed), `condition` telling a summary
+/// (`None`) from the rest beyond the cap ([`SAVING_ALERT_MORE`]).
+fn saving_group(workloads: &[&WorkloadRecommendation], condition: Option<&str>) -> SavingAlert {
+    let total = workloads.len();
+    let message = match condition {
+        Some(_) => format!("{total} more workloads could shrink their requests by half or more"),
+        None => format!("{total} workloads could shrink their requests by half or more"),
+    };
+    SavingAlert {
+        object: AlertObjectRef {
+            group: String::new(),
+            version: String::new(),
+            kind: SAVING_ALERT_GROUP_KIND.into(),
+            namespace: None,
+            name: String::new(),
+        },
+        finding: Finding {
+            reason: AlertReason::RightsizingSaving,
+            container: None,
+            condition: condition.map(str::to_string),
+            message,
+        },
+        group: Some(AlertGroup {
+            total: u32::try_from(total).unwrap_or(u32::MAX),
+            names: workloads
+                .iter()
+                .take(GROUP_NAME_LIMIT)
+                .map(|w| format!("{}/{}", w.namespace, w.name))
+                .collect(),
+        }),
+    }
+}
+
+/// The alerts one successful scan raises for its new large savings
+/// ([`saving_alerts`]), largest saving first:
+/// - without a previous run (the first scan, or after a clear) one summary
+///   alert for the cluster, not one per workload;
+/// - otherwise the [`SAVING_ALERTS_PER_SCAN`] largest one by one, and one
+///   group alert for the rest.
+pub(crate) fn plan_saving_alerts(
+    previous: Option<&RightsizingReport>,
+    next: &RightsizingReport,
+) -> Vec<SavingAlert> {
+    let mut new = saving_alerts(previous, next);
+    if new.is_empty() {
+        return Vec::new();
+    }
+    new.sort_by(|a, b| {
+        a.monthly_delta
+            .total_cmp(&b.monthly_delta)
+            .then_with(|| (&a.namespace, &a.kind, &a.name).cmp(&(&b.namespace, &b.kind, &b.name)))
+    });
+    if previous.is_none() {
+        return vec![saving_group(&new, None)];
+    }
+    let rest = new.split_off(new.len().min(SAVING_ALERTS_PER_SCAN));
+    let mut alerts: Vec<SavingAlert> = new.into_iter().map(saving_alert).collect();
+    if !rest.is_empty() {
+        alerts.push(saving_group(&rest, Some(SAVING_ALERT_MORE)));
+    }
+    alerts
 }
 
 impl Kubepit {
@@ -318,7 +405,7 @@ impl Kubepit {
         &self,
         cluster_id: &str,
         outcome: &ScanOutcome,
-    ) -> Vec<(AlertObjectRef, Finding)> {
+    ) -> Vec<SavingAlert> {
         let ScanOutcome::Success { report, .. } = outcome else {
             return Vec::new();
         };
@@ -332,10 +419,7 @@ impl Kubepit {
             Ok(rec::scan(conn, cluster_id, run.id)?.map(|stored| stored.report))
         });
         match previous {
-            Ok(previous) => saving_alerts(previous.as_ref(), report)
-                .into_iter()
-                .map(saving_alert)
-                .collect(),
+            Ok(previous) => plan_saving_alerts(previous.as_ref(), report),
             Err(e) => {
                 tracing::warn!(cluster = %cluster_id, "saving alerts skipped: {e:#}");
                 Vec::new()
@@ -351,7 +435,7 @@ impl Kubepit {
         &self,
         cluster_id: &str,
         run_id: i64,
-        alerts: Vec<(AlertObjectRef, Finding)>,
+        alerts: Vec<SavingAlert>,
     ) -> usize {
         if alerts.is_empty() {
             return 0;
@@ -366,9 +450,15 @@ impl Kubepit {
         }
         alerts
             .into_iter()
-            .filter(|(object, finding)| {
-                self.alerts
-                    .raise(&*self.sink, cluster_id, object.clone(), finding.clone())
+            .filter(|alert| {
+                let (object, finding) = (alert.object.clone(), alert.finding.clone());
+                match alert.group.clone() {
+                    Some(group) => {
+                        self.alerts
+                            .raise_group(&*self.sink, cluster_id, object, finding, group)
+                    }
+                    None => self.alerts.raise(&*self.sink, cluster_id, object, finding),
+                }
             })
             .count()
     }
@@ -1144,7 +1234,12 @@ mod tests {
 
     #[test]
     fn saving_alerts_name_the_workload_and_the_share_only() {
-        let (object, finding) = saving_alert(&big("web"));
+        let SavingAlert {
+            object,
+            finding,
+            group,
+        } = saving_alert(&big("web"));
+        assert_eq!(group, None);
         assert_eq!(
             object,
             AlertObjectRef {
@@ -1160,7 +1255,87 @@ mod tests {
         assert_eq!((finding.container, finding.condition), (None, None));
         let mut job = big("nightly");
         job.kind = "CronJob".into();
-        assert_eq!(saving_alert(&job).0.group, "batch");
+        assert_eq!(saving_alert(&job).object.group, "batch");
+    }
+
+    /// `name` saving `delta` a month (all qualify: ≥ half of 1000).
+    fn saving(name: &str, delta: f64) -> WorkloadRecommendation {
+        workload(name, Confidence::High, (1000.0, 200.0), (1000.0, -delta))
+    }
+
+    #[test]
+    fn a_scan_alerts_its_five_largest_new_savings_and_groups_the_rest() {
+        let previous = with(vec![saving("old", 900.0)]);
+        let next = with(vec![
+            saving("old", 900.0),
+            saving("a", 510.0),
+            saving("b", 800.0),
+            saving("c", 600.0),
+            saving("d", 990.0),
+            saving("e", 700.0),
+            saving("f", 520.0),
+            saving("g", 950.0),
+            saving("h", 500.0),
+        ]);
+        let plan = plan_saving_alerts(Some(&previous), &next);
+        assert_eq!(plan.len(), SAVING_ALERTS_PER_SCAN + 1);
+        let singles: Vec<&str> = plan[..5].iter().map(|a| a.object.name.as_str()).collect();
+        assert_eq!(singles, ["d", "g", "b", "e", "c"], "largest saving first");
+        assert!(plan[..5].iter().all(|a| a.group.is_none()));
+        let rest = &plan[5];
+        assert_eq!(rest.object.kind, SAVING_ALERT_GROUP_KIND);
+        assert_eq!(
+            (rest.object.name.as_str(), &rest.object.namespace),
+            ("", &None)
+        );
+        assert_eq!(rest.finding.condition.as_deref(), Some(SAVING_ALERT_MORE));
+        assert_eq!(
+            rest.finding.message,
+            "3 more workloads could shrink their requests by half or more"
+        );
+        assert_eq!(
+            rest.group,
+            Some(AlertGroup {
+                total: 3,
+                names: vec!["shop/f".into(), "shop/a".into(), "shop/h".into()],
+            })
+        );
+
+        // Up to the cap: one alert each, no group.
+        let few = with(vec![
+            saving("old", 900.0),
+            saving("a", 510.0),
+            saving("b", 800.0),
+        ]);
+        let plan = plan_saving_alerts(Some(&previous), &few);
+        assert_eq!(plan.len(), 2);
+        assert!(plan.iter().all(|a| a.group.is_none()));
+        assert!(plan_saving_alerts(Some(&few), &few).is_empty());
+    }
+
+    #[test]
+    fn without_a_previous_scan_one_summary_alert_per_cluster() {
+        let many: Vec<WorkloadRecommendation> = (0..60)
+            .map(|i| saving(&format!("w{i:02}"), 500.0 + f64::from(i)))
+            .collect();
+        let plan = plan_saving_alerts(None, &with(many));
+        assert_eq!(plan.len(), 1);
+        let summary = &plan[0];
+        assert_eq!(summary.finding.condition, None);
+        assert_eq!(summary.finding.reason, AlertReason::RightsizingSaving);
+        assert_eq!(
+            summary.finding.message,
+            "60 workloads could shrink their requests by half or more"
+        );
+        let group = summary.group.as_ref().unwrap();
+        assert_eq!(group.total, 60);
+        assert_eq!(group.names.len(), GROUP_NAME_LIMIT);
+        assert_eq!(group.names[0], "shop/w59", "largest saving first");
+        // One saving is still a summary; none is nothing.
+        let one = plan_saving_alerts(None, &with_big_saving());
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].group.as_ref().unwrap().total, 1);
+        assert!(plan_saving_alerts(None, &medium_confidence_saving()).is_empty());
     }
 
     /// Records every alert.
@@ -1289,6 +1464,35 @@ mod tests {
         app.set_alert_monitoring(false);
         store_success(&app, &cluster, savings(&["web", "search"])).await;
         assert_eq!(alerts().len(), 1);
+
+        // After a clear there is no previous scan: one summary for the
+        // cluster, not one alert per workload.
+        app.set_alert_monitoring(true);
+        app.history_clear(HistoryKind::Recommendations, Some(&cluster.id))
+            .unwrap();
+        let names: Vec<String> = (0..12).map(|i| format!("w{i}")).collect();
+        let many: Vec<&str> = names.iter().map(String::as_str).collect();
+        store_success(&app, &cluster, savings(&many)).await;
+        let raised = alerts();
+        assert_eq!(raised.len(), 2, "{raised:?}");
+        let summary = &raised[1].alert;
+        assert_eq!(summary.object.name, "");
+        assert_eq!(summary.count, 1);
+        assert_eq!(summary.group.as_ref().map(|g| g.total), Some(12));
+
+        // Then the cap: 7 new savings raise 5 alerts and one group.
+        let seven: Vec<String> = (0..7).map(|i| format!("n{i}")).collect();
+        let next: Vec<&str> = many
+            .iter()
+            .copied()
+            .chain(seven.iter().map(String::as_str))
+            .collect();
+        store_success(&app, &cluster, savings(&next)).await;
+        let raised = alerts();
+        assert_eq!(raised.len(), 2 + SAVING_ALERTS_PER_SCAN + 1, "{raised:?}");
+        let last = &raised.last().unwrap().alert;
+        assert_eq!(last.condition.as_deref(), Some(SAVING_ALERT_MORE));
+        assert_eq!(last.group.as_ref().map(|g| g.total), Some(2));
     }
 
     #[test]

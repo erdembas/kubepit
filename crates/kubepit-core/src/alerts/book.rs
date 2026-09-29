@@ -221,13 +221,76 @@ impl AlertBook {
             self.by_object.insert(key, alert.id.clone());
             alert
         };
-        self.alerts.push_back(alert.clone());
+        self.push(alert.clone());
+        AlertEvent { alert, fresh: true }
+    }
+
+    /// Record one finding about several objects at once (a recommendation
+    /// scan's summary of its new savings) as a group alert: `object.name`
+    /// is emptied and `group` lists the objects (at most
+    /// [`GROUP_NAME_LIMIT`] names). A group of the same bucket seen within
+    /// [`COOLDOWN_MS`] takes the new group and message and counts the
+    /// repeat instead of raising a new alert.
+    pub fn record_group(
+        &mut self,
+        cluster_id: &str,
+        object: AlertObjectRef,
+        finding: Finding,
+        mut group: AlertGroup,
+        now: i64,
+    ) -> AlertEvent {
+        let object = AlertObjectRef {
+            name: String::new(),
+            ..object
+        };
+        group.names.truncate(GROUP_NAME_LIMIT);
+        let bucket = BucketKey {
+            cluster: cluster_id.to_string(),
+            kind: object.kind.clone(),
+            namespace: object.namespace.clone(),
+            reason: finding.reason,
+            condition: finding.condition.clone(),
+        };
+        if let Some(id) = self.groups.get(&bucket).cloned() {
+            if let Some(alert) = self
+                .get_mut(&id)
+                .filter(|a| now - a.last_seen < COOLDOWN_MS)
+            {
+                alert.count += 1;
+                alert.last_seen = now;
+                alert.message = finding.message;
+                alert.group = Some(group);
+                return AlertEvent {
+                    alert: alert.clone(),
+                    fresh: false,
+                };
+            }
+        }
+        let mut alert = new_alert(
+            cluster_id,
+            object,
+            Finding {
+                container: None,
+                ..finding
+            },
+            now,
+            Some(group),
+        );
+        // One occurrence, however many objects it names.
+        alert.count = 1;
+        self.groups.insert(bucket, alert.id.clone());
+        self.push(alert.clone());
+        AlertEvent { alert, fresh: true }
+    }
+
+    /// Append `alert`, dropping the oldest beyond the limit.
+    fn push(&mut self, alert: Alert) {
+        self.alerts.push_back(alert);
         while self.alerts.len() > self.limit {
             if let Some(old) = self.alerts.pop_front() {
                 self.unindex(&old);
             }
         }
-        AlertEvent { alert, fresh: true }
     }
 
     /// Forget the index entry pointing at `alert` (not a newer one).
@@ -553,5 +616,63 @@ mod tests {
         assert_eq!(book.clear(None), 1);
         assert!(book.is_empty());
         assert!(book.record("c1", pod("a", "x"), crash(""), T0 + 30).fresh);
+    }
+
+    #[test]
+    fn preset_groups_are_one_entry_and_merge_within_the_cooldown() {
+        let mut book = AlertBook::with_limit(3);
+        let object = AlertObjectRef {
+            group: String::new(),
+            version: String::new(),
+            kind: "Workload".into(),
+            namespace: None,
+            name: "ignored".into(),
+        };
+        let finding = |message: &str| Finding {
+            reason: AlertReason::RightsizingSaving,
+            container: Some("dropped".into()),
+            condition: None,
+            message: message.into(),
+        };
+        let group = |n: u32| AlertGroup {
+            total: n,
+            names: (0..n).map(|i| format!("shop/w{i}")).collect(),
+        };
+        let first = book.record_group("c1", object.clone(), finding("a"), group(80), T0);
+        assert!(first.fresh);
+        let alert = &first.alert;
+        assert_eq!((alert.object.name.as_str(), alert.count), ("", 1));
+        assert_eq!(alert.container, None);
+        let listed = alert.group.as_ref().unwrap();
+        assert_eq!((listed.total, listed.names.len()), (80, GROUP_NAME_LIMIT));
+
+        let again = book.record_group("c1", object.clone(), finding("b"), group(2), T0 + 1);
+        assert!(!again.fresh);
+        assert_eq!(again.alert.id, first.alert.id);
+        assert_eq!(again.alert.count, 2);
+        assert_eq!(again.alert.message, "b");
+        assert_eq!(again.alert.group.as_ref().unwrap().total, 2);
+        assert_eq!(book.len(), 1);
+
+        // Another condition is another entry; the limit still applies.
+        let more = Finding {
+            condition: Some("more".into()),
+            ..finding("c")
+        };
+        assert!(
+            book.record_group("c1", object.clone(), more, group(3), T0 + 2)
+                .fresh
+        );
+        assert!(
+            book.record_group("c2", object.clone(), finding("d"), group(1), T0)
+                .fresh
+        );
+        assert!(book.record("c1", pod("a", "x"), crash(""), T0 + 3).fresh);
+        assert_eq!(book.len(), 3);
+        // The first group was dropped: a new one is fresh.
+        assert!(
+            book.record_group("c1", object, finding("e"), group(1), T0 + 4)
+                .fresh
+        );
     }
 }

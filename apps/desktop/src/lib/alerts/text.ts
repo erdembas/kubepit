@@ -93,12 +93,26 @@ function groupTitle(alert: Alert, count: number): string {
         values,
       );
     case 'RightsizingSaving':
-      return i18n.plural(
-        '{count} workload requests far more than it uses in {namespace}',
-        '{count} workloads request far more than they use in {namespace}',
-        count,
-        values,
-      );
+      // A burst in one namespace, or a scan's own group across the cluster:
+      // its summary, or the savings beyond the per-scan cap (`more`).
+      if (alert.object.namespace)
+        return i18n.plural(
+          '{count} workload requests far more than it uses in {namespace}',
+          '{count} workloads request far more than they use in {namespace}',
+          count,
+          values,
+        );
+      return alert.condition === 'more'
+        ? i18n.plural(
+            '{count} more workload requests far more than it uses',
+            '{count} more workloads request far more than they use',
+            count,
+          )
+        : i18n.plural(
+            '{count} workload requests far more than it uses',
+            '{count} workloads request far more than they use',
+            count,
+          );
   }
 }
 

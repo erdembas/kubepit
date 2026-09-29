@@ -43,7 +43,7 @@ import {
   workloadCount,
 } from './fixtures/recommendations';
 import { DAY } from './fixtures/util';
-import { raiseAlert } from './alerts';
+import { raiseAlert, raiseAlertGroup } from './alerts';
 import { provideRecommendationHistory } from './history';
 import { handlers, register, type MockArgs } from './registry';
 
@@ -449,6 +449,38 @@ export function newSavings(
   return next.workloads.filter((w) => healthVerdict(w) === 'over' && !before.has(key(w)));
 }
 
+/** Like `scan.rs`: new savings alerted one by one per scan; the rest share one group alert. */
+export const SAVING_ALERTS_PER_SCAN = 5;
+const GROUP_NAME_LIMIT = 50;
+
+export type SavingAlertPlan =
+  | { kind: 'one'; workload: WorkloadRecommendation }
+  | { kind: 'group'; more: boolean; workloads: WorkloadRecommendation[] };
+
+/**
+ * Like `scan.rs::plan_saving_alerts`, largest saving first: without a
+ * previous run one summary for the cluster; otherwise the five largest one
+ * by one and a group for the rest.
+ */
+export function planSavingAlerts(
+  previous: RightsizingReport | null,
+  next: RightsizingReport,
+): SavingAlertPlan[] {
+  const found = newSavings(previous, next).sort(
+    (a, b) =>
+      a.monthly_delta - b.monthly_delta ||
+      `${a.namespace}/${a.kind}/${a.name}`.localeCompare(`${b.namespace}/${b.kind}/${b.name}`),
+  );
+  if (!found.length) return [];
+  if (!previous) return [{ kind: 'group', more: false, workloads: found }];
+  const plan: SavingAlertPlan[] = found
+    .slice(0, SAVING_ALERTS_PER_SCAN)
+    .map((workload) => ({ kind: 'one', workload }));
+  const rest = found.slice(SAVING_ALERTS_PER_SCAN);
+  if (rest.length) plan.push({ kind: 'group', more: true, workloads: rest });
+  return plan;
+}
+
 /** A successful scan's alerts (`Settings.recommendations.alerts`; the alert filters apply). */
 function alertNewSavings(
   clusterId: string,
@@ -456,7 +488,28 @@ function alertNewSavings(
   next: RightsizingReport,
 ) {
   if (!settings()?.alerts) return;
-  for (const w of newSavings(previous, next)) {
+  for (const item of planSavingAlerts(previous, next)) {
+    if (item.kind === 'group') {
+      const total = item.workloads.length;
+      raiseAlertGroup(
+        clusterId,
+        { group: '', version: '', kind: 'Workload', namespace: null, name: '' },
+        {
+          reason: 'RightsizingSaving',
+          container: null,
+          condition: item.more ? 'more' : null,
+          message: item.more
+            ? `${total} more workloads could shrink their requests by half or more`
+            : `${total} workloads could shrink their requests by half or more`,
+        },
+        {
+          total,
+          names: item.workloads.slice(0, GROUP_NAME_LIMIT).map((w) => `${w.namespace}/${w.name}`),
+        },
+      );
+      continue;
+    }
+    const w = item.workload;
     const { group, version } = workloadGvk(w.kind);
     const share = Math.min(100, Math.max(0, (-w.monthly_delta / w.monthly_current) * 100));
     raiseAlert(

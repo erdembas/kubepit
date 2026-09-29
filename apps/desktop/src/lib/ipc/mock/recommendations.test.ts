@@ -8,6 +8,7 @@ import type {
   RecommendationScanStatus,
   RightsizingReport,
   Settings,
+  WorkloadRecommendation,
   WorkloadUsageHistory,
 } from '@/types';
 
@@ -21,6 +22,8 @@ type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>
 let invoke: Invoke;
 let listen: typeof import('./bus').mockListen;
 let newSavings: typeof import('./recommendations').newSavings;
+let planSavingAlerts: typeof import('./recommendations').planSavingAlerts;
+let SAVING_ALERTS_PER_SCAN: number;
 
 beforeAll(async () => {
   vi.useFakeTimers({ now: new Date('2026-09-28T10:30:00Z') });
@@ -29,7 +32,7 @@ beforeAll(async () => {
   const mock = await import('./index');
   invoke = (command, args = {}) => mock.mockInvoke(command, args);
   listen = (await import('./bus')).mockListen;
-  newSavings = (await import('./recommendations')).newSavings;
+  ({ newSavings, planSavingAlerts, SAVING_ALERTS_PER_SCAN } = await import('./recommendations'));
 });
 
 afterAll(() => {
@@ -275,27 +278,78 @@ describe('demo recommendation scans', () => {
     await scan();
     expect(saving).toEqual([]);
 
-    // After a clear there is no previous run: every large saving is new, once.
+    // After a clear there is no previous run: one summary for the cluster.
     await invoke('history_clear', { kind: 'recommendations', clusterId: 'c-dev' });
     await scan();
     const latest = await settle(
       invoke<RecommendationLatest>('recommendations_latest', { clusterId: 'c-dev', runId: null }),
     );
-    const expected = newSavings(null, latest.scan!.report).map((w) => w.name);
+    const expected = newSavings(null, latest.scan!.report).map((w) => `${w.namespace}/${w.name}`);
     expect(expected.length).toBeGreaterThan(0);
-    const names = new Set(
-      saving.flatMap((n) => (n.alert.group ? n.alert.group.names : [n.alert.object.name])),
+    expect(saving.length).toBe(1);
+    const summary = saving[0]!.alert;
+    expect(summary.object).toMatchObject({ kind: 'Workload', namespace: null, name: '' });
+    expect(summary.condition).toBeNull();
+    expect(summary.count).toBe(1);
+    expect(summary.group!.total).toBe(expected.length);
+    expect([...summary.group!.names].sort()).toEqual([...expected].sort());
+    expect(summary.message).toBe(
+      `${expected.length} workloads could shrink their requests by half or more`,
     );
-    expect([...names].sort()).toEqual([...expected].sort());
-    const single = saving.find((n) => !n.alert.group)!;
-    expect(single.alert.message).toMatch(/^Requests could shrink by \d+%$/);
-    expect(single.alert.object.group).toBe('apps');
-    const count = saving.length;
     await scan();
-    expect(saving.length).toBe(count);
+    expect(saving.length).toBe(1);
     stop();
     await invoke('settings_set', { settings });
     await settle(invoke('cluster_disconnect', { id: 'c-dev' }));
+  });
+
+  it('caps the saving alerts of a scan at five plus one group', async () => {
+    const latest = await settle(
+      invoke<RecommendationLatest>('recommendations_latest', {
+        clusterId: 'c-prod-eu',
+        runId: null,
+      }),
+    );
+    const report = latest.scan!.report;
+    const base = report.workloads.find((w) => w.monthly_current > 0)!;
+    const big = (name: string, delta: number): WorkloadRecommendation => ({
+      ...base,
+      name,
+      verdict: 'over',
+      confidence: 'high',
+      changed: true,
+      monthly_current: 1000,
+      monthly_delta: -delta,
+      containers: base.containers.map((c) => ({
+        ...c,
+        current: { ...c.current, cpu_request: 2000 },
+        recommended: { ...c.recommended, cpu_request: 200 },
+      })),
+    });
+    const previous = { ...report, workloads: [big('old', 900)] };
+    const deltas = [510, 800, 600, 990, 700, 520, 950, 500];
+    const next = {
+      ...report,
+      workloads: [big('old', 900), ...deltas.map((d, i) => big(`w${i}`, d))],
+    };
+    const plan = planSavingAlerts(previous, next);
+    expect(plan.length).toBe(SAVING_ALERTS_PER_SCAN + 1);
+    expect(plan.slice(0, 5).map((p) => (p.kind === 'one' ? p.workload.name : ''))).toEqual([
+      'w3',
+      'w6',
+      'w1',
+      'w4',
+      'w2',
+    ]);
+    const rest = plan[5]!;
+    expect(rest.kind === 'group' && rest.more && rest.workloads.map((w) => w.name)).toEqual([
+      'w5',
+      'w0',
+      'w7',
+    ]);
+    const first = planSavingAlerts(null, next);
+    expect(first.length).toBe(1);
+    expect(first[0]!.kind === 'group' && !first[0]!.more && first[0]!.workloads.length).toBe(9);
   });
 
   it('charts usage with gaps and refuses odd pod names', async () => {

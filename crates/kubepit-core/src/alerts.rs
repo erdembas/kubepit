@@ -132,7 +132,7 @@ impl AlertCenter {
         object: AlertObjectRef,
         finding: Finding,
     ) -> bool {
-        if !self.monitoring() || !self.settings.read().monitors(cluster_id) {
+        if !self.may_raise(cluster_id) {
             return false;
         }
         record_finding(
@@ -143,6 +143,38 @@ impl AlertCenter {
             object,
             finding,
         )
+    }
+
+    /// [`Self::raise`] for one finding about several objects (a scan's
+    /// summary of its new savings): one group alert
+    /// ([`AlertBook::record_group`]) under the same conditions and filters.
+    pub fn raise_group(
+        &self,
+        sink: &dyn EventSink,
+        cluster_id: &str,
+        object: AlertObjectRef,
+        finding: Finding,
+        group: AlertGroup,
+    ) -> bool {
+        if !self.may_raise(cluster_id)
+            || !self
+                .settings
+                .read()
+                .records(finding.reason, object.namespace.as_deref())
+        {
+            return false;
+        }
+        let event = self
+            .book
+            .lock()
+            .record_group(cluster_id, object, finding, group, now_millis());
+        sink.alert(&event);
+        true
+    }
+
+    /// Monitoring is on in this process and alerts are enabled for `cluster_id`.
+    fn may_raise(&self, cluster_id: &str) -> bool {
+        self.monitoring() && self.settings.read().monitors(cluster_id)
     }
 }
 
