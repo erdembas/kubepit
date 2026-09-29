@@ -41,6 +41,8 @@ interface FileContextMenuProps {
  *  - Esc closes
  *  - Click outside closes
  *  - Click on an item closes (after firing `onClick`)
+ *  - The first enabled item takes focus on open; ↑/↓, Home and End move
+ *    between items, Tab closes, and focus returns to where it was
  *
  * Auto-flip: if the natural position would overflow the viewport on the
  * right or bottom, the menu shifts left / up so it always stays fully
@@ -84,6 +86,40 @@ export function FileContextMenu({ x, y, items, onClose }: FileContextMenuProps) 
     };
   }, [onClose]);
 
+  // Keyboard users (Shift+F10, a "…" button) land inside the menu at once and
+  // get their focus back when it closes, unless something else took it (a
+  // dialog the item opened).
+  useEffect(() => {
+    const menu = ref.current;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    menuItems(menu)[0]?.focus({ preventScroll: true });
+    return () => {
+      const active = document.activeElement;
+      const lost = !active || active === document.body || !!menu?.contains(active);
+      if (lost && previous?.isConnected) previous.focus({ preventScroll: true });
+    };
+  }, []);
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const items = menuItems(ref.current);
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      onClose();
+      return;
+    }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key) || !items.length) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const current = items.findIndex((item) => item === document.activeElement);
+    const next =
+      e.key === 'Home'
+        ? 0
+        : e.key === 'End'
+          ? items.length - 1
+          : (current + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+    items[next]?.focus({ preventScroll: true });
+  };
+
   return createPortal(
     <div
       ref={ref}
@@ -91,6 +127,7 @@ export function FileContextMenu({ x, y, items, onClose }: FileContextMenuProps) 
       className="border-border bg-surface-overlay fixed z-10001 min-w-[200px] rounded-md border py-1 shadow-[0_12px_40px_rgba(0,0,0,0.45)]"
       style={{ left: pos.left, top: pos.top }}
       onContextMenu={(e) => e.preventDefault()}
+      onKeyDown={onKeyDown}
     >
       {items.map((entry) => {
         if ('separator' in entry) {
@@ -114,8 +151,8 @@ export function FileContextMenu({ x, y, items, onClose }: FileContextMenuProps) 
               entry.disabled
                 ? 'text-fg/30 cursor-not-allowed'
                 : isDanger
-                  ? 'text-rose-400 hover:bg-rose-400/10'
-                  : 'text-fg hover:bg-fg/8',
+                  ? 'text-rose-400 hover:bg-rose-400/10 focus-visible:bg-rose-400/10'
+                  : 'text-fg hover:bg-fg/8 focus-visible:bg-fg/8',
             )}
           >
             {entry.icon && (
@@ -138,4 +175,10 @@ export function FileContextMenu({ x, y, items, onClose }: FileContextMenuProps) 
     </div>,
     document.body,
   );
+}
+
+function menuItems(menu: HTMLElement | null): HTMLButtonElement[] {
+  return menu
+    ? [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')]
+    : [];
 }

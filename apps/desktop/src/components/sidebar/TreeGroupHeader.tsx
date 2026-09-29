@@ -37,7 +37,7 @@ export function TreeGroupHeader({
           type="button"
           aria-expanded={!collapsed}
           onClick={onToggle}
-          className="text-fg-dim hover:text-fg-muted flex min-w-0 flex-1 items-center gap-2 rounded-md py-1.5 pl-2 text-left transition-colors outline-none"
+          className="text-fg-dim hover:text-fg-muted focus-visible:bg-fg/5 focus-visible:text-fg-muted flex min-w-0 flex-1 items-center gap-2 rounded-md py-1.5 pl-2 text-left transition-colors outline-none"
         >
           <ChevronDown
             className={cn('h-3 w-3 shrink-0 transition-transform', collapsed && '-rotate-90')}

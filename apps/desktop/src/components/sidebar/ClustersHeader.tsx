@@ -19,15 +19,20 @@ export function ClustersHeader({
     (s) => Object.values(s.statuses).filter((status) => status.state === 'error').length,
   );
   const setGroupBy = useAppStore((s) => s.setSidebarGroupBy);
+  const failingTitle = i18n.plural(
+    '{count} cluster is failing. Group clusters by connection status',
+    '{count} clusters are failing. Group clusters by connection status',
+    errorCount,
+  );
 
   return (
     <div className="flex h-8 items-center gap-1.5 pr-2 pl-4">
       <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
-        <span className="text-fg-dim shrink-0 text-[10.5px] font-semibold tracking-[0.12em] uppercase">
+        <span className="text-fg-dim min-w-0 truncate text-[10.5px] font-semibold tracking-[0.12em] uppercase">
           {i18n.t('Clusters')}
         </span>
         <span
-          className="text-fg-dim text-[10px] tabular-nums"
+          className="text-fg-dim shrink-0 text-[10px] tabular-nums"
           title={i18n.t('{running} running · {count} total', {
             running: connectedCount,
             count: clustersCount,
@@ -43,16 +48,16 @@ export function ClustersHeader({
           )}
         </span>
         {errorCount > 0 && (
+          // Icon and count only, so the chip survives the narrowest sidebar.
           <button
             type="button"
             onClick={() => setGroupBy('status')}
-            title={i18n.t('Group clusters by connection status')}
-            className="bg-status-error/15 text-status-error hover:bg-status-error/25 rounded-app-sm inline-flex min-w-0 items-center gap-1 truncate px-1.5 text-[10px] font-medium whitespace-nowrap tabular-nums transition"
+            title={failingTitle}
+            aria-label={failingTitle}
+            className="bg-status-error/15 text-status-error hover:bg-status-error/25 focus-visible:bg-status-error/25 rounded-app-sm inline-flex shrink-0 items-center gap-1 px-1.5 text-[10px] font-medium tabular-nums transition"
           >
-            {i18n.rich('{icon}{errorCount} failing', {
-              icon: <AlertTriangle size={9} strokeWidth={2.2} />,
-              errorCount,
-            })}
+            <AlertTriangle size={9} strokeWidth={2.2} aria-hidden />
+            {i18n.number(errorCount)}
           </button>
         )}
       </div>

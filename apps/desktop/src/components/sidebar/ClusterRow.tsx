@@ -60,6 +60,9 @@ export function ClusterRow({
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [moving, setMoving] = useState(false);
   const moreRef = useRef<HTMLButtonElement | null>(null);
+  const menuWasOpen = useRef(false);
+  // Keep the row lit and its actions shown while one of its menus is open.
+  const active = menu !== null || moving;
 
   const detail = clusterDetail(cluster, status, overview);
   const usage = live ? clusterUsage(overview) : null;
@@ -131,6 +134,7 @@ export function ClusterRow({
     status?.error ?? null,
     cluster.context !== cluster.name ? cluster.context : null,
     status?.server ?? null,
+    cluster.tags.length ? cluster.tags.map((tag) => `#${tag}`).join(' ') : null,
   ]
     .filter(Boolean)
     .join('\n');
@@ -170,9 +174,13 @@ export function ClusterRow({
           }
         }}
         title={tooltip || undefined}
+        // `group-*` so the row stays lit while the pointer is over its actions.
         className={cn(
           'relative flex w-full items-start gap-2 rounded-md py-[5px] pr-2 pl-2 text-left transition-colors',
-          selected ? 'bg-fg/7 text-fg' : 'text-fg-muted hover:bg-fg/4 hover:text-fg',
+          selected
+            ? 'bg-fg/7 text-fg group-has-[:focus-visible]:bg-fg/10'
+            : 'text-fg-muted group-hover:bg-fg/4 group-hover:text-fg group-has-[:focus-visible]:bg-fg/5 group-has-[:focus-visible]:text-fg',
+          active && !selected && 'bg-fg/4 text-fg',
         )}
       >
         {selected && (
@@ -185,7 +193,13 @@ export function ClusterRow({
           <ClusterGlyph cluster={cluster} state={state} dim={!live && !selected} />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="flex h-[18px] min-w-0 items-center gap-1.5">
+          {/* Room for the hover actions, so they never cover the name. */}
+          <span
+            className={cn(
+              'flex h-[18px] min-w-0 items-center gap-1.5 group-hover:pr-11 group-has-[:focus-visible]:pr-11',
+              active && 'pr-11',
+            )}
+          >
             <span
               className={cn(
                 'min-w-0 truncate text-[12.5px] leading-[18px]',
@@ -200,8 +214,9 @@ export function ClusterRow({
             {env && (
               <span
                 className={cn(
-                  'bg-fg/4 ml-auto shrink-0 rounded-md px-1.5 py-0.5 text-[9px] leading-none font-medium tracking-wide group-focus-within:invisible group-hover:invisible',
+                  'bg-fg/4 ml-auto shrink-0 rounded-md px-1.5 py-0.5 text-[9px] leading-none font-medium tracking-wide group-hover:hidden group-has-[:focus-visible]:hidden',
                   env.color,
+                  active && 'hidden',
                 )}
               >
                 {env.short}
@@ -227,7 +242,12 @@ export function ClusterRow({
         </span>
       </button>
 
-      <div className="invisible absolute top-px right-1 flex items-center group-focus-within:visible group-hover:visible">
+      <div
+        className={cn(
+          'invisible absolute top-px right-1 flex items-center group-hover:visible group-has-[:focus-visible]:visible',
+          active && 'visible',
+        )}
+      >
         {live ? (
           <IconButton
             label={i18n.t('Open cluster terminal')}
@@ -251,7 +271,14 @@ export function ClusterRow({
           size="xs"
           aria-haspopup="menu"
           aria-expanded={!!menu}
-          onClick={openMenuFromButton}
+          // The menu closes on this very mousedown; a click then must not reopen it.
+          onPointerDown={() => {
+            menuWasOpen.current = menu !== null;
+          }}
+          onClick={() => {
+            if (menuWasOpen.current) menuWasOpen.current = false;
+            else openMenuFromButton();
+          }}
         />
       </div>
 

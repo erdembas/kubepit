@@ -35,7 +35,9 @@ export function CollapsedClusterList({
             onClick={() => onSelect(cluster.id)}
             className={cn(
               'relative flex flex-col items-center gap-1 rounded-md px-0.5 pt-1.5 pb-1 transition-colors',
-              selected ? 'bg-fg/7 text-fg' : 'text-fg-muted hover:bg-fg/4 hover:text-fg',
+              selected
+                ? 'bg-fg/7 text-fg focus-visible:bg-fg/10'
+                : 'text-fg-muted hover:bg-fg/4 hover:text-fg focus-visible:bg-fg/5 focus-visible:text-fg',
             )}
           >
             {selected && (

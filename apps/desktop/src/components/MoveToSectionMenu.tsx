@@ -74,16 +74,57 @@ export function MoveToSectionMenu({
     }
   }, [creating]);
 
+  // Once the popover is placed, focus the current section so the keyboard can
+  // pick another one; remember where focus was to give it back on close.
+  const restoreRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const popover = popoverRef.current;
+    if (!open || !pos || !popover || popover.contains(document.activeElement)) return;
+    restoreRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const rows = pickerRows(popover);
+    (rows.find((row) => row.getAttribute('aria-checked') === 'true') ?? rows[0])?.focus({
+      preventScroll: true,
+    });
+  }, [open, pos, popoverRef]);
+
+  /** Close after a keyboard or menu choice, returning focus to where it was. */
+  const closeAndRestore = () => {
+    setOpen(false);
+    const previous = restoreRef.current;
+    restoreRef.current = null;
+    if (previous?.isConnected) previous.focus({ preventScroll: true });
+  };
+
   const assign = (sectionId: SectionId | null) => {
     assignCluster(itemId, sectionId);
-    setOpen(false);
+    closeAndRestore();
   };
 
   const commitCreate = () => {
     const trimmed = name.trim();
     if (!trimmed) return;
     createVisibleSection(trimmed, color, { kind: 'cluster', id: itemId });
-    setOpen(false);
+    closeAndRestore();
+  };
+
+  const onPopoverKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.defaultPrevented) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeAndRestore();
+      return;
+    }
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    if ((e.target as HTMLElement).closest('input')) return;
+    const rows = pickerRows(e.currentTarget);
+    if (!rows.length) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const current = rows.findIndex((row) => row === document.activeElement);
+    const step = e.key === 'ArrowDown' ? 1 : -1;
+    rows[(current + step + rows.length) % rows.length]?.focus({ preventScroll: true });
   };
 
   const popover = open && pos && (
@@ -92,6 +133,7 @@ export function MoveToSectionMenu({
       role="menu"
       style={{ position: 'fixed', top: pos.top, left: pos.left, width: POPOVER_W }}
       className="border-border bg-surface-raised rounded-app-lg animate-fade-in z-[60] overflow-hidden border shadow-[0_20px_60px_rgba(0,0,0,0.55)]"
+      onKeyDown={onPopoverKeyDown}
     >
       <div className="px-3 pt-2.5 pb-1.5">
         <span className="text-fg-dim text-[9.5px] font-semibold tracking-[0.14em] uppercase">
@@ -184,8 +226,9 @@ export function MoveToSectionMenu({
         ) : (
           <button
             type="button"
+            data-picker-row=""
             onClick={() => setCreating(true)}
-            className="text-fg-muted hover:bg-surface-overlay hover:text-fg flex w-full items-center gap-2 px-3 py-2 text-left text-[11.5px] transition"
+            className="text-fg-muted hover:bg-surface-overlay hover:text-fg focus-visible:bg-surface-overlay focus-visible:text-fg flex w-full items-center gap-2 px-3 py-2 text-left text-[11.5px] transition"
           >
             {i18n.rich('{value1}New section…', { value1: <FolderPlus className="h-3 w-3" /> })}
           </button>
@@ -239,10 +282,13 @@ function PickerRow({
       type="button"
       role="menuitemradio"
       aria-checked={checked}
+      data-picker-row=""
       onClick={onClick}
       className={cn(
         'rounded-app-sm group flex w-full items-center gap-2 px-2 py-1.5 text-left text-[11.5px] transition',
-        checked ? 'bg-accent/10 text-fg' : 'text-fg-muted hover:bg-surface-overlay hover:text-fg',
+        checked
+          ? 'bg-accent/10 text-fg focus-visible:bg-accent/20'
+          : 'text-fg-muted hover:bg-surface-overlay hover:text-fg focus-visible:bg-surface-overlay focus-visible:text-fg',
       )}
     >
       {leading}
@@ -254,4 +300,8 @@ function PickerRow({
       )}
     </button>
   );
+}
+
+function pickerRows(popover: HTMLElement): HTMLButtonElement[] {
+  return [...popover.querySelectorAll<HTMLButtonElement>('[data-picker-row]')];
 }

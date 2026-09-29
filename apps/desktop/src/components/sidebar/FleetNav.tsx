@@ -113,12 +113,18 @@ function FleetNavRow({
       <button
         type="button"
         onClick={item.run}
-        title={item.hint ? `${item.label} (${item.hint})` : item.label}
+        title={
+          item.hint
+            ? i18n.t('{label} ({shortcut})', { label: item.label, shortcut: item.hint })
+            : item.label
+        }
         aria-label={item.label}
         aria-current={active ? 'page' : undefined}
         className={cn(
           'relative flex h-8 w-8 items-center justify-center rounded-md transition-colors',
-          active ? 'bg-fg/7 text-accent' : 'text-fg-dim hover:bg-fg/4 hover:text-fg',
+          active
+            ? 'bg-fg/7 text-accent focus-visible:bg-fg/10'
+            : 'text-fg-dim hover:bg-fg/4 hover:text-fg focus-visible:bg-fg/5 focus-visible:text-fg',
         )}
       >
         <Icon className="h-3.5 w-3.5" />
@@ -135,7 +141,9 @@ function FleetNavRow({
       aria-current={active ? 'page' : undefined}
       className={cn(
         'group/fleet relative flex w-full items-center gap-2 rounded-md py-[5px] pr-2 pl-2.5 text-left text-[12.5px] transition-colors',
-        active ? 'bg-fg/7 text-fg font-medium' : 'text-fg-muted hover:bg-fg/4 hover:text-fg',
+        active
+          ? 'bg-fg/7 text-fg focus-visible:bg-fg/10 font-medium'
+          : 'text-fg-muted hover:bg-fg/4 hover:text-fg focus-visible:bg-fg/5 focus-visible:text-fg',
       )}
     >
       {active && (
@@ -157,7 +165,7 @@ function FleetNavRow({
         </span>
       )}
       {item.hint && !item.count && (
-        <span className="text-fg-dim font-mono text-[10px] font-normal opacity-0 transition-opacity group-hover/fleet:opacity-100">
+        <span className="text-fg-dim font-mono text-[10px] font-normal opacity-0 transition-opacity group-hover/fleet:opacity-100 group-focus-visible/fleet:opacity-100">
           {item.hint}
         </span>
       )}
