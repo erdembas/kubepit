@@ -3,7 +3,14 @@ import { ipc } from '@/lib/ipc';
 import { kindKey } from '@/lib/kube/catalog';
 import { perfNow, recordWatchCommit } from '@/lib/perf/probe';
 import type { ClusterId, Gvk, KubeObject, WatchBatch } from '@/types';
-import { applyBatch, batchFlush, isForbidden, routeBatch } from './watchBatch';
+import {
+  applyBatch,
+  ApplyRetry,
+  batchFlush,
+  isForbidden,
+  routeBatch,
+  type BatchRoute,
+} from './watchBatch';
 
 /**
  * Shared, ref-counted resource watches. Every table, mini-table and overview
@@ -66,6 +73,11 @@ class WatchEntry {
   private applyStart = 0;
   /** Perf probe: time spent applying the batches since the last flush. */
   private applyMs = 0;
+  /** Restarts after failed applies, with backoff, then gives up. */
+  private readonly retry = new ApplyRetry(
+    () => this.relaunch(),
+    (message) => this.update({ status: 'error', error: message, forbidden: false }),
+  );
   snapshot: WatchSnapshot = EMPTY;
 
   constructor(
@@ -87,7 +99,13 @@ class WatchEntry {
     };
   }
 
+  /** Retry button, header refresh: start over, failed applies forgotten. */
   restart() {
+    this.retry.reset();
+    this.relaunch();
+  }
+
+  private relaunch() {
     this.stop();
     if (this.listeners.size) this.start();
   }
@@ -95,10 +113,19 @@ class WatchEntry {
   private start() {
     const generation = ++this.generation;
     this.update({ status: 'loading', error: null, forbidden: false, synced: false });
-    const route = {
-      apply: (batch: WatchBatch) => this.apply(batch),
+    const route: BatchRoute = {
+      apply: (batch) => {
+        this.apply(batch);
+        this.retry.succeeded();
+      },
       ack: acknowledge,
-      restart: () => this.restart(),
+      restart: () => this.relaunch(),
+      // Stop at once (later batches would land on half-applied rows), then
+      // restart after a backoff, or give up.
+      failed: (error) => {
+        this.stop();
+        this.retry.failed(error);
+      },
     };
     ipc
       .resourceWatch(this.clusterId, this.gvk, this.namespaces, (batch) =>
@@ -117,6 +144,7 @@ class WatchEntry {
 
   private stop() {
     this.generation++;
+    this.retry.cancel();
     if (this.frame !== null) {
       cancelAnimationFrame(this.frame);
       this.frame = null;

@@ -1,6 +1,16 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KubeObject, WatchBatch } from '@/types';
-import { applyBatch, batchFlush, batchPatch, routeBatch } from './watchBatch';
+import {
+  APPLY_FAILURE_LIMIT,
+  APPLY_RETRY_BASE_MS,
+  APPLY_RETRY_MAX_MS,
+  applyBatch,
+  ApplyRetry,
+  applyRetryDelay,
+  batchFlush,
+  batchPatch,
+  routeBatch,
+} from './watchBatch';
 import type { WatchSnapshot } from './watchCache';
 
 const pod = (uid: string, namespace = 'a') =>
@@ -27,6 +37,7 @@ describe('routeBatch', () => {
         apply: (b: WatchBatch) => void calls.push(`apply ${b.seq}`),
         ack: (b: WatchBatch) => void calls.push(`ack ${b.seq}`),
         restart: () => void calls.push('restart'),
+        failed: (error: unknown) => void calls.push(`failed ${(error as Error).message}`),
       },
     };
   };
@@ -41,7 +52,7 @@ describe('routeBatch', () => {
     routeBatch(batch({ seq: 7 }), false, r);
     expect(calls).toEqual(['ack 7']);
   });
-  it('never throws: a failed apply is reported, acked and restarts the watch', () => {
+  it('never throws: a failed apply is reported, acked, then handed to `failed`', () => {
     const { calls, route: r } = route();
     const failing = {
       ...r,
@@ -52,7 +63,7 @@ describe('routeBatch', () => {
     const report = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       expect(() => routeBatch(batch({ seq: 2 }), true, failing)).not.toThrow();
-      expect(calls).toEqual(['ack 2', 'restart']);
+      expect(calls).toEqual(['ack 2', 'failed boom']);
       expect(report).toHaveBeenCalledOnce();
     } finally {
       report.mockRestore();
@@ -63,6 +74,76 @@ describe('routeBatch', () => {
     routeBatch(batch({ seq: 5, stopped: true }), true, r);
     routeBatch(batch({ seq: 5, stopped: true }), false, r);
     expect(calls).toEqual(['restart']);
+  });
+});
+
+describe('ApplyRetry', () => {
+  const setup = () => {
+    const events: string[] = [];
+    const retry = new ApplyRetry(
+      () => void events.push('restart'),
+      (message) => void events.push(`error: ${message}`),
+    );
+    return { events, retry };
+  };
+
+  beforeEach(() => void vi.useFakeTimers());
+  afterEach(() => void vi.useRealTimers());
+
+  it('backs off 1 s, doubling, capped at 30 s', () => {
+    expect([1, 2, 3, 4, 5, 6, 7, 40].map(applyRetryDelay)).toEqual([
+      APPLY_RETRY_BASE_MS,
+      2_000,
+      4_000,
+      8_000,
+      16_000,
+      APPLY_RETRY_MAX_MS,
+      APPLY_RETRY_MAX_MS,
+      APPLY_RETRY_MAX_MS,
+    ]);
+  });
+  it('restarts after the backoff and gives up after 3 consecutive failures', () => {
+    const { events, retry } = setup();
+    retry.failed(new Error('boom'));
+    vi.advanceTimersByTime(999);
+    expect(events).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(events).toEqual(['restart']);
+    retry.failed(new Error('boom'));
+    vi.advanceTimersByTime(1_999);
+    expect(events).toEqual(['restart']);
+    vi.advanceTimersByTime(1);
+    expect(events).toEqual(['restart', 'restart']);
+    expect(APPLY_FAILURE_LIMIT).toBe(3);
+    retry.failed(new Error('boom'));
+    expect(events.at(-1)).toBe('error: Updates to this list could not be applied: boom');
+    vi.advanceTimersByTime(60_000);
+    expect(events).toHaveLength(3);
+  });
+  it('a clean apply resets the count, and so does Retry', () => {
+    const { events, retry } = setup();
+    retry.failed(new Error('a'));
+    vi.advanceTimersByTime(1_000);
+    retry.failed(new Error('b'));
+    vi.advanceTimersByTime(2_000);
+    retry.succeeded();
+    retry.failed(new Error('c'));
+    vi.advanceTimersByTime(1_000);
+    expect(events).toEqual(['restart', 'restart', 'restart']);
+    retry.failed(new Error('d'));
+    retry.failed(new Error('e'));
+    expect(events.at(-1)).toMatch(/^error: /);
+    retry.reset();
+    retry.failed(new Error('f'));
+    vi.advanceTimersByTime(1_000);
+    expect(events.at(-1)).toBe('restart');
+  });
+  it('a stopped watch cancels its pending restart', () => {
+    const { events, retry } = setup();
+    retry.failed(new Error('boom'));
+    retry.cancel();
+    vi.advanceTimersByTime(60_000);
+    expect(events).toEqual([]);
   });
 });
 

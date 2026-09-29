@@ -117,7 +117,12 @@ localStorage (`kubepit.workbench.v1`, `kubepit.views.v1`,
   acked, including a superseded watch's (a restart or unsubscribe raced
   it). `routeBatch` never throws: a Tauri channel whose `onmessage` throws
   delivers nothing after that message, so a batch that fails to apply is
-  logged, acked, and restarts the watch (its rows may be half-applied).
+  logged and acked, and the watch stops (its rows may be half-applied) and
+  restarts after a backoff (1 s, doubling, at most 30 s; `ApplyRetry`). A
+  clean apply resets the count; after 3 consecutive failures the list turns
+  `error` and its Retry starts over. The backend skips (and logs) an object
+  that does not serialise to a JSON object, so one bad object cannot fail
+  every batch.
   A watch whose batches get no ack for 60 s
   stops; its last batch has `stopped` set, and a view that still
   subscribes restarts the watch when it runs again (a frozen webview). A

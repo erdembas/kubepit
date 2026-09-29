@@ -269,17 +269,28 @@ impl WatchAggregator {
     }
 
     /// Fold one raw watcher event.
+    ///
+    /// An object that does not serialise to a JSON object (`to_kube_object`
+    /// yields `null`) is skipped and logged: the UI could not apply it, and
+    /// one bad object must not fail every batch it lands in. An update of
+    /// an object already listed keeps its previous version.
     pub fn on_event(&mut self, source: usize, event: Event<DynamicObject>, ar: &ApiResource) {
         match event {
             Event::Init => self.on_init(source),
             Event::InitApply(obj) => {
                 let key = object_key(&obj);
-                self.on_init_apply(source, key, to_kube_object(obj, ar));
+                if let Some(value) = serialisable(to_kube_object(obj, ar), &key, ar) {
+                    self.on_init_apply(source, key, value);
+                }
             }
             Event::InitDone => self.on_init_done(source),
             Event::Apply(obj) => {
                 let key = object_key(&obj);
-                self.on_apply(source, key, to_kube_object(obj, ar));
+                match serialisable(to_kube_object(obj, ar), &key, ar) {
+                    Some(value) => self.on_apply(source, key, value),
+                    // The source still delivered an event.
+                    None => self.on_healthy(source),
+                }
             }
             Event::Delete(obj) => {
                 let key = object_key(&obj);
@@ -348,6 +359,19 @@ impl WatchAggregator {
             stopped: false,
         })
     }
+}
+
+/// `value` when it is a JSON object (every object the UI can apply); else
+/// logs and drops it.
+fn serialisable(value: Value, key: &str, ar: &ApiResource) -> Option<Value> {
+    if value.is_object() {
+        return Some(value);
+    }
+    tracing::warn!(
+        "watch {}: skipping {key}, which does not serialise to an object",
+        ar.plural
+    );
+    None
 }
 
 /// Batches a watch may have sent and not had acknowledged yet. While the
@@ -1017,6 +1041,37 @@ mod tests {
         assert!(batch.upserts[0]["metadata"].get("managedFields").is_none());
         agg.on_event(0, Event::Delete(dynamic), &ar);
         assert_eq!(agg.take_batch().unwrap().deletes, vec!["u-1"]);
+    }
+
+    #[test]
+    fn objects_that_do_not_serialise_are_skipped() {
+        let ar = pods_ar();
+        let broken = |uid: &str| {
+            let mut obj = pod(0, 1);
+            obj.metadata.uid = Some(uid.into());
+            // Flattened non-object data cannot serialise: `null` for the UI.
+            obj.data = json!("not an object");
+            assert_eq!(to_kube_object(obj.clone(), &ar), Value::Null);
+            obj
+        };
+        let mut agg = WatchAggregator::new("w", 1);
+        agg.on_event(0, Event::Init, &ar);
+        agg.on_event(0, Event::InitApply(pod(1, 1)), &ar);
+        agg.on_event(0, Event::InitApply(broken("bad")), &ar);
+        agg.on_event(0, Event::InitDone, &ar);
+        let batch = agg.take_batch().unwrap();
+        assert_eq!(upsert_uids(&batch), ["u00001"]);
+        assert!(batch.upserts.iter().all(|o| o.is_object()));
+
+        // A broken update keeps the listed version, and still proves the
+        // source healthy.
+        agg.on_error(0, "connection reset".into());
+        agg.take_batch();
+        agg.on_event(0, Event::Apply(broken("u00001")), &ar);
+        let batch = agg.take_batch().unwrap();
+        assert!(batch.recovered && batch.upserts.is_empty());
+        assert_eq!(agg.store["u00001"].1["metadata"]["resourceVersion"], "1");
+        assert!(!agg.store.contains_key("bad"));
     }
 
     #[test]
