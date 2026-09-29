@@ -53,7 +53,13 @@ export interface TopologyView {
   distance: ReadonlyMap<string, number>;
 }
 
-export const DEFAULT_MAX_NODES = 400;
+/**
+ * The map's node budget, measured (large-cluster performance plan, Task 22):
+ * build + view + layout stay far under 250 ms at 800 and 1 200 nodes, and
+ * 800 pans at 60 fps taking every pointer move, like 400. At 1 200 a third
+ * of the pointer moves are lost and some frames run long, so 800 it is.
+ */
+export const DEFAULT_MAX_NODES = 800;
 
 /** Reverse traversal through these hubs would pull in unrelated objects (every pod on a node). */
 const HUB_EDGES = new Set<EdgeKind>(['runs-on', 'identity', 'class', 'role-ref']);

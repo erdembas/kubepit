@@ -38,7 +38,8 @@ export function useMapReachability({
   namespaces: readonly string[];
   isActive: boolean;
   apiResources: readonly ApiResourceInfo[] | null;
-  graph: TopoGraph;
+  /** The map's graph; null until the map's engine sent it (asked for while the overlay is on). */
+  graph: TopoGraph | null;
   selection: ObjectSelection | null;
 }): MapReachability {
   const enabled = useNetpolViewState(clusterId).mapOverlay;
@@ -48,7 +49,7 @@ export function useMapReachability({
       ? findPod(data.cluster, selection.namespace, selection.name)
       : null;
   const overlay = useMemo(
-    () => (source ? reachOverlay(graph, data.cluster, source, null) : null),
+    () => (source && graph ? reachOverlay(graph, data.cluster, source, null) : null),
     [graph, data.cluster, source],
   );
   const uncertain =

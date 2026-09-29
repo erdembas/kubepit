@@ -13,6 +13,7 @@ import { TopologyMap } from './TopologyMap';
 import { useTopologyData } from './useTopologyData';
 // NetworkPolicy simulator: reachability overlay from the selected pod.
 import { MapReachabilityToggle, useMapReachability } from '../netpol/MapReachability';
+import { useNetpolViewState } from '../netpol/netpolStore';
 
 /**
  * Namespace "Resource Map": every object in the selected namespaces and how
@@ -36,15 +37,18 @@ export function ResourceMapPage({
     () => Array<SlotScope>(TOPOLOGY_SOURCE_COUNT).fill(namespaces),
     [namespaces],
   );
-  const data = useTopologyData(clusterId, slotScopes, isActive, apiResources);
+  // The reachability overlay reads the whole graph: only then does it come back from the engine.
+  const overlayOn = useNetpolViewState(clusterId).mapOverlay;
+  const data = useTopologyData(clusterId, slotScopes, isActive, apiResources, null, undefined, {
+    withGraph: overlayOn,
+  });
   const selection = useWorkbenchStore((s) => s.selection[clusterId]?.[VIEW.resourceMap] ?? null);
   const focusRequest = useMapFocus((s) => (s.request?.clusterId === clusterId ? s.request : null));
   const selectedId = selection ? nodeId(selection.key, selection.namespace, selection.name) : null;
-  const selectedNode = selectedId ? data.graph.nodes.get(selectedId) : undefined;
+  const { gvkFor } = data;
   const selectedGvk = useMemo(
-    () =>
-      selection ? (gvkForKey(selection.key, apiResources) ?? selectedNode?.gvk ?? null) : null,
-    [selection, apiResources, selectedNode],
+    () => (selection ? (gvkForKey(selection.key, apiResources) ?? gvkFor(selection.key)) : null),
+    [selection, apiResources, gvkFor],
   );
   const Icon = kindIcon(VIEW.resourceMap);
   const reach = useMapReachability({
@@ -88,14 +92,12 @@ export function ResourceMapPage({
         </div>
         <TopologyMap
           label={i18n.t('Resource Map')}
-          graph={data.graph}
+          model={data.model}
           rootId={null}
           hops={1}
           selectedId={selectedId}
           showNamespace={namespaces.length !== 1}
           persistKey="namespace"
-          active={isActive}
-          synced={data.synced}
           errors={data.errors}
           fitKey={`${clusterId}|${namespaces.join(',')}`}
           focusRequest={focusRequest}

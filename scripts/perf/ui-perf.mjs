@@ -251,6 +251,8 @@ function summarizeMap(r) {
     lastViewMs: last('map:view'),
     lastLayoutMs: last('map:layout'),
     longTaskMax: max(r.longTasks),
+    // Every Long Tasks API entry is over 50 ms.
+    longTaskCount: r.longTasks.length,
   };
 }
 

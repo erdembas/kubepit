@@ -7,7 +7,7 @@ import {
   type TopoGraph,
   type TopoNode,
 } from './model';
-import { hideKinds } from './view';
+import { DEFAULT_MAX_NODES, deriveView, hideKinds } from './view';
 
 // The quadratic implementation `hideKinds` replaced, copied verbatim (with the
 // private `dedupe` it calls). It is the oracle for the linear one.
@@ -188,5 +188,23 @@ describe('hideKinds', () => {
     const got = hideKinds(list, g.edges, new Set(['ReplicaSet']), keep);
     expect(got).toEqual(hideKindsReference(list, g.edges, new Set(['ReplicaSet']), keep));
     expect(got.nodes.some((x) => x.id === keep)).toBe(true);
+  });
+});
+
+describe('deriveView', () => {
+  it('caps the view at DEFAULT_MAX_NODES with one "+N more" node per kind', () => {
+    const view = deriveView(chainGraph(3000), {
+      rootId: null,
+      hops: 1,
+      expanded: new Set(),
+      hiddenKinds: new Set(),
+      maxNodes: DEFAULT_MAX_NODES,
+    });
+    // Measured in plan Task 22: 1 200 pans with ~40% fewer pointer moves than 800.
+    expect(DEFAULT_MAX_NODES).toBe(800);
+    expect(view.nodes.length).toBeLessThanOrEqual(DEFAULT_MAX_NODES);
+    expect(view.aggregated).toBeGreaterThan(0);
+    const more = view.nodes.filter((n) => n.aggregate);
+    expect(new Set(more.map((n) => n.kindKey)).size).toBe(more.length);
   });
 });
