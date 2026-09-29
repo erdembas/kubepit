@@ -36,6 +36,7 @@
 //! larger payloads do). Its last batch has `stopped` set, so a webview that
 //! was only frozen restarts the watch when it runs again.
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
@@ -82,7 +83,11 @@ pub struct WatchAggregator {
     sources: Vec<SourceState>,
     /// uid → (source index, object)
     store: HashMap<String, (usize, SharedKubeObject)>,
-    upserts: HashMap<String, SharedKubeObject>,
+    /// uid → (its entry in `upsert_order`, object)
+    upserts: HashMap<String, (usize, SharedKubeObject)>,
+    /// Staging order. A delete leaves its entry behind (a key re-added
+    /// later gets a new one), so an entry counts only while its key's
+    /// upsert points at it; stale entries are compacted away.
     upsert_order: Vec<String>,
     deletes: HashSet<String>,
     reset: bool,
@@ -127,22 +132,47 @@ impl WatchAggregator {
         &mut self.sources[index.min(last)]
     }
 
+    /// An update keeps the key's place in the order; a (re)added key goes
+    /// last.
     fn stage_upsert(&mut self, key: String, value: SharedKubeObject) {
         if !self.deletes.is_empty() {
             self.deletes.remove(&key);
         }
-        if self.upserts.insert(key.clone(), value).is_none() {
-            self.upsert_order.push(key);
+        match self.upserts.entry(key) {
+            Entry::Occupied(mut staged) => staged.get_mut().1 = value,
+            Entry::Vacant(slot) => {
+                self.upsert_order.push(slot.key().clone());
+                slot.insert((self.upsert_order.len() - 1, value));
+            }
         }
         self.pending += 1;
     }
 
+    /// O(1) amortised: the key's order entry goes stale instead of being
+    /// searched for (a watch blocked on acks may stage a whole store).
     fn stage_delete(&mut self, key: String) {
         if self.upserts.remove(&key).is_some() {
-            self.upsert_order.retain(|k| k != &key);
+            self.compact_order();
         }
         self.deletes.insert(key);
         self.pending += 1;
+    }
+
+    /// Drops stale order entries once they are the majority, so repeated
+    /// delete and re-add cycles cannot grow the order without bound.
+    fn compact_order(&mut self) {
+        if self.upsert_order.len() <= 2 * self.upserts.len() {
+            return;
+        }
+        let order = std::mem::take(&mut self.upsert_order);
+        for (index, key) in order.into_iter().enumerate() {
+            if let Some(staged) = self.upserts.get_mut(&key) {
+                if staged.0 == index {
+                    staged.0 = self.upsert_order.len();
+                    self.upsert_order.push(key);
+                }
+            }
+        }
     }
 
     /// A watcher (re)started listing for `source`.
@@ -298,7 +328,11 @@ impl WatchAggregator {
         let mut upserts_map = std::mem::take(&mut self.upserts);
         let upserts = order
             .into_iter()
-            .filter_map(|k| upserts_map.remove(&k))
+            .enumerate()
+            .filter_map(|(index, key)| match upserts_map.entry(key) {
+                Entry::Occupied(staged) if staged.get().0 == index => Some(staged.remove().1),
+                _ => None,
+            })
             .collect();
         let mut deletes: Vec<String> = self.deletes.drain().collect();
         deletes.sort();
@@ -704,6 +738,73 @@ mod tests {
         assert_eq!(batch.upserts[0]["metadata"]["resourceVersion"], "2");
         assert_eq!(batch.deletes, vec!["b", "gone"]);
         assert_eq!(agg.pending(), 0);
+    }
+
+    fn upsert_uids(batch: &WatchBatch) -> Vec<String> {
+        batch
+            .upserts
+            .iter()
+            .map(|o| o["metadata"]["uid"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn updates_keep_their_place_and_re_added_keys_go_last() {
+        let mut agg = WatchAggregator::new("w", 1);
+        agg.on_init(0);
+        agg.on_init_done(0);
+        agg.take_batch();
+        for uid in ["a", "b", "c"] {
+            agg.on_apply(0, uid.into(), obj(uid, 1));
+        }
+        agg.on_apply(0, "a".into(), obj("a", 2));
+        agg.on_delete(0, "b".into());
+        agg.on_apply(0, "b".into(), obj("b", 2));
+        let batch = agg.take_batch().unwrap();
+        assert_eq!(upsert_uids(&batch), ["a", "c", "b"]);
+        assert!(batch.deletes.is_empty(), "the re-add cancels the delete");
+        assert_eq!(batch.upserts[0]["metadata"]["resourceVersion"], "2");
+    }
+
+    /// A watch blocked on acks stages everything: deleting every staged
+    /// object must stay linear (it used to search the order per delete).
+    #[test]
+    fn deleting_a_whole_staged_store_stays_linear() {
+        const N: usize = 20_000;
+        let mut agg = WatchAggregator::new("w", 1);
+        agg.on_init(0);
+        agg.on_init_done(0);
+        agg.take_batch();
+        let bounded = |agg: &WatchAggregator| agg.upsert_order.len() <= 2 * agg.upserts.len() + 1;
+        for i in 0..N {
+            agg.on_apply(0, format!("u{i}"), obj("x", 1));
+        }
+        let started = std::time::Instant::now();
+        for i in 0..N {
+            agg.on_delete(0, format!("u{i}"));
+            assert!(bounded(&agg), "stale entries are compacted");
+        }
+        let elapsed = started.elapsed();
+        let batch = agg.take_batch().unwrap();
+        assert!(batch.upserts.is_empty());
+        assert_eq!(batch.deletes.len(), N);
+        // Quadratic took ~0.3 s optimised; linear takes a few ms, even
+        // unoptimised this stays far below the bound.
+        assert!(elapsed < Duration::from_secs(2), "{elapsed:?}");
+
+        // Delete and re-add cycles cannot grow the order either.
+        for i in 0..100 {
+            agg.on_apply(0, format!("k{i}"), obj("x", 1));
+        }
+        for round in 0..10_000 {
+            let key = format!("k{}", round % 100);
+            agg.on_delete(0, key.clone());
+            agg.on_apply(0, key, obj("x", 2));
+            assert!(bounded(&agg));
+        }
+        let batch = agg.take_batch().unwrap();
+        assert_eq!(batch.upserts.len(), 100);
+        assert!(batch.deletes.is_empty());
     }
 
     #[test]
