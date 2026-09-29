@@ -713,10 +713,8 @@ wrapAfter('cluster_remove', (args) => {
 }
 
 register({
-  recommendations_status: ({ clusterId }: MockArgs) => {
-    clusterDef(String(clusterId));
-    return structuredClone(statusOf(String(clusterId)));
-  },
+  // Like the backend: any id gets a status (idle when nothing is known).
+  recommendations_status: ({ clusterId }: MockArgs) => structuredClone(statusOf(String(clusterId))),
   recommendations_scan: async ({ clusterId }: MockArgs) => {
     const id = String(clusterId);
     clusterDef(id);

@@ -271,6 +271,19 @@ describe('demo recommendation scans', () => {
     ).rejects.toThrow('invalid pod name');
   });
 
+  it('answers the status of any cluster id like the backend', async () => {
+    const status = await invoke<RecommendationScanStatus>('recommendations_status', {
+      clusterId: 'c-unknown',
+    });
+    expect(status).toMatchObject({
+      cluster_id: 'c-unknown',
+      state: 'idle',
+      scheduled: false,
+      run_id: null,
+      last_success_at: null,
+    });
+  });
+
   it('clears a cluster through the history', async () => {
     await invoke('history_clear', { kind: 'recommendations', clusterId: 'c-dev' });
     const dev = await settle(
