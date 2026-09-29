@@ -211,6 +211,7 @@ impl Kubepit {
         self.apply_alert_settings(&saved.alerts);
         self.sync_change_journals();
         self.sync_history();
+        self.sync_recommendation_scans();
         Ok(saved)
     }
 
@@ -234,6 +235,7 @@ impl Kubepit {
         self.manifest_watches.stop_all();
         self.alerts.stop_all();
         self.change_journals.stop_all();
+        self.stop_all_recommendation_scans();
         self.history.shutdown();
         self.forwards.stop_all(self.sink.as_ref());
         let cleanup = self.cleanup_all_node_shells();

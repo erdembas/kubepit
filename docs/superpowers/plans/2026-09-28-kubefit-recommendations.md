@@ -1720,7 +1720,7 @@ git commit -m "feat(recommendations): manual scans persisted with keep-last-good
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn next_due_follows_the_rules() {
@@ -1751,22 +1751,22 @@ async fn disconnect_or_removal_interrupts_a_running_scan() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core recommendations::schedule && cargo test -p kubepit-core --test recommendations schedul`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement the scheduler and the lifecycle hooks**
+- [x] **Step 3: Implement the scheduler and the lifecycle hooks**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core`
 
 Expected: PASS. The existing tests stay deterministic because no test enables scans
 except these.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core

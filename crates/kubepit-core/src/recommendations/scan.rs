@@ -34,7 +34,7 @@ use anyhow::{anyhow, bail, Result};
 use parking_lot::Mutex;
 use serde::Serialize;
 
-use super::types::{RecommendationScanStatus, ScanState, ScanTrigger};
+use super::types::{RecommendationRun, RecommendationScanStatus, ScanState, ScanTrigger};
 use crate::app::Kubepit;
 use crate::history::recommendations::{
     self as rec, LatestRead, ScanBegin, ScanOutcome, ERROR_STOPPED,
@@ -354,6 +354,16 @@ impl Kubepit {
             .expect("history.db readable")
     }
 
+    /// Tests: the stored runs of `cluster_id`, newest first, after every
+    /// queued history write (`recommendations_runs` replaces it).
+    #[doc(hidden)]
+    pub fn history_rec_runs_for_tests(&self, cluster_id: &str) -> Vec<RecommendationRun> {
+        assert!(self.history_flush(), "history writes flushed");
+        self.history
+            .rec_read(|conn| rec::runs(conn, cluster_id, rec::MAX_RUNS))
+            .expect("history.db readable")
+    }
+
     /// Tests: run one scheduled scan of `cluster_id` now and wait for it
     /// (no cooldown); returns its run id.
     #[doc(hidden)]
@@ -377,7 +387,11 @@ pub(crate) async fn run_scan(
 }
 
 /// One scan of a claimed cluster, from `queued` to its terminal status.
-async fn run_claimed(app: Arc<Kubepit>, claim: Claim, trigger: ScanTrigger) -> Result<i64> {
+pub(crate) async fn run_claimed(
+    app: Arc<Kubepit>,
+    claim: Claim,
+    trigger: ScanTrigger,
+) -> Result<i64> {
     let cluster_id = claim.cluster_id.clone();
     let stop_app = app.clone();
     let mut task = ScanTask {
@@ -547,6 +561,7 @@ impl ScanTask {
         self.ended = true;
         let claim = self.claim.take();
         let now = now_millis();
+        self.app.recommendation_scan_ended(&self.cluster_id, now);
         self.app.update_scan_status(&self.cluster_id, |s| {
             s.state = state;
             s.progress = None;

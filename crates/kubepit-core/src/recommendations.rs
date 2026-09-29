@@ -7,12 +7,16 @@
 //!   trends (kept in `history.db` by [`crate::history::recommendations`]).
 //! - [`scan`]: the scan runner — one collection per cluster at a time, two
 //!   overall, stored as a run whose failure keeps the last good result.
+//! - [`schedule`]: background scans of connected, opted-in clusters in a
+//!   process that turned them on.
 
 pub mod scan;
+pub mod schedule;
 pub mod types;
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Weak};
 
 use parking_lot::Mutex;
 
@@ -33,6 +37,15 @@ pub struct Recommendations {
     pub(crate) last_manual: Mutex<HashMap<String, i64>>,
     /// Running manual scans, tagged with their cluster.
     pub(crate) manual: TaskRegistry,
+    /// Scheduler loops (and the scans they run), tagged with their cluster.
+    pub(crate) scheduled: TaskRegistry,
+    /// The state of every running scheduler.
+    pub(crate) schedules: Mutex<HashMap<String, schedule::Schedule>>,
+    /// Background scans are opt-in per process
+    /// ([`Kubepit::set_recommendation_scans`](crate::Kubepit::set_recommendation_scans)).
+    pub(crate) active: AtomicBool,
+    /// The app, for the scheduler loops (set with the process switch).
+    pub(crate) app: Mutex<Option<Weak<crate::Kubepit>>>,
 }
 
 impl Default for Recommendations {
@@ -43,6 +56,10 @@ impl Default for Recommendations {
             semaphore: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_SCANS)),
             last_manual: Mutex::default(),
             manual: TaskRegistry::default(),
+            scheduled: TaskRegistry::default(),
+            schedules: Mutex::default(),
+            active: AtomicBool::new(false),
+            app: Mutex::new(None),
         }
     }
 }

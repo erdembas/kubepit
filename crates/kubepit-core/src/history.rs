@@ -159,7 +159,7 @@ impl History {
         }
     }
 
-    fn require_writer(&self) -> Result<Arc<Writer>> {
+    pub(crate) fn require_writer(&self) -> Result<Arc<Writer>> {
         self.writer().ok_or_else(|| {
             anyhow!(
                 "the history database is unavailable: {}",

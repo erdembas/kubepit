@@ -81,6 +81,8 @@ struct Fixture {
     /// The memory max (Q5) and pod owners (Q11) hold no series for this
     /// namespace, so a shared source cannot prove it is this cluster's.
     unverified_for: Option<&'static str>,
+    /// Q1 answers this late (the router blocks, like a slow Prometheus).
+    q1_delay: Option<Duration>,
 }
 
 fn base() -> Fixture {
@@ -105,6 +107,7 @@ fn base() -> Fixture {
         prometheus: true,
         cluster_label: None,
         unverified_for: None,
+        q1_delay: None,
     }
 }
 
@@ -256,6 +259,9 @@ fn prometheus(f: &Fixture, req: &Request) -> Reply {
     }
     if n == 1 && f.fail_q1_multi && scope.as_ref().is_none_or(|s| s.len() > 1) {
         return prom_error("query processing would load too many samples into memory");
+    }
+    if let (1, Some(delay)) = (n, f.q1_delay) {
+        std::thread::sleep(delay);
     }
     if n == 1 && f.fail_q1_now.load(Ordering::SeqCst) {
         return prom_error("query processing would load too many samples into memory");
@@ -1271,4 +1277,196 @@ async fn unverified_namespaces_are_left_out_and_nothing_verified_fails() {
         )
     );
     assert!(app.history_rec_latest_for_tests(&id).scan.is_none());
+}
+
+// ---------------------------------------------------------------------------
+// Scheduler: opted-in connected clusters only; stopping and removal
+// ---------------------------------------------------------------------------
+
+fn opt_in(app: &Kubepit, id: &str, on: bool) {
+    let mut settings = app.settings();
+    settings.recommendations.scan_clusters = if on { vec![id.to_string()] } else { vec![] };
+    app.set_settings(settings).unwrap();
+}
+
+/// Poll the status of `id` until `done` holds (bounded).
+async fn wait_for_status(
+    app: &Kubepit,
+    id: &str,
+    done: impl Fn(&RecommendationScanStatus) -> bool,
+) -> RecommendationScanStatus {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let status = app.recommendations_status(id);
+        if done(&status) {
+            return status;
+        }
+        assert!(Instant::now() < deadline, "{status:#?}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// The newest run of `id` once no run is `running` any more (a stopped
+/// scan's run is finished by its drop guard, asynchronously).
+async fn last_run(app: &Kubepit, id: &str) -> kubepit_core::recommendations::RecommendationRun {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let runs = app.history_rec_runs_for_tests(id);
+        if let Some(run) = runs.first().filter(|r| r.status != RunStatus::Running) {
+            return run.clone();
+        }
+        assert!(Instant::now() < deadline, "{runs:#?}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn schedulers_run_only_for_opted_in_connected_clusters() {
+    let server = start(kubefit_router(base())).await;
+    let (_dir, app, _recorder, id) = setup(&server.url, true);
+    // Off for the process (tests, other binaries): nothing is scheduled.
+    opt_in(&app, &id, true);
+    app.cluster_connect(&id).await.unwrap();
+    assert!(!app.recommendations_status(&id).scheduled);
+    app.cluster_disconnect(&id);
+
+    app.set_recommendation_scans(true);
+    assert!(
+        !app.recommendations_status(&id).scheduled,
+        "not while disconnected"
+    );
+    app.cluster_connect(&id).await.unwrap();
+    let connected = app.cluster_status(&id).connected_at.unwrap();
+    let s = app.recommendations_status(&id);
+    let next = s.next_at.unwrap();
+    assert!(s.scheduled, "{s:?}");
+    assert!(
+        (connected + 120_000..=connected + 180_000).contains(&next),
+        "{next} vs {connected}"
+    );
+    assert_eq!(s.interval_minutes, 60);
+
+    opt_in(&app, &id, false);
+    let s = app.recommendations_status(&id);
+    assert!(!s.scheduled && s.next_at.is_none(), "{s:?}");
+    // Opting in again while connected starts it at once.
+    opt_in(&app, &id, true);
+    assert!(app.recommendations_status(&id).scheduled);
+    app.cluster_disconnect(&id);
+    assert!(!app.recommendations_status(&id).scheduled);
+    // Turned off for the process: stopped.
+    app.cluster_connect(&id).await.unwrap();
+    assert!(app.recommendations_status(&id).scheduled);
+    app.set_recommendation_scans(false);
+    assert!(!app.recommendations_status(&id).scheduled);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_due_scheduler_scans_and_waits_an_interval() {
+    let server = start(kubefit_router(base())).await;
+    let (_dir, app, recorder, id) = setup(&server.url, true);
+    app.set_recommendation_scans(true);
+    opt_in(&app, &id, true);
+    app.cluster_connect(&id).await.unwrap();
+    app.recommendations_due_now_for_tests(&id);
+    let done = wait_for_state(&recorder, ScanState::Success).await;
+    assert_eq!(done.trigger, Some(ScanTrigger::Schedule));
+    let run = last_run(&app, &id).await;
+    assert_eq!(
+        (run.status, run.trigger),
+        (RunStatus::Success, ScanTrigger::Schedule)
+    );
+    // The next one is a full interval after this attempt.
+    let end = run.finished_at.unwrap();
+    let s = wait_for_status(&app, &id, |s| {
+        s.next_at.is_some_and(|t| t >= end + 3_600_000)
+    })
+    .await;
+    assert!(s.scheduled && s.next_at.unwrap() <= done.finished_at.unwrap() + 3_600_000 + 1_000);
+
+    // A shorter interval moves it at once (the scheduler is woken).
+    let mut settings = app.settings();
+    settings.recommendations.interval_minutes = 15;
+    app.set_settings(settings).unwrap();
+    let s = wait_for_status(&app, &id, |s| {
+        s.interval_minutes == 15 && s.next_at.is_some_and(|t| t < end + 3_600_000)
+    })
+    .await;
+    // From the end of the last attempt (the stored or the in-memory one).
+    let next = s.next_at.unwrap();
+    assert!(
+        (end + 15 * 60_000..=end + 15 * 60_000 + 1_000).contains(&next),
+        "{next} vs {end}"
+    );
+
+    // A source change makes the next scan due in two minutes.
+    let before = kubepit_core::objects::now_millis();
+    let mut def = app.cluster_def(&id).unwrap();
+    def.prometheus = PrometheusConfig::Service {
+        namespace: "monitoring".into(),
+        service: "prometheus-operated".into(),
+        port: 9090,
+        scheme: PromScheme::Http,
+        path_prefix: String::new(),
+    };
+    app.cluster_update(def).unwrap();
+    let s = wait_for_status(&app, &id, |s| {
+        s.next_at
+            .is_some_and(|t| t >= before + 120_000 && t < end + 15 * 60_000)
+    })
+    .await;
+    assert!(s.next_at.unwrap() <= kubepit_core::objects::now_millis() + 120_000);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn disconnect_or_removal_interrupts_a_running_scan() {
+    let ScanApp {
+        app,
+        recorder,
+        id,
+        _dir,
+        ..
+    } = scan_app(Fixture {
+        q1_delay: Some(Duration::from_secs(2)),
+        ..base()
+    })
+    .await;
+    // A good result first, so the latest pointer exists.
+    let good = app.recommendations_run_for_tests(&id).await.unwrap();
+    let from = recorder.scans.lock().len();
+    app.recommendations_scan(&id).await.unwrap();
+    let running = wait_for_state_from(&recorder, ScanState::Running, from).await;
+    app.cluster_disconnect(&id);
+    let run = last_run(&app, &id).await;
+    assert_eq!(Some(run.id), running.run_id);
+    assert_eq!(run.status, RunStatus::Interrupted);
+    assert_eq!(run.error.as_deref(), Some("stopped"));
+    // The status ends as interrupted; the latest pointer is untouched.
+    let stopped = wait_for_state_from(&recorder, ScanState::Interrupted, from).await;
+    assert_eq!(stopped.error.as_deref(), Some("stopped"));
+    assert!(stopped.progress.is_none());
+    assert_eq!(
+        recorder.scans.lock().last().unwrap().state,
+        ScanState::Interrupted
+    );
+    assert_eq!(
+        app.history_rec_latest_for_tests(&id).scan.unwrap().run.id,
+        good
+    );
+
+    // Removed during a scheduled scan: no rows stay behind, nothing panics.
+    app.set_recommendation_scans(true);
+    opt_in(&app, &id, true);
+    app.cluster_connect(&id).await.unwrap();
+    let from = recorder.scans.lock().len();
+    app.recommendations_due_now_for_tests(&id);
+    let running = wait_for_state_from(&recorder, ScanState::Running, from).await;
+    assert_eq!(running.trigger, Some(ScanTrigger::Schedule));
+    app.cluster_remove(&id).await.unwrap();
+    assert!(!app.recommendations_status(&id).scheduled);
+    assert!(
+        app.history_rec_runs_for_tests(&id).is_empty(),
+        "removal clears the history"
+    );
+    assert!(app.cluster_def(&id).is_err());
 }

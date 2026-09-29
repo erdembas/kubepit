@@ -311,11 +311,13 @@ impl Kubepit {
         if connection_changed {
             self.cluster_disconnect(&next.id);
         }
-        // Secret values read for the old settings must not outlive them.
+        // Secret values read for the old settings must not outlive them,
+        // and scans of the new source start soon.
         if next.prometheus != existing.prometheus
             || next.prometheus_access != existing.prometheus_access
         {
             self.prometheus_tunnels.forget(&next.id);
+            self.recommendations_source_changed(&next.id);
         }
         if !self.run_kubeconfig_is_transient(&next) {
             if let Err(e) = self.write_run_kubeconfig(&next) {
@@ -334,6 +336,8 @@ impl Kubepit {
         };
         self.cleanup_cluster_node_shells(id).await;
         self.forget_connection(id);
+        // Its stored recommendation scans go too (after its scan stopped).
+        self.forget_recommendations(id).await;
         let removed_id = id.to_string();
         let ((), list) = self.store.update_clusters(move |list| {
             list.retain(|c| c.id != removed_id);
