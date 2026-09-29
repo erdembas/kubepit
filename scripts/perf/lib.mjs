@@ -145,12 +145,21 @@ export function percentile(values, p) {
 
 /**
  * Heap growth and DOM drift of a soak: the last sample against the first one
- * taken at or after minute 5 (the first sample when the soak is shorter).
+ * taken at or after minute 5 in the same view (the soak cycles views of very
+ * different sizes, so another view would hide or invent growth). A shorter
+ * soak uses its first earlier sample in that view; without one, the first
+ * sample at or after minute 5, then the first sample.
  */
 export function soakSummary(samples) {
   if (!samples.length) return { heapRatio: NaN, domDrift: NaN };
-  const base = samples.find((s) => s.minute >= 5) ?? samples[0];
   const last = samples[samples.length - 1];
+  const earlier = samples.slice(0, -1);
+  const sameView = earlier.filter((s) => s.view === last.view);
+  const base =
+    sameView.find((s) => s.minute >= 5) ??
+    sameView[0] ??
+    earlier.find((s) => s.minute >= 5) ??
+    samples[0];
   return {
     heapRatio: last.heap / base.heap,
     domDrift: (last.dom - base.dom) / base.dom,
