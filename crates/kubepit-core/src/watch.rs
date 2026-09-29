@@ -27,6 +27,7 @@
 //! channel to the webview is gone.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -39,7 +40,7 @@ use serde_json::Value;
 use crate::app::Kubepit;
 use crate::error::watcher_error_message;
 use crate::objects::{api_resource, dynamic_api, object_key, to_kube_object};
-use crate::types::{Gvk, WatchBatch};
+use crate::types::{Gvk, SharedKubeObject, WatchBatch};
 
 /// Flush cadence for pending watch changes.
 pub const FLUSH_INTERVAL: Duration = Duration::from_millis(150);
@@ -49,7 +50,7 @@ pub const FLUSH_MAX_OBJECTS: usize = 500;
 #[derive(Default)]
 struct SourceState {
     /// Fresh list being collected during a re-init.
-    buffer: Option<HashMap<String, Value>>,
+    buffer: Option<HashMap<String, SharedKubeObject>>,
     synced_once: bool,
     failed_initial: bool,
     /// Last error of a source that has not delivered an event since (failing).
@@ -63,12 +64,15 @@ impl SourceState {
 }
 
 /// Pure watch bookkeeping: events in, batches out. No I/O, fully testable.
+///
+/// Objects are shared (`Arc`) between the store and the batches, so staging
+/// an object or sending a full reset snapshot never copies one.
 pub struct WatchAggregator {
     watch_id: String,
     sources: Vec<SourceState>,
     /// uid → (source index, object)
-    store: HashMap<String, (usize, Value)>,
-    upserts: HashMap<String, Value>,
+    store: HashMap<String, (usize, SharedKubeObject)>,
+    upserts: HashMap<String, SharedKubeObject>,
     upsert_order: Vec<String>,
     deletes: HashSet<String>,
     reset: bool,
@@ -113,8 +117,10 @@ impl WatchAggregator {
         &mut self.sources[index.min(last)]
     }
 
-    fn stage_upsert(&mut self, key: String, value: Value) {
-        self.deletes.remove(&key);
+    fn stage_upsert(&mut self, key: String, value: SharedKubeObject) {
+        if !self.deletes.is_empty() {
+            self.deletes.remove(&key);
+        }
         if self.upserts.insert(key.clone(), value).is_none() {
             self.upsert_order.push(key);
         }
@@ -144,11 +150,12 @@ impl WatchAggregator {
 
     /// Object received while listing.
     pub fn on_init_apply(&mut self, source: usize, key: String, value: Value) {
+        let value = Arc::new(value);
         if let Some(buffer) = self.source(source).buffer.as_mut() {
             buffer.insert(key, value);
             return;
         }
-        self.store.insert(key.clone(), (source, value.clone()));
+        self.store.insert(key.clone(), (source, Arc::clone(&value)));
         self.stage_upsert(key, value);
     }
 
@@ -196,7 +203,8 @@ impl WatchAggregator {
     /// Object added or modified.
     pub fn on_apply(&mut self, source: usize, key: String, value: Value) {
         self.on_healthy(source);
-        self.store.insert(key.clone(), (source, value.clone()));
+        let value = Arc::new(value);
+        self.store.insert(key.clone(), (source, Arc::clone(&value)));
         self.stage_upsert(key, value);
     }
 
@@ -261,13 +269,13 @@ impl WatchAggregator {
             self.upserts.clear();
             self.upsert_order.clear();
             self.deletes.clear();
-            let mut upserts: Vec<(&String, &Value)> =
+            let mut upserts: Vec<(&String, &SharedKubeObject)> =
                 self.store.iter().map(|(k, (_, v))| (k, v)).collect();
-            upserts.sort_by(|a, b| a.0.cmp(b.0));
+            upserts.sort_unstable_by(|a, b| a.0.cmp(b.0));
             return Some(WatchBatch {
                 watch_id: self.watch_id.clone(),
                 reset: true,
-                upserts: upserts.into_iter().map(|(_, v)| v.clone()).collect(),
+                upserts: upserts.into_iter().map(|(_, v)| Arc::clone(v)).collect(),
                 deletes: Vec::new(),
                 synced,
                 error,

@@ -146,7 +146,7 @@ async fn connect_list_watch_apply_against_fake_apiserver() {
         for obj in &batch.upserts {
             store.insert(
                 obj["metadata"]["uid"].as_str().unwrap().to_string(),
-                obj.clone(),
+                Value::clone(obj),
             );
         }
         for uid in &batch.deletes {
