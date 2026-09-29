@@ -2740,6 +2740,11 @@ export interface AiSettings {
    * change it with `aiClusterSet` (production needs a typed confirmation).
    */
   clusters: ClusterId[];
+  /**
+   * Production clusters enabled with the typed confirmation. Backend-owned:
+   * written by `aiClusterSet`, kept as stored by `settingsSet`.
+   */
+  production_acknowledged: ClusterId[];
   redaction: AiRedactionSettings;
   tool_policy: AiToolPolicy;
   /** Keep every request in the local `ai_log` of `history.db`. */

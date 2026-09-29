@@ -102,4 +102,33 @@ describe('openSuggestion', () => {
     await openSuggestion('c1', { kind: 'logql', query: '{app="web"} |= "error"' }, {});
     expect(dock.loki).toHaveBeenCalledWith('c1', { query: '{app="web"} |= "error"' });
   });
+
+  it('refuses queries whose placeholders cannot be restored', async () => {
+    expect(
+      await openSuggestion('c1', { kind: 'promql', query: 'up{instance="__IP_4__:9100"}' }, {}),
+    ).toEqual({ ok: false, reason: 'missing-placeholder' });
+    expect(await openSuggestion('c1', { kind: 'logql', query: '{host="__HOST_1__"}' }, {})).toEqual(
+      { ok: false, reason: 'missing-placeholder' },
+    );
+    expect(dock.promql).not.toHaveBeenCalled();
+    expect(dock.loki).not.toHaveBeenCalled();
+  });
+
+  it('reports a clipboard that refuses the write', async () => {
+    writeText.mockRejectedValueOnce(new Error('Document is not focused.'));
+    const cmd = suggestionForCode('sh', 'kubectl -n shop get pods')!;
+    expect(await openSuggestion('c1', cmd, {})).toEqual({ ok: false, reason: 'clipboard' });
+  });
+
+  it('uses the fallback namespace for partial manifests without one', async () => {
+    const partial = suggestionForCode(
+      'yaml',
+      'apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n  replicas: 3',
+    )!;
+    await openSuggestion('c1', partial, {}, 'shop');
+    expect(vi.mocked(dock.create).mock.calls[0]![1]).toBe('shop');
+    // A namespace in the manifest wins over the fallback.
+    await openSuggestion('c1', suggestionForCode('yaml', ingressFor('web.acme.io'))!, {}, 'other');
+    expect(vi.mocked(dock.create).mock.calls[1]![1]).toBe('shop');
+  });
 });

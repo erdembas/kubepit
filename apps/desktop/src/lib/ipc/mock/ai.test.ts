@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_AI_SETTINGS } from '@/lib/ai/defaults';
 import type {
   AiContextSection,
   AiEvent,
@@ -25,6 +26,10 @@ type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>
 
 let invoke: Invoke;
 let handlers: typeof import('./registry').handlers;
+/** The demo settings before any save. */
+let initial: Settings;
+/** `DEFAULT_AI_SETTINGS.clusters` right after the store's list was changed in place. */
+let defaultsAfterMutation: string[] = [];
 
 beforeAll(async () => {
   vi.useFakeTimers({ now: new Date('2026-09-29T10:00:00Z') });
@@ -33,6 +38,12 @@ beforeAll(async () => {
   const mock = await import('./index');
   invoke = (command, args = {}) => mock.mockInvoke(command, args);
   handlers = (await import('./registry')).handlers;
+  initial = structuredClone(await invoke<Settings>('settings_get'));
+  // Same object as the store holds: an in-place change must not reach the defaults.
+  const live = await invoke<Settings>('settings_get');
+  live.ai.clusters.push('mutated-in-place');
+  defaultsAfterMutation = [...DEFAULT_AI_SETTINGS.clusters];
+  live.ai.clusters.pop();
 });
 
 afterAll(() => {
@@ -553,5 +564,117 @@ describe('demo assistant: request log', () => {
       filter: { cluster_ids: [], text: null, since: null, cursor: null, limit: 100 },
     });
     expect(page.total).toBe(0);
+  });
+});
+
+describe('demo assistant: backend-owned settings', () => {
+  it('starts from a copy of the defaults, never the shared objects', () => {
+    expect(initial.ai).toEqual(DEFAULT_AI_SETTINGS);
+    expect(defaultsAfterMutation).toEqual([]);
+    expect(DEFAULT_AI_SETTINGS.clusters).toEqual([]);
+    expect(DEFAULT_AI_SETTINGS.production_acknowledged).toEqual([]);
+  });
+
+  it('records the production acknowledgement and keeps it read-only in settings_set', async () => {
+    const on = await invoke<Settings>('ai_cluster_set', {
+      clusterId: 'c-prod-us',
+      enabled: true,
+      acknowledgeProduction: true,
+    });
+    expect(on.ai.production_acknowledged).toEqual(['c-prod-us']);
+    const kept = await saveAi({ production_acknowledged: [], clusters: [] });
+    expect(kept.ai.production_acknowledged).toEqual(['c-prod-us']);
+    expect(kept.ai.clusters).toContain('c-prod-us');
+    const off = await invoke<Settings>('ai_cluster_set', {
+      clusterId: 'c-prod-us',
+      enabled: false,
+      acknowledgeProduction: false,
+    });
+    expect(off.ai.production_acknowledged).toEqual([]);
+  });
+
+  it('refuses a production cluster enabled without the acknowledgement', async () => {
+    await invoke('ai_cluster_set', {
+      clusterId: 'c-kind',
+      enabled: true,
+      acknowledgeProduction: false,
+    });
+    const kind = (await invoke<import('@/types').ClusterDef[]>('cluster_list')).find(
+      (c) => c.id === 'c-kind',
+    )!;
+    await invoke('cluster_update', { cluster: { ...kind, environment: 'production' } });
+    const request = {
+      ...chatRequest(null, 'chat', 'hi'),
+      scope: { cluster_id: 'c-kind', namespace: null, object: null },
+    };
+    await expect(settle(invoke('ai_preview', { request }))).rejects.toThrow(/typed confirmation/);
+    await invoke('ai_cluster_set', {
+      clusterId: 'c-kind',
+      enabled: true,
+      acknowledgeProduction: true,
+    });
+    await expect(settle(invoke<AiPreview>('ai_preview', { request }))).resolves.toMatchObject({
+      production: true,
+    });
+  });
+
+  it('drops a removed cluster from both lists', async () => {
+    await invoke('ai_cluster_set', {
+      clusterId: 'c-prod-eu',
+      enabled: true,
+      acknowledgeProduction: true,
+    });
+    await settle(invoke('cluster_remove', { id: 'c-prod-eu' }), 0);
+    const settings = await invoke<Settings>('settings_get');
+    expect(settings.ai.clusters).not.toContain('c-prod-eu');
+    expect(settings.ai.production_acknowledged).not.toContain('c-prod-eu');
+  });
+
+  it('keeps keychain_kubeconfigs for kubeconfig_storage_set alone', async () => {
+    const current = await invoke<Settings>('settings_get');
+    const saved = await invoke<Settings>('settings_set', {
+      settings: { ...current, keychain_kubeconfigs: !current.keychain_kubeconfigs },
+    });
+    expect(saved.keychain_kubeconfigs).toBe(current.keychain_kubeconfigs);
+    const moved = await settle(
+      invoke<Settings>('kubeconfig_storage_set', { keychain: !current.keychain_kubeconfigs }),
+    );
+    expect(moved.keychain_kubeconfigs).toBe(!current.keychain_kubeconfigs);
+    await settle(invoke('kubeconfig_storage_set', { keychain: current.keychain_kubeconfigs }));
+  });
+});
+
+describe('demo assistant: unanswered tool consent', () => {
+  it('declines a waiting tool result when the next message of the chat is sent', async () => {
+    const first = await settle(
+      invoke<AiPreview>('ai_preview', { request: explainRequest('c-dev') }),
+    );
+    const waiting = await send(first.preview_id);
+    await waitFor(() => waiting.calls().some((c) => c.status === 'pending-approval'));
+    const next = await settle(
+      invoke<AiPreview>('ai_preview', { request: chatRequest(first.session_id, 'chat', 'go on') }),
+    );
+    const run = await send(next.preview_id);
+    await waitFor(waiting.done);
+    expect(waiting.events).toContainEqual(
+      expect.objectContaining({ type: 'tool-result', status: 'denied' }),
+    );
+    expect(waiting.events.at(-1)).toMatchObject({ type: 'done', stop: 'cancelled' });
+    await waitFor(run.done);
+    expect(run.events.at(-1)).toMatchObject({ type: 'done', stop: 'end' });
+  });
+
+  it('declines a waiting tool result when the session ends', async () => {
+    const first = await settle(
+      invoke<AiPreview>('ai_preview', { request: explainRequest('c-dev') }),
+    );
+    const waiting = await send(first.preview_id);
+    await waitFor(() => waiting.calls().some((c) => c.status === 'pending-approval'));
+    await invoke('ai_session_end', { sessionId: first.session_id });
+    await waitFor(waiting.done);
+    expect(waiting.events).toContainEqual(
+      expect.objectContaining({ type: 'tool-result', status: 'denied' }),
+    );
+    expect(waiting.events.at(-1)).toMatchObject({ type: 'done', stop: 'cancelled' });
   });
 });

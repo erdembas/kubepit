@@ -75,6 +75,28 @@ describe('enableAssistantFor', () => {
     expect(ipcMock.aiClusterSet).not.toHaveBeenCalled();
   });
 
+  it('resolves from the save when the dialog is replaced while saving', async () => {
+    let finish: (s: Settings) => void = () => {};
+    ipcMock.aiClusterSet.mockReturnValueOnce(new Promise<Settings>((r) => (finish = r)));
+    let outcome: boolean | null = null;
+    const result = enableAssistantFor(cluster('c-prod', 'production')).then((v) => (outcome = v));
+    const confirming = useAppStore.getState().confirm!.onConfirm();
+    useAppStore.getState().requestConfirm({ title: 'other', message: 'x', onConfirm: () => {} });
+    await Promise.resolve();
+    expect(outcome).toBeNull();
+    finish(saved(['c-prod']));
+    await confirming;
+    await result;
+    expect(outcome).toBe(true);
+
+    ipcMock.aiClusterSet.mockRejectedValueOnce(new Error('keychain locked'));
+    const failing = enableAssistantFor(cluster('c-prod', 'production'));
+    const attempt = useAppStore.getState().confirm!.onConfirm();
+    useAppStore.getState().closeConfirm();
+    await expect(attempt).rejects.toThrow('keychain locked');
+    expect(await failing).toBe(false);
+  });
+
   it('keeps the confirmation open when saving fails, and reports other failures', async () => {
     ipcMock.aiClusterSet.mockRejectedValueOnce(new Error('keychain locked'));
     const result = enableAssistantFor(cluster('c-prod', 'production'));

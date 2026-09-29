@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { condenseLogs } from './logs';
+import { collapseKey, condenseLogs } from './logs';
 
 /** `n` distinct INFO lines (words, not digits, differ, so they never collapse). */
 function infoLines(n: number, from = 0): string[] {
@@ -81,6 +81,26 @@ describe('condenseLogs', () => {
     expect(out.text).not.toContain('ERROR job aa failed'); // the oldest one
     const shown = out.text.split('\n').filter((l) => l.startsWith('ERROR')).length;
     expect(shown).toBeLessThanOrEqual(60);
+  });
+
+  it('builds collapse keys in linear time, even for huge lines', () => {
+    const huge = `INFO ${'1'.repeat(20_000)} ${'a1'.repeat(10_000)}`;
+    let started = performance.now();
+    collapseKey(huge);
+    expect(performance.now() - started).toBeLessThan(50);
+    started = performance.now();
+    condenseLogs([huge, huge, 'ERROR x']);
+    expect(performance.now() - started).toBeLessThan(50);
+    // Only the first 512 characters make the key.
+    expect(collapseKey(`${'x'.repeat(512)}tail-a`)).toBe(collapseKey(`${'x'.repeat(512)}tail-b`));
+    expect(collapseKey('decade 0x1f req a1b2c3 cafe')).toBe('decade # req # cafe');
+  });
+
+  it('caps each output line at 2 KiB', () => {
+    const out = condenseLogs([`ERROR ${'y'.repeat(5_000)}`, 'INFO done']);
+    const long = out.text.split('\n').find((l) => l.startsWith('ERROR'))!;
+    expect(long.length).toBeLessThan(2_100);
+    expect(long).toMatch(/… \(2958 more chars\)$/);
   });
 
   it('handles empty input', () => {

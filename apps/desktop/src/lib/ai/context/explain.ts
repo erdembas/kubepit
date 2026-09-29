@@ -91,7 +91,11 @@ export function objectSection(obj: KubeObject): AiContextSection {
 }
 
 /** Container state, last state reason / exit code and restarts per pod. */
-export function containersSection(pods: KubeObject[]): AiContextSection | null {
+export function containersSection(
+  pods: KubeObject[],
+  /** Pod name → a note, e.g. why its logs were not read. */
+  notes: ReadonlyMap<string, string> = new Map(),
+): AiContextSection | null {
   if (!pods.length) return null;
   const lines: string[] = [];
   for (const pod of pods) {
@@ -111,6 +115,8 @@ export function containersSection(pods: KubeObject[]): AiContextSection | null {
         `  ${c.init ? 'init ' : ''}${c.name}: ${state}${message} ready=${c.ready} restarts=${c.restarts} image=${c.image}${last}`,
       );
     }
+    const note = notes.get(pod.metadata.name);
+    if (note) lines.push(`  ${note}`);
   }
   return {
     id: 'containers',

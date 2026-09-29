@@ -8,7 +8,8 @@
  */
 
 const RESTORABLE_RE = /__(?:IP|HOST)_\d+__/g;
-const UNRESTORABLE_RE = /__(?:SECRET|TOKEN)__/g;
+/** Any spelling a model may echo back: `__SECRET__`, `__secret__`, `__TOKEN_2__`. */
+const UNRESTORABLE_RE = /__(?:SECRET|TOKEN)(?:_\d+)?__/gi;
 
 const unique = (values: Iterable<string>) => [...new Set(values)];
 
@@ -32,7 +33,7 @@ export function restorePlaceholders(
   return { text: restored, missing };
 }
 
-/** `__SECRET__` / `__TOKEN__` markers in `text`, each once. */
+/** `__SECRET__` / `__TOKEN__` markers (any case, numbered or not) in `text`, each once. */
 export function unrestorableMarkers(text: string): string[] {
   return unique(text.match(UNRESTORABLE_RE) ?? []);
 }

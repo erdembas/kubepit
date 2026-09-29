@@ -31,6 +31,7 @@ export function enableAssistantFor(cluster: ClusterDef): Promise<boolean> {
 
   return new Promise<boolean>((resolve) => {
     let settled = false;
+    let saving = false;
     const settle = (enabled: boolean) => {
       if (settled) return;
       settled = true;
@@ -48,14 +49,21 @@ export function enableAssistantFor(cluster: ClusterDef): Promise<boolean> {
       typeToConfirm: cluster.name,
       // A failed save throws: the dialog stays open and shows the error.
       onConfirm: async () => {
-        await save(true);
+        saving = true;
+        try {
+          await save(true);
+        } catch (error) {
+          saving = false;
+          if (useAppStore.getState().confirm !== request) settle(false);
+          throw error;
+        }
         settle(true);
       },
     };
     // The dialog closing (or another confirmation taking its place) without
-    // a successful save means "cancelled".
+    // a save means "cancelled"; while a save runs, its result decides.
     const unsubscribe = useAppStore.subscribe((state) => {
-      if (state.confirm !== request) settle(false);
+      if (state.confirm !== request && !saving) settle(false);
     });
     useAppStore.getState().requestConfirm(request);
   });

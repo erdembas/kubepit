@@ -67,7 +67,7 @@ describe('suggestions in assistant answers', () => {
       suggestionForCode('bash', '# look first\n$ kubectl get pods -A\nkubectl top pods'),
     ).toMatchObject({
       kind: 'kubectl',
-      command: 'kubectl get pods -A\nkubectl top pods',
+      command: '# look first\nkubectl get pods -A\nkubectl top pods',
     });
     expect(suggestionForCode('kubectl', 'kubectl describe pod web-1')).toMatchObject({
       kind: 'kubectl',
@@ -84,6 +84,7 @@ describe('suggestions in assistant answers', () => {
       suggestionForCode('yml', `${deploymentPartial}\n---\n${secretManifest('x')}`),
     ).toMatchObject({
       objects: [{ kind: 'Deployment' }, { kind: 'Secret' }],
+      blocked: 'secret',
     });
   });
 
@@ -115,6 +116,91 @@ spec:
       kind: 'promql',
       query: 'up{instance="__IP_1__:9100"}',
     });
+  });
+
+  it('never throws on unresolved aliases, cross-document merge keys or alias bombs', () => {
+    const unresolved = 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: *nope\n';
+    const merge = `apiVersion: v1\nkind: ConfigMap\nmetadata: &common\n  name: a\n---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  <<: *common\n`;
+    const levels = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+    const bomb = [
+      'a: &a ["lol","lol","lol","lol","lol","lol","lol","lol","lol"]',
+      ...levels.slice(1).map((l, i) => `${l}: &${l} [${Array(9).fill(`*${levels[i]}`).join(',')}]`),
+      'apiVersion: v1',
+      'kind: ConfigMap',
+      'metadata:',
+      '  name: boom',
+    ].join('\n');
+    for (const text of [unresolved, merge, bomb]) {
+      expect(() => suggestionForCode('yaml', text)).not.toThrow();
+      expect(suggestionForCode('yaml', text)).toBeNull();
+      expect(() => extractSuggestions(`${F}yaml\n${text}\n${F}`)).not.toThrow();
+      expect(extractSuggestions(`${F}yaml\n${text}\n${F}`)).toEqual([]);
+    }
+    const started = performance.now();
+    suggestionForCode('yaml', bomb);
+    expect(performance.now() - started).toBeLessThan(200);
+  });
+
+  it('blocks numbered, lower-case and base64-encoded secret markers', () => {
+    expect(suggestionForCode('yaml', secretManifest('__SECRET_1__'))).toMatchObject({
+      blocked: 'secret',
+    });
+    expect(
+      suggestionForCode('sh', 'kubectl -n shop exec web-1 -- env TOKEN=__token_2__ ./run'),
+    ).toMatchObject({ blocked: 'secret' });
+    const encoded = `apiVersion: v1
+kind: Secret
+metadata:
+  name: db
+  namespace: shop
+data:
+  password: X19TRUNSRVRfXw==`;
+    expect(suggestionForCode('yaml', encoded)).toMatchObject({ blocked: 'secret' });
+  });
+
+  it('refuses Secret-like manifests that carry any values, which the model never saw', () => {
+    const sealed = `apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: db
+  namespace: shop
+spec:
+  encryptedData:
+    password: AgBy3i4OJSWK+PiTySYZZA==`;
+    expect(suggestionForCode('yaml', secretManifest('s3cr3t-guess'))).toMatchObject({
+      blocked: 'secret',
+    });
+    expect(suggestionForCode('yaml', sealed)).toMatchObject({ blocked: 'secret' });
+    const labelsOnly =
+      'apiVersion: v1\nkind: Secret\nmetadata:\n  name: db\n  labels:\n    app: web\ntype: Opaque';
+    expect(suggestionForCode('yaml', labelsOnly)).toMatchObject({ blocked: null });
+    const configMap =
+      'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cfg\ndata:\n  mode: fast';
+    expect(suggestionForCode('yaml', configMap)).toMatchObject({ blocked: null });
+  });
+
+  it('copies the command as written: heredocs kept, prompts and console output dropped', () => {
+    const heredoc = `kubectl apply -f - <<'EOF'
+#!/bin/sh
+# keep this comment
+
+echo "done"
+EOF`;
+    expect(suggestionForCode('sh', heredoc)).toMatchObject({ kind: 'kubectl', command: heredoc });
+    const session = [
+      '$ kubectl -n shop get pods',
+      'NAME    READY   STATUS',
+      'web-1   1/1     Running',
+      '$ kubectl -n shop logs web-1 \\',
+      '    --previous',
+    ].join('\n');
+    expect(suggestionForCode('console', session)).toMatchObject({
+      command: 'kubectl -n shop get pods\nkubectl -n shop logs web-1 \\\n    --previous',
+    });
+    expect(suggestionForCode('sh', '$ kubectl get ns\n$ kubectl get pods')).toMatchObject({
+      command: 'kubectl get ns\nkubectl get pods',
+    });
+    expect(suggestionForCode('console', 'NAME  READY\nweb-1 1/1')).toBeNull();
   });
 
   it('skips empty queries and plain code', () => {

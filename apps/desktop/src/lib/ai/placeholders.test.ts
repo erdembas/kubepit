@@ -23,6 +23,11 @@ describe('redaction placeholders', () => {
       '__TOKEN__',
     ]);
     expect(unrestorableMarkers('host: __HOST_1__')).toEqual([]);
+    expect(unrestorableMarkers('a: __SECRET_1__ b: __token__ c: __Token_12__')).toEqual([
+      '__SECRET_1__',
+      '__token__',
+      '__Token_12__',
+    ]);
     expect(restorePlaceholders('p: __SECRET__', { __SECRET__: 'hunter2' })).toEqual({
       text: 'p: __SECRET__',
       missing: [],

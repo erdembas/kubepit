@@ -23,6 +23,7 @@ import type {
   KubeObject,
   Settings,
 } from '@/types';
+import { writeBackendOwned } from './app';
 import { sleep } from './bus';
 import {
   DEMO_MODELS,
@@ -69,8 +70,13 @@ import { handlers, register, type MockArgs } from './registry';
  *   local models), end with `done`, can be cancelled (disconnecting or
  *   removing the cluster cancels them too) and are appended to the demo
  *   request log that `ai_log_*` page and export and the history clears.
- * - `ai_cluster_set` saves through the settings handler; `settings_set`
- *   keeps `ai.clusters` read-only and normalizes the AI settings.
+ * - A tool result nobody answers never blocks the demo session: it is
+ *   declined, and its run ends as cancelled, when `ai_cancel` is called,
+ *   the session ends, or the next message of the session is sent.
+ * - `ai_cluster_set` saves through the settings handler and records the
+ *   typed production confirmation in `ai.production_acknowledged`; a
+ *   production cluster without it is refused. `settings_set` keeps both
+ *   lists as stored (`app.ts`) and normalizes the AI settings.
  */
 
 const PREVIEW_TTL_MS = 600_000;
@@ -160,15 +166,17 @@ function settings(): Settings {
 }
 
 function aiSettings(): AiSettings {
-  return settings().ai ?? DEFAULT_AI_SETTINGS;
+  const ai = settings().ai ?? structuredClone(DEFAULT_AI_SETTINGS);
+  // Settings saved by an older demo lack the acknowledgement list.
+  return ai.production_acknowledged ? ai : { ...ai, production_acknowledged: [] };
 }
 
 function clusters(): ClusterDef[] {
   return (handlers.cluster_list?.({}) as ClusterDef[] | undefined) ?? [];
 }
 
-/** `settings_set` normalization of `Settings.ai`; `clusters` stays as it was. */
-function normalizeAi(ai: AiSettings, clustersNow: string[] | null): AiSettings {
+/** `settings_set` normalization of `Settings.ai` (`AiSettings::normalized`). */
+function normalizeAi(ai: AiSettings): AiSettings {
   return {
     ...ai,
     providers: ai.providers.map((p) => ({ ...p, base_url: p.base_url.trim().replace(/\/+$/, '') })),
@@ -176,23 +184,21 @@ function normalizeAi(ai: AiSettings, clustersNow: string[] | null): AiSettings {
       900_000,
       Math.max(2_000, Math.round(ai.max_context_tokens) || 60_000),
     ),
-    clusters: clustersNow ?? [...new Set(ai.clusters)],
+    clusters: [...new Set(ai.clusters)],
+    production_acknowledged: [...new Set(ai.production_acknowledged ?? [])],
   };
 }
 
-let writingClusters = false;
-
-/** Saves through the settings handler, the one path allowed to change `ai.clusters`. */
+/**
+ * Saves a change of the backend-owned lists (`ai.clusters`,
+ * `ai.production_acknowledged`) through the settings handler, which keeps
+ * them as stored for every other caller (`writeBackendOwned` in `app.ts`).
+ */
 function saveAi(change: (ai: AiSettings) => AiSettings): unknown {
   const current = settings();
-  writingClusters = true;
-  try {
-    return handlers.settings_set!({
-      settings: { ...current, ai: change(current.ai ?? DEFAULT_AI_SETTINGS) },
-    });
-  } finally {
-    writingClusters = false;
-  }
+  return writeBackendOwned(() =>
+    handlers.settings_set!({ settings: { ...current, ai: change(aiSettings()) } }),
+  );
 }
 
 {
@@ -201,10 +207,9 @@ function saveAi(change: (ai: AiSettings) => AiSettings): unknown {
     register({
       settings_set: (args: MockArgs) => {
         const next = args.settings as Settings;
-        const kept = writingClusters ? null : (aiSettings().clusters ?? []);
         return inner({
           ...args,
-          settings: { ...next, ai: normalizeAi(next.ai ?? DEFAULT_AI_SETTINGS, kept) },
+          settings: { ...next, ai: normalizeAi(next.ai ?? structuredClone(DEFAULT_AI_SETTINGS)) },
         });
       },
     });
@@ -243,6 +248,10 @@ function checkCluster(ai: AiSettings, cluster: ClusterDef) {
   if (!ai.clusters.includes(cluster.id))
     throw new Error(
       `The assistant is not enabled for ${cluster.name}. Enable it for this cluster first.`,
+    );
+  if (cluster.environment === 'production' && !ai.production_acknowledged.includes(cluster.id))
+    throw new Error(
+      `${cluster.name} is a production cluster and the assistant was enabled without the typed confirmation. Enable it again.`,
     );
 }
 
@@ -744,7 +753,11 @@ function send(previewId: string, onEvent: (event: AiEvent) => void): string {
   const provider = providerOf(ai, session.providerId);
   checkEgress(ai, provider);
   checkKey(provider);
-  if (session.runId) throw new Error(BUSY);
+  const active = session.runId ? runs.get(session.runId) : undefined;
+  // A run still waiting for tool consent does not block the chat: the next
+  // message declines the result and ends it. A streaming run does.
+  if (active && !active.pending) throw new Error(BUSY);
+  if (active) cancel(active);
   previews.delete(previewId);
   if (!session.primed)
     session.prefixTokens =
@@ -873,11 +886,16 @@ register({
         `${cluster.name} is a production cluster: enabling the assistant needs a typed confirmation.`,
       );
     if (!enabled) stopCluster(cluster.id);
+    const production = cluster.environment === 'production';
     return saveAi((ai) => ({
       ...ai,
       clusters: enabled
         ? [...new Set([...ai.clusters, cluster.id])]
         : ai.clusters.filter((c) => c !== cluster.id),
+      production_acknowledged:
+        enabled && production
+          ? [...new Set([...ai.production_acknowledged, cluster.id])]
+          : ai.production_acknowledged.filter((c) => c !== cluster.id),
     }));
   },
   ai_preview: ({ request }: MockArgs) => preview(request as AiRequest),
@@ -915,7 +933,8 @@ register({
 });
 
 // Disconnecting a cluster stops its runs; removing it also ends its sessions
-// and drops it from the enabled clusters (the backend's `ai_forget_cluster`).
+// and drops it from the enabled and acknowledged clusters (the backend's
+// `ai_forget_cluster`).
 for (const command of ['cluster_disconnect', 'cluster_remove'] as const) {
   const inner = handlers[command];
   if (!inner) continue;
@@ -926,8 +945,13 @@ for (const command of ['cluster_disconnect', 'cluster_remove'] as const) {
       const result = await inner(args);
       if (command === 'cluster_remove') {
         for (const s of [...sessions.values()]) if (s.clusterId === id) endSession(s.id);
-        if (aiSettings().clusters.includes(id))
-          await saveAi((ai) => ({ ...ai, clusters: ai.clusters.filter((c) => c !== id) }));
+        const ai = aiSettings();
+        if (ai.clusters.includes(id) || ai.production_acknowledged.includes(id))
+          await saveAi((current) => ({
+            ...current,
+            clusters: current.clusters.filter((c) => c !== id),
+            production_acknowledged: current.production_acknowledged.filter((c) => c !== id),
+          }));
       }
       return result;
     },

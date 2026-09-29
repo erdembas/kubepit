@@ -92,7 +92,7 @@
   "{minutes}m": "{minutes} dk",
   "{ms} ms": "{ms} ms",
   "{name} (copy)": "{name} (kopya)",
-  "{name} is a production cluster. When you ask the assistant about it, context from this cluster (objects, events, logs) is sent to your model provider after you review it. Type the cluster name to confirm.": "{name} bir üretim cluster'ıdır. Asistana bu cluster hakkında soru sorduğunuzda, bu cluster'dan alınan bağlam (nesneler, olaylar, loglar) siz inceledikten sonra model sağlayıcınıza gönderilir. Onaylamak için cluster adını yazın.",
+  "{name} is a production cluster. When you ask the assistant about it, context from this cluster (objects, events, logs) is sent to your model provider after you review it. Type the cluster name to confirm.": "{name} bir production cluster'ıdır. Asistana bu cluster hakkında soru sorduğunuzda, bu cluster'dan alınan bağlam (nesneler, olaylar, loglar) siz inceledikten sonra model sağlayıcınıza gönderilir. Onaylamak için cluster adını yazın.",
   "{names} and {count} more": "{names} ve {count} tane daha",
   "{percent} discount": "{percent} indirim",
   "{price} per GiB-hour": "GiB-saat başına {price}",

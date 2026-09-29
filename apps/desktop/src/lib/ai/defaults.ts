@@ -42,6 +42,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   active_provider: 'anthropic',
   providers: DEFAULT_AI_PROVIDERS.map((p) => ({ ...p })),
   clusters: [],
+  production_acknowledged: [],
   redaction: { tokens: true, ips: false, hostnames: false },
   tool_policy: 'ask',
   log_requests: true,

@@ -7,6 +7,7 @@ const ipcMock = vi.hoisted(() => ({
   podLogsStream: vi.fn(),
   podLogsStop: vi.fn(async () => undefined),
   resourceList: vi.fn(),
+  resourceGet: vi.fn(),
   resourceEvents: vi.fn(),
   changesList: vi.fn(),
   metricsPods: vi.fn(),
@@ -158,6 +159,24 @@ describe('collectPodLogs', () => {
     await vi.advanceTimersByTimeAsync(10_000);
     expect(await lines).toEqual(['partial', 'half']);
     expect(ipcMock.podLogsStop).toHaveBeenCalledWith('s');
+  });
+
+  it('stops the stream when aborted and keeps what arrived', async () => {
+    ipcMock.podLogsStream.mockImplementation((async (_c, _n, _p, _ct, _o, onChunk) => {
+      setTimeout(() => onChunk({ stream_id: 's', data: 'one\ntwo', done: false, error: null }), 5);
+      return 's';
+    }) as Stream);
+    const controller = new AbortController();
+    const lines = collectPodLogs('c-dev', 'shop', 'web-1', 'app', false, 10_000, controller.signal);
+    await vi.advanceTimersByTimeAsync(50);
+    controller.abort();
+    expect(await lines).toEqual(['one', 'two']);
+    expect(ipcMock.podLogsStop).toHaveBeenCalledWith('s');
+    const aborted = new AbortController();
+    aborted.abort();
+    expect(
+      await collectPodLogs('c-dev', 'shop', 'web-1', 'app', false, 10_000, aborted.signal),
+    ).toEqual([]);
   });
 
   it('resolves empty when the stream cannot start', async () => {
@@ -349,5 +368,201 @@ describe('gatherExplainContext', () => {
       'web-b/app@previous',
     );
     expect(sections.some((s) => s.label.startsWith('web-a/'))).toBe(false);
+  });
+
+  it('keeps only the pods of the Deployment itself (exact ReplicaSet name)', async () => {
+    const other = pod('web-api-1', 7, false);
+    other.metadata.ownerReferences = [
+      {
+        apiVersion: 'apps/v1',
+        kind: 'ReplicaSet',
+        name: 'web-api-7c9d8b6f5',
+        uid: 'rs2',
+        controller: true,
+      },
+    ];
+    ipcMock.resourceList.mockResolvedValue({
+      items: [other, pod('web-a', 1)],
+      resource_version: '1',
+    });
+    ipcMock.podLogsStream.mockImplementation(streamOf(() => ['INFO ok']));
+    ipcMock.resourceEvents.mockResolvedValue([]);
+    ipcMock.changesList.mockResolvedValue({ entries: [], next_cursor: null, status: {} });
+    ipcMock.metricsPods.mockResolvedValue({ available: false, items: [] });
+    const gathered = gatherExplainContext('c-dev', DEPLOY_GVK, deployment);
+    await vi.advanceTimersByTimeAsync(100);
+    const sections = await gathered;
+    expect(sections.find((s) => s.id === 'containers')!.label).toBe('pod/web-a');
+  });
+
+  it('follows a CronJob to its Jobs and their pods', async () => {
+    const cron: KubeObject = {
+      apiVersion: 'batch/v1',
+      kind: 'CronJob',
+      metadata: { name: 'nightly', namespace: 'shop', uid: 'uid-cron' },
+      spec: { schedule: '0 2 * * *', jobTemplate: { spec: {} } },
+    };
+    const job = (name: string, owner: string): KubeObject => ({
+      apiVersion: 'batch/v1',
+      kind: 'Job',
+      metadata: {
+        name,
+        namespace: 'shop',
+        uid: `uid-${name}`,
+        ownerReferences: [
+          { apiVersion: 'batch/v1', kind: 'CronJob', name: owner, uid: 'c', controller: true },
+        ],
+      },
+      spec: { selector: { matchLabels: { 'batch.kubernetes.io/controller-uid': `uid-${name}` } } },
+    });
+    const jobPod = pod('nightly-1-abcde', 2, false);
+    jobPod.metadata.ownerReferences = [
+      {
+        apiVersion: 'batch/v1',
+        kind: 'Job',
+        name: 'nightly-1',
+        uid: 'uid-nightly-1',
+        controller: true,
+      },
+    ];
+    ipcMock.resourceList.mockImplementation(
+      async (_c: string, gvk: Gvk, _ns: string, selector?: string) =>
+        gvk.kind === 'Job'
+          ? {
+              items: [job('nightly-1', 'nightly'), job('backup-1', 'backup')],
+              resource_version: '1',
+            }
+          : {
+              items: selector?.includes('uid-nightly-1') ? [jobPod] : [],
+              resource_version: '1',
+            },
+    );
+    ipcMock.podLogsStream.mockImplementation(streamOf(() => ['ERROR report failed']));
+    ipcMock.resourceEvents.mockResolvedValue([]);
+    ipcMock.changesList.mockResolvedValue({ entries: [], next_cursor: null, status: {} });
+    ipcMock.metricsPods.mockResolvedValue({ available: false, items: [] });
+    const gathered = gatherExplainContext(
+      'c-dev',
+      { group: 'batch', version: 'v1', kind: 'CronJob', plural: 'cronjobs', namespaced: true },
+      cron,
+    );
+    await vi.advanceTimersByTimeAsync(100);
+    const sections = await gathered;
+    expect(sections.find((s) => s.id === 'containers')!.label).toBe('pod/nightly-1-abcde');
+    expect(sections.some((s) => s.id === 'logs:nightly-1-abcde/app@previous')).toBe(true);
+    const selectors = ipcMock.resourceList.mock.calls.map((c) => c[3]);
+    expect(selectors).not.toContain('batch.kubernetes.io/controller-uid=uid-backup-1');
+  });
+
+  it('reads the logs of init containers that are still running', async () => {
+    const initializing = pod('web-i', 0, false);
+    initializing.spec.initContainers = [{ name: 'migrate', image: 'ghcr.io/acme/migrate:1' }];
+    initializing.status.phase = 'Pending';
+    initializing.status.initContainerStatuses = [
+      { name: 'migrate', ready: false, restartCount: 0, state: { running: { startedAt: 'x' } } },
+    ];
+    initializing.status.containerStatuses = [
+      {
+        name: 'app',
+        ready: false,
+        restartCount: 0,
+        state: { waiting: { reason: 'PodInitializing' } },
+      },
+      {
+        name: 'proxy',
+        ready: false,
+        restartCount: 0,
+        state: { waiting: { reason: 'PodInitializing' } },
+      },
+    ];
+    ipcMock.podLogsStream.mockImplementation(streamOf((_p, c) => [`INFO ${c} migrating`]));
+    ipcMock.resourceEvents.mockResolvedValue([]);
+    ipcMock.changesList.mockResolvedValue({ entries: [], next_cursor: null, status: {} });
+    ipcMock.metricsPods.mockResolvedValue({ available: false, items: [] });
+    const gathered = gatherExplainContext('c-dev', POD_GVK, initializing);
+    await vi.advanceTimersByTimeAsync(100);
+    const sections = await gathered;
+    expect(sections.map((s) => s.id)).toContain('logs:web-i/migrate');
+  });
+
+  it('skips the logs of pods on a NotReady node or in phase Unknown, and says so', async () => {
+    const onDeadNode = pod('web-n', 3, false);
+    onDeadNode.spec.nodeName = 'node-a';
+    const unknown = pod('web-u', 1, false);
+    unknown.status.phase = 'Unknown';
+    ipcMock.resourceList.mockResolvedValue({ items: [onDeadNode, unknown], resource_version: '1' });
+    ipcMock.resourceGet.mockResolvedValue({
+      apiVersion: 'v1',
+      kind: 'Node',
+      metadata: { name: 'node-a', uid: 'n' },
+      status: { conditions: [{ type: 'Ready', status: 'Unknown', reason: 'NodeStatusUnknown' }] },
+    });
+    ipcMock.podLogsStream.mockImplementation(streamOf(() => ['INFO ok']));
+    ipcMock.resourceEvents.mockResolvedValue([]);
+    ipcMock.changesList.mockResolvedValue({ entries: [], next_cursor: null, status: {} });
+    ipcMock.metricsPods.mockResolvedValue({ available: false, items: [] });
+    const gathered = gatherExplainContext('c-dev', DEPLOY_GVK, deployment);
+    await vi.advanceTimersByTimeAsync(100);
+    const sections = await gathered;
+    expect(ipcMock.podLogsStream).not.toHaveBeenCalled();
+    expect(sections.some((s) => s.kind === 'logs')).toBe(false);
+    const containers = sections.find((s) => s.id === 'containers')!.content;
+    expect(containers).toContain('logs not read: node node-a is not Ready');
+    expect(containers).toContain('logs not read: pod phase is Unknown');
+    expect(ipcMock.resourceGet.mock.calls[0]!.slice(2)).toEqual([null, 'node-a']);
+  });
+
+  it('reads all logs within one shared deadline', async () => {
+    const busy = pod('web-1', 2, false);
+    busy.spec.containers.push({ name: 'sidecar', image: 'x' });
+    busy.status.containerStatuses.push({
+      name: 'sidecar',
+      ready: false,
+      restartCount: 1,
+      state: { running: {} },
+    });
+    busy.status.containerStatuses[1].restartCount = 1;
+    // Streams that never finish: every job would wait for its own 10 s timeout.
+    ipcMock.podLogsStream.mockImplementation((async (_c, _n, p, c) => `${p}/${c}`) as Stream);
+    ipcMock.resourceEvents.mockResolvedValue([]);
+    ipcMock.changesList.mockResolvedValue({ entries: [], next_cursor: null, status: {} });
+    ipcMock.metricsPods.mockResolvedValue({ available: false, items: [] });
+    let done = false;
+    const gathered = gatherExplainContext('c-dev', POD_GVK, busy).then((s) => {
+      done = true;
+      return s;
+    });
+    await vi.advanceTimersByTimeAsync(11_900);
+    expect(done).toBe(false);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(done).toBe(true);
+    await gathered;
+    // Six jobs (three containers, current + previous), four at a time: the
+    // last two start at 10 s with what is left of the shared 12 s.
+    expect(ipcMock.podLogsStream).toHaveBeenCalledTimes(6);
+    expect(ipcMock.podLogsStop).toHaveBeenCalledTimes(6);
+  });
+
+  it('stops everything when the caller aborts', async () => {
+    ipcMock.podLogsStream.mockImplementation((async (_c, _n, p, c) => `${p}/${c}`) as Stream);
+    ipcMock.resourceEvents.mockReturnValue(new Promise(() => {}));
+    ipcMock.changesList.mockResolvedValue({ entries: [], next_cursor: null, status: {} });
+    ipcMock.metricsPods.mockResolvedValue({ available: false, items: [] });
+    const controller = new AbortController();
+    const gathered = gatherExplainContext(
+      'c-dev',
+      POD_GVK,
+      pod('web-1', 1, false),
+      controller.signal,
+    );
+    const outcome = gathered.then(
+      () => 'resolved',
+      (e: unknown) => (e instanceof Error ? e.name : String(e)),
+    );
+    await vi.advanceTimersByTimeAsync(100);
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await outcome).toBe('AbortError');
+    expect(ipcMock.podLogsStop).toHaveBeenCalled();
   });
 });

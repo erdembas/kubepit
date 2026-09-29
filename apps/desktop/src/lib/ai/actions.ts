@@ -13,38 +13,47 @@ import { restorePlaceholders, unrestorableMarkers } from './placeholders';
  * - a kubectl command is copied (Kubepit never runs it);
  * - PromQL and LogQL open the PromQL and Loki tabs.
  *
- * IP / host placeholders are restored first. A manifest or command with a
- * secret marker, or with a placeholder that cannot be restored, is refused
- * and nothing is opened or copied.
+ * IP / host placeholders are restored first. A suggestion with a secret
+ * marker, or with a placeholder that cannot be restored, is refused and
+ * nothing is opened or copied.
  */
 
-export type OpenResult = { ok: true } | { ok: false; reason: 'secret' | 'missing-placeholder' };
+export type OpenResult =
+  { ok: true } | { ok: false; reason: 'secret' | 'missing-placeholder' | 'clipboard' };
 
+/**
+ * `fallbackNamespace` (the session's scope) is the editor namespace for
+ * manifests that name none, e.g. partial ones.
+ */
 export async function openSuggestion(
   clusterId: ClusterId,
   s: AiSuggestion,
   placeholders: Readonly<Record<string, string>>,
+  fallbackNamespace: string | null = null,
 ): Promise<OpenResult> {
+  const source = s.kind === 'manifest' ? s.yaml : s.kind === 'kubectl' ? s.command : s.query;
+  const blocked = (s.kind === 'manifest' || s.kind === 'kubectl') && s.blocked !== null;
+  if (blocked || unrestorableMarkers(source).length) return { ok: false, reason: 'secret' };
+  const { text, missing } = restorePlaceholders(source, placeholders);
+  if (missing.length) return { ok: false, reason: 'missing-placeholder' };
   switch (s.kind) {
-    case 'manifest':
-    case 'kubectl': {
-      const source = s.kind === 'manifest' ? s.yaml : s.command;
-      if (s.blocked || unrestorableMarkers(source).length) return { ok: false, reason: 'secret' };
-      const { text, missing } = restorePlaceholders(source, placeholders);
-      if (missing.length) return { ok: false, reason: 'missing-placeholder' };
-      if (s.kind === 'kubectl') {
-        await navigator.clipboard.writeText(text);
-        return { ok: true };
-      }
-      const namespace = s.objects.find((o) => o.namespace)?.namespace ?? null;
+    case 'manifest': {
+      const namespace = s.objects.find((o) => o.namespace)?.namespace ?? fallbackNamespace;
       dock.create(clusterId, namespace, text, { reviewMode: 'apply' });
       return { ok: true };
     }
+    case 'kubectl':
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        return { ok: false, reason: 'clipboard' };
+      }
+      return { ok: true };
     case 'promql':
-      dock.promql(clusterId, restorePlaceholders(s.query, placeholders).text);
+      dock.promql(clusterId, text);
       return { ok: true };
     case 'logql':
-      dock.loki(clusterId, { query: restorePlaceholders(s.query, placeholders).text });
+      dock.loki(clusterId, { query: text });
       return { ok: true };
   }
 }

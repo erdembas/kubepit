@@ -14,7 +14,7 @@ import { lineBody, RecordIndex, type LogRecord } from '@/lib/logs/records';
  *   digits, hex ids and UUIDs;
  * - the last 40 lines (repeats collapsed the same way);
  * - at most 200 lines in total; the oldest repeats go first, then the
- *   oldest errors.
+ *   oldest errors; each line at most 2 KiB (`… (N more chars)`).
  *
  * Output lines are raw log text without ANSI codes and without the
  * Kubernetes timestamp prefix (`lineBody`), in their original order. The
@@ -43,13 +43,28 @@ export interface CondensedLogs {
 }
 
 const UUID_RE = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
-/** Hex words and numbers (a digit somewhere): request ids, pointers, counters. */
-const HEX_RE = /\b(?:0x)?[0-9a-f]*\d[0-9a-f]*\b/gi;
+/** Hex words and numbers; only those with a digit are ids (`decade`, `cafe` stay). */
+const HEX_RE = /\b(?:0x)?[0-9a-f]+\b/gi;
 const DIGITS_RE = /\d+/g;
+/** Characters of a line that make its collapse key. */
+const KEY_CHARS = 512;
+/** Longest output line; the rest is replaced by a note. */
+const MAX_LINE_CHARS = 2048;
 
-/** The collapse key of a line: digits, hex ids and UUIDs become `#`. */
+/** The collapse key of a line: digits, hex ids and UUIDs become `#` (first 512 characters). */
 export function collapseKey(body: string): string {
-  return body.replace(UUID_RE, '#').replace(HEX_RE, '#').replace(DIGITS_RE, '#').trim();
+  return body
+    .slice(0, KEY_CHARS)
+    .replace(UUID_RE, '#')
+    .replace(HEX_RE, (m) => (/\d/.test(m) ? '#' : m))
+    .replace(DIGITS_RE, '#')
+    .trim();
+}
+
+function capLine(line: string): string {
+  return line.length > MAX_LINE_CHARS
+    ? `${line.slice(0, MAX_LINE_CHARS)} … (${line.length - MAX_LINE_CHARS} more chars)`
+    : line;
 }
 
 interface Item {
@@ -68,7 +83,7 @@ function render(record: LogRecord, count: number, maxFrames: number): string[] {
     count > 1 ? `(×${count}) ${head}` : head,
     ...shown,
     ...(more > 0 ? [`\t… ${more} more lines`] : []),
-  ];
+  ].map(capLine);
 }
 
 function header(levels: LevelCounts, shown: number, total: number, collapsed: number): string {
