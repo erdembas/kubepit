@@ -12,7 +12,7 @@ import {
 import { Columns2 } from 'lucide-react';
 import { DropZoneOverlay, HostSlot, SplitTree, useHosts } from '@/components/split/SplitTree';
 import { PaneFocusContext, useNestedPaneFocus } from '@/components/split/paneFocus';
-import { PANE_DROP, tabCollision, useTabDrag, type DropZone } from '@/components/split/tabDrag';
+import { PANE_DROP, useTabDrag, type DropZone } from '@/components/split/tabDrag';
 import { kindIcon } from '@/lib/kube/icons';
 import { viewLabel } from '@/lib/kube/nav';
 import { perfViewShown } from '@/lib/perf/probe';
@@ -21,6 +21,7 @@ import type { ViewGroup, ViewLayout } from '@/store/viewLayout';
 import type { ApiResourceInfo } from '@/types';
 import { ViewHost } from '../ViewHost';
 import { ViewTabStrip } from './ViewTabStrip';
+import { viewTabCollision } from './viewTabCollision';
 
 const MIN_PANE = { row: 280, column: 150 } as const;
 
@@ -58,7 +59,7 @@ export function ViewPanes({
   return (
     <DndContext
       sensors={sensors}
-      collisionDetection={tabCollision}
+      collisionDetection={viewTabCollision}
       onDragStart={drag.start}
       onDragMove={drag.move}
       onDragCancel={drag.cancel}

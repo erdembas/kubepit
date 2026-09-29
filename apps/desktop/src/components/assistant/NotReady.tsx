@@ -2,11 +2,14 @@ import { assistantErrorMessage } from '@/lib/ai/errorMessage';
 import { useState } from 'react';
 import * as i18n from '@/i18n';
 import type { AiReadiness } from '@/lib/ai/readiness';
+import { isLocalAgent } from '@/lib/ai/localAgents';
 import { useAppStore } from '@/store/useAppStore';
 import { Button } from '@/components/ui/Button';
 import { enableAssistantFor } from './enableCluster';
+import { useAssistantNavigation } from './navigation';
 export function NotReady({ readiness }: { readiness: Exclude<AiReadiness, { state: 'ready' }> }) {
   i18n.useLocale();
+  const revealWorkbench = useAssistantNavigation();
   const [saving, setSaving] = useState(false);
   const label =
     readiness.state === 'off'
@@ -14,7 +17,11 @@ export function NotReady({ readiness }: { readiness: Exclude<AiReadiness, { stat
       : readiness.state === 'no-provider'
         ? i18n.t('Choose a model provider in Assistant settings.')
         : readiness.state === 'blocked'
-          ? i18n.t('This provider is blocked by the local-only or network policy.')
+          ? isLocalAgent(readiness.provider.kind)
+            ? i18n.t(
+                'This agent is unavailable or blocked by the local-only or network policy. Check its installation in Assistant settings.',
+              )
+            : i18n.t('This provider is blocked by the local-only or network policy.')
           : readiness.state === 'no-key'
             ? i18n.t('Set a provider API key in Assistant settings.')
             : readiness.state === 'no-model'
@@ -42,7 +49,13 @@ export function NotReady({ readiness }: { readiness: Exclude<AiReadiness, { stat
           {i18n.t('Enable for {name}', { name: readiness.cluster.name })}
         </Button>
       ) : (
-        <Button size="sm" onClick={() => useAppStore.getState().openSettings('assistant')}>
+        <Button
+          size="sm"
+          onClick={() => {
+            useAppStore.getState().openSettings('assistant');
+            revealWorkbench();
+          }}
+        >
           {i18n.t('Assistant settings')}
         </Button>
       )}

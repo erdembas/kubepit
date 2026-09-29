@@ -15,8 +15,9 @@ const PADDING = 12;
 
 /**
  * Monaco surface that grows with its content (between `minLines` and
- * `maxHeight`), for editing values inline in the details panel. Cmd/Ctrl+S
- * calls `onSave`. Falls back to a plain textarea while Monaco loads.
+ * `maxHeight`), for editing or previewing values inline in the details panel.
+ * Cmd/Ctrl+S calls `onSave` when editable. Falls back to plain text while
+ * Monaco loads, keeping previews read-only.
  */
 export function InlineCodeEditor({
   value,
@@ -25,15 +26,17 @@ export function InlineCodeEditor({
   language,
   ariaLabel,
   autoFocus,
+  readOnly = false,
   minLines = 4,
   maxHeight = 440,
 }: {
   value: string;
-  onChange: (value: string) => void;
+  onChange?: (value: string) => void;
   onSave?: () => void;
   language: string;
   ariaLabel: string;
   autoFocus?: boolean;
+  readOnly?: boolean;
   minLines?: number;
   maxHeight?: number;
 }) {
@@ -54,12 +57,13 @@ export function InlineCodeEditor({
     (editor, api) => {
       editorRef.current = editor;
       monacoRef.current = api;
-      editor.addAction({
-        id: 'kubepit.details.save',
-        label: i18n.t('Save'),
-        keybindings: [api.KeyMod.CtrlCmd | api.KeyCode.KeyS],
-        run: () => saveRef.current?.(),
-      });
+      if (!readOnly)
+        editor.addAction({
+          id: 'kubepit.details.save',
+          label: i18n.t('Save'),
+          keybindings: [api.KeyMod.CtrlCmd | api.KeyCode.KeyS],
+          run: () => saveRef.current?.(),
+        });
       // Keep the caret visible in the surrounding scroll area (the editor
       // grows instead of scrolling), minus its scroll padding (sticky bars).
       const reveal = () => {
@@ -100,7 +104,7 @@ export function InlineCodeEditor({
       api.editor.setModelMarkers(
         model,
         'kubepit-data',
-        language !== 'yaml'
+        readOnly || language !== 'yaml'
           ? []
           : yamlIssues(value).map((issue) => ({
               severity: api.MarkerSeverity.Error,
@@ -113,13 +117,22 @@ export function InlineCodeEditor({
       );
     }, 300);
     return () => clearTimeout(timer);
-  }, [value, language, mounted]);
+  }, [value, language, mounted, readOnly]);
 
   if (!monaco.ready || monaco.error)
-    return (
+    return readOnly ? (
+      <pre
+        aria-label={ariaLabel}
+        tabIndex={0}
+        className="bg-fg/[0.035] border-border/60 text-fg-muted overflow-auto rounded-md border p-2.5 font-mono text-[11.5px] leading-[18px] whitespace-pre"
+        style={{ minHeight, maxHeight, tabSize: 2 }}
+      >
+        {value}
+      </pre>
+    ) : (
       <PlainTextEditor
         value={value}
-        onChange={onChange}
+        onChange={(v) => onChange?.(v)}
         onSave={onSave}
         ariaLabel={ariaLabel}
         autoFocus={autoFocus}
@@ -135,11 +148,14 @@ export function InlineCodeEditor({
         value={value}
         language={language}
         theme={theme}
-        onChange={(v) => onChange(v ?? '')}
+        onChange={readOnly ? undefined : (v) => onChange?.(v ?? '')}
         onMount={onMount}
         loading={<span className="text-fg-dim p-3 text-[12px]">{i18n.t('Loading editor…')}</span>}
         options={{
           ariaLabel,
+          readOnly,
+          domReadOnly: readOnly,
+          contextmenu: !readOnly,
           minimap: { enabled: false },
           fontFamily: "'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, monospace",
           fontSize: 11.5,
@@ -148,7 +164,8 @@ export function InlineCodeEditor({
           insertSpaces: true,
           detectIndentation: true,
           scrollBeyondLastLine: false,
-          renderLineHighlight: 'line',
+          renderLineHighlight: readOnly ? 'none' : 'line',
+          renderValidationDecorations: readOnly ? 'off' : 'on',
           automaticLayout: true,
           lineNumbersMinChars: 3,
           folding: true,

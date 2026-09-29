@@ -13,6 +13,7 @@ import type { ConfirmRequest } from '@/store/types';
 import { useAppStore } from '@/store/useAppStore';
 import { useDockStore } from '@/store/useDockStore';
 import type { ClusterId } from '@/types';
+import { useAssistantNavigation } from './navigation';
 export function SuggestionActions({
   lang,
   text,
@@ -29,6 +30,7 @@ export function SuggestionActions({
   origin?: AiOrigin | null;
 }) {
   i18n.useLocale();
+  const revealWorkbench = useAssistantNavigation();
   const clusters = useAppStore((s) => s.clusters);
   const [notice, setNotice] = useState<string | null>(null);
   const [validation, setValidation] = useState<GeneratedValidation | null>(null);
@@ -52,6 +54,7 @@ export function SuggestionActions({
       if (!result.ok)
         setNotice(result.reason === 'clipboard' ? i18n.t('Could not copy to clipboard.') : reason);
       else if (suggestion.kind === 'kubectl') setNotice(i18n.t('Copied'));
+      else revealWorkbench();
     } finally {
       setWorking(false);
     }
@@ -114,8 +117,10 @@ export function SuggestionActions({
         setNotice(
           i18n.t('The editor changed while you were reviewing. Review the suggestion again.'),
         );
-      else if (outcome === 'replaced')
+      else if (outcome === 'replaced') {
         setNotice(i18n.t('Suggestion added to the editor. Review validation before applying.'));
+        revealWorkbench();
+      }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
     } finally {
@@ -123,13 +128,15 @@ export function SuggestionActions({
     }
   };
   return (
-    <div>
+    <div className="min-w-0">
       <CodeBlock text={text} maxHeight="max-h-[360px]" />
       {suggestion && (
-        <div className="mt-1 space-y-1">
-          <div className="flex flex-wrap gap-1">
+        <div className="mt-2 space-y-1.5">
+          <div className="flex flex-wrap gap-1.5">
             <Button
               size="xs"
+              variant="ghost"
+              className="bg-fg/[0.03] hover:bg-fg/5"
               disabled={!!reason || !clusterId || !message.stop || working}
               onClick={() => void apply()}
             >
@@ -144,6 +151,8 @@ export function SuggestionActions({
             {origin && suggestion.kind === 'manifest' && (
               <Button
                 size="xs"
+                variant="ghost"
+                className="bg-fg/[0.03] hover:bg-fg/5"
                 disabled={!!reason || !message.stop || working}
                 onClick={() => void useInEditor()}
               >

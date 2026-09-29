@@ -160,6 +160,40 @@ export function detectDataFormat(key: string, value: string): DataFormat {
   return FORMATS[byName ?? sniff(value)];
 }
 
+/** Pretty-print JSON for display, preserving every token in the original value. */
+export function formatDataPreview(format: DataFormatId, text: string): string {
+  if (format !== 'json') return text;
+  try {
+    // Validate only: reserializing would round large numbers and lose duplicate keys.
+    JSON.parse(text);
+  } catch {
+    return text;
+  }
+
+  const tokens = text.match(/"(?:\\.|[^"\\])*"|[{}\[\],:]|[^\s{}\[\],:]+/g) ?? [];
+  const parts: string[] = [];
+  let depth = 0;
+  const newline = () => parts.push('\n', '  '.repeat(depth));
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]!;
+    if (token === '{' || token === '[') {
+      parts.push(token);
+      depth++;
+      if (tokens[i + 1] !== '}' && tokens[i + 1] !== ']') newline();
+    } else if (token === '}' || token === ']') {
+      depth--;
+      if (tokens[i - 1] !== '{' && tokens[i - 1] !== '[') newline();
+      parts.push(token);
+    } else if (token === ',') {
+      parts.push(token);
+      newline();
+    } else {
+      parts.push(token === ':' ? ': ' : token);
+    }
+  }
+  return parts.join('');
+}
+
 /** First syntax problem for formats we can check, else null. */
 export function validateData(format: DataFormatId, text: string): string | null {
   if (!text.trim()) return null;

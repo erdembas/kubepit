@@ -54,8 +54,8 @@ pub fn request(case: &Case, cluster: &str) -> AiRequest {
         session_id: None,
         intent: case.intent,
         message: match case.locale {
-            AiLocale::En => "Explain the likely cause and suggest safe next steps.",
             AiLocale::Tr => "Olası nedeni açıklayın ve güvenli sonraki adımlar önerin.",
+            _ => "Explain the likely cause and suggest safe next steps.",
         }
         .into(),
         scope,

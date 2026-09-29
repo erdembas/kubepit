@@ -1,6 +1,7 @@
 import * as i18n from '@/i18n';
 import { useLocaleMemo as useMemo } from '@/i18n';
-import { ShieldCheck } from 'lucide-react';
+import { useId, useState } from 'react';
+import { ChevronRight, ShieldCheck } from 'lucide-react';
 import { Badge, type BadgeTone } from '@/components/ui/Badge';
 import {
   asArray,
@@ -95,11 +96,25 @@ function CertificateCard({
   now: number;
 }) {
   i18n.useLocale();
+  const [open, setOpen] = useState(!cert.isCA);
+  const detailsId = useId();
   const expiry = certificateExpiry(cert, now);
   const title = cert.subject.cn || cert.sans[0] || cert.subject.dn || cert.serial;
   return (
     <div className="border-border/70 bg-surface-raised/40 rounded-app overflow-hidden border">
-      <div className="border-border/60 flex items-center gap-2 border-b px-3 py-2">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        aria-controls={detailsId}
+        className={cn(
+          'hover:bg-fg/4 focus-visible:bg-fg/4 flex w-full items-center gap-2 px-3 py-2 text-left',
+          open && 'border-border/60 border-b',
+        )}
+      >
+        <ChevronRight
+          className={cn('text-fg-dim h-3 w-3 shrink-0 transition-transform', open && 'rotate-90')}
+        />
         <ShieldCheck className="text-fg-dim h-3.5 w-3.5 shrink-0" />
         <span className="text-fg min-w-0 flex-1 truncate text-[12.5px] font-medium" title={title}>
           {title}
@@ -108,8 +123,8 @@ function CertificateCard({
           {count > 1 ? `${dataKey} #${index + 1}` : dataKey}
         </span>
         <ExpiryBadge expiry={expiry} />
-      </div>
-      <div className="space-y-3 px-3 py-2.5">
+      </button>
+      <div id={detailsId} hidden={!open} className="space-y-3 px-3 py-2.5">
         <div className="space-y-1">
           <Lifetime cert={cert} now={now} expiry={expiry} />
           <div className="text-fg-dim flex justify-between text-[10.5px] tabular-nums">
@@ -163,7 +178,15 @@ export function CertificateCards({ obj, now }: { obj: KubeObject; now: number })
         {entries.flatMap((e) =>
           e.certs.map((cert, i) => (
             <CertificateCard
-              key={`${e.key}|${i}`}
+              key={JSON.stringify([
+                obj.metadata.uid,
+                e.key,
+                i,
+                cert.issuer.dn,
+                cert.serial,
+                cert.notBefore,
+                cert.notAfter,
+              ])}
               cert={cert}
               dataKey={e.key}
               index={i}

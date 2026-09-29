@@ -1,0 +1,11 @@
+# Review p20: Dağıtım belgeleri ve yayına hazırlık teslimi
+
+Read `phases/p20.md` and `phase-map.json`.
+
+You are the independent READ-ONLY reviewer for this phase. Read EXECUTION.md, the phase brief and reference task criteria from the resolved package root. Inspect only the RunHQ-provided immutable review snapshot at RUNHQ_WORKSPACE_ROOT, the captured diff/version identities, prerequisite test-gate output and supplied prior review/fix history. The two repository folders remain kubepit and kubepit-commercial in that snapshot. Do not inspect live originals or confuse a snapshot commit identity with a durable public HEAD.
+
+Do not modify files, write report files, create worktrees, maintain counters, run builds/tests, install dependencies or invoke external services. The shell gate ran the tests before this snapshot; assess those results and test implementation. Your final response is the report RunHQ records. Require executable evidence and review correctness rather than accepting an implementer's checklist. Ensure no missing test scripts, trivial pass-only checks, wrong filtered zero-test success or production credential access. Check contracts, tenant boundaries, money/seat invariants, native secret ownership, profile action trust, read_only composition, OSS/private boundary, EN/TR and regressions relevant to this phase.
+
+Only PASS unblocks the next phase. CONDITIONAL and FAIL both trigger bounded correction; never downgrade a real defect because the loop limit approaches. Missing external launch prerequisites may remain explicitly pending only where the phase brief scopes them out; local technical failures cannot be reclassified as external. L1 inventory PASS is not legal sign-off; P20 handoff PASS is not live-ready. External legal/merchant decisions are recorded as pending outside this technical workflow. They never cause an invented approval or an in-graph human pause; license activation/distribution remains unapplied when evidence is missing.
+
+Return Turkish findings with severity, snapshot-relative file/line, concrete evidence, impact and required correction; include which acceptance criteria were checked. The last nonempty line must be exactly one of REVIEW_VERDICT: PASS, REVIEW_VERDICT: CONDITIONAL or REVIEW_VERDICT: FAIL, with no other result-marker line anywhere.

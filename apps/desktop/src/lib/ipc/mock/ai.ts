@@ -1,5 +1,13 @@
 import * as i18n from '@/i18n/core';
 import { DEFAULT_AI_SETTINGS } from '@/lib/ai/defaults';
+import { isLocalAgent } from '@/lib/ai/localAgents';
+import { needsKey } from '@/lib/ai/settingsIssues';
+import {
+  selectedAgentModel,
+  agentSessionModel,
+  DEFAULT_AGENT_OPTIONS,
+} from '@/lib/ai/agentModelOptions';
+import { DEMO_AGENT_CATALOGS } from './fixtures/agentCatalogs';
 import { formatAge } from '@/lib/format';
 import type {
   AiEvent,
@@ -27,6 +35,7 @@ import { writeBackendOwned } from './app';
 import { sleep } from './bus';
 import {
   DEMO_MODELS,
+  DEMO_LOCAL_AGENTS,
   DEMO_TOOLS,
   FALLBACK_MODEL,
   TOOL_DECLINED,
@@ -104,6 +113,8 @@ interface Session {
   model: string;
   local: boolean;
   locale: AiLocale;
+  /** Saved preference when the session started; null follows the UI language. */
+  responseLanguage: AiLocale | null;
   /** Tools offered for the whole session (fixed when it starts). */
   tools: string[];
   /** Messages already sent (user and assistant). */
@@ -167,8 +178,12 @@ function settings(): Settings {
 
 function aiSettings(): AiSettings {
   const ai = settings().ai ?? structuredClone(DEFAULT_AI_SETTINGS);
-  // Settings saved by an older demo lack the acknowledgement list.
-  return ai.production_acknowledged ? ai : { ...ai, production_acknowledged: [] };
+  // Settings saved by an older demo may lack newer fields.
+  return {
+    ...ai,
+    response_language: ai.response_language ?? null,
+    production_acknowledged: ai.production_acknowledged ?? [],
+  };
 }
 
 function clusters(): ClusterDef[] {
@@ -179,7 +194,13 @@ function clusters(): ClusterDef[] {
 function normalizeAi(ai: AiSettings): AiSettings {
   return {
     ...ai,
-    providers: ai.providers.map((p) => ({ ...p, base_url: p.base_url.trim().replace(/\/+$/, '') })),
+    response_language: ai.response_language ?? null,
+    agent_options: ai.agent_options ?? {},
+    providers: ai.providers.map((p) => ({
+      ...p,
+      base_url: isLocalAgent(p.kind) ? '' : p.base_url.trim().replace(/\/+$/, ''),
+      model: isLocalAgent(p.kind) ? p.model.trim() || 'default' : p.model,
+    })),
     max_context_tokens: Math.min(
       900_000,
       Math.max(2_000, Math.round(ai.max_context_tokens) || 60_000),
@@ -226,6 +247,22 @@ function providerOf(ai: AiSettings, id: string | null): AiProviderConfig {
 }
 
 function checkEgress(ai: AiSettings, provider: AiProviderConfig) {
+  if (isLocalAgent(provider.kind)) {
+    if (ai.local_only)
+      throw new Error(
+        'local assistant agents may use cloud services; remote providers must be allowed and local-only mode must be off',
+      );
+    const agent = DEMO_LOCAL_AGENTS.find((agent) => agent.kind === provider.kind);
+    if (!agent?.supported)
+      throw new Error(
+        'this local agent cannot disable its host tools and integrations; choose another assistant provider',
+      );
+    if (!agent.available)
+      throw new Error(
+        'local assistant agent is not installed or is not executable; install it and refresh discovery',
+      );
+    return;
+  }
   if (ai.local_only && !isLoopback(provider.base_url))
     throw new Error(
       `${provider.name} is remote and the assistant is in local-only mode (loopback providers only).`,
@@ -233,7 +270,7 @@ function checkEgress(ai: AiSettings, provider: AiProviderConfig) {
 }
 
 function checkKey(provider: AiProviderConfig) {
-  if (provider.kind !== 'ollama' && !keys.has(provider.id))
+  if (needsKey(provider) && !keys.has(provider.id))
     throw new Error(`No API key is stored for ${provider.name}. Set one in Settings → Assistant.`);
 }
 
@@ -262,14 +299,18 @@ function status(): AiStatus {
     remote_allowed: true,
     keychain: i18n.t('Demo credential store (this browser tab)'),
     providers: ai.providers.map((p) => {
-      const local = isLoopback(p.base_url);
+      const agent = isLocalAgent(p.kind);
+      const discovered = DEMO_LOCAL_AGENTS.find((item) => item.kind === p.kind);
+      const local = !agent && isLoopback(p.base_url);
       return {
         id: p.id,
         kind: p.kind,
         local,
-        has_key: keys.has(p.id),
+        has_key: !agent && keys.has(p.id),
         key_error: null,
-        allowed: local || !ai.local_only,
+        allowed: agent
+          ? !!discovered?.available && discovered.supported && !ai.local_only
+          : local || !ai.local_only,
       };
     }),
   };
@@ -306,9 +347,14 @@ function sessionFor(request: AiRequest, ai: AiSettings, cluster: ClusterDef | nu
     if (!found) throw new Error(SESSION_GONE);
     if (found.clusterId !== (cluster?.id ?? null))
       throw new Error('This chat belongs to another cluster. Start a new chat.');
+    if (found.locale !== request.locale || found.responseLanguage !== ai.response_language)
+      throw new Error('assistant session settings or scope changed; start a new conversation');
     return found;
   }
   const provider = providerOf(ai, ai.active_provider);
+  const nativeModel = isLocalAgent(provider.kind)
+    ? selectedAgentModel(DEMO_AGENT_CATALOGS[provider.kind] ?? null, provider.model)
+    : undefined;
   const hasPrometheus = cluster?.prometheus?.mode !== 'off';
   const session: Session = {
     id: `s-${uuid()}`,
@@ -317,11 +363,12 @@ function sessionFor(request: AiRequest, ai: AiSettings, cluster: ClusterDef | nu
     production: cluster?.environment === 'production',
     providerId: provider.id,
     providerKind: provider.kind,
-    model: provider.model,
+    model: agentSessionModel(nativeModel, provider.model),
     local: isLoopback(provider.base_url),
     locale: request.locale,
+    responseLanguage: ai.response_language,
     tools:
-      !cluster || ai.tool_policy === 'off'
+      !cluster || ai.tool_policy === 'off' || isLocalAgent(provider.kind)
         ? []
         : DEMO_TOOLS.filter((t) => t !== 'query_prometheus' || hasPrometheus),
     messages: 0,
@@ -360,7 +407,19 @@ async function preview(request: AiRequest): Promise<AiPreview> {
   if (!ai.enabled) throw new Error(OFF);
   const active = providerOf(ai, ai.active_provider);
   checkEgress(ai, active);
-  if (!active.model.trim())
+  if (isLocalAgent(active.kind)) {
+    const model = selectedAgentModel(DEMO_AGENT_CATALOGS[active.kind] ?? null, active.model);
+    const options = ai.agent_options?.[active.id] ?? DEFAULT_AGENT_OPTIONS;
+    if (
+      (options.effort && !model?.efforts.includes(options.effort)) ||
+      (options.service_tier && !model?.service_tiers.includes(options.service_tier)) ||
+      (options.fast_mode && !model?.supports_fast_mode)
+    )
+      throw new Error(
+        'the selected local agent model does not support these options; refresh its model catalog',
+      );
+  }
+  if (!isLocalAgent(active.kind) && !active.model.trim())
     throw new Error(`Choose a model for ${active.name} in Settings → Assistant.`);
   const cluster = request.scope.cluster_id ? clusterOf(request.scope.cluster_id) : null;
   if (cluster) checkCluster(ai, cluster);
@@ -377,8 +436,13 @@ async function preview(request: AiRequest): Promise<AiPreview> {
   const message = redactDemo(request.message, 'text', ai.redaction, session.names).text;
   const windowTokens =
     provider.context_window ??
+    selectedAgentModel(DEMO_AGENT_CATALOGS[provider.kind] ?? null, session.model)?.context_window ??
     demoModel(provider.kind, session.model)?.context_window ??
-    (provider.kind === 'openai-compatible' ? 32_768 : 200_000);
+    (isLocalAgent(provider.kind)
+      ? 128_000
+      : provider.kind === 'openai-compatible'
+        ? 32_768
+        : 200_000);
   const systemTokens = estimateTokens(demoSystemPrompt(session.locale));
   const tools = ai.tool_policy === 'off' ? [] : session.tools;
   const toolTokens = tools.length * TOOL_TOKENS;
@@ -750,6 +814,8 @@ function send(previewId: string, onEvent: (event: AiEvent) => void): string {
   const session = sessions.get(stored.preview.session_id);
   if (!session) throw new Error(SESSION_GONE);
   if (session.clusterId) checkCluster(ai, clusterOf(session.clusterId));
+  if (session.responseLanguage !== ai.response_language)
+    throw new Error('assistant settings changed; preview the request again');
   const provider = providerOf(ai, session.providerId);
   checkEgress(ai, provider);
   checkKey(provider);
@@ -860,8 +926,29 @@ provideAiHistory({
 
 register({
   ai_status: () => status(),
+  ai_local_agents: () => structuredClone(DEMO_LOCAL_AGENTS),
+  ai_agent_catalog: async ({ kind }: MockArgs) => {
+    const providerKind = kind as AiProviderKind;
+    checkEgress(aiSettings(), {
+      id: providerKind,
+      kind: providerKind,
+      name: providerKind,
+      base_url: '',
+      model: 'default',
+      context_window: null,
+      max_output_tokens: 4096,
+    });
+    const catalog = DEMO_AGENT_CATALOGS[providerKind];
+    if (!catalog) throw new Error('this local agent protocol is not supported');
+    await sleep(250);
+    return structuredClone(catalog);
+  },
   ai_key_set: ({ providerId, key }: MockArgs) => {
-    providerOf(aiSettings(), String(providerId));
+    const provider = providerOf(aiSettings(), String(providerId));
+    if (isLocalAgent(provider.kind))
+      throw new Error(
+        'local assistant agents use their own sign-in; no API key is stored in Kubepit',
+      );
     if (!String(key ?? '').trim()) throw new Error('The API key is empty.');
     keys.add(String(providerId));
     return status();

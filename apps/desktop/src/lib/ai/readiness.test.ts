@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AiSettings, AiStatus, ClusterDef } from '@/types';
 import { DEFAULT_AI_SETTINGS } from './defaults';
 import { assistantReadiness } from './readiness';
+import { selectLocalAgent } from './localAgents';
 
 // Enabled defaults (Anthropic active) with overrides.
 const ai = (patch: Partial<AiSettings> = {}): AiSettings => ({
@@ -29,6 +30,36 @@ const cluster = (id: string, environment: string | null = null) =>
   ({ id, name: `${id}-name`, environment }) as ClusterDef;
 
 describe('assistantReadiness', () => {
+  it('uses CLI login and the configured default model, while still enforcing availability', () => {
+    const initial = ai();
+    const config = {
+      ...initial,
+      ...selectLocalAgent(initial, {
+        kind: 'codex-cli',
+        name: 'Codex',
+        executable: '/bin/codex',
+        source: 'PATH',
+        available: true,
+        supported: true,
+      }),
+    };
+    config.providers.at(-1)!.model = '';
+    const s = status([], {
+      providers: [
+        {
+          id: 'codex-cli',
+          kind: 'codex-cli',
+          local: false,
+          has_key: false,
+          key_error: null,
+          allowed: true,
+        },
+      ],
+    });
+    expect(assistantReadiness(config, s, null).state).toBe('ready');
+    s.providers[0]!.allowed = false;
+    expect(assistantReadiness(config, s, null).state).toBe('blocked');
+  });
   it('is off without settings or with the master switch off', () => {
     expect(assistantReadiness(null, status(), null).state).toBe('off');
     expect(assistantReadiness(ai({ enabled: false }), status(), null).state).toBe('off');

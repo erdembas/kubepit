@@ -1,0 +1,9 @@
+# Automatic public checkpoint after p03
+
+The user requested automatic continuation. Read EXECUTION.md and the immediately preceding accepted PASS review, its immutable snapshot/version identities, test-gate evidence and exact changed-file list. This step replaces a manual checkpoint; do not request another routine approval.
+
+Do not edit product source or rerun implementation. Confirm the current public content still matches the accepted snapshot/diff. Check staged, unstaged and untracked paths. Include the reviewed cumulative public changes since the previous durable HEAD (including earlier accepted phases such as D1), using their PRIVATE/docs/workflow records and the full accepted snapshot; do not mistake those for unrelated edits. Verify the staged diff exactly matches that accepted cumulative tree and intended paths, then stage only those reviewed public files by explicit paths. Exclude unrelated/private/generated/secret files. Never use blanket add, stash, clean, reset, amend, rebase, force or remote operations. If unexpected concurrent changes exist, do not absorb or discard them; return BLOCKED with exact paths.
+
+Create a normal LOCAL public Git commit, using existing configured author/hook policy; do not invent an author identity or disable hooks. Verify public clean and record full SHA plus source tree identity in PRIVATE/docs/workflow/p03-checkpoint.md. If already clean on retry and HEAD contains the accepted tree, reuse it without an empty commit. This is a local recovery/build checkpoint, not a release/legal approval. The next implementation phase refreshes the private vendor pin from this durable SHA and runs normal tests/review. Do not modify the vendor here.
+
+Return the verified SHA, exact committed paths and clean-tree result in Turkish. Last nonempty line: PIPELINE_RESULT: SUCCESS; if genuinely blocked or failed use PIPELINE_RESULT: BLOCKED or PIPELINE_RESULT: FAILED respectively, exactly once.

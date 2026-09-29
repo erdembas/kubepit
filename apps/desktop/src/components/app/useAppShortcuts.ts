@@ -1,9 +1,14 @@
 import { useEffect } from 'react';
+import { requestCloseTabs } from '@/components/workbench/dock/tabs';
 import { IS_MAC } from '@/lib/platform';
 import { duplicateWindow } from '@/lib/windowing';
+import { tabFromKey } from '@/store/mainLayout';
 import { focusedGroup } from '@/store/splitLayout';
-import { DASHBOARD_TAB_KEY, useAppStore } from '@/store/useAppStore';
+import { useAppStore } from '@/store/useAppStore';
+import { useDockStore } from '@/store/useDockStore';
 import { openFleetSearch } from '@/store/useFleetSearchStore';
+import { useWorkbenchStore, viewLayoutOf } from '@/store/useWorkbenchStore';
+import { closeTarget } from './closeTarget';
 
 function isEditable(target: EventTarget | null) {
   const el = target as HTMLElement | null;
@@ -11,11 +16,42 @@ function isEditable(target: EventTarget | null) {
   return el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
 }
 
+/** ⌘W closes the innermost tab, ⌘⇧W the main tab (see `closeTarget`). */
+function closeFocused(event: KeyboardEvent) {
+  const store = useAppStore.getState();
+  const tab = tabFromKey(store.activeMainTabKey);
+  const clusterId = tab?.kind === 'cluster' ? tab.refId : null;
+  const dockEl = (event.target as Element | null)?.closest?.('[data-dock]');
+  const target = closeTarget({
+    mainTab: store.activeMainTabKey,
+    mainPane: store.mainLayout.focused,
+    whole: event.shiftKey,
+    dock:
+      clusterId && dockEl?.getAttribute('data-dock') === clusterId
+        ? (useDockStore.getState().docks[clusterId] ?? null)
+        : null,
+    views:
+      clusterId && store.statuses[clusterId]?.state === 'connected'
+        ? viewLayoutOf(clusterId)
+        : null,
+  });
+  if (!target) return;
+  event.preventDefault();
+  if (target.kind === 'dock-tab') requestCloseTabs(target.clusterId, [target.tabId]);
+  else if (target.kind === 'view-tab')
+    useWorkbenchStore.getState().closeTab(target.clusterId, target.key);
+  else if (target.kind === 'view-pane')
+    useWorkbenchStore.getState().closePane(target.clusterId, target.paneId);
+  else if (target.kind === 'main-tab') store.closeMainTab(target.key);
+  else store.closeMainPane(target.paneId);
+}
+
 /**
  * Global shortcuts (⌘ on macOS, Ctrl elsewhere):
  *   K palette · N add cluster · Shift+N new window · , settings · B toggle sidebar
- *   W close tab · 1–9 switch tab · Shift+[ / Shift+] previous / next tab
- *   Shift+F fleet search (works from text fields too)
+ *   W close the innermost tab · Shift+W close the main tab · 1–9 switch tab
+ *   Shift+[ / Shift+] previous / next tab · Shift+F fleet search (works from
+ *   text fields too; so does ⌘W on macOS, where editors give it no meaning)
  * Tab shortcuts act on the focused pane.
  */
 export function useAppShortcuts() {
@@ -37,8 +73,8 @@ export function useAppShortcuts() {
         openFleetSearch();
         return;
       }
-      // Editors (Monaco, xterm, inputs) keep their own chords.
-      if (isEditable(event.target) && key !== ',') return;
+      // Editors (Monaco, xterm, inputs) keep their own chords; Ctrl+W deletes a word.
+      if (isEditable(event.target) && key !== ',' && !(IS_MAC && key === 'w')) return;
 
       if (key === 'n' && !event.shiftKey) {
         event.preventDefault();
@@ -53,11 +89,7 @@ export function useAppShortcuts() {
         event.preventDefault();
         store.setSidebarPinned(!store.sidebarPinned);
       } else if (key === 'w') {
-        if (store.activeMainTabKey === DASHBOARD_TAB_KEY) return;
-        event.preventDefault();
-        // An empty split pane has no tab to close: close the pane itself.
-        if (store.activeMainTabKey) store.closeMainTab(store.activeMainTabKey);
-        else store.closeMainPane(store.mainLayout.focused);
+        closeFocused(event);
       } else if (/^[1-9]$/.test(event.key)) {
         const keys = focusedGroup(store.mainLayout).tabs;
         const tab = event.key === '9' ? keys.at(-1) : keys[Number(event.key) - 1];

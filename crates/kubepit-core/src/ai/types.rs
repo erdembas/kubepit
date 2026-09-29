@@ -15,7 +15,7 @@ use serde_json::Value;
 // Settings (`Settings.ai`), status, usage
 // ---------------------------------------------------------------------------
 
-/// Which wire protocol a provider speaks.
+/// Which HTTP or installed-agent protocol a provider speaks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AiProviderKind {
@@ -25,22 +25,93 @@ pub enum AiProviderKind {
     OpenaiCompatible,
     /// Ollama's native `POST /api/chat`.
     Ollama,
+    /// Installed agents, using their own sign-in and a restricted transport.
+    CodexCli,
+    ClaudeCli,
+    OpencodeCli,
+    CursorCli,
+}
+
+/// Metadata-only discovery. Finding an executable does not prove it is signed in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiLocalAgent {
+    pub kind: AiProviderKind,
+    pub name: String,
+    pub executable: Option<String>,
+    pub source: Option<String>,
+    pub available: bool,
+    /// The installed tool can be run without bypassing Assistant permissions.
+    pub supported: bool,
+}
+
+/// Native model metadata, obtained without sending a conversation to the agent.
+/// Identifiers and capability values belong to the agent, not Kubepit enums.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiAgentModel {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub resolved_model: Option<String>,
+    pub is_alias: bool,
+    pub is_default: bool,
+    pub context_window: Option<u32>,
+    pub max_output_tokens: Option<u32>,
+    pub efforts: Vec<String>,
+    pub default_effort: Option<String>,
+    pub service_tiers: Vec<String>,
+    pub default_service_tier: Option<String>,
+    pub supports_fast_mode: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiAgentCatalog {
+    pub kind: AiProviderKind,
+    pub models: Vec<AiAgentModel>,
+    /// Only set when the native agent reports a global default.
+    pub default_model: Option<String>,
+    /// None means the agent did not report account status.
+    pub authenticated: Option<bool>,
+    pub auth_method: Option<String>,
+    pub version: Option<String>,
+}
+
+/// Persisted per provider; null leaves the choice to the native agent.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AiAgentOptions {
+    pub effort: Option<String>,
+    pub service_tier: Option<String>,
+    pub fast_mode: bool,
+}
+
+impl From<&AiAgentModel> for AiModelInfo {
+    fn from(model: &AiAgentModel) -> Self {
+        Self {
+            id: model.id.clone(),
+            display_name: Some(model.name.clone()),
+            context_window: model.context_window,
+            max_output_tokens: model.max_output_tokens,
+            effort: Some(!model.efforts.is_empty()),
+            ..Self::default()
+        }
+    }
 }
 
 /// One configured provider. The API key is never part of the settings: it
 /// lives in the OS credential store at `ai/<id>` (see `ai/keys.rs`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AiProviderConfig {
-    /// Stable id (`anthropic`, `openai`, `ollama`); also the keychain key.
+    /// Stable id; HTTP provider ids also identify their keychain entry.
     pub id: String,
     pub kind: AiProviderKind,
     /// Display name.
     #[serde(default)]
     pub name: String,
-    /// Without a trailing slash (normalized).
+    /// Without a trailing slash (normalized); empty for installed agents.
     #[serde(default)]
     pub base_url: String,
     /// Model id; empty = not chosen yet (OpenAI-compatible, Ollama).
+    /// Installed agents use `default` to let the CLI choose.
     #[serde(default)]
     pub model: String,
     /// Context window in tokens; `None` = from the Models API or a default.
@@ -120,6 +191,8 @@ pub struct AiSettings {
     pub enabled: bool,
     /// Refuse every non-loopback provider in the backend.
     pub local_only: bool,
+    /// Preferred answer language; `None` follows the application language.
+    pub response_language: Option<AiLocale>,
     /// Id of the provider requests go to.
     pub active_provider: Option<String>,
     pub providers: Vec<AiProviderConfig>,
@@ -139,6 +212,8 @@ pub struct AiSettings {
     pub max_context_tokens: u32,
     /// `None` = per intent (explain/fix/yaml high, chat medium, others low).
     pub effort: Option<AiEffort>,
+    /// Native reasoning variants and speed options, keyed by provider id.
+    pub agent_options: BTreeMap<String, AiAgentOptions>,
     pub prices: Vec<AiPrice>,
 }
 
@@ -169,7 +244,7 @@ impl AiUsage {
 pub struct AiProviderStatus {
     pub id: String,
     pub kind: AiProviderKind,
-    /// The base URL is a loopback address.
+    /// The model endpoint is loopback. False for CLIs, which may use the cloud.
     pub local: bool,
     /// A usable API key is stored for it: false when there is none, and
     /// also when the stored key was saved for another origin or provider
@@ -237,13 +312,24 @@ pub enum AiIntent {
     Yaml,
 }
 
-/// Answer language (the UI locale).
+/// Answer language, independent of the application's UI locale.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AiLocale {
     #[default]
     En,
     Tr,
+    De,
+    Fr,
+    Es,
+    It,
+    Pt,
+    Ru,
+    Ar,
+    Hi,
+    Ja,
+    Ko,
+    Zh,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -320,6 +406,7 @@ pub struct AiRequest {
     /// Section ids the user excluded in the preview.
     #[serde(default)]
     pub excluded: Vec<String>,
+    /// Resolved answer language: the saved preference or the application locale.
     #[serde(default)]
     pub locale: AiLocale,
 }
@@ -547,7 +634,28 @@ mod tests {
                 "yaml"
             ])
         );
-        assert_eq!(wire([AiLocale::En, AiLocale::Tr]), json!(["en", "tr"]));
+        let locales = [
+            AiLocale::En,
+            AiLocale::Tr,
+            AiLocale::De,
+            AiLocale::Fr,
+            AiLocale::Es,
+            AiLocale::It,
+            AiLocale::Pt,
+            AiLocale::Ru,
+            AiLocale::Ar,
+            AiLocale::Hi,
+            AiLocale::Ja,
+            AiLocale::Ko,
+            AiLocale::Zh,
+        ];
+        let locale_codes =
+            json!(["en", "tr", "de", "fr", "es", "it", "pt", "ru", "ar", "hi", "ja", "ko", "zh"]);
+        assert_eq!(wire(locales), locale_codes);
+        assert_eq!(
+            serde_json::from_value::<Vec<AiLocale>>(locale_codes).unwrap(),
+            locales
+        );
         let kinds = [
             AiSectionKind::Scope,
             AiSectionKind::Object,

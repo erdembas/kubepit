@@ -1,10 +1,11 @@
 import * as i18n from '@/i18n';
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { AlertsPanel } from '@/components/alerts/AlertsPanel';
 import { FleetEventsPanel } from '@/components/panels/FleetEventsPanel';
 import { PortForwardsPanel } from '@/components/panels/PortForwardsPanel';
 import { AssistantPanel } from '@/components/assistant/AssistantPanel';
+import { useAssistantFullscreen } from '@/components/assistant/useAssistantFullscreen';
 import { cn } from '@/lib/cn';
 
 /** Keep panel state mounted, but resize the workspace only once per toggle.
@@ -13,8 +14,21 @@ import { cn } from '@/lib/cn';
 export function RightSidePanel() {
   i18n.useLocale();
   const active = useAppStore((s) => s.rightPanel);
+  const mainTab = useAppStore((s) => s.activeMainTabKey);
   const width = useAppStore((s) => s.rightPanelWidth);
   const setWidth = useAppStore((s) => s.setRightPanelWidth);
+  const [assistantExpanded, setAssistantExpanded] = useState(false);
+  const expanded = active === 'assistant' && assistantExpanded;
+  const panel = useRef<HTMLElement>(null);
+  const exitFullscreen = useCallback(() => setAssistantExpanded(false), []);
+  useAssistantFullscreen(expanded, panel, exitFullscreen);
+  useEffect(() => {
+    if (active !== 'assistant') setAssistantExpanded(false);
+  }, [active]);
+  useEffect(() => {
+    // Global navigation (for example the Settings shortcut) must stay visible.
+    setAssistantExpanded(false);
+  }, [mainTab]);
 
   const resizing = useRef(false);
   const startXRef = useRef(0);
@@ -68,15 +82,23 @@ export function RightSidePanel() {
 
   return (
     <aside
+      ref={panel}
+      role={expanded ? 'dialog' : undefined}
+      aria-modal={expanded || undefined}
+      aria-label={expanded ? i18n.t('Assistant') : undefined}
       className={cn(
-        'chrome-gradient bg-surface-raised relative flex h-full min-h-0 shrink-0 flex-col overflow-hidden',
-        isOpen && 'border-border/70 border-l',
+        'chrome-gradient bg-surface-raised flex h-full min-h-0 shrink-0 flex-col overflow-hidden',
+        expanded ? 'absolute inset-0 z-40' : 'relative',
+        isOpen && !expanded && 'border-border/70 border-l',
       )}
-      style={{ width: renderedWidth }}
+      style={{ width: expanded ? '100%' : renderedWidth }}
       aria-hidden={!isOpen}
     >
-      <div className="absolute inset-y-0 right-0 flex flex-col" style={{ width }}>
-        {isOpen && (
+      <div
+        className="absolute inset-y-0 right-0 flex flex-col"
+        style={{ width: expanded ? '100%' : width }}
+      >
+        {isOpen && !expanded && (
           <div
             role="separator"
             aria-orientation="vertical"
@@ -104,7 +126,12 @@ export function RightSidePanel() {
           )}
           {hasOpenedAssistant.current && (
             <div className={active === 'assistant' ? 'flex h-full min-h-0 flex-1' : 'hidden'}>
-              <AssistantPanel visible={active === 'assistant'} />
+              <AssistantPanel
+                visible={active === 'assistant'}
+                expanded={expanded}
+                onToggleExpanded={() => setAssistantExpanded((value) => !value)}
+                onExitExpanded={exitFullscreen}
+              />
             </div>
           )}
           {hasOpenedAlerts.current && (

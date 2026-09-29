@@ -16,6 +16,7 @@ export type MainTab =
   | { kind: 'dashboard' }
   | { kind: 'cluster'; refId: ClusterId }
   | { kind: 'settings' }
+  | { kind: 'ai-guide' }
   | { kind: 'port-forwards' }
   /** Fleet search across every connected cluster. */
   | { kind: 'search' }
@@ -25,6 +26,7 @@ export type MainTab =
 export const DASHBOARD_TAB: MainTab = { kind: 'dashboard' };
 export const DASHBOARD_TAB_KEY = 'dashboard:dashboard';
 export const SETTINGS_TAB_KEY = 'settings:settings';
+export const AI_GUIDE_TAB_KEY = 'ai-guide:ai-guide';
 export const PORT_FORWARDS_TAB_KEY = 'port-forwards:port-forwards';
 export const SEARCH_TAB_KEY = 'search:search';
 export const ACTIVITY_TAB_KEY = 'activity:activity';

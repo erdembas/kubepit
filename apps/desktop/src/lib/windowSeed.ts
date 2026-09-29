@@ -36,6 +36,7 @@ export interface WorkbenchSession {
   layouts: Record<string, SplitLayout>;
   activeKind: Record<string, string>;
   namespaces: Record<string, string[]>;
+  pinnedTabKeys: Record<string, string[]>;
 }
 
 export interface WindowSeed {

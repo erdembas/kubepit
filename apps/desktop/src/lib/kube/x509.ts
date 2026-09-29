@@ -32,6 +32,13 @@ export interface X509Certificate {
   selfSigned: boolean;
 }
 
+const identities = new WeakMap<X509Certificate, string>();
+
+/** Exact DER identity, including the signature. Keep this opaque value out of the UI. */
+export function certificateIdentity(certificate: X509Certificate): string | null {
+  return identities.get(certificate) ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // DER
 // ---------------------------------------------------------------------------
@@ -315,7 +322,7 @@ export function parseDer(der: Uint8Array): X509Certificate {
   const ext = fields.slice(i).find((f) => f.tag === 0xa3);
   const { sans, isCA } = ext ? extensions(der, ext) : { sans: [], isCA: false };
   const sigOid = oid(der, expect(children(der, expect(sigAlg, 0x30))[0], 0x06));
-  return {
+  const parsed: X509Certificate = {
     subject,
     issuer,
     sans,
@@ -327,6 +334,10 @@ export function parseDer(der: Uint8Array): X509Certificate {
     isCA,
     selfSigned: subject.dn === issuer.dn,
   };
+  let binary = '';
+  for (const byte of der.subarray(0, cert.end)) binary += String.fromCharCode(byte);
+  identities.set(parsed, btoa(binary));
+  return parsed;
 }
 
 // ---------------------------------------------------------------------------

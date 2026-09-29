@@ -108,7 +108,8 @@ export const GLOBAL_SHORTCUTS: readonly GlobalShortcut[] = [
   { keys: [`${MOD}+shift+n`], label: () => i18n.t('New window') },
   { keys: [`${MOD}+,`], label: () => i18n.t('Settings') },
   { keys: [`${MOD}+b`], label: () => i18n.t('Toggle the sidebar') },
-  { keys: [`${MOD}+w`], label: () => i18n.t('Close tab') },
+  { keys: [`${MOD}+w`], label: () => i18n.t('Close tab (dock, view, then cluster)') },
+  { keys: [`${MOD}+shift+w`], label: () => i18n.t('Close the cluster tab') },
   {
     keys: ['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d) => `${MOD}+${d}`),
     label: () => i18n.t('Switch to tab 1–9'),

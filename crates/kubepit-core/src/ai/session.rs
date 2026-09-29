@@ -17,8 +17,10 @@ use super::anthropic::AnthropicProvider;
 use super::budget::estimate_tokens;
 use super::context;
 use super::keys;
+use super::local_agent::LocalAgentProvider;
 use super::ollama::OllamaProvider;
 use super::openai::OpenAiCompatProvider;
+use super::opencode_cli::OpenCodeCliProvider;
 use super::pricing;
 use super::prompts;
 use super::provider::{
@@ -93,6 +95,11 @@ impl Default for Engine {
         }
     }
 }
+impl Engine {
+    pub(crate) fn timeouts(&self) -> AiTimeouts {
+        self.timing.lock().0
+    }
+}
 #[derive(Default)]
 struct Data {
     previews: HashMap<String, Prepared>,
@@ -154,6 +161,10 @@ fn default_window(kind: AiProviderKind) -> u32 {
         AiProviderKind::Anthropic => 200_000,
         AiProviderKind::OpenaiCompatible => settings::DEFAULT_OPENAI_CONTEXT_WINDOW,
         AiProviderKind::Ollama => settings::DEFAULT_OLLAMA_CONTEXT_WINDOW,
+        AiProviderKind::CodexCli
+        | AiProviderKind::ClaudeCli
+        | AiProviderKind::OpencodeCli
+        | AiProviderKind::CursorCli => 128_000,
     }
 }
 
@@ -162,6 +173,8 @@ enum Client {
     Anthropic(AnthropicProvider),
     Openai(OpenAiCompatProvider),
     Ollama(OllamaProvider),
+    Local(LocalAgentProvider),
+    Opencode(OpenCodeCliProvider),
 }
 impl Client {
     fn provider(&self) -> &dyn Provider {
@@ -169,6 +182,8 @@ impl Client {
             Self::Anthropic(p) => p,
             Self::Openai(p) => p,
             Self::Ollama(p) => p,
+            Self::Local(p) => p,
+            Self::Opencode(p) => p,
         }
     }
     fn with_hook(self, hook: super::provider::RequestHook) -> Self {
@@ -176,6 +191,8 @@ impl Client {
             Self::Anthropic(p) => Self::Anthropic(p.with_request_hook(hook)),
             Self::Openai(p) => Self::Openai(p.with_request_hook(hook)),
             Self::Ollama(p) => Self::Ollama(p.with_request_hook(hook)),
+            Self::Local(p) => Self::Local(p.with_request_hook(hook)),
+            Self::Opencode(p) => Self::Opencode(p.with_request_hook(hook)),
         }
     }
 }
@@ -189,7 +206,23 @@ impl Kubepit {
         if ai.provider(&provider.id) != Some(provider) {
             bail!("assistant provider changed; preview the request again");
         }
-        super::provider::check_egress(&provider.base_url, self.ai_remote_allowed(), ai.local_only)?;
+        if provider.kind.is_cli() {
+            if !self.ai_remote_allowed() || ai.local_only {
+                bail!("local assistant agents may use cloud services; remote providers must be allowed and local-only mode must be off");
+            }
+            if !super::local_discovery::supported(provider.kind) {
+                bail!("this local agent cannot disable its host tools and integrations; choose another assistant provider");
+            }
+            if super::local_discovery::resolve(provider.kind).is_none() {
+                bail!("local assistant agent is not installed or is not executable; install it and refresh discovery");
+            }
+        } else {
+            super::provider::check_egress(
+                &provider.base_url,
+                self.ai_remote_allowed(),
+                ai.local_only,
+            )?;
+        }
         if provider.model.is_empty() {
             bail!("choose an assistant model first");
         }
@@ -206,14 +239,30 @@ impl Kubepit {
     fn ai_client(
         &self,
         config: &AiProviderConfig,
+        ai: &AiSettings,
         info: Option<AiModelInfo>,
         window: u32,
     ) -> Result<Client> {
         let (timeouts, retry) = *self.ai.engine.timing.lock();
         let egress = Egress {
             remote_allowed: self.ai_remote_allowed(),
-            local_only: self.settings().ai.local_only,
+            local_only: ai.local_only,
         };
+        if config.kind.is_cli() {
+            let options = ai
+                .agent_options
+                .get(&config.id)
+                .cloned()
+                .unwrap_or_default();
+            return Ok(match config.kind {
+                AiProviderKind::CodexCli | AiProviderKind::ClaudeCli => Client::Local(
+                    LocalAgentProvider::new(config.kind, timeouts, egress)?.with_options(options),
+                ),
+                _ => Client::Opencode(
+                    OpenCodeCliProvider::new(config.kind, timeouts, egress)?.with_options(options),
+                ),
+            });
+        }
         egress.check(&config.base_url)?;
         // Read the key afresh; a cached status must never hide a locked keychain.
         let key = keys::read_key(self.secrets.as_ref(), config)?;
@@ -241,6 +290,7 @@ impl Kubepit {
                 OllamaProvider::new(config.base_url.clone(), window, timeouts, retry)?
                     .with_egress(egress),
             ),
+            _ => unreachable!("local agent providers are constructed above"),
         })
     }
     /// Only provider metadata; no cluster data or conversation is sent.
@@ -249,14 +299,24 @@ impl Kubepit {
         let config = ai
             .provider(provider_id)
             .ok_or_else(|| anyhow!("unknown assistant provider"))?;
-        let client = self.ai_client(
-            config,
-            None,
-            config
-                .context_window
-                .unwrap_or_else(|| default_window(config.kind)),
-        )?;
-        let models = client.provider().list_models().await?;
+        let models = if config.kind.is_cli() {
+            self.ai_agent_catalog(config.kind, true)
+                .await?
+                .models
+                .iter()
+                .map(AiModelInfo::from)
+                .collect()
+        } else {
+            let client = self.ai_client(
+                config,
+                &ai,
+                None,
+                config
+                    .context_window
+                    .unwrap_or_else(|| default_window(config.kind)),
+            )?;
+            client.provider().list_models().await?
+        };
         self.ai
             .engine
             .data
@@ -328,10 +388,27 @@ impl Kubepit {
                     bail!("too many active assistant sessions");
                 }
             }
-            let info = data
-                .models
-                .get(&model_key(&config))
-                .and_then(|m| m.iter().find(|m| m.id == config.model));
+            let catalog = self.ai.agent_catalogs.peek(config.kind);
+            let native_info = catalog
+                .as_ref()
+                .and_then(|catalog| catalog.model(&config.model))
+                .map(AiModelInfo::from);
+            let info = native_info.as_ref().or_else(|| {
+                if config.kind.is_cli() {
+                    None
+                } else {
+                    data.models
+                        .get(&model_key(&config))
+                        .and_then(|m| m.iter().find(|m| m.id == config.model))
+                }
+            });
+            // A native default/alias is resolved once for the conversation, so
+            // budget, preview and follow-up turns use the same known model.
+            let model = catalog
+                .as_ref()
+                .and_then(|catalog| catalog.session_model(&config.model))
+                .unwrap_or(&config.model)
+                .to_string();
             let window = config
                 .context_window
                 .or_else(|| info.and_then(|m| m.context_window))
@@ -353,7 +430,9 @@ impl Kubepit {
                     )
                 })
                 .is_some_and(|s| s.state == crate::types::PrometheusState::Available);
-            let tools = if request.scope.cluster_id.is_some() && ai.tool_policy != AiToolPolicy::Off
+            let tools = if !config.kind.is_cli()
+                && request.scope.cluster_id.is_some()
+                && ai.tool_policy != AiToolPolicy::Off
             {
                 tools::tool_specs(prometheus)
             } else {
@@ -367,12 +446,16 @@ impl Kubepit {
                 model_info: info.cloned(),
                 settings: ai.clone(),
                 chat: ChatRequest {
-                    model: config.model.clone(),
+                    model,
                     system: prompts::system_prompt(request.locale).into(),
                     messages: vec![],
                     tools,
                     max_tokens,
-                    effort: ai.effort.or(Some(prompts::default_effort(request.intent))),
+                    effort: if config.kind.is_cli() {
+                        None
+                    } else {
+                        ai.effort.or(Some(prompts::default_effort(request.intent)))
+                    },
                 },
                 pseudo: Pseudonyms::default(),
                 approved: ai.tool_policy == AiToolPolicy::Session,
@@ -424,7 +507,7 @@ impl Kubepit {
             session_id: session.id.clone(),
             provider_id: config.id.clone(),
             provider_kind: config.kind,
-            model: config.model.clone(),
+            model: session.chat.model.clone(),
             local: is_loopback(&config.base_url),
             production: cluster
                 .as_ref()
@@ -448,7 +531,7 @@ impl Kubepit {
                     input_tokens: estimated_input_tokens as u64,
                     ..Default::default()
                 },
-                pricing::price_for(&ai.prices, &config.model),
+                pricing::price_for(&ai.prices, &session.chat.model),
             ),
             placeholders: session.pseudo.restore_map(),
             expires_at: epoch_ms() + PREVIEW_TTL.as_millis() as i64,
@@ -500,6 +583,7 @@ impl Kubepit {
         }
         let client = self.ai_client(
             &prepared.session.provider,
+            &prepared.session.settings,
             prepared.session.model_info.clone(),
             prepared.session.window,
         )?;
@@ -799,7 +883,7 @@ impl Drop for RunGuard {
         let actual_model = p
             .actual_model
             .as_deref()
-            .unwrap_or(&self.session.provider.model);
+            .unwrap_or(&self.session.chat.model);
         let has_partial = p.current_usage != AiUsage::default() || p.turns == 0;
         let partial_cost = if has_partial {
             pricing::cost(
@@ -867,7 +951,7 @@ impl Drop for RunGuard {
 async fn run(mut guard: RunGuard, client: Client) {
     guard.emit(AiEvent::Started {
         run_id: guard.id.clone(),
-        model: guard.session.provider.model.clone(),
+        model: guard.session.chat.model.clone(),
     });
     let app = guard.app.clone();
     let scope = guard.session.scope.clone();

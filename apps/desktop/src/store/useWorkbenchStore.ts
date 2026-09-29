@@ -14,8 +14,8 @@ import { syncPreferences, windowStorage } from './windowStorage';
 /**
  * Cluster workbench UI state. One entry per cluster for navigation
  * (split panes with their view tabs, active kind, namespaces, selected
- * object per tab) plus global layout prefs. Layout prefs, namespaces, panes
- * and the active kind persist to localStorage (`kubepit.workbench.v1`);
+ * object per tab) plus global layout prefs. Layout prefs, namespaces, panes,
+ * pins and the active kind persist to localStorage (`kubepit.workbench.v1`);
  * with several windows only `main` persists that session and every window
  * shares the layout prefs (see `windowStorage.ts`);
  * selections and discovery data are session-only.
@@ -58,6 +58,8 @@ interface WorkbenchState {
   /** Split panes and their tabs per cluster; read through `useViewLayout`. */
   layouts: Record<ClusterId, ViewLayout>;
   activeKind: Record<ClusterId, ViewKey>;
+  /** Pinned view tabs per cluster (separate from the navigator's favourite kinds). */
+  pinnedTabKeys: Record<ClusterId, ViewKey[]>;
   /** Selected object per cluster and view tab (the tab's details panel). */
   selection: Record<ClusterId, Record<ViewKey, ObjectSelection>>;
   /**
@@ -65,6 +67,8 @@ interface WorkbenchState {
    * into view. Keyed by `${clusterId}|${kindKey}`.
    */
   navRevision: Record<string, number>;
+  /** Reveal a tab even when its already active navigator row is clicked again. */
+  viewRevealRevision: Record<string, number>;
   /** CRD kinds reached through links before discovery arrived. */
   customKinds: Record<ClusterId, Record<string, Gvk>>;
   apiResources: Record<ClusterId, ApiResourceInfo[]>;
@@ -91,7 +95,10 @@ interface WorkbenchState {
   closeOtherTabs: (clusterId: ClusterId, key: ViewKey) => void;
   closeTabsToRight: (clusterId: ClusterId, key: ViewKey) => void;
   closeAllTabs: (clusterId: ClusterId, paneId: string) => void;
-  /** Move a tab into a pane before `index` (end when omitted); reorders within its own pane. */
+  toggleTabPin: (clusterId: ClusterId, key: ViewKey) => void;
+  moveTabLeft: (clusterId: ClusterId, key: ViewKey) => void;
+  moveTabRight: (clusterId: ClusterId, key: ViewKey) => void;
+  /** Move an unpinned tab before `index` (end when omitted), always after the destination's pins. */
   moveTab: (clusterId: ClusterId, key: ViewKey, paneId: string, index?: number) => void;
   /** Open a pane beside `paneId`, moving `key` into it or leaving it empty. */
   splitPane: (clusterId: ClusterId, paneId: string, side: SplitSide, key?: ViewKey | null) => void;
@@ -118,9 +125,9 @@ interface WorkbenchState {
 }
 
 const STORAGE_KEY = 'kubepit.workbench.v1';
-const STORAGE_VERSION = 3;
+const STORAGE_VERSION = 4;
 /** Persisted per window; the rest of the persisted state is shared layout prefs. */
-const SESSION_KEYS = ['namespaces', 'layouts', 'activeKind'] as const;
+const SESSION_KEYS = ['namespaces', 'layouts', 'activeKind', 'pinnedTabKeys'] as const;
 const PREF_KEYS = [
   'navWidth',
   'navCollapsed',
@@ -140,6 +147,24 @@ function layoutOf(s: WorkbenchState, clusterId: ClusterId): ViewLayout {
   return s.layouts[clusterId] ?? layouts.singleLayout(s.activeKind[clusterId]);
 }
 
+/** A pin never gets pulled into an empty focused pane by navigator navigation. */
+function openTab(s: WorkbenchState, clusterId: ClusterId, key: ViewKey): ViewLayout {
+  let layout = layoutOf(s, clusterId);
+  if (s.pinnedTabKeys[clusterId]?.includes(key)) {
+    const owner = layouts.groupOf(layout, key);
+    if (owner) layout = layouts.focusPane(layout, owner.id);
+  }
+  return layouts.openView(layout, key);
+}
+
+function revealTab(s: WorkbenchState, clusterId: ClusterId, key: ViewKey) {
+  const revision = `${clusterId}|${key}`;
+  return {
+    ...s.viewRevealRevision,
+    [revision]: (s.viewRevealRevision[revision] ?? 0) + 1,
+  };
+}
+
 /**
  * State patch storing a cluster's layout and its `activeKind` mirror.
  * Closed tabs that are no longer open anywhere forget their selection and filter.
@@ -149,22 +174,37 @@ function commit(
   clusterId: ClusterId,
   layout: ViewLayout,
   closed: readonly ViewKey[] = [],
+  pins: readonly ViewKey[] = s.pinnedTabKeys[clusterId] ?? [],
 ): Partial<WorkbenchState> {
+  const open = layouts.openKeys(layout);
+  const pinned = [...new Set(pins)]
+    .filter((key) => open.has(key))
+    .slice(0, layouts.MAX_PINNED_VIEW_TABS);
+  layout = layouts.withPinnedTabs(layout, new Set(pinned));
   const patch: Partial<WorkbenchState> = {
     layouts: { ...s.layouts, [clusterId]: layout },
     activeKind: { ...s.activeKind, [clusterId]: layouts.focusedGroup(layout).active ?? '' },
   };
-  const open = layouts.openKeys(layout);
+  const previous = s.pinnedTabKeys[clusterId] ?? [];
+  if (pinned.length !== previous.length || pinned.some((key, i) => key !== previous[i])) {
+    const pinnedTabKeys = { ...s.pinnedTabKeys };
+    if (pinned.length) pinnedTabKeys[clusterId] = pinned;
+    else delete pinnedTabKeys[clusterId];
+    patch.pinnedTabKeys = pinnedTabKeys;
+  }
   const gone = closed.filter((k) => !open.has(k));
   if (gone.length) {
     const selection = { ...s.selection[clusterId] };
     const filters = { ...s.filters };
+    const viewRevealRevision = { ...s.viewRevealRevision };
     for (const key of gone) {
       delete selection[key];
       delete filters[`${clusterId}|${key}`];
+      delete viewRevealRevision[`${clusterId}|${key}`];
     }
     patch.selection = { ...s.selection, [clusterId]: selection };
     patch.filters = filters;
+    patch.viewRevealRevision = viewRevealRevision;
   }
   return patch;
 }
@@ -175,13 +215,34 @@ function closeIn(
   clusterId: ClusterId,
   key: ViewKey,
   pick: (k: ViewKey, index: number, at: number) => boolean,
+  keepPinned = false,
 ): Partial<WorkbenchState> {
   const layout = layoutOf(s, clusterId);
   const pane = layouts.groupOf(layout, key);
   if (!pane) return {};
   const at = pane.tabs.indexOf(key);
-  const result = layouts.closeViews(layout, pane.id, (k, i) => pick(k, i, at));
+  const pinned = new Set(s.pinnedTabKeys[clusterId]);
+  const result = layouts.closeViews(
+    layout,
+    pane.id,
+    (k, i) => (!keepPinned || !pinned.has(k)) && pick(k, i, at),
+  );
   return result.closed.length ? commit(s, clusterId, result.layout, result.closed) : {};
+}
+
+/** Move an unpinned tab one place without changing the pane's active view. */
+function swapTab(s: WorkbenchState, clusterId: ClusterId, key: ViewKey, step: -1 | 1) {
+  const layout = layoutOf(s, clusterId);
+  const pane = layouts.groupOf(layout, key);
+  const pinned = new Set(s.pinnedTabKeys[clusterId]);
+  if (!pane || pinned.has(key)) return {};
+  const at = pane.tabs.indexOf(key);
+  const other = pane.tabs[at + step];
+  if (!other || pinned.has(other)) return {};
+  const tabs = [...pane.tabs];
+  tabs[at] = other;
+  tabs[at + step] = key;
+  return commit(s, clusterId, layouts.withPaneTabs(layout, pane.id, tabs));
 }
 
 export const useWorkbenchStore = create<WorkbenchState>()(
@@ -190,8 +251,10 @@ export const useWorkbenchStore = create<WorkbenchState>()(
       namespaces: {},
       layouts: {},
       activeKind: {},
+      pinnedTabKeys: {},
       selection: {},
       navRevision: {},
+      viewRevealRevision: {},
       customKinds: {},
       apiResources: {},
       pendingNav: {},
@@ -211,27 +274,73 @@ export const useWorkbenchStore = create<WorkbenchState>()(
           namespaces: { ...s.namespaces, [clusterId]: [...new Set(namespaces)].sort() },
         })),
       setActiveKind: (clusterId, key) =>
-        set((s) => commit(s, clusterId, layouts.openView(layoutOf(s, clusterId), key))),
+        set((s) => ({
+          ...commit(s, clusterId, openTab(s, clusterId, key)),
+          viewRevealRevision: revealTab(s, clusterId, key),
+        })),
       closeTab: (clusterId, key) => set((s) => closeIn(s, clusterId, key, (k) => k === key)),
-      closeOtherTabs: (clusterId, key) => set((s) => closeIn(s, clusterId, key, (k) => k !== key)),
+      closeOtherTabs: (clusterId, key) =>
+        set((s) => closeIn(s, clusterId, key, (k) => k !== key, true)),
       closeTabsToRight: (clusterId, key) =>
-        set((s) => closeIn(s, clusterId, key, (_, i, at) => i > at)),
+        set((s) => closeIn(s, clusterId, key, (_, i, at) => i > at, true)),
       closeAllTabs: (clusterId, paneId) =>
         set((s) => {
-          const result = layouts.closeViews(layoutOf(s, clusterId), paneId, () => true);
+          const pinned = new Set(s.pinnedTabKeys[clusterId]);
+          const result = layouts.closeViews(layoutOf(s, clusterId), paneId, (k) => !pinned.has(k));
           return result.closed.length ? commit(s, clusterId, result.layout, result.closed) : {};
         }),
+      toggleTabPin: (clusterId, key) =>
+        set((s) => {
+          const layout = layoutOf(s, clusterId);
+          const pane = layouts.groupOf(layout, key);
+          if (!pane) return {};
+          const pinned = s.pinnedTabKeys[clusterId] ?? [];
+          if (!pinned.includes(key) && pinned.length >= layouts.MAX_PINNED_VIEW_TABS) return {};
+          const next = pinned.includes(key) ? pinned.filter((k) => k !== key) : [...pinned, key];
+          // Pin at the end of the pinned group; unpin at the start of the rest.
+          const rest = pane.tabs.filter((k) => k !== key);
+          const at = layouts.pinBoundary(rest, new Set(next));
+          const tabs = [...rest.slice(0, at), key, ...rest.slice(at)];
+          return commit(s, clusterId, layouts.withPaneTabs(layout, pane.id, tabs), [], next);
+        }),
+      moveTabLeft: (clusterId, key) => set((s) => swapTab(s, clusterId, key, -1)),
+      moveTabRight: (clusterId, key) => set((s) => swapTab(s, clusterId, key, 1)),
       moveTab: (clusterId, key, paneId, index) =>
-        set((s) =>
-          commit(s, clusterId, layouts.moveView(layoutOf(s, clusterId), key, paneId, index)),
-        ),
+        set((s) => {
+          const layout = layoutOf(s, clusterId);
+          const pinned = new Set(s.pinnedTabKeys[clusterId]);
+          const pane = layout.groups.find((g) => g.id === paneId);
+          if (pinned.has(key) || !pane || !layouts.groupOf(layout, key)) return {};
+          const rest = pane.tabs.filter((k) => k !== key);
+          const at = Math.max(
+            layouts.pinBoundary(rest, pinned),
+            Math.min(index ?? rest.length, rest.length),
+          );
+          return commit(s, clusterId, layouts.moveView(layout, key, paneId, at));
+        }),
       splitPane: (clusterId, paneId, side, key = null) =>
         set((s) =>
-          commit(s, clusterId, layouts.splitView(layoutOf(s, clusterId), paneId, side, key)),
+          key && s.pinnedTabKeys[clusterId]?.includes(key)
+            ? {}
+            : commit(s, clusterId, layouts.splitView(layoutOf(s, clusterId), paneId, side, key)),
         ),
       closePane: (clusterId, paneId) =>
         set((s) => {
-          const result = layouts.closePane(layoutOf(s, clusterId), paneId);
+          let layout = layoutOf(s, clusterId);
+          const at = layout.groups.findIndex((g) => g.id === paneId);
+          const pane = layout.groups[at];
+          if (!pane) return {};
+          const pinned = new Set(s.pinnedTabKeys[clusterId]);
+          const heir = layout.groups[at - 1] ?? layout.groups[at + 1];
+          if (!heir) {
+            const result = layouts.closeViews(layout, paneId, (key) => !pinned.has(key));
+            return commit(s, clusterId, result.layout, result.closed);
+          }
+          for (const key of pane.tabs.filter((k) => pinned.has(k))) {
+            const rest = layout.groups.find((g) => g.id === heir.id)!.tabs;
+            layout = layouts.moveView(layout, key, heir.id, layouts.pinBoundary(rest, pinned));
+          }
+          const result = layouts.closePane(layout, paneId);
           return commit(s, clusterId, result.layout, result.closed);
         }),
       focusPane: (clusterId, paneId) =>
@@ -323,9 +432,12 @@ export const useWorkbenchStore = create<WorkbenchState>()(
         set((s) => {
           const selection = { ...s.selection };
           const apiResources = { ...s.apiResources };
+          const viewRevealRevision = { ...s.viewRevealRevision };
           delete selection[clusterId];
           delete apiResources[clusterId];
-          return { selection, apiResources };
+          for (const key of Object.keys(viewRevealRevision))
+            if (key.startsWith(`${clusterId}|`)) delete viewRevealRevision[key];
+          return { selection, apiResources, viewRevealRevision };
         }),
     }),
     {
@@ -338,6 +450,7 @@ export const useWorkbenchStore = create<WorkbenchState>()(
       }),
       // v1 kept one flat tab list per cluster (`tabs`); it becomes a single pane.
       // v2 laid panes out on one axis; they become one split of the tree.
+      // v3 had no pinned view tabs.
       migrate: (persisted, version) => {
         const state = (persisted ?? {}) as Partial<WorkbenchState> & {
           tabs?: Record<ClusterId, ViewKey[]>;
@@ -355,12 +468,26 @@ export const useWorkbenchStore = create<WorkbenchState>()(
             next[clusterId] = layouts.fromFlatLayout(layout);
           state.layouts = next;
         }
+        // An older secondary-window session may have picked up main's newer
+        // pins while windowStorage combined it with the shared preferences.
+        if (version < 4) state.pinnedTabKeys = {};
         return state as WorkbenchState;
+      },
+      merge: (persisted, current) => {
+        const saved = (persisted ?? {}) as Partial<Persisted>;
+        const next = { ...current, ...saved, pinnedTabKeys: {} } as WorkbenchState;
+        for (const [clusterId, raw] of Object.entries(saved.pinnedTabKeys ?? {})) {
+          if (!next.layouts[clusterId] && next.activeKind[clusterId] === undefined) continue;
+          const pins = Array.isArray(raw) ? raw.filter((key) => typeof key === 'string') : [];
+          Object.assign(next, commit(next, clusterId, layoutOf(next, clusterId), [], pins));
+        }
+        return next;
       },
       partialize: (s) => ({
         namespaces: s.namespaces,
         layouts: s.layouts,
         activeKind: s.activeKind,
+        pinnedTabKeys: s.pinnedTabKeys,
         navWidth: s.navWidth,
         navCollapsed: s.navCollapsed,
         collapsedGroups: s.collapsedGroups,
@@ -391,6 +518,11 @@ export function useViewLayout(clusterId: ClusterId): ViewLayout {
   return useMemo(() => stored ?? layouts.singleLayout(active), [stored, active]);
 }
 
+/** A cluster's current view layout, outside React (keyboard shortcuts). */
+export function viewLayoutOf(clusterId: ClusterId): ViewLayout {
+  return layoutOf(useWorkbenchStore.getState(), clusterId);
+}
+
 /**
  * Open (or focus) a kind's tab in a cluster workbench and optionally select
  * one object (the details panel opens on it). Also focuses the cluster's
@@ -408,7 +540,7 @@ export function navigateTo(
   const revision = `${clusterId}|${key}`;
   // Without a name the tab keeps whatever it had selected.
   useWorkbenchStore.setState((s) => ({
-    ...commit(s, clusterId, layouts.openView(layoutOf(s, clusterId), key)),
+    ...commit(s, clusterId, openTab(s, clusterId, key)),
     ...(name && {
       selection: {
         ...s.selection,
@@ -419,6 +551,7 @@ export function navigateTo(
       },
     }),
     navRevision: { ...s.navRevision, [revision]: (s.navRevision[revision] ?? 0) + 1 },
+    viewRevealRevision: revealTab(s, clusterId, key),
   }));
   const app = useAppStore.getState();
   if (app.activeMainTabKey !== `cluster:${clusterId}`) app.openCluster(clusterId);

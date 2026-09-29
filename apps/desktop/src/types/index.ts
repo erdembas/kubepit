@@ -2699,7 +2699,60 @@ export interface ContainerResourceChange {
 // ---------------------------------------------------------------------------
 
 /** Wire protocol of a provider. */
-export type AiProviderKind = 'anthropic' | 'openai-compatible' | 'ollama';
+export type AiProviderKind =
+  | 'anthropic'
+  | 'openai-compatible'
+  | 'ollama'
+  | 'codex-cli'
+  | 'claude-cli'
+  | 'opencode-cli'
+  | 'cursor-cli';
+
+/** Installed agent discovery; detection never starts the agent or checks its account. */
+export interface AiLocalAgent {
+  kind: AiProviderKind;
+  name: string;
+  executable: string | null;
+  source: string | null;
+  available: boolean;
+  /** This agent can disable native tools and integrations for a context-only request. */
+  supported: boolean;
+}
+
+/** Native model metadata; capabilities and identifiers come from the agent itself. */
+export interface AiAgentModel {
+  id: string;
+  name: string;
+  description: string | null;
+  resolved_model: string | null;
+  is_alias: boolean;
+  is_default: boolean;
+  context_window: number | null;
+  max_output_tokens: number | null;
+  efforts: string[];
+  default_effort: string | null;
+  service_tiers: string[];
+  default_service_tier: string | null;
+  supports_fast_mode: boolean;
+}
+
+export interface AiAgentCatalog {
+  kind: AiProviderKind;
+  models: AiAgentModel[];
+  /** Only set when the native agent reports a global default. */
+  default_model: string | null;
+  /** null = the agent did not report account status. */
+  authenticated: boolean | null;
+  auth_method: string | null;
+  version: string | null;
+}
+
+/** Persisted per provider; null leaves the choice to the native agent. */
+export interface AiAgentOptions {
+  effort: string | null;
+  service_tier: string | null;
+  fast_mode: boolean;
+}
 
 /** One configured provider. Its API key lives in the OS credential store, never here. */
 export interface AiProviderConfig {
@@ -2708,9 +2761,9 @@ export interface AiProviderConfig {
   kind: AiProviderKind;
   /** Display name. */
   name: string;
-  /** Without a trailing slash (normalized by `settings_set`). */
+  /** Without a trailing slash (normalized by `settings_set`); empty for CLI agents. */
   base_url: string;
-  /** Model id; empty = not chosen yet (OpenAI-compatible, Ollama). */
+  /** Model id; empty = not chosen yet (HTTP), `default` = the CLI's own model. */
   model: string;
   /** Tokens; null = from the Models API (Anthropic) or 32 768 (OpenAI-compatible). */
   context_window: number | null;
@@ -2748,6 +2801,8 @@ export interface AiPrice {
 export interface AiSettings {
   /** Master switch; off by default. */
   enabled: boolean;
+  /** Answer language, independent of the interface. null follows the UI locale. */
+  response_language: AiLocale | null;
   /** Refuse every non-loopback provider in the backend. */
   local_only: boolean;
   /** Id of the provider requests go to. */
@@ -2773,6 +2828,8 @@ export interface AiSettings {
   max_context_tokens: number;
   /** null = per intent (explain/fix/yaml high, chat medium, the others low). */
   effort: AiEffort | null;
+  /** Native reasoning variants and speed options, keyed by provider id. */
+  agent_options: Record<string, AiAgentOptions>;
   prices: AiPrice[];
 }
 
@@ -2788,7 +2845,7 @@ export interface AiUsage {
 export interface AiProviderStatus {
   id: string;
   kind: AiProviderKind;
-  /** The base URL is a loopback address. */
+  /** The base URL is a loopback address. CLI agents are false: they may reach cloud models. */
   local: boolean;
   /**
    * A usable API key is stored for it: false when there is none, and also
@@ -2805,7 +2862,8 @@ export interface AiProviderStatus {
   /**
    * Requests may go to it: a valid base URL, loopback or remote egress
    * allowed and not local-only; when a key is involved (Anthropic, or a key
-   * is stored) only over https:// or to a loopback address.
+   * is stored) only over https:// or to a loopback address. CLI agents must
+   * be installed, with remote egress allowed and local-only mode off.
    */
   allowed: boolean;
 }
@@ -2835,8 +2893,21 @@ export interface AiModelInfo {
 export type AiIntent =
   'explain' | 'fix' | 'chat' | 'kubectl' | 'promql' | 'logql' | 'explain-query' | 'yaml';
 
-/** Answer language (the UI locale). */
-export type AiLocale = 'en' | 'tr';
+/** Assistant answer language; the interface still supports its own EN/TR locales. */
+export type AiLocale =
+  | 'en'
+  | 'tr'
+  | 'de'
+  | 'fr'
+  | 'es'
+  | 'it'
+  | 'pt'
+  | 'ru'
+  | 'ar'
+  | 'hi'
+  | 'ja'
+  | 'ko'
+  | 'zh';
 
 export type AiSectionKind =
   | 'scope'
@@ -2892,6 +2963,7 @@ export interface AiRequest {
   sections: AiContextSection[];
   /** Section ids the user excluded in the preview. */
   excluded: string[];
+  /** Resolved response language (`ai.response_language`, or the UI locale when unset). */
   locale: AiLocale;
 }
 

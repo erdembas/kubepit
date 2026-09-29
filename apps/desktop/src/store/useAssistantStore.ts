@@ -24,6 +24,8 @@ export interface AskInput {
 }
 export interface AssistantSession {
   id: string;
+  createdAt: number;
+  updatedAt: number;
   clusterId: ClusterId | null;
   scope: AiScope;
   messages: AiMessage[];
@@ -118,11 +120,14 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
           void ipc.aiSessionEnd(result.session_id).catch(() => {});
         return;
       }
+      const now = Date.now();
       set((state) => ({
         sessions: {
           ...state.sessions,
           [result.session_id]: state.sessions[result.session_id] ?? {
             id: result.session_id,
+            createdAt: now,
+            updatedAt: now,
             clusterId: request.scope.cluster_id,
             scope: request.scope,
             messages: [],
@@ -184,15 +189,16 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
       const active = get().activeSessionId;
       const session = active ? get().sessions[active] : null;
       if (session?.busy) return;
-      const provider = useAppStore.getState().settings?.ai?.active_provider;
+      const ai = useAppStore.getState().settings?.ai;
+      const provider = ai?.active_provider;
+      const locale = ai?.response_language ?? i18n.getLocale();
       // Cluster and provider are fixed by the backend for a session.
       const compatible =
         session &&
         sameScope(session.scope, scope) &&
         session.providerId === provider &&
         (!input.origin || JSON.stringify(input.origin) === JSON.stringify(session.origin)) &&
-        session.settingsKey ===
-          JSON.stringify([useAppStore.getState().settings?.ai, i18n.getLocale()]);
+        session.settingsKey === JSON.stringify([ai, locale]);
       await preview(
         {
           session_id: compatible ? session.id : null,
@@ -201,7 +207,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
           sections: input.sections,
           scope,
           excluded: [],
-          locale: i18n.getLocale(),
+          locale,
         },
         input.origin ?? (compatible ? session.origin : null),
         true,
@@ -261,6 +267,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
       assistant.placeholders = reviewed.placeholders;
       updateSession(sessionId, (s) => ({
         ...s,
+        updatedAt: Date.now(),
         scope: request.scope,
         busy: true,
         cancelRequested: false,
@@ -279,6 +286,10 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
         const runId = await ipc.aiSend(reviewed.preview_id, (event) => {
           updateSession(sessionId, (s) => ({
             ...s,
+            updatedAt:
+              event.type === 'done' && s.messages.some((m) => m.id === messageId && m.stop === null)
+                ? Date.now()
+                : s.updatedAt,
             runId: event.type === 'started' ? event.run_id : event.type === 'done' ? null : s.runId,
             busy: event.type === 'done' ? false : s.busy,
             messages: s.messages.map((m) => (m.id === messageId ? applyAiEvent(m, event) : m)),
@@ -299,6 +310,9 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
       } catch (error) {
         updateSession(sessionId, (s) => ({
           ...s,
+          updatedAt: s.messages.some((m) => m.id === messageId && m.stop === null)
+            ? Date.now()
+            : s.updatedAt,
           busy: false,
           runId: null,
           messages: s.messages.map((m) =>
@@ -353,9 +367,11 @@ export const useAssistantStore = create<AssistantState>((set, get) => {
         set({ error: i18n.t('The selected context changed. Start a new chat to continue.') });
         return;
       }
-      const settingsKey = JSON.stringify([useAppStore.getState().settings?.ai, request.locale]);
+      const ai = useAppStore.getState().settings?.ai;
+      const locale = ai?.response_language ?? i18n.getLocale();
+      const settingsKey = JSON.stringify([ai, locale]);
       await preview(
-        { ...request, session_id: session.settingsKey === settingsKey ? session.id : null },
+        { ...request, locale, session_id: session.settingsKey === settingsKey ? session.id : null },
         session.origin,
         true,
         currentScope(),

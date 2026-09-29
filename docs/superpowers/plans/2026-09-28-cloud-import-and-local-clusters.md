@@ -1,5 +1,11 @@
 # Cloud Import and Local Clusters Implementation Plan
 
+> **Superseded implementation direction (2026-09-29):** AWS/GCP/Azure discovery
+> and import are now paid private features; local kind/k3d/minikube lifecycle is
+> proposed as free. Start with the [commercial program](2026-09-29-commercial-program.md).
+> Reuse this file's provider/CLI safety cases, but not its all-public code placement
+> or obsolete test-harness setup. Do not execute it unchanged.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add EKS/GKE/AKS clusters through the user's own CLIs and create/start/stop/delete kind, k3d and minikube clusters from an "Add cluster" hub. Every result is registered as a Kubepit-managed kubeconfig and no user kubeconfig is ever written.

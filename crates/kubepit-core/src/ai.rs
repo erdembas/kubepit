@@ -34,13 +34,17 @@
 //! | [`tools`]    | read-only tool catalog, input parsing, executor       |
 //! | [`logs`]     | plain-text log condensation for tool results          |
 
+pub mod agent_catalog;
 pub mod anthropic;
 pub mod budget;
 pub mod context;
 pub mod keys;
+pub mod local_agent;
+pub mod local_discovery;
 pub mod logs;
 pub mod ollama;
 pub mod openai;
+pub mod opencode_cli;
 pub mod pricing;
 pub mod prompts;
 pub mod provider;
@@ -72,9 +76,15 @@ pub struct AiState {
     /// cache always describes the entry the credential store ends up with.
     key_writes: parking_lot::Mutex<()>,
     pub(crate) engine: session::Engine,
+    pub(crate) agent_catalogs: agent_catalog::CatalogCache,
 }
 
 impl Kubepit {
+    /// Inspect installed executables without starting agents or reading their credentials.
+    pub fn ai_local_agents(&self) -> Vec<AiLocalAgent> {
+        local_discovery::discover()
+    }
+
     /// Allow requests to remote (non-loopback) model providers from this
     /// process. Only the desktop shell calls this; tests never do, so no
     /// test can reach a real provider.
@@ -116,6 +126,23 @@ impl Kubepit {
             .providers
             .iter()
             .map(|p| {
+                if p.kind.is_cli() {
+                    return AiProviderStatus {
+                        id: p.id.clone(),
+                        kind: p.kind,
+                        // "local" describes model egress, not the executable.
+                        local: false,
+                        has_key: false,
+                        key_error: None,
+                        allowed: settings::provider_allowed(
+                            p,
+                            false,
+                            remote_allowed,
+                            ai.local_only,
+                        ) && local_discovery::supported(p.kind)
+                            && local_discovery::resolve(p.kind).is_some(),
+                    };
+                }
                 let (has_key, key_error) = match self.ai_key_binding(&p.id) {
                     Ok(binding) => match binding.check(p) {
                         Ok(present) => (present, None),
@@ -153,6 +180,9 @@ impl Kubepit {
             .provider(provider_id.trim())
             .ok_or_else(|| anyhow!("there is no assistant provider {provider_id}"))?;
         let key = key.trim();
+        if provider.kind.is_cli() {
+            bail!("local assistant agents use their own sign-in; no API key is stored in Kubepit");
+        }
         if key.is_empty() {
             bail!("the API key is empty");
         }

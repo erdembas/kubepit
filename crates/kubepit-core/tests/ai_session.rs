@@ -154,6 +154,58 @@ async fn preview_is_offline_exact_single_use_and_redacted() {
         .ends_with(&preview.message));
     assert!(f.app.ai_send(&preview.preview_id, |_| true).is_err());
 }
+
+#[tokio::test]
+async fn response_language_reaches_the_provider_without_translating_the_request() {
+    let f = plain().await;
+    for (index, locale) in [AiLocale::Tr, AiLocale::De].into_iter().enumerate() {
+        let mut settings = f.app.settings();
+        settings.ai.response_language = Some(locale);
+        f.app.set_settings(settings).unwrap();
+
+        // The user's text and cluster context retain their original language.
+        let mut req = request(&f);
+        req.locale = locale;
+        let preview = f.app.ai_preview(req.clone()).unwrap();
+        let (_, mut rx) = start(&f, &preview);
+        assert_stop(&done(&mut rx).await, AiStop::End);
+        let sent = bodies(&f);
+        assert_eq!(
+            sent[index]["system"][0]["text"],
+            prompts::system_prompt(locale)
+        );
+        assert!(sent[index]["messages"][0]["content"][1]["text"]
+            .as_str()
+            .unwrap()
+            .ends_with(&req.message));
+        assert!(sent[index]["messages"][0]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("kind: Secret"));
+
+        // A cached session cannot silently retain a different answer language.
+        req.session_id = Some(preview.session_id);
+        req.locale = AiLocale::En;
+        assert!(f
+            .app
+            .ai_preview(req)
+            .unwrap_err()
+            .to_string()
+            .contains("start a new conversation"));
+    }
+}
+
+#[tokio::test]
+async fn changing_response_language_invalidates_a_prepared_request() {
+    let f = plain().await;
+    let preview = f.app.ai_preview(request(&f)).unwrap();
+    let mut settings = f.app.settings();
+    settings.ai.response_language = Some(AiLocale::Tr);
+    f.app.set_settings(settings).unwrap();
+    assert!(f.app.ai_send(&preview.preview_id, |_| true).is_err());
+    assert!(f.provider.log.lock().is_empty());
+}
+
 #[tokio::test]
 async fn missing_or_locked_key_fails_before_sending() {
     let f = plain().await;

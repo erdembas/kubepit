@@ -38,6 +38,7 @@ export const DEFAULT_AI_PROVIDERS: readonly AiProviderConfig[] = [
 
 export const DEFAULT_AI_SETTINGS: AiSettings = {
   enabled: false,
+  response_language: null,
   local_only: false,
   active_provider: 'anthropic',
   providers: DEFAULT_AI_PROVIDERS.map((p) => ({ ...p })),
@@ -48,5 +49,6 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   log_requests: true,
   max_context_tokens: 60000,
   effort: null,
+  agent_options: {},
   prices: [],
 };

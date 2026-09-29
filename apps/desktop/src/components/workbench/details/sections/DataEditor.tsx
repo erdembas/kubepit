@@ -24,6 +24,7 @@ import {
   decodeBase64Text,
   detectDataFormat,
   encodeBase64,
+  formatDataPreview,
   isValidDataKey,
   validateData,
   type DataFormat,
@@ -749,6 +750,8 @@ function EntryView({
         >
           {'•'.repeat(Math.min(24, Math.max(8, text.length)))}
         </button>
+      ) : format.code ? (
+        <ValuePreview keyName={key} value={text} format={format} />
       ) : (
         <div
           onDoubleClick={canEdit ? onToggleOpen : undefined}
@@ -758,6 +761,30 @@ function EntryView({
         </div>
       )}
     </div>
+  );
+}
+
+/** Mounted only for visible values; formatting never changes the editable/copyable source. */
+function ValuePreview({
+  keyName,
+  value,
+  format,
+}: {
+  keyName: string;
+  value: string;
+  format: DataFormat;
+}) {
+  i18n.useLocale();
+  const preview = useMemo(() => formatDataPreview(format.id, value), [format.id, value]);
+  return (
+    <InlineCodeEditor
+      value={preview}
+      language={format.language}
+      ariaLabel={i18n.t('Value of {key}', { key: keyName })}
+      readOnly
+      minLines={3}
+      maxHeight={288}
+    />
   );
 }
 

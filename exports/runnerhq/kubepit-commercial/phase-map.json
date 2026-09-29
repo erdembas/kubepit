@@ -1,0 +1,2354 @@
+{
+  "schemaVersion": 1,
+  "cloudTasks": 26,
+  "desktopTasks": 28,
+  "licensingWorkstreams": 7,
+  "phases": [
+    {
+      "id": "p01",
+      "title": "Başlangıç, ücretsiz ürün ve hak envanteri",
+      "tasks": [
+        "D1"
+      ],
+      "licensing": [
+        "L1"
+      ],
+      "kind": "baseline",
+      "note": "Record the free-feature baseline and rights/provenance evidence. Prepare a concrete proposed license change and unresolved ownership list as draft artifacts and record unresolved rights in EXTERNAL_GATES.md; continue technical implementation without a manual approval step.",
+      "database": false,
+      "checks": [
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "i18n:check"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "test:ui"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all",
+            "--",
+            "--check"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "cargo",
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--locked",
+            "--",
+            "-D",
+            "warnings"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "cargo",
+            "test",
+            "--workspace",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@kubepit/desktop",
+            "build"
+          ]
+        }
+      ],
+      "pinRequired": false
+    },
+    {
+      "id": "p02",
+      "title": "Özel workspace, ortak sözleşmeler ve lisans taslakları",
+      "tasks": [
+        "C1",
+        "C2"
+      ],
+      "licensing": [
+        "L2",
+        "L3"
+      ],
+      "kind": "cloud",
+      "note": "Prepare the exact proposed license transition as PRIVATE/docs/legal/proposed-license-transition.patch and draft CLA/EULA/privacy/terms. Preserve currently effective license declarations; mark L2 activation and unresolved rights as external pending, without stopping technical implementation. Do not invent ownership, seller identity or counsel approval. Establish all verification harness conventions in EXECUTION.md.",
+      "database": true,
+      "checks": [
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "contracts:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:unit",
+            "--",
+            "tests/unit/test-database-guard.test.ts"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:integration",
+            "--",
+            "tests/integration/harness.test.ts"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:contract",
+            "--",
+            "tests/contract/policy.test.ts"
+          ]
+        }
+      ],
+      "pinRequired": false
+    },
+    {
+      "id": "p03",
+      "title": "Public edition SDK, React bootstrap ve Tauri host",
+      "tasks": [
+        "D2",
+        "D3",
+        "D4"
+      ],
+      "licensing": [],
+      "kind": "public",
+      "note": "Add the public SDK test command pnpm --filter @kubepit/edition-contracts test; the desktop Vitest suite alone does not cover this package. Keep the default community bootstrap intact.",
+      "database": false,
+      "checks": [
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "i18n:check"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "test:ui"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all",
+            "--",
+            "--check"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "cargo",
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--locked",
+            "--",
+            "-D",
+            "warnings"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "cargo",
+            "test",
+            "--workspace",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@kubepit/desktop",
+            "build"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@kubepit/edition-contracts",
+            "test"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "tauri:build:local"
+          ]
+        }
+      ],
+      "pinRequired": false
+    },
+    {
+      "id": "p04",
+      "title": "İki edition için erken build denemesi",
+      "tasks": [
+        "D5"
+      ],
+      "licensing": [],
+      "kind": "composition",
+      "note": "Pin the reviewed, clean public HEAD established by the preceding automatic checkpoint agent. Build from that commit without patching vendor. Required here: actual current-host production builds with a clean public/vendor commit and the current private working-tree candidate; report its captured snapshot/content identity, not a fictional clean private HEAD. Other operating-system/signing evidence stays pending in EXTERNAL_GATES until actually available; no remote CI launch is implied. Stop if the composition strategy fails; do not broaden features or copy premium code into public.",
+      "database": true,
+      "checks": [
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "i18n:check"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "test:ui"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all",
+            "--",
+            "--check"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "cargo",
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--locked",
+            "--",
+            "-D",
+            "warnings"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "cargo",
+            "test",
+            "--workspace",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@kubepit/desktop",
+            "build"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@kubepit/edition-contracts",
+            "test"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "contracts:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "i18n:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:ui"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "build:desktop"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all",
+            "--",
+            "--check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--locked",
+            "--",
+            "-D",
+            "warnings"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "--workspace",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:contract"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "tauri:build:local"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "tauri:build:local"
+          ]
+        }
+      ],
+      "pinRequired": true
+    },
+    {
+      "id": "p05",
+      "title": "Public import, katkı katmanı ve terminal arayüzleri",
+      "tasks": [
+        "D6"
+      ],
+      "licensing": [],
+      "kind": "public",
+      "note": "Implement generic core origin/contribution/read-only/PTY boundaries only. Test actual mutating backend paths against fake APIs. The next automatic checkpoint agent makes this public API a durable local commit before private consumers use it.",
+      "database": false,
+      "checks": [
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "i18n:check"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "test:ui"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all",
+            "--",
+            "--check"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "cargo",
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--locked",
+            "--",
+            "-D",
+            "warnings"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "cargo",
+            "test",
+            "--workspace",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@kubepit/desktop",
+            "build"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@kubepit/edition-contracts",
+            "test"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "cargo",
+            "test",
+            "-p",
+            "kubepit-core",
+            "--test",
+            "edition_host",
+            "--locked"
+          ]
+        }
+      ],
+      "pinRequired": false
+    },
+    {
+      "id": "p06",
+      "title": "Özel IPC, demo ve Rust/TS sözleşme uyumu",
+      "tasks": [
+        "D7"
+      ],
+      "licensing": [
+        "L4"
+      ],
+      "kind": "desktop",
+      "note": "Refresh vendor/kubepit to the clean public HEAD recorded by the preceding automatic checkpoint, then prove both editions still build. Freeze Rust/TS wire fixtures and prevent real network/process calls from the private demo.",
+      "database": true,
+      "checks": [
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "i18n:check"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "test:ui"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all",
+            "--",
+            "--check"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "cargo",
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--locked",
+            "--",
+            "-D",
+            "warnings"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "cargo",
+            "test",
+            "--workspace",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@kubepit/desktop",
+            "build"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@kubepit/edition-contracts",
+            "test"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "contracts:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "i18n:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:ui"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "build:desktop"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all",
+            "--",
+            "--check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--locked",
+            "--",
+            "-D",
+            "warnings"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "--workspace",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:contract"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "tauri:build:local"
+          ]
+        }
+      ],
+      "pinRequired": true
+    },
+    {
+      "id": "p07",
+      "title": "PostgreSQL tenancy, RLS, işler ve idempotency",
+      "tasks": [
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "licensing": [],
+      "kind": "cloud",
+      "note": "Use PostgreSQL 17 with distinct owner/runtime/intake roles. Add an append-only AuditWriter storage port now for later billing/role mutations; finish its complete audit/redaction module in C20. No production no-op audit adapter.",
+      "database": true,
+      "checks": [
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "contracts:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:integration",
+            "--",
+            "tests/integration/tenancy-constraints.test.ts"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:integration",
+            "--",
+            "tests/integration/rls.test.ts",
+            "tests/integration/pool-isolation.test.ts"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:integration",
+            "--",
+            "tests/integration/outbox.test.ts",
+            "tests/integration/idempotency.test.ts",
+            "tests/integration/jobs.test.ts"
+          ]
+        }
+      ],
+      "pinRequired": true
+    },
+    {
+      "id": "p08",
+      "title": "Kimlik, organizasyon, koltuk ve davetler",
+      "tasks": [
+        "C6",
+        "C7",
+        "C8",
+        "C9",
+        "C10"
+      ],
+      "licensing": [],
+      "kind": "cloud",
+      "note": "Exercise real authorization policy on test-only fixture endpoints if later profile routes are not yet present. A 404 on a nonexistent route is not proof of denial. Complete actual route coverage again in C19/C25. Use durable outbox/fake mail; no real notifications.",
+      "database": true,
+      "checks": [
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "contracts:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:integration",
+            "--",
+            "tests/integration/web-auth.test.ts"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:integration",
+            "--",
+            "tests/integration/desktop-auth.test.ts"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:contract",
+            "--",
+            "tests/contract/desktop-dpop.test.ts"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:integration",
+            "--",
+            "tests/integration/organizations.test.ts",
+            "tests/integration/roles.test.ts"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:integration",
+            "--",
+            "tests/integration/seat-concurrency.test.ts",
+            "tests/integration/invitations.test.ts"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:integration",
+            "--",
+            "tests/integration/mail.test.ts",
+            "tests/integration/identity-revocation.test.ts"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "i18n:check"
+          ]
+        }
+      ],
+      "pinRequired": true
+    },
+    {
+      "id": "p09",
+      "title": "Masaüstü oturumu ve imzalı lease doğrulama",
+      "tasks": [
+        "D8",
+        "D9",
+        "D10"
+      ],
+      "licensing": [],
+      "kind": "desktop",
+      "note": "Build against C2/C7 contracts and test signing keys. Real server lease interoperability is C17 after C16, not a prerequisite cycle. Store secrets in native secret-store adapters; use MemorySecretStore in automated tests.",
+      "database": true,
+      "checks": [
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "contracts:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "i18n:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:ui"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "build:desktop"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all",
+            "--",
+            "--check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--locked",
+            "--",
+            "-D",
+            "warnings"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "--workspace",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:contract"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "-p",
+            "kubepit-commercial",
+            "--test",
+            "auth_session",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "-p",
+            "kubepit-commercial",
+            "--test",
+            "entitlements",
+            "--locked"
+          ]
+        }
+      ],
+      "pinRequired": true
+    },
+    {
+      "id": "p10",
+      "title": "Paddle, abonelik, webhook ve entitlement servisi",
+      "tasks": [
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C15",
+        "C16"
+      ],
+      "licensing": [],
+      "kind": "cloud",
+      "note": "Implement the fake provider and sandbox-compatible Paddle adapter without live merchant credentials. USD 3/month and USD 30/year, seat reservations, pending decrease, capacity_conflict, reconciliation, durable intake and ES256 leases must share server-authoritative policy.",
+      "database": true,
+      "checks": [
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "contracts:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:contract",
+            "--",
+            "tests/contract/billing-provider.test.ts"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:unit",
+            "--",
+            "tests/unit/billing-economics.test.ts"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:contract",
+            "--",
+            "tests/contract/paddle.test.ts"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:integration",
+            "--",
+            "tests/integration/checkout.test.ts",
+            "tests/integration/billing-changes.test.ts"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:integration",
+            "--",
+            "tests/integration/webhook-intake.test.ts"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:integration",
+            "--",
+            "tests/integration/billing-reconcile.test.ts",
+            "tests/integration/billing-adjustments.test.ts"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:unit",
+            "--",
+            "tests/unit/entitlement-policy.test.ts"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:integration",
+            "--",
+            "tests/integration/entitlements.test.ts"
+          ]
+        }
+      ],
+      "pinRequired": true
+    },
+    {
+      "id": "p11",
+      "title": "Kimlik ve lease uçtan uca uyumluluğu",
+      "tasks": [
+        "C17"
+      ],
+      "licensing": [],
+      "kind": "interop",
+      "note": "Consume actual server-generated fixture leases in the Rust verifier and prove DPoP/revocation/clock/error behavior. Never mark this phase passed based only on independent mocked implementations.",
+      "database": true,
+      "checks": [
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "contracts:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:contract",
+            "--",
+            "tests/contract/desktop-entitlements.test.ts"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "i18n:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:ui"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "build:desktop"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all",
+            "--",
+            "--check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--locked",
+            "--",
+            "-D",
+            "warnings"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "--workspace",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:contract"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "-p",
+            "kubepit-commercial",
+            "--test",
+            "entitlements",
+            "--locked"
+          ]
+        }
+      ],
+      "pinRequired": true
+    },
+    {
+      "id": "p12",
+      "title": "Güvenli CLI çalıştırma, EKS/GKE/AKS adaptörleri",
+      "tasks": [
+        "D11",
+        "D12",
+        "D13"
+      ],
+      "licensing": [],
+      "kind": "desktop",
+      "note": "Use portable fake executables, bounded output and argv construction. Never read or mutate real kubeconfig/provider credentials. Cover GKE account/plugin pinning, AWS scopes and Windows process handling.",
+      "database": true,
+      "checks": [
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "contracts:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "i18n:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:ui"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "build:desktop"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all",
+            "--",
+            "--check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--locked",
+            "--",
+            "-D",
+            "warnings"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "--workspace",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:contract"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "-p",
+            "kubepit-commercial",
+            "--test",
+            "cloud_process",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "-p",
+            "kubepit-commercial",
+            "--test",
+            "cloud_aws",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "-p",
+            "kubepit-commercial",
+            "--test",
+            "cloud_gcp",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "-p",
+            "kubepit-commercial",
+            "--test",
+            "cloud_azure",
+            "--locked"
+          ]
+        }
+      ],
+      "pinRequired": true
+    },
+    {
+      "id": "p13",
+      "title": "Bulut keşfi, atomik import ve kullanıcı akışları",
+      "tasks": [
+        "D14",
+        "D15",
+        "D16",
+        "D17"
+      ],
+      "licensing": [],
+      "kind": "desktop",
+      "note": "Prove partial streaming/cancellation, private temporary kubeconfig, stable origins, staged rollback, explicit login and free post-expiry cluster use. Reuse public hooks. Any necessary new public change requires a reviewed durable pin checkpoint before mixed-build verification; never patch vendor.",
+      "database": true,
+      "checks": [
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "contracts:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "i18n:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:ui"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "build:desktop"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all",
+            "--",
+            "--check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--locked",
+            "--",
+            "-D",
+            "warnings"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "--workspace",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:contract"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "-p",
+            "kubepit-commercial",
+            "--test",
+            "cloud_discovery",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "-p",
+            "kubepit-commercial",
+            "--test",
+            "cloud_import",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "-p",
+            "kubepit-commercial",
+            "--test",
+            "cloud_login",
+            "--locked"
+          ]
+        }
+      ],
+      "pinRequired": true
+    },
+    {
+      "id": "p14",
+      "title": "Profil şeması, güvenli önizleme ve yerel katmanlar",
+      "tasks": [
+        "D18",
+        "D19",
+        "D20",
+        "D21"
+      ],
+      "licensing": [],
+      "kind": "desktop",
+      "note": "Use the C2/D7 canonical envelope; add bounded Rust validation and shared fixture corpus. No arbitrary secret-bearing fields. Shared executable action rows remain disabled until D24 implements backend trust gates.",
+      "database": true,
+      "checks": [
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "contracts:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "i18n:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:ui"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "build:desktop"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all",
+            "--",
+            "--check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--locked",
+            "--",
+            "-D",
+            "warnings"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "--workspace",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:contract"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "-p",
+            "kubepit-commercial",
+            "--test",
+            "team_export",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "-p",
+            "kubepit-commercial",
+            "--test",
+            "team_mapping",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "-p",
+            "kubepit-commercial",
+            "--test",
+            "team_layers",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "-p",
+            "kubepit-commercial",
+            "team::validate",
+            "--locked",
+            "--",
+            "--list"
+          ],
+          "requireTestList": true
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "-p",
+            "kubepit-commercial",
+            "team::validate",
+            "--locked"
+          ]
+        }
+      ],
+      "pinRequired": true
+    },
+    {
+      "id": "p15",
+      "title": "Profil API, revision, erişim ve audit",
+      "tasks": [
+        "C18",
+        "C19",
+        "C20"
+      ],
+      "licensing": [],
+      "kind": "cloud",
+      "note": "Use the existing Rust/shared profile corpus for server validation. Enforce current membership and seat access, ETag conditional writes, tombstones, tenant-safe exports, redaction and rate limits. No last-writer-wins loss.",
+      "database": true,
+      "checks": [
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "contracts:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:integration",
+            "--",
+            "tests/integration/profile-validation.test.ts"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:integration",
+            "--",
+            "tests/integration/profile-access.test.ts",
+            "tests/integration/profile-sync.test.ts"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:integration",
+            "--",
+            "tests/integration/audit.test.ts",
+            "tests/integration/redaction.test.ts",
+            "tests/integration/abuse.test.ts"
+          ]
+        }
+      ],
+      "pinRequired": true
+    },
+    {
+      "id": "p16",
+      "title": "Profil sync, iptal/detach, komut güveni ve UI",
+      "tasks": [
+        "D22",
+        "D23",
+        "D24",
+        "D25"
+      ],
+      "licensing": [],
+      "kind": "desktop",
+      "note": "Implement lifecycle-safe sync, explicit detach, content-hash trust and backend read_only checks. Verify two synthetic devices/users, conflicts and offline removal. No unattended command execution or automatic credential lookup from profile content.",
+      "database": true,
+      "checks": [
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "contracts:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "i18n:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:ui"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "build:desktop"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all",
+            "--",
+            "--check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--locked",
+            "--",
+            "-D",
+            "warnings"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "--workspace",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:contract"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "-p",
+            "kubepit-commercial",
+            "--test",
+            "team_sync",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "-p",
+            "kubepit-commercial",
+            "--test",
+            "team_lifecycle",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "-p",
+            "kubepit-commercial",
+            "--test",
+            "team_actions",
+            "--locked"
+          ]
+        }
+      ],
+      "pinRequired": true
+    },
+    {
+      "id": "p17",
+      "title": "Web konsolu, ödeme akışları ve veri yaşam döngüsü",
+      "tasks": [
+        "C21",
+        "C22",
+        "C23"
+      ],
+      "licensing": [],
+      "kind": "cloud",
+      "note": "Complete EN/TR account/team/seat/device/billing/profile/export/deletion UX using existing RunHQ tokens. Purchased, assigned and reserved capacity must be distinct. Use fake providers and fake inbox only.",
+      "database": true,
+      "checks": [
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "contracts:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "i18n:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:unit",
+            "--",
+            "tests/unit/console-permissions.test.ts"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:e2e",
+            "--",
+            "tests/e2e/organizations.spec.ts"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:e2e",
+            "--",
+            "tests/e2e/billing.spec.ts",
+            "tests/e2e/profiles.spec.ts"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:integration",
+            "--",
+            "tests/integration/exports.test.ts",
+            "tests/integration/deletion.test.ts",
+            "tests/integration/retention.test.ts"
+          ]
+        }
+      ],
+      "pinRequired": true
+    },
+    {
+      "id": "p18",
+      "title": "Dağıtım varlıkları, izole CI ve restore provası",
+      "tasks": [
+        "C24"
+      ],
+      "licensing": [
+        "L5"
+      ],
+      "kind": "cloud",
+      "note": "Create reproducible local images, migration/rollback/restore runbooks and isolated CI declarations. Run real local PostgreSQL backup/restore; do not deploy or configure remote secrets. Audit source/artifact allowlists, notices, alternative grants and private cache boundaries.",
+      "database": true,
+      "checks": [
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "contracts:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "build"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:integration",
+            "--",
+            "tests/integration/restore-recovery.test.ts"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "verify:oss-boundary"
+          ]
+        }
+      ],
+      "pinRequired": true
+    },
+    {
+      "id": "p19",
+      "title": "Bağımsız entegrasyon, yük ve iki edition kabulü",
+      "tasks": [
+        "C25",
+        "D26"
+      ],
+      "licensing": [
+        "L6"
+      ],
+      "kind": "full",
+      "note": "Run the full acceptance matrix, fixture-only load measurements and OSS isolation checks. Record unsupported OS/signing/manual checks as pending external gates, never as passes. Missing executable local acceptance evidence blocks PASS.",
+      "database": true,
+      "checks": [
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "i18n:check"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "test:ui"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all",
+            "--",
+            "--check"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "cargo",
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--locked",
+            "--",
+            "-D",
+            "warnings"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "cargo",
+            "test",
+            "--workspace",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@kubepit/desktop",
+            "build"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@kubepit/edition-contracts",
+            "test"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "contracts:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "lint"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "i18n:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:unit"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:contract"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:integration"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:e2e"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "build"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "verify:oss-boundary"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:ui"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "build:desktop"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all",
+            "--",
+            "--check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--locked",
+            "--",
+            "-D",
+            "warnings"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "--workspace",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "node",
+            "scripts/load-fixtures.mjs"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "tauri:build:local"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "tauri:build:local"
+          ]
+        }
+      ],
+      "pinRequired": true
+    },
+    {
+      "id": "p20",
+      "title": "Dağıtım belgeleri ve yayına hazırlık teslimi",
+      "tasks": [
+        "C26",
+        "D27",
+        "D28"
+      ],
+      "licensing": [
+        "L7"
+      ],
+      "kind": "handoff",
+      "note": "Produce a reviewed local release candidate and precise external-action register. Paddle seller/<$10 fee approval, authorized provider sandbox, signing, region/legal and OS evidence remain pending unless actually provided. PASS here means local handoff complete, never live-ready or launched. Do not execute production or publication actions.",
+      "database": true,
+      "checks": [
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@kubepit/edition-contracts",
+            "test"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "lint"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:unit"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:integration"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:e2e"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "build"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "i18n:check"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "test:ui"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all",
+            "--",
+            "--check"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "cargo",
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--locked",
+            "--",
+            "-D",
+            "warnings"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "cargo",
+            "test",
+            "--workspace",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@kubepit/desktop",
+            "build"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "contracts:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "i18n:check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:ui"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "build:desktop"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all",
+            "--",
+            "--check"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--locked",
+            "--",
+            "-D",
+            "warnings"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "cargo",
+            "test",
+            "--workspace",
+            "--locked"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "node",
+            "scripts/load-fixtures.mjs"
+          ]
+        },
+        {
+          "repo": "public",
+          "argv": [
+            "pnpm",
+            "tauri:build:local"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "tauri:build:local"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "test:contract"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "pnpm",
+            "verify:oss-boundary"
+          ]
+        },
+        {
+          "repo": "private",
+          "argv": [
+            "node",
+            "scripts/check-commercial-handoff.mjs"
+          ]
+        }
+      ],
+      "pinRequired": true
+    }
+  ]
+}

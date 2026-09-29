@@ -1,8 +1,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_AI_SETTINGS } from '@/lib/ai/defaults';
+import { selectLocalAgent } from '@/lib/ai/localAgents';
+import { DEMO_LOCAL_AGENTS } from './fixtures/ai';
 import type {
+  AiAgentCatalog,
   AiContextSection,
   AiEvent,
+  AiLocalAgent,
   AiLogDetail,
   AiLogPage,
   AiModelInfo,
@@ -156,6 +160,8 @@ beforeEach(async () => {
     tool_policy: 'ask',
     log_requests: true,
     prices: [],
+    agent_options: {},
+    response_language: null,
     redaction: { tokens: true, ips: true, hostnames: false },
   });
   await invoke('ai_cluster_set', {
@@ -167,6 +173,151 @@ beforeEach(async () => {
 });
 
 describe('demo assistant: status, keys and models', () => {
+  it('loads native catalogs for unsaved agents while the assistant is off, without changing consent', async () => {
+    await saveAi({ enabled: false });
+    const before = structuredClone(await invoke<Settings>('settings_get'));
+    expect(before.ai.providers.some((provider) => provider.kind === 'claude-cli')).toBe(false);
+    const catalog = await settle(
+      invoke<AiAgentCatalog>('ai_agent_catalog', { kind: 'claude-cli' }),
+    );
+    expect(catalog).toMatchObject({
+      kind: 'claude-cli',
+      authenticated: true,
+      default_model: 'sonnet',
+    });
+    expect(catalog.models.find((model) => model.id === 'opus')).toMatchObject({
+      is_alias: true,
+      supports_fast_mode: true,
+      efforts: ['low', 'medium', 'high', 'max'],
+    });
+    catalog.models.length = 0;
+    expect(
+      (
+        await settle(
+          invoke<AiAgentCatalog>('ai_agent_catalog', { kind: 'claude-cli', refresh: true }),
+        )
+      ).models.length,
+    ).toBeGreaterThan(0);
+    expect(await invoke<Settings>('settings_get')).toEqual(before);
+  });
+
+  it('enforces local-only, installation and supported protocol rules for native catalogs', async () => {
+    await saveAi({ local_only: true });
+    await expect(settle(invoke('ai_agent_catalog', { kind: 'codex-cli' }))).rejects.toThrow(
+      /cloud services/,
+    );
+    await saveAi({ local_only: false });
+    const opencode = DEMO_LOCAL_AGENTS.find((agent) => agent.kind === 'opencode-cli')!;
+    opencode.available = false;
+    try {
+      await expect(settle(invoke('ai_agent_catalog', { kind: 'opencode-cli' }))).rejects.toThrow(
+        /not installed/,
+      );
+    } finally {
+      opencode.available = true;
+    }
+    await expect(settle(invoke('ai_agent_catalog', { kind: 'cursor-cli' }))).rejects.toThrow(
+      /cannot disable/,
+    );
+  });
+
+  it('persists native options, rejects unsupported choices, and permits a plain custom model id', async () => {
+    const original = structuredClone((await invoke<Settings>('settings_get')).ai);
+    const agent = (await invoke<AiLocalAgent[]>('ai_local_agents'))[0]!;
+    const selected = { ...original, ...selectLocalAgent(original, agent) };
+    await saveAi({
+      ...selected,
+      agent_options: {
+        'codex-cli': { effort: 'ultra', service_tier: 'priority', fast_mode: false },
+      },
+    });
+    expect((await invoke<Settings>('settings_get')).ai.agent_options['codex-cli']).toEqual({
+      effort: 'ultra',
+      service_tier: 'priority',
+      fast_mode: false,
+    });
+    await expect(
+      settle(invoke<AiPreview>('ai_preview', { request: chatRequest(null, 'chat', 'hello') })),
+    ).resolves.toMatchObject({ provider_kind: 'codex-cli' });
+    await saveAi({
+      providers: selected.providers.map((provider) =>
+        provider.id === 'codex-cli' ? { ...provider, model: 'gpt-6-luna' } : provider,
+      ),
+    });
+    await expect(
+      settle(invoke('ai_preview', { request: chatRequest(null, 'chat', 'hello') })),
+    ).rejects.toThrow(/does not support/);
+    await saveAi({
+      providers: selected.providers.map((provider) =>
+        provider.id === 'codex-cli' ? { ...provider, model: 'future-version' } : provider,
+      ),
+      agent_options: {},
+    });
+    await expect(
+      settle(invoke<AiPreview>('ai_preview', { request: chatRequest(null, 'chat', 'hello') })),
+    ).resolves.toMatchObject({ model: 'future-version' });
+    await saveAi(original);
+  });
+
+  it('detects agents without changing saved settings, including unsupported agents', async () => {
+    const before = structuredClone(await invoke<Settings>('settings_get'));
+    const agents = await invoke<AiLocalAgent[]>('ai_local_agents');
+    expect(agents.map((agent) => agent.kind)).toEqual([
+      'codex-cli',
+      'claude-cli',
+      'opencode-cli',
+      'cursor-cli',
+    ]);
+    expect(agents.find((agent) => agent.kind === 'opencode-cli')).toMatchObject({
+      available: true,
+      executable: '/home/demo/.opencode/bin/opencode',
+    });
+    expect(agents.find((agent) => agent.kind === 'cursor-cli')).toMatchObject({
+      available: true,
+      supported: false,
+    });
+    agents[0]!.available = false;
+    expect((await invoke<AiLocalAgent[]>('ai_local_agents'))[0]!.available).toBe(true);
+    expect(await invoke<Settings>('settings_get')).toEqual(before);
+  });
+
+  it('runs a detected agent without a key or tools and still respects local-only mode', async () => {
+    const original = (await invoke<Settings>('settings_get')).ai;
+    const agent = (await invoke<AiLocalAgent[]>('ai_local_agents'))[0]!;
+    await saveAi(selectLocalAgent(original, agent));
+    const status = await invoke<AiStatus>('ai_status');
+    expect(status.providers.find((provider) => provider.kind === 'codex-cli')).toMatchObject({
+      local: false,
+      has_key: false,
+      key_error: null,
+      allowed: true,
+    });
+    await expect(
+      invoke('ai_key_set', { providerId: 'codex-cli', key: 'not-stored' }),
+    ).rejects.toThrow(/own sign-in/);
+    const preview = await settle(
+      invoke<AiPreview>('ai_preview', { request: explainRequest('c-dev') }),
+    );
+    expect(preview).toMatchObject({
+      provider_kind: 'codex-cli',
+      model: 'gpt-6-sol',
+      local: false,
+      tools: [],
+    });
+    const run = await send(preview.preview_id);
+    await waitFor(run.done);
+    expect(run.text().length).toBeGreaterThan(0);
+    expect(run.calls()).toEqual([]);
+    await saveAi({ local_only: true });
+    await expect(
+      settle(invoke('ai_preview', { request: explainRequest('c-dev') })),
+    ).rejects.toThrow(/cloud services/);
+    await saveAi({
+      providers: original.providers,
+      active_provider: original.active_provider,
+      local_only: false,
+    });
+  });
   it('reports the providers, the demo credential store and loopback providers as local', async () => {
     const status = await invoke<AiStatus>('ai_status');
     expect(status.remote_allowed).toBe(true);
@@ -240,6 +391,48 @@ describe('demo assistant: enablement', () => {
 });
 
 describe('demo assistant: preview and send', () => {
+  it('refuses a stale preview when the response language preference changes', async () => {
+    const preview = await settle(
+      invoke<AiPreview>('ai_preview', { request: chatRequest(null, 'chat', 'hello') }),
+    );
+    await saveAi({ response_language: 'tr' });
+    const onEvent = vi.fn();
+    await expect(invoke('ai_send', { previewId: preview.preview_id, onEvent })).rejects.toThrow(
+      'assistant settings changed; preview the request again',
+    );
+    expect(onEvent).not.toHaveBeenCalled();
+  });
+
+  it('refuses to continue a session in a different request locale', async () => {
+    const preview = await settle(
+      invoke<AiPreview>('ai_preview', { request: chatRequest(null, 'chat', 'hello') }),
+    );
+    await expect(
+      settle(
+        invoke('ai_preview', {
+          request: { ...chatRequest(preview.session_id, 'chat', 'merhaba'), locale: 'tr' },
+        }),
+      ),
+    ).rejects.toThrow('assistant session settings or scope changed; start a new conversation');
+  });
+
+  it('refuses to continue a session after its preference changes even if the resolved locale is unchanged', async () => {
+    const preview = await settle(
+      invoke<AiPreview>('ai_preview', { request: chatRequest(null, 'chat', 'hello') }),
+    );
+    await saveAi({ response_language: 'en' });
+    await expect(
+      settle(
+        invoke('ai_preview', {
+          request: chatRequest(preview.session_id, 'chat', 'continue'),
+        }),
+      ),
+    ).rejects.toThrow('assistant session settings or scope changed; start a new conversation');
+    await expect(
+      settle(invoke<AiPreview>('ai_preview', { request: chatRequest(null, 'chat', 'hello') })),
+    ).resolves.toMatchObject({ earlier_messages: 0 });
+  });
+
   it('redacts secrets, tokens and IPs before the preview and lists excluded sections', async () => {
     const asked = Date.now();
     const preview = await settle(
@@ -487,6 +680,35 @@ describe('demo assistant: preview and send', () => {
     expect(run.text()).toMatch(/gece/);
   });
 
+  it('completes a German answer, tool consent and logged system prompt in the request language', async () => {
+    await settle(invoke('history_clear', { kind: 'ai', clusterId: null }), 0);
+    await saveAi({ response_language: 'de' });
+    const preview = await settle(
+      invoke<AiPreview>('ai_preview', {
+        request: explainRequest('c-dev', { locale: 'de' }),
+      }),
+    );
+    const run = await send(preview.preview_id);
+    await waitFor(() => run.calls().some((call) => call.status === 'pending-approval'));
+    expect(run.text()).toContain('Ich prüfe zuerst');
+    const call = run.calls().find((call) => call.status === 'pending-approval')!;
+    await invoke('ai_tool_decision', {
+      runId: run.runId,
+      callId: call.id,
+      decision: 'deny',
+    });
+    await waitFor(run.done);
+    expect(run.events.at(-1)).toMatchObject({ type: 'done', stop: 'end' });
+    expect(run.text()).toContain('Die Ereignisse wurden nicht geteilt');
+    expect(run.text()).toContain('vorgefertigte Demo-Antwort auf Deutsch');
+    const page = await invoke<AiLogPage>('ai_log_list', {
+      filter: { cluster_ids: [], text: null, since: null, cursor: null, limit: 1 },
+    });
+    const detail = await invoke<AiLogDetail>('ai_log_get', { id: page.entries[0]!.id });
+    expect(JSON.parse(detail.request).system).toContain('Answer in German (Deutsch).');
+    expect(JSON.parse(detail.request).system).toContain('quoted errors verbatim.');
+  });
+
   it('simulates provider errors on request', async () => {
     const preview = await settle(
       invoke<AiPreview>('ai_preview', { request: chatRequest(null, 'chat', 'trigger #error') }),
@@ -592,6 +814,21 @@ describe('demo assistant: backend-owned settings', () => {
     expect(defaultsAfterMutation).toEqual([]);
     expect(DEFAULT_AI_SETTINGS.clusters).toEqual([]);
     expect(DEFAULT_AI_SETTINGS.production_acknowledged).toEqual([]);
+  });
+
+  it('persists a selected response language and defaults an older settings object to the UI language', async () => {
+    const saved = await saveAi({ response_language: 'fr' });
+    expect(saved.ai.response_language).toBe('fr');
+    await saveAi({ max_context_tokens: saved.ai.max_context_tokens + 1 });
+    const current = await invoke<Settings>('settings_get');
+    expect(current.ai.response_language).toBe('fr');
+
+    const legacyAi: Partial<AiSettings> = { ...current.ai };
+    delete legacyAi.response_language;
+    const migrated = await invoke<Settings>('settings_set', {
+      settings: { ...current, ai: legacyAi },
+    });
+    expect(migrated.ai.response_language).toBeNull();
   });
 
   it('records the production acknowledgement and keeps it read-only in settings_set', async () => {

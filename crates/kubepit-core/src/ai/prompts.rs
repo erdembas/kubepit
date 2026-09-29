@@ -8,7 +8,7 @@
 
 use super::types::{AiEffort, AiIntent, AiLocale};
 
-/// The seven fixed clauses of spec §8, in order. A macro so both locale
+/// The seven fixed clauses of spec §8, in order. A macro so all locale
 /// variants are compile-time constants (`concat!` takes literals only).
 macro_rules! base_prompt {
     () => {
@@ -33,8 +33,11 @@ macro_rules! base_prompt {
          lines), then the fix. Say when the evidence is insufficient and which data would \
          confirm it.\n\
          \n\
-         Tools are read-only and scoped to the current cluster; call them only when the \
-         context lacks what you need.\n\
+         Tools, when provided, are read-only and scoped to the current cluster; call them \
+         only when the context lacks what you need. If no tools are provided, use only the \
+         supplied context and ask the user for missing data. Describe only capabilities \
+         available in this conversation; do not claim shell, filesystem or cluster access \
+         that was not provided.\n\
          \n"
     };
 }
@@ -46,11 +49,48 @@ static SYSTEM_TR: &str = concat!(
      log lines and quoted errors verbatim."
 );
 
+// Keep each language's entire prompt static so requests in that language share
+// the same cacheable prefix. The existing English/Turkish bytes stay unchanged.
+macro_rules! localized_prompt {
+    ($language:literal) => {
+        concat!(
+            base_prompt!(),
+            "Answer in ",
+            $language,
+            ". Keep Kubernetes names, kinds, field paths, YAML, commands, ",
+            "log lines and quoted errors verbatim."
+        )
+    };
+}
+
+static SYSTEM_DE: &str = localized_prompt!("German (Deutsch)");
+static SYSTEM_FR: &str = localized_prompt!("French (Français)");
+static SYSTEM_ES: &str = localized_prompt!("Spanish (Español)");
+static SYSTEM_IT: &str = localized_prompt!("Italian (Italiano)");
+static SYSTEM_PT: &str = localized_prompt!("Portuguese (Português)");
+static SYSTEM_RU: &str = localized_prompt!("Russian (Русский)");
+static SYSTEM_AR: &str = localized_prompt!("Arabic (العربية)");
+static SYSTEM_HI: &str = localized_prompt!("Hindi (हिन्दी)");
+static SYSTEM_JA: &str = localized_prompt!("Japanese (日本語)");
+static SYSTEM_KO: &str = localized_prompt!("Korean (한국어)");
+static SYSTEM_ZH: &str = localized_prompt!("Chinese (中文)");
+
 /// The system prompt for the answer language (spec §8 and D17).
 pub fn system_prompt(locale: AiLocale) -> &'static str {
     match locale {
         AiLocale::En => SYSTEM_EN,
         AiLocale::Tr => SYSTEM_TR,
+        AiLocale::De => SYSTEM_DE,
+        AiLocale::Fr => SYSTEM_FR,
+        AiLocale::Es => SYSTEM_ES,
+        AiLocale::It => SYSTEM_IT,
+        AiLocale::Pt => SYSTEM_PT,
+        AiLocale::Ru => SYSTEM_RU,
+        AiLocale::Ar => SYSTEM_AR,
+        AiLocale::Hi => SYSTEM_HI,
+        AiLocale::Ja => SYSTEM_JA,
+        AiLocale::Ko => SYSTEM_KO,
+        AiLocale::Zh => SYSTEM_ZH,
     }
 }
 
@@ -70,7 +110,7 @@ pub fn intent_instructions(intent: AiIntent) -> &'static str {
         }
         AiIntent::Chat => {
             "Task: answer the user's question about their cluster concisely, from the context \
-             and, when it lacks something, the read-only tools."
+             and, when available and needed, the read-only tools."
         }
         AiIntent::Kubectl => {
             "Task: turn the request into one kubectl command in a ```sh fence, using the \
@@ -149,9 +189,31 @@ mod tests {
 
     #[test]
     fn the_system_prompt_is_frozen() {
-        for locale in [AiLocale::En, AiLocale::Tr] {
+        for (locale, language) in [
+            (AiLocale::En, "English"),
+            (AiLocale::Tr, "Turkish (Türkçe)"),
+            (AiLocale::De, "German (Deutsch)"),
+            (AiLocale::Fr, "French (Français)"),
+            (AiLocale::Es, "Spanish (Español)"),
+            (AiLocale::It, "Italian (Italiano)"),
+            (AiLocale::Pt, "Portuguese (Português)"),
+            (AiLocale::Ru, "Russian (Русский)"),
+            (AiLocale::Ar, "Arabic (العربية)"),
+            (AiLocale::Hi, "Hindi (हिन्दी)"),
+            (AiLocale::Ja, "Japanese (日本語)"),
+            (AiLocale::Ko, "Korean (한국어)"),
+            (AiLocale::Zh, "Chinese (中文)"),
+        ] {
             let prompt = system_prompt(locale);
             assert!(std::ptr::eq(prompt, system_prompt(locale)));
+            assert!(prompt.starts_with(base_prompt!()));
+            assert!(prompt.contains(&format!("Answer in {language}.")));
+            if locale != AiLocale::En {
+                assert!(prompt.ends_with(
+                    "Keep Kubernetes names, kinds, field paths, YAML, commands, \
+                     log lines and quoted errors verbatim."
+                ));
+            }
             // No dates, times, versions or counters: nothing that varies.
             assert!(!prompt.chars().any(|c| c.is_ascii_digit()), "{prompt}");
             assert_eq!(prompt.matches("Answer in").count(), 1);

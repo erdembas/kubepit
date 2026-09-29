@@ -1,10 +1,18 @@
 import * as i18n from '@/i18n';
 import type { LucideIcon } from 'lucide-react';
-import { History, LayoutDashboard, Network, Search, Settings as SettingsIcon } from 'lucide-react';
+import {
+  BookOpen,
+  History,
+  LayoutDashboard,
+  Network,
+  Search,
+  Settings as SettingsIcon,
+} from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { IS_MAC, modChord } from '@/lib/platform';
 import {
   ACTIVITY_TAB_KEY,
+  AI_GUIDE_TAB_KEY,
   DASHBOARD_TAB_KEY,
   PORT_FORWARDS_TAB_KEY,
   SEARCH_TAB_KEY,
@@ -72,17 +80,27 @@ export function FleetNav({ expanded }: { expanded: boolean }) {
   );
 }
 
-/** Settings sits at the bottom of the rail, like an IDE's gear. */
+/** Documentation and settings stay reachable at the bottom of the rail. */
 export function SettingsNavRow({ expanded }: { expanded: boolean }) {
   i18n.useLocale();
-  const active = useAppStore((s) => s.activeMainTabKey === SETTINGS_TAB_KEY);
+  const activeKey = useAppStore((s) => s.activeMainTabKey);
   return (
     <div
       className={cn(
-        'border-border/60 flex shrink-0 border-t py-1.5',
-        expanded ? 'flex-col px-2' : 'justify-center',
+        'border-border/60 flex shrink-0 flex-col gap-px border-t py-1.5',
+        expanded ? 'px-2' : 'items-center',
       )}
     >
+      <FleetNavRow
+        item={{
+          tabKey: AI_GUIDE_TAB_KEY,
+          label: i18n.t('AI capabilities'),
+          icon: BookOpen,
+          run: () => useAppStore.getState().openMainTab({ kind: 'ai-guide' }),
+        }}
+        active={activeKey === AI_GUIDE_TAB_KEY}
+        expanded={expanded}
+      />
       <FleetNavRow
         item={{
           tabKey: SETTINGS_TAB_KEY,
@@ -91,7 +109,7 @@ export function SettingsNavRow({ expanded }: { expanded: boolean }) {
           hint: modChord(','),
           run: () => useAppStore.getState().openSettings(),
         }}
-        active={active}
+        active={activeKey === SETTINGS_TAB_KEY}
         expanded={expanded}
       />
     </div>

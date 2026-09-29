@@ -4,12 +4,15 @@ import type {
   AccessCheck,
   AccessDecision,
   AccessRules,
+  AiAgentCatalog,
   AiEvent,
+  AiLocalAgent,
   AiLogDetail,
   AiLogFilter,
   AiLogPage,
   AiModelInfo,
   AiPreview,
+  AiProviderKind,
   AiRequest,
   AiStatus,
   AiToolDecision,
@@ -729,6 +732,11 @@ export const ipc = {
   // -- Assistant (opt-in; the backend holds keys, redacts and is the only egress) --
   /** Switches, credential store and per-provider key / egress status (no network). */
   aiStatus: () => call<AiStatus>('ai_status'),
+  /** Detects installed agent executables without starting them or accessing a provider. */
+  aiLocalAgents: () => call<AiLocalAgent[]>('ai_local_agents'),
+  /** Native model/capability metadata only; cached five minutes, refresh bypasses the cache. */
+  aiAgentCatalog: (kind: AiProviderKind, refresh = false) =>
+    call<AiAgentCatalog>('ai_agent_catalog', { kind, refresh }),
   /** Stores the key in the OS credential store; it is never returned. */
   aiKeySet: (providerId: string, key: string) => call<AiStatus>('ai_key_set', { providerId, key }),
   aiKeyDelete: (providerId: string) => call<AiStatus>('ai_key_delete', { providerId }),
@@ -738,6 +746,7 @@ export const ipc = {
   aiClusterSet: (clusterId: ClusterId, enabled: boolean, acknowledgeProduction: boolean) =>
     call<Settings>('ai_cluster_set', { clusterId, enabled, acknowledgeProduction }),
   /** Redacts, budgets and stores the exact payload; nothing leaves the machine yet. */
+  /** request.locale is the resolved answer language, independent of UI labels. */
   aiPreview: (request: AiRequest) => call<AiPreview>('ai_preview', { request }),
   /** Sends a stored preview (single use); resolves to the run id, events stream on `onEvent`. */
   aiSend: (previewId: string, onEvent: (event: AiEvent) => void) =>

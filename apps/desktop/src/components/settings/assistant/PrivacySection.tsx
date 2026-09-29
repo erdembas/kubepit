@@ -4,6 +4,7 @@ import { Select } from '@/components/ui/Select';
 import type { AiSettings, AiToolPolicy } from '@/types';
 import { SettingsSection } from '../SettingsView';
 import { Field } from './Fields';
+import { isLocalAgent } from '@/lib/ai/localAgents';
 
 export function PrivacySection({
   ai,
@@ -13,6 +14,8 @@ export function PrivacySection({
   onChange: (patch: Partial<AiSettings>) => void;
 }) {
   i18n.useLocale();
+  const active = ai.providers.find((provider) => provider.id === ai.active_provider);
+  const agent = !!active && isLocalAgent(active.kind);
   return (
     <SettingsSection title={i18n.t('Privacy')}>
       <div className="space-y-3">
@@ -44,7 +47,8 @@ export function PrivacySection({
         />
         <Field label={i18n.t('Read-only tools')}>
           <Select
-            value={ai.tool_policy}
+            value={agent ? 'off' : ai.tool_policy}
+            disabled={agent}
             ariaLabel={i18n.t('Read-only tools')}
             onChange={(value) => onChange({ tool_policy: value as AiToolPolicy })}
             options={[
@@ -53,6 +57,13 @@ export function PrivacySection({
               { value: 'session', label: i18n.t('Share results for this session') },
             ]}
           />
+          {agent && (
+            <p className="text-fg-dim mt-2 text-[11px]">
+              {i18n.t(
+                'Local agents answer from the previewed context. Read-only tools are unavailable for these providers.',
+              )}
+            </p>
+          )}
         </Field>
         <Switch
           checked={ai.log_requests}

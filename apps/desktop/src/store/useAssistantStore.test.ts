@@ -1,10 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AiEvent, AiPreview, AiRequest, AiScope } from '@/types';
+import type { AiEvent, AiLocale, AiPreview, AiRequest, AiScope } from '@/types';
 import * as i18n from '@/i18n/core';
 const mocks = vi.hoisted(() => ({
   uiScope: { cluster_id: 'c1', namespace: 'shop', object: null } as AiScope,
   app: {
-    settings: { ai: { active_provider: 'p1', providers: [{ id: 'p1', model: 'm1' }] } },
+    settings: {
+      ai: {
+        active_provider: 'p1',
+        providers: [{ id: 'p1', model: 'm1' }],
+        response_language: null as AiLocale | null | undefined,
+      },
+    },
     rightPanel: null as string | null,
   },
   appListeners: new Set<
@@ -105,6 +111,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.app.rightPanel = null;
   mocks.app.settings.ai.providers[0]!.model = 'm1';
+  mocks.app.settings.ai.response_language = null;
   i18n.setLocale('en', false);
   mocks.uiScope = { cluster_id: 'c1', namespace: 'shop', object: null };
   mocks.ipc.aiPreview.mockImplementation(async (request: AiRequest) => preview(request));
@@ -119,6 +126,50 @@ beforeEach(() => {
   mocks.ipc.aiToolDecision.mockResolvedValue(undefined);
 });
 describe('assistant session state machine', () => {
+  it('timestamps creation and completed activity without reordering history on every streamed event', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1000);
+    let emit!: (event: AiEvent) => void;
+    mocks.ipc.aiSend.mockImplementation(async (_id, callback) => {
+      emit = callback;
+      callback({ type: 'started', run_id: 'r1', model: 'm1' });
+      return 'r1';
+    });
+    try {
+      await ask();
+      expect(store().sessions.s1).toMatchObject({ createdAt: 1000, updatedAt: 1000 });
+      now.mockReturnValue(2000);
+      await store().send();
+      expect(store().sessions.s1).toMatchObject({ createdAt: 1000, updatedAt: 2000 });
+      now.mockReturnValue(3000);
+      emit({ type: 'text', delta: 'first chunk' });
+      emit({ type: 'usage', usage });
+      expect(store().sessions.s1?.updatedAt).toBe(2000);
+      now.mockReturnValue(4000);
+      emit(done);
+      expect(store().sessions.s1).toMatchObject({ createdAt: 1000, updatedAt: 4000 });
+      now.mockReturnValue(5000);
+      emit(done);
+      expect(store().sessions.s1?.updatedAt).toBe(4000);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it('retains completed chats and their activity when starting and selecting another chat', async () => {
+    await ask('first conversation', []);
+    const first = store().sessions.s1;
+    store().newChat();
+    expect(store().activeSessionId).toBeNull();
+    expect(store().sessions.s1).toEqual(first);
+    mocks.ipc.aiPreview.mockImplementation(async (request: AiRequest) => preview(request, 's2'));
+    await ask('second conversation', []);
+    expect(Object.keys(store().sessions)).toEqual(['s1', 's2']);
+    store().selectSession('s1');
+    expect(store().activeSessionId).toBe('s1');
+    expect(store().sessions.s1).toEqual(first);
+    expect(mocks.ipc.aiSessionEnd).not.toHaveBeenCalled();
+  });
+
   it('shows exact redacted preview, sends its id once and never raw request text', async () => {
     await ask();
     expect(mocks.ipc.aiSend).not.toHaveBeenCalled();
@@ -413,6 +464,61 @@ describe('assistant session state machine', () => {
     mocks.app.settings.ai.providers[0]!.model = 'm2';
     await ask('fourth', []);
     expect(mocks.ipc.aiPreview.mock.calls.at(-1)![0].session_id).toBeNull();
+  });
+  it.each([
+    ['en', 'tr'],
+    ['tr', 'en'],
+    ['en', 'ja'],
+  ] as const)('uses the chosen answer language with a %s interface', async (ui, answer) => {
+    i18n.setLocale(ui, false);
+    mocks.app.settings.ai.response_language = answer;
+    await ask('Explain the selected workload', []);
+    expect(mocks.ipc.aiPreview.mock.calls.at(-1)![0].locale).toBe(answer);
+    expect(i18n.getLocale()).toBe(ui);
+  });
+  it('follows the interface language when older settings have no preference', async () => {
+    mocks.app.settings.ai.response_language = undefined;
+    i18n.setLocale('tr', false);
+    await ask('Explain', []);
+    expect(mocks.ipc.aiPreview.mock.calls.at(-1)![0].locale).toBe('tr');
+  });
+  it('keeps the same chat across interface language changes with an explicit answer language', async () => {
+    mocks.app.settings.ai.response_language = 'tr';
+    await ask('first', []);
+    i18n.setLocale('tr', false);
+    await ask('second', []);
+    expect(mocks.ipc.aiPreview.mock.calls.at(-1)![0]).toMatchObject({
+      session_id: 's1',
+      locale: 'tr',
+    });
+  });
+  it('starts a new chat when the answer language changes and when returning to the app language', async () => {
+    await ask('first', []);
+    mocks.ipc.aiPreview.mockImplementation(async (request: AiRequest) => preview(request, 's2'));
+    mocks.app.settings.ai.response_language = 'tr';
+    await ask('second', []);
+    expect(mocks.ipc.aiPreview.mock.calls.at(-1)![0]).toMatchObject({
+      session_id: null,
+      locale: 'tr',
+    });
+    mocks.app.settings.ai.response_language = null;
+    await ask('third', []);
+    expect(mocks.ipc.aiPreview.mock.calls.at(-1)![0]).toMatchObject({
+      session_id: null,
+      locale: 'en',
+    });
+  });
+  it('retries in a fresh chat with the newly selected answer language', async () => {
+    mocks.ipc.aiSend.mockRejectedValueOnce(new Error('offline'));
+    await ask('explain', []);
+    const failed = store().sessions.s1!.messages[1]!;
+    mocks.app.settings.ai.response_language = 'de';
+    await store().retry(failed.id);
+    expect(mocks.ipc.aiPreview.mock.calls.at(-1)![0]).toMatchObject({
+      session_id: null,
+      locale: 'de',
+      message: 'explain',
+    });
   });
   it('never attaches a second editor request to the first editor origin', async () => {
     const originA = { kind: 'editor' as const, clusterId: 'c1', tabId: 'editor-a' };

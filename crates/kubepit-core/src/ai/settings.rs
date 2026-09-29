@@ -35,6 +35,10 @@ impl AiProviderKind {
             Self::Anthropic => "anthropic",
             Self::OpenaiCompatible => "openai-compatible",
             Self::Ollama => "ollama",
+            Self::CodexCli => "codex-cli",
+            Self::ClaudeCli => "claude-cli",
+            Self::OpencodeCli => "opencode-cli",
+            Self::CursorCli => "cursor-cli",
         }
     }
 
@@ -46,13 +50,14 @@ impl AiProviderKind {
             Self::Anthropic => ANTHROPIC_BASE_URL,
             Self::OpenaiCompatible => OPENAI_BASE_URL,
             Self::Ollama => OLLAMA_BASE_URL,
+            Self::CodexCli | Self::ClaudeCli | Self::OpencodeCli | Self::CursorCli => "",
         }
     }
 
     pub fn default_max_output_tokens(self) -> u32 {
         match self {
             Self::Anthropic => 64_000,
-            Self::OpenaiCompatible | Self::Ollama => 4_096,
+            _ => 4_096,
         }
     }
 
@@ -62,7 +67,18 @@ impl AiProviderKind {
             Self::Anthropic => "Anthropic",
             Self::OpenaiCompatible => "OpenAI-compatible",
             Self::Ollama => "Ollama",
+            Self::CodexCli => "Codex",
+            Self::ClaudeCli => "Claude Code",
+            Self::OpencodeCli => "OpenCode",
+            Self::CursorCli => "Cursor Agent",
         }
+    }
+
+    pub fn is_cli(self) -> bool {
+        matches!(
+            self,
+            Self::CodexCli | Self::ClaudeCli | Self::OpencodeCli | Self::CursorCli
+        )
     }
 }
 
@@ -243,6 +259,7 @@ impl Default for AiSettings {
         Self {
             enabled: false,
             local_only: false,
+            response_language: None,
             active_provider: Some(DEFAULT_PROVIDER.to_string()),
             providers: default_providers(),
             clusters: Vec::new(),
@@ -252,6 +269,7 @@ impl Default for AiSettings {
             log_requests: true,
             max_context_tokens: DEFAULT_MAX_CONTEXT_TOKENS,
             effort: None,
+            agent_options: Default::default(),
             prices: Vec::new(),
         }
     }
@@ -277,6 +295,12 @@ impl AiProviderConfig {
         self.model = self.model.trim().to_string();
         if self.model.is_empty() && self.kind == AiProviderKind::Anthropic {
             self.model = DEFAULT_ANTHROPIC_MODEL.to_string();
+        }
+        if self.kind.is_cli() {
+            self.base_url.clear();
+            if self.model.is_empty() {
+                self.model = "default".into();
+            }
         }
         self.name = self.name.trim().to_string();
         if self.name.is_empty() {
@@ -351,6 +375,15 @@ impl AiSettings {
         }
         self.providers = providers;
 
+        // Keep native options with their provider, never with a removed or HTTP one.
+        self.agent_options.retain(|id, options| {
+            options.effort = normalized_native_option(options.effort.take());
+            options.service_tier = normalized_native_option(options.service_tier.take());
+            self.providers
+                .iter()
+                .any(|p| p.id == *id && p.kind.is_cli())
+        });
+
         // An unknown provider is not silently swapped for another one (and
         // its data sent there): no provider is chosen until the user picks.
         let providers = &self.providers;
@@ -381,6 +414,15 @@ impl AiSettings {
     /// usable ([`base_url_problem`]). A blank base URL is accepted: the
     /// default providers get theirs back, a custom one stays not allowed.
     pub fn validate(&self) -> Result<()> {
+        for options in self.agent_options.values() {
+            if [&options.effort, &options.service_tier]
+                .iter()
+                .filter_map(|s| s.as_ref())
+                .any(|s| s.len() > 128 || s.chars().any(char::is_control))
+            {
+                bail!("local assistant agent options must be at most 128 bytes and contain no control characters");
+            }
+        }
         for provider in &self.providers {
             let id = provider.id.trim();
             if !valid_provider_id(id) {
@@ -390,6 +432,12 @@ impl AiSettings {
                 );
             }
             let url = trim_base_url(&provider.base_url);
+            if provider.kind.is_cli() {
+                if !url.is_empty() {
+                    bail!("local assistant agents do not use a base URL");
+                }
+                continue;
+            }
             if !url.is_empty() {
                 if let Err(why) = parse_base_url(url) {
                     bail!("the base URL of assistant provider \"{id}\" is not valid: {why}");
@@ -524,6 +572,12 @@ impl AiSettings {
     }
 }
 
+fn normalized_native_option(value: Option<String>) -> Option<String> {
+    value.map(|value| value.trim().to_string()).filter(|value| {
+        !value.is_empty() && value.len() <= 128 && !value.chars().any(char::is_control)
+    })
+}
+
 /// A usable `http(s)://` base URL with a loopback host: `127.0.0.0/8`,
 /// `::1` or `localhost`. Anything else (unparsable, user info, `\`, …) is
 /// not loopback.
@@ -554,6 +608,10 @@ pub fn provider_allowed(
     remote_allowed: bool,
     local_only: bool,
 ) -> bool {
+    // A local CLI can contact its cloud service with its existing login.
+    if provider.kind.is_cli() {
+        return remote_allowed && !local_only;
+    }
     if provider.kind == AiProviderKind::Anthropic || has_key {
         key_egress_allowed(&provider.base_url, remote_allowed, local_only)
     } else {
@@ -910,6 +968,46 @@ mod tests {
         assert!(s.ai.enabled);
         assert_eq!(s.ai.providers, default_providers());
         assert_eq!(s.ai.max_context_tokens, DEFAULT_MAX_CONTEXT_TOKENS);
+        assert_eq!(s.ai.response_language, None);
+    }
+
+    #[test]
+    fn response_language_persists_and_unknown_stored_languages_preserve_other_settings() {
+        use super::super::types::AiLocale;
+
+        for language in [
+            None,
+            Some(AiLocale::En),
+            Some(AiLocale::Tr),
+            Some(AiLocale::De),
+            Some(AiLocale::Fr),
+            Some(AiLocale::Es),
+            Some(AiLocale::It),
+            Some(AiLocale::Pt),
+            Some(AiLocale::Ru),
+            Some(AiLocale::Ar),
+            Some(AiLocale::Hi),
+            Some(AiLocale::Ja),
+            Some(AiLocale::Ko),
+            Some(AiLocale::Zh),
+        ] {
+            let ai = AiSettings {
+                enabled: true,
+                response_language: language,
+                ..AiSettings::default()
+            };
+            let stored = serde_json::to_value(&ai).unwrap();
+            assert_eq!(AiSettings::from_stored(stored).normalized(), ai);
+        }
+
+        let ai = AiSettings::from_stored(serde_json::json!({
+            "enabled": true,
+            "response_language": "unsupported",
+            "max_context_tokens": 12_000
+        }));
+        assert_eq!(ai.response_language, None);
+        assert!(ai.enabled);
+        assert_eq!(ai.max_context_tokens, 12_000);
     }
 
     #[test]

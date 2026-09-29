@@ -3,7 +3,7 @@ import { memo } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { X } from 'lucide-react';
+import { Pin, X } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
 interface Props {
@@ -15,11 +15,13 @@ interface Props {
   active: boolean;
   /** The tab's pane is the focused one (bright vs muted active tier). */
   focused: boolean;
+  pinned: boolean;
   closable: boolean;
   /** A tab from another pane is being dragged (show the insert marker). */
   foreignDrag: boolean;
   onActivate: (key: string) => void;
   onClose: (key: string) => void;
+  onTogglePin: (key: string) => void;
   onStep: (key: string, step: -1 | 1) => void;
   onMenu: (key: string, x: number, y: number) => void;
 }
@@ -32,16 +34,18 @@ export const ViewTabItem = memo(function ViewTabItem({
   icon: Icon,
   active,
   focused,
+  pinned,
   closable,
   foreignDrag,
   onActivate,
   onClose,
+  onTogglePin,
   onStep,
   onMenu,
 }: Props) {
   i18n.useLocale();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging, isOver } =
-    useSortable({ id: viewKey });
+    useSortable({ id: viewKey, disabled: { draggable: pinned } });
   const pill = variant === 'pill';
   const bright = active && focused;
   const muted = active && !focused;
@@ -50,13 +54,16 @@ export const ViewTabItem = memo(function ViewTabItem({
     <div
       ref={setNodeRef}
       data-view-tab={viewKey}
+      data-view-tab-pinned={pinned || undefined}
       style={{
-        transform: CSS.Translate.toString(transform ? { ...transform, y: 0 } : null),
+        transform: CSS.Translate.toString(!pinned && transform ? { ...transform, y: 0 } : null),
         transition,
       }}
       {...attributes}
       {...listeners}
       role="tab"
+      aria-label={label}
+      aria-disabled={undefined}
       aria-selected={active}
       tabIndex={active ? 0 : -1}
       onClick={() => onActivate(viewKey)}
@@ -74,12 +81,20 @@ export const ViewTabItem = memo(function ViewTabItem({
         onMenu(viewKey, e.clientX, e.clientY);
       }}
       onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
         if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
           e.preventDefault();
           onStep(viewKey, e.key === 'ArrowLeft' ? -1 : 1);
         } else if (closable && (e.key === 'Delete' || e.key === 'Backspace')) {
           e.preventDefault();
           onClose(viewKey);
+        } else if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onActivate(viewKey);
+        } else if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+          e.preventDefault();
+          const rect = e.currentTarget.getBoundingClientRect();
+          onMenu(viewKey, rect.left, rect.bottom);
         }
       }}
       title={label}
@@ -88,7 +103,7 @@ export const ViewTabItem = memo(function ViewTabItem({
         pill
           ? cn(
               'h-7 rounded-md pl-2',
-              closable ? 'pr-1' : 'pr-2',
+              closable || pinned ? 'pr-1' : 'pr-2',
               active
                 ? cn('focus-visible:bg-fg/10', bright ? 'bg-fg/7 text-fg' : 'bg-fg/5 text-fg-muted')
                 : 'text-fg-muted hover:bg-fg/5 hover:text-fg focus-visible:bg-fg/5',
@@ -100,9 +115,11 @@ export const ViewTabItem = memo(function ViewTabItem({
                 : 'text-fg-muted hover:bg-fg/4 hover:text-fg focus-visible:bg-fg/4',
             ),
         isDragging && 'opacity-40',
+        pinned &&
+          'w-12 justify-center gap-1 px-1.5 @min-[640px]/view-tabs:w-auto @min-[640px]/view-tabs:max-w-40',
       )}
     >
-      {isOver && foreignDrag && (
+      {isOver && foreignDrag && !pinned && (
         <span
           aria-hidden
           className="bg-accent pointer-events-none absolute inset-y-1 -left-px z-10 w-[2px] rounded-full"
@@ -115,8 +132,27 @@ export const ViewTabItem = memo(function ViewTabItem({
           !pill && (bright ? 'text-accent' : muted ? 'text-fg-muted' : 'text-fg-dim'),
         )}
       />
-      <span className="max-w-48 truncate">{label}</span>
-      {closable ? (
+      <span
+        className={cn('max-w-48 truncate', pinned && 'hidden min-w-0 @min-[640px]/view-tabs:block')}
+      >
+        {label}
+      </span>
+      {pinned ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onTogglePin(viewKey);
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          aria-label={i18n.t('Unpin {title}', { title: label })}
+          title={i18n.t('Unpin Tab')}
+          tabIndex={-1}
+          className="text-accent hover:bg-fg/8 rounded-app-sm flex h-4 w-4 shrink-0 items-center justify-center transition"
+        >
+          <Pin className="h-3 w-3 fill-current" />
+        </button>
+      ) : closable ? (
         <button
           type="button"
           onClick={(e) => {

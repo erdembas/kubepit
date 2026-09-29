@@ -25,6 +25,9 @@ import { mainTabKey, useAppStore } from '@/store/useAppStore';
 const SettingsView = lazy(() =>
   import('@/components/settings/SettingsView').then((m) => ({ default: m.SettingsView })),
 );
+const AiGuidePage = lazy(() =>
+  import('@/components/assistant/AiGuidePage').then((m) => ({ default: m.AiGuidePage })),
+);
 const PortForwardsView = lazy(() =>
   import('@/components/port-forwards/PortForwardsView').then((m) => ({
     default: m.PortForwardsView,
@@ -216,6 +219,7 @@ const MainTabPanel = memo(function MainTabPanel({
         {tab.kind === 'cluster' && <ClusterWorkbench clusterId={tab.refId} isActive={visible} />}
         <Suspense fallback={<p className="text-fg-muted p-5 text-[12px]">{i18n.t('Loading…')}</p>}>
           {tab.kind === 'settings' && <SettingsView />}
+          {tab.kind === 'ai-guide' && <AiGuidePage />}
           {tab.kind === 'port-forwards' && <PortForwardsView />}
           {tab.kind === 'search' && <FleetSearchView visible={visible} />}
           {tab.kind === 'activity' && <ActivityView visible={visible} />}

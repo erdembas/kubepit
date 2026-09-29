@@ -1,5 +1,10 @@
 # Team sharing: design
 
+> **Historical design:** The [2026-09-29 commercial strategy](2026-09-29-open-core-commercial-strategy.md)
+> supersedes the all-public, file-only sharing architecture below. Paid team profiles
+> now use private desktop code and a tenant-isolated cloud service. Preserve the useful
+> credential exclusion, mapping and local layering requirements through the new plan.
+
 Status: draft for review · Date: 2026-09-28 · Plan: `docs/superpowers/plans/2026-09-28-team-sharing.md`
 
 ## Problem

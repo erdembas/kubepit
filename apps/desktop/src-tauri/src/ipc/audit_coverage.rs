@@ -222,6 +222,8 @@ const NOT_MUTATING: &[&str] = &[
     // tools are read-only; suggested mutations use the audited editor path.
     // Model requests are recorded separately in ai_log by the session guard.
     "ai_status",
+    "ai_local_agents",
+    "ai_agent_catalog",
     "ai_key_set",
     "ai_key_delete",
     "ai_models",

@@ -8,8 +8,8 @@ import { useWorkbenchStore } from '@/store/useWorkbenchStore';
 
 /** This window's session with `mainLayout` as the new window's tabs. */
 function seedFrom(mainLayout: SplitLayout): WindowSeed {
-  const { layouts, activeKind, namespaces } = useWorkbenchStore.getState();
-  return { mainLayout, workbench: { layouts, activeKind, namespaces } };
+  const { layouts, activeKind, namespaces, pinnedTabKeys } = useWorkbenchStore.getState();
+  return { mainLayout, workbench: { layouts, activeKind, namespaces, pinnedTabKeys } };
 }
 
 async function openWindow(seed: WindowSeed): Promise<boolean> {

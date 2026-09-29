@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Switch } from '@/components/ui/Switch';
+import { ResponseLanguageSelect } from '@/components/assistant/ResponseLanguageSelect';
 import { settingsIssues, hasBlockingIssues } from '@/lib/ai/settingsIssues';
 import { ipc } from '@/lib/ipc';
 import { useAppStore } from '@/store/useAppStore';
@@ -17,6 +18,7 @@ import { PricesSection } from './assistant/PricesSection';
 import { ClustersSection } from './assistant/ClustersSection';
 import { RequestLogSection } from './assistant/RequestLogSection';
 import { Field, errorText } from './assistant/Fields';
+import { isLocalAgent } from '@/lib/ai/localAgents';
 
 export function AssistantCategory({ description }: { description: string }) {
   i18n.useLocale();
@@ -53,6 +55,8 @@ export function AssistantCategory({ description }: { description: string }) {
   });
   if (!draft) return <p className="text-fg-dim text-[12px]">{i18n.t('Loading settings…')}</p>;
   const ai = draft.ai;
+  const activeProvider = ai.providers.find((provider) => provider.id === ai.active_provider);
+  const agent = !!activeProvider && isLocalAgent(activeProvider.kind);
   const issues = settingsIssues(ai, status);
   const set = (patch: Partial<AiSettings>) => update('ai', { ...ai, ...patch });
   return (
@@ -67,6 +71,17 @@ export function AssistantCategory({ description }: { description: string }) {
               'Use your own model provider or a local model. Cluster access is enabled separately.',
             )}
           />
+          <div className="mt-4 max-w-sm">
+            <ResponseLanguageSelect
+              value={ai.response_language ?? null}
+              onChange={(response_language) => set({ response_language })}
+            />
+            <p className="text-fg-dim mt-2 text-[11px]">
+              {i18n.t(
+                'Choose the language for assistant responses without changing the app language. Applies to new chats.',
+              )}
+            </p>
+          </div>
           {error && (
             <div role="alert" className="text-status-error mt-3 text-[11px]">
               {assistantErrorMessage(error)}
@@ -108,21 +123,25 @@ export function AssistantCategory({ description }: { description: string }) {
                 onChange={(e) => set({ max_context_tokens: Number(e.target.value) })}
               />
             </Field>
-            <Field label={i18n.t('Reasoning effort')}>
-              <Select
-                value={ai.effort ?? 'auto'}
-                onChange={(value) => set({ effort: value === 'auto' ? null : (value as AiEffort) })}
-                ariaLabel={i18n.t('Reasoning effort')}
-                options={[
-                  { value: 'auto', label: i18n.t('Automatic') },
-                  { value: 'low', label: i18n.t('Low') },
-                  { value: 'medium', label: i18n.t('Medium') },
-                  { value: 'high', label: i18n.t('High') },
-                  { value: 'xhigh', label: i18n.t('Extra high') },
-                  { value: 'max', label: i18n.t('Maximum') },
-                ]}
-              />
-            </Field>
+            {!agent && (
+              <Field label={i18n.t('Reasoning effort')}>
+                <Select
+                  value={ai.effort ?? 'auto'}
+                  onChange={(value) =>
+                    set({ effort: value === 'auto' ? null : (value as AiEffort) })
+                  }
+                  ariaLabel={i18n.t('Reasoning effort')}
+                  options={[
+                    { value: 'auto', label: i18n.t('Automatic') },
+                    { value: 'low', label: i18n.t('Low') },
+                    { value: 'medium', label: i18n.t('Medium') },
+                    { value: 'high', label: i18n.t('High') },
+                    { value: 'xhigh', label: i18n.t('Extra high') },
+                    { value: 'max', label: i18n.t('Maximum') },
+                  ]}
+                />
+              </Field>
+            )}
           </div>
         </SettingsSection>
         <PricesSection prices={ai.prices} issues={issues} onChange={(prices) => set({ prices })} />

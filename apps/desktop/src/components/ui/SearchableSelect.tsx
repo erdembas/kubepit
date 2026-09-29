@@ -5,7 +5,7 @@ import * as i18n from '@/i18n';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Search, X } from 'lucide-react';
-import { filterSelectOptions, type SearchableOption } from '@/lib/selectSearch';
+import { searchableSelectOptions, type SearchableOption } from '@/lib/selectSearch';
 
 export function SearchableSelect({
   value,
@@ -18,6 +18,7 @@ export function SearchableSelect({
   compact,
   searchable = true,
   leading,
+  renderOptionLeading,
   className = '',
   menuWidth = 320,
   indentGrouped = false,
@@ -34,6 +35,7 @@ export function SearchableSelect({
   compact?: boolean;
   searchable?: boolean;
   leading?: ReactNode;
+  renderOptionLeading?: (option: SearchableOption) => ReactNode;
   className?: string;
   menuWidth?: number;
   indentGrouped?: boolean;
@@ -57,16 +59,10 @@ export function SearchableSelect({
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const selected = options.find((option) => option.value === value);
-  const filtered = useMemo(() => {
-    const matches = filterSelectOptions(options, query);
-    const custom = createOption?.(query);
-    if (custom && !options.some((option) => option.value === custom.value)) matches.push(custom);
-    if (createOption) {
-      const exact = matches.findIndex((option) => option.value === query.trim());
-      if (exact > 0) matches.unshift(...matches.splice(exact, 1));
-    }
-    return matches;
-  }, [options, query, createOption]);
+  const filtered = useMemo(
+    () => searchableSelectOptions(options, query, createOption),
+    [options, query, createOption],
+  );
   const groups = useMemo(() => {
     const result: {
       key: string;
@@ -326,6 +322,7 @@ export function SearchableSelect({
                         onClick={() => choose(option)}
                         className={`flex w-full items-center gap-2.5 rounded-lg py-2 pr-3 text-left transition-colors ${indentGrouped && option.group ? 'pl-6' : 'pl-3'} ${option.disabled ? 'opacity-40' : active === index ? 'bg-fg/7' : 'hover:bg-fg/5'} ${option.value === value ? 'text-fg' : 'text-fg-muted'}`}
                       >
+                        {renderOptionLeading?.(option)}
                         {option.color && (
                           <span
                             className="h-2 w-2 shrink-0 rounded-full"
@@ -369,7 +366,7 @@ export function SearchableSelect({
             )}
             {searchable && (
               <div className="border-border/50 text-fg-dim mt-1 flex shrink-0 justify-between border-t px-2 pt-2 pb-1 text-[10px]">
-                <span>{i18n.rich('{value1} results', { value1: filtered.length })}</span>
+                <span>{i18n.plural('{count} result', '{count} results', filtered.length)}</span>
                 <span>{i18n.t('↑ ↓ Navigate · Enter Select')}</span>
               </div>
             )}

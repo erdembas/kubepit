@@ -1,6 +1,7 @@
 import { assistantErrorMessage } from './errorMessage';
 import * as i18n from '@/i18n/core';
 import type { AiPrice, AiProviderConfig, AiProviderStatus, AiSettings, AiStatus } from '@/types';
+import { isLocalAgent } from './localAgents';
 
 /**
  * Validation of the Settings → Assistant draft (`Settings.ai`) against the
@@ -151,7 +152,9 @@ export function isKeySafeUrl(url: string): boolean {
 
 /** Requests to the provider carry an API key: Anthropic always, the others when one is stored. */
 export function sendsKey(provider: AiProviderConfig, status: AiProviderStatus | undefined) {
-  return provider.kind === 'anthropic' || (status?.has_key ?? false);
+  return (
+    !isLocalAgent(provider.kind) && (provider.kind === 'anthropic' || (status?.has_key ?? false))
+  );
 }
 
 /** The provider cannot answer without a key: Anthropic, or a remote OpenAI-compatible endpoint. */
@@ -176,8 +179,9 @@ export function settingsIssues(ai: AiSettings, status: AiStatus | null): Setting
     const field = `providers.${provider.id}`;
     const isActive = provider === active;
     const providerStatus = status?.providers.find((p) => p.id === provider.id);
-    const urlProblem = baseUrlProblem(provider.base_url);
-    const local = isLoopbackUrl(provider.base_url);
+    const agent = isLocalAgent(provider.kind);
+    const urlProblem = agent ? null : baseUrlProblem(provider.base_url);
+    const local = !agent && isLoopbackUrl(provider.base_url);
 
     if (urlProblem) push(`${field}.base_url`, urlProblem, 'error');
     else if (sendsKey(provider, providerStatus) && !isKeySafeUrl(provider.base_url))
@@ -193,10 +197,15 @@ export function settingsIssues(ai: AiSettings, status: AiStatus | null): Setting
       if (ai.local_only)
         push(
           'active_provider',
-          i18n.t(
-            '{name} is not on this computer, and local-only mode refuses remote providers. Choose a local provider or turn local-only mode off.',
-            { name: provider.name },
-          ),
+          agent
+            ? i18n.t(
+                '{name} runs on this computer but may use cloud models. Turn local-only mode off or choose a local model server.',
+                { name: provider.name },
+              )
+            : i18n.t(
+                '{name} is not on this computer, and local-only mode refuses remote providers. Choose a local provider or turn local-only mode off.',
+                { name: provider.name },
+              ),
           readiness,
         );
       else if (status && !status.remote_allowed)
@@ -209,7 +218,23 @@ export function settingsIssues(ai: AiSettings, status: AiStatus | null): Setting
         );
     }
 
-    if (isActive && provider.kind !== 'anthropic' && !provider.model.trim())
+    if (
+      isActive &&
+      agent &&
+      providerStatus &&
+      !providerStatus.allowed &&
+      !ai.local_only &&
+      status?.remote_allowed
+    )
+      push(
+        `${field}.executable`,
+        i18n.t(
+          'This agent cannot currently be used. Refresh local agents to check its availability.',
+        ),
+        'warning',
+      );
+
+    if (isActive && !agent && provider.kind !== 'anthropic' && !provider.model.trim())
       push(
         `${field}.model`,
         i18n.t('Choose a model for {name}.', { name: provider.name }),
@@ -225,7 +250,7 @@ export function settingsIssues(ai: AiSettings, status: AiStatus | null): Setting
         'error',
       );
 
-    if (providerStatus?.key_error)
+    if (!agent && providerStatus?.key_error)
       push(
         `${field}.key`,
         i18n.t('The stored key cannot be used: {error}', {

@@ -107,6 +107,7 @@ export function ClusterDock({ clusterId, visible }: { clusterId: ClusterId; visi
       ref={rootRef}
       className="bg-surface relative flex shrink-0 flex-col"
       style={open ? { height } : undefined}
+      data-dock={clusterId}
       onFocusCapture={() => setFocused(true)}
       onBlurCapture={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);

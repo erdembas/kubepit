@@ -1,5 +1,27 @@
 # Plan roadmap
 
+## Commercial program — current direction (2026-09-29)
+
+Start with [Open-core commercial program](2026-09-29-commercial-program.md) for the
+paid cloud-import and team-profile work. It coordinates the
+[cloud implementation](2026-09-29-commercial-cloud.md),
+[desktop implementation](2026-09-29-commercial-desktop.md),
+[product strategy](../specs/2026-09-29-open-core-commercial-strategy.md) and
+[licensing/repository decision](../specs/2026-09-29-commercial-licensing-and-repository.md).
+
+The proposed product is an independently buildable open-source Community app plus
+private paid desktop features and a small Node/PostgreSQL service for organizations,
+teams, Paddle subscriptions and profiles. Pricing is $3/seat/month or $30/seat/year.
+The founder says the current MIT-labeled code has not been published; the new
+proposal is AGPL core with a controlled commercial alternative, subject to ownership
+and legal review. No license or Git history was changed by the planning work.
+
+The older cloud/local and team-sharing documents below are historical technical
+references: their all-public placement and file-only sharing design are superseded.
+Do not execute those plans unchanged. Other roadmap plans retain their own scope.
+
+## Earlier roadmap
+
 Implementation plans written in the superpowers `writing-plans` format. Each plan
 has a design spec next to it in `../specs/` and is meant to be executed with
 `superpowers:subagent-driven-development` (recommended) or

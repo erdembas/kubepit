@@ -1,0 +1,125 @@
+{
+  "validatedAt": "2026-09-29T21:24:09.050420+00:00",
+  "scope": "Package import/static integrity only. No product implementation, product tests, workflow execution or real RunHQ data changes.",
+  "static": {
+    "staticValidation": "passed",
+    "steps": 122,
+    "phases": 20,
+    "taskCoverage": 54,
+    "licensingCoverage": 7,
+    "humanGates": 0,
+    "files": 98,
+    "expandedBytes": 868366,
+    "zipParity": "passed",
+    "sourceHashes": "passed"
+  },
+  "nodeSyntax": "passed",
+  "realImporter": [
+    {
+      "captured_under_temp_home": true,
+      "issues": [
+        {
+          "blocking": false,
+          "code": "pipeline.review_contract",
+          "detail": ""
+        }
+      ],
+      "max_prompt_bytes": 2936,
+      "name": "Kubepit · Community + Commercial · Otomatik Uygulama",
+      "registered_projects": 0,
+      "repositories": [
+        {
+          "branch": "main",
+          "name": "kubepit",
+          "path": "/Users/erdembas/Projects/github.com/erdembas/kubepit"
+        },
+        {
+          "branch": "main",
+          "name": "kubepit-commercial",
+          "path": "/Users/erdembas/Projects/github.com/erdembas/kubepit-commercial"
+        }
+      ],
+      "roles": {
+        "barrier": 20,
+        "implement": 22,
+        "review": 20,
+        "revise": 20,
+        "shell": 40
+      },
+      "sessions": 0,
+      "source": "/Users/erdembas/Projects/github.com/erdembas/kubepit/exports/runnerhq/kubepit-commercial/pipeline.json",
+      "steps": 122,
+      "workflow_runs_created": false,
+      "workspace_mode": "direct"
+    },
+    {
+      "captured_under_temp_home": true,
+      "issues": [
+        {
+          "blocking": false,
+          "code": "pipeline.review_contract",
+          "detail": ""
+        }
+      ],
+      "max_prompt_bytes": 2936,
+      "name": "Kubepit · Community + Commercial · Otomatik Uygulama",
+      "registered_projects": 0,
+      "repositories": [
+        {
+          "branch": "main",
+          "name": "kubepit",
+          "path": "/Users/erdembas/Projects/github.com/erdembas/kubepit"
+        },
+        {
+          "branch": "main",
+          "name": "kubepit-commercial",
+          "path": "/Users/erdembas/Projects/github.com/erdembas/kubepit-commercial"
+        }
+      ],
+      "roles": {
+        "barrier": 20,
+        "implement": 22,
+        "review": 20,
+        "revise": 20,
+        "shell": 40
+      },
+      "sessions": 0,
+      "source": "/Users/erdembas/Projects/github.com/erdembas/kubepit/exports/runnerhq/kubepit-commercial.zip",
+      "steps": 122,
+      "workflow_runs_created": false,
+      "workspace_mode": "direct"
+    }
+  ],
+  "runnerHead": "51b4dafdbfe09ba0b8875c907e372cabbc5fe77a",
+  "importerSourceSha256": {
+    "crates/runhq-core/src/agents/pipeline/types.rs": "7ddcd34b3058b93fab37f5cddc49d5afc02b34bc2916d410840bd04ba871ae7f",
+    "crates/runhq-core/src/agents/pipeline/import.rs": "49e86ffb85ac38bb143b3ef7104b1e7bf8f766cebd4f91146db9d4752398800e",
+    "crates/runhq-core/src/agents/pipeline/condition.rs": "9156316bf568061892bc6adf8e0253ddbe8bd2d0134ab8ecbe10ea07465b80ab",
+    "crates/runhq-core/src/agents/workflow_package_import.rs": "f757cc984d9a6fb19de8c82d2cdd1400803168e8a8b0e20c9ef65452d47ada53",
+    "crates/runhq-core/src/agents/workflow_native.rs": "474e1aded6274cbc4783a4e3b085912c36d5762e661ba7969976747b57b4d6f4"
+  },
+  "artifactSha256": {
+    "pipeline.json": "b6400061dc43c98aa36263ce84c397cc57dc1b53832af3a293827dc20b25becb",
+    "kubepit-commercial.zip": "12672521b10354d34126cd846060cd3e8eaedcfc6cc78ca4da80ef3e602a6dd9"
+  },
+  "startPrerequisites": {
+    "publicWorkingTree": "dirty at export time; preserve and prepare clean target before start",
+    "privateRepository": "absent at export time; create approved local checkout/initial commit before start",
+    "branchDefaults": [
+      "kubepit:main",
+      "kubepit-commercial:main"
+    ],
+    "node": "24+",
+    "host": "macOS",
+    "productionLaunch": "not authorized by this export"
+  },
+  "automation": {
+    "humanApprovalSteps": 0,
+    "automaticLocalCheckpoints": [
+      "p03-checkpoint",
+      "p05-checkpoint"
+    ],
+    "uiSetting": "Keep Run next steps automatically enabled; this is not a supported package manifest field.",
+    "effectiveLicenseTransition": "Draft patch; unresolved activation remains external pending without a workflow pause."
+  }
+}

@@ -4,6 +4,7 @@ import { useAssistantStore } from '@/store/useAssistantStore';
 import { sectionKindLabel, redactionSummary, formatCost } from '@/lib/ai/format';
 import { BudgetBar } from './BudgetBar';
 import type { AiPreview } from '@/types';
+import { isLocalAgent } from '@/lib/ai/localAgents';
 export function ContextPreview({ preview, mismatch }: { preview: AiPreview; mismatch: boolean }) {
   i18n.useLocale();
   const preparing = useAssistantStore((s) => s.preparing);
@@ -18,6 +19,13 @@ export function ContextPreview({ preview, mismatch }: { preview: AiPreview; mism
         {preview.provider_id} · {preview.model}
         {preview.local ? ` · ${i18n.t('Local')}` : ''}
       </p>
+      {isLocalAgent(preview.provider_kind) && (
+        <p className="text-fg-muted mt-2">
+          {i18n.t(
+            'This agent runs locally and may send the previewed context to its cloud model using your CLI account.',
+          )}
+        </p>
+      )}
       {preview.production && (
         <p className="bg-status-warning/10 text-status-warning my-2 rounded p-2">
           {i18n.t('Production cluster: {name}', { name: preview.cluster_name })}

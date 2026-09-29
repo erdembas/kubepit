@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use kubepit_core::ai::keys::KeyMismatch;
 use kubepit_core::ai::{
-    AiProviderConfig, AiProviderKind, AiProviderStatus, AiSettings, AiToolPolicy,
+    AiAgentOptions, AiProviderConfig, AiProviderKind, AiProviderStatus, AiSettings, AiToolPolicy,
 };
 use kubepit_core::events::NullSink;
 use kubepit_core::secrets::{MemorySecretStore, SecretStore};
@@ -18,6 +18,239 @@ use kubepit_core::types::{ClusterEnvironment, ClusterInput};
 use kubepit_core::{Kubepit, Paths};
 
 const KEY: &str = "sk-ant-test-0123456789abcdefghij";
+
+#[test]
+fn native_agent_options_persist_per_provider_and_keep_unknown_native_variants() {
+    let (_dir, app, _, _) = support::setup_with_secrets(
+        "http://127.0.0.1:9",
+        false,
+        Arc::new(MemorySecretStore::default()),
+    );
+    let mut settings = app.settings();
+    settings.ai.providers.push(AiProviderConfig {
+        id: "native-test".into(),
+        kind: AiProviderKind::OpencodeCli,
+        name: "Fixture".into(),
+        base_url: String::new(),
+        model: "fixture/model".into(),
+        context_window: None,
+        max_output_tokens: 4096,
+    });
+    let options = AiAgentOptions {
+        effort: Some("  custom-reasoning-variant  ".into()),
+        service_tier: None,
+        fast_mode: false,
+    };
+    for id in ["native-test", "removed", "anthropic"] {
+        settings.ai.agent_options.insert(id.into(), options.clone());
+    }
+    let saved = app.set_settings(settings).unwrap();
+    assert_eq!(saved.ai.agent_options.len(), 1);
+    assert_eq!(
+        saved.ai.agent_options["native-test"].effort.as_deref(),
+        Some("custom-reasoning-variant")
+    );
+    assert_eq!(
+        AiSettings::from_stored(serde_json::to_value(&saved.ai).unwrap()),
+        saved.ai
+    );
+
+    let mut settings = saved;
+    settings
+        .ai
+        .agent_options
+        .get_mut("native-test")
+        .unwrap()
+        .effort = Some("bad\nvalue".into());
+    assert!(app
+        .set_settings(settings)
+        .unwrap_err()
+        .to_string()
+        .contains("control characters"));
+}
+
+#[tokio::test]
+async fn native_catalog_refuses_disabled_egress_and_unsupported_protocols_before_spawning() {
+    let (_dir, app, _, _) = support::setup_with_secrets(
+        "http://127.0.0.1:9",
+        false,
+        Arc::new(MemorySecretStore::default()),
+    );
+    for kind in [
+        AiProviderKind::CodexCli,
+        AiProviderKind::ClaudeCli,
+        AiProviderKind::OpencodeCli,
+    ] {
+        let error = app
+            .ai_agent_catalog(kind, false)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("remote providers must be allowed"),
+            "{error}"
+        );
+    }
+    app.set_ai_remote_providers(true);
+    for kind in [AiProviderKind::CursorCli, AiProviderKind::Anthropic] {
+        assert!(app
+            .ai_agent_catalog(kind, true)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("cannot disable"));
+    }
+    let mut settings = app.settings();
+    settings.ai.local_only = true;
+    app.set_settings(settings).unwrap();
+    assert!(app
+        .ai_agent_catalog(AiProviderKind::CodexCli, true)
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("local-only"));
+}
+
+#[test]
+fn local_agents_use_native_sign_in_and_keep_remote_egress_opt_in() {
+    use kubepit_core::ai::{AiIntent, AiLocale, AiRequest, AiScope};
+    let secrets = Arc::new(MemorySecretStore::default());
+    let (_dir, app, _, _) =
+        support::setup_with_secrets("http://127.0.0.1:9", false, secrets.clone());
+    for kind in [
+        AiProviderKind::CodexCli,
+        AiProviderKind::ClaudeCli,
+        AiProviderKind::OpencodeCli,
+    ] {
+        let mut settings = app.settings();
+        settings.ai.enabled = true;
+        settings.ai.active_provider = Some(kind.as_str().into());
+        settings.ai.providers = vec![AiProviderConfig {
+            id: kind.as_str().into(),
+            kind,
+            name: String::new(),
+            base_url: String::new(),
+            model: String::new(),
+            context_window: None,
+            max_output_tokens: 4096,
+        }];
+        app.set_settings(settings).unwrap();
+        let stored = app.settings().ai;
+        let provider = stored.active().unwrap();
+        assert_eq!(provider.model, "default");
+        assert_eq!(provider.name, kind.default_name());
+        assert!(provider.base_url.is_empty());
+        let status = provider_status(&app, kind.as_str());
+        assert!(!status.allowed && !status.has_key && !status.local);
+        assert!(status.key_error.is_none());
+        assert!(app
+            .ai_key_set(kind.as_str(), KEY)
+            .unwrap_err()
+            .to_string()
+            .contains("own sign-in"));
+        assert!(secrets.keys().is_empty());
+        let error = app
+            .ai_preview(AiRequest {
+                session_id: None,
+                intent: AiIntent::Chat,
+                message: "fixture only".into(),
+                scope: AiScope {
+                    cluster_id: None,
+                    namespace: None,
+                    object: None,
+                },
+                sections: vec![],
+                excluded: vec![],
+                locale: AiLocale::En,
+            })
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("remote providers must be allowed"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn local_cli_settings_round_trip_and_never_count_as_local_models() {
+    use kubepit_core::ai::settings::provider_allowed;
+    for kind in [
+        AiProviderKind::CodexCli,
+        AiProviderKind::ClaudeCli,
+        AiProviderKind::OpencodeCli,
+        AiProviderKind::CursorCli,
+    ] {
+        let provider = AiProviderConfig {
+            id: kind.as_str().into(),
+            kind,
+            name: kind.default_name().into(),
+            base_url: String::new(),
+            model: "default".into(),
+            context_window: None,
+            max_output_tokens: 4096,
+        };
+        let serialized = serde_json::to_value(&provider).unwrap();
+        assert_eq!(serialized["kind"], kind.as_str());
+        assert_eq!(
+            serde_json::from_value::<AiProviderConfig>(serialized).unwrap(),
+            provider
+        );
+        assert!(provider_allowed(&provider, false, true, false));
+        assert!(!provider_allowed(&provider, false, true, true));
+        assert!(!provider_allowed(&provider, false, false, false));
+        let mut ai = AiSettings {
+            providers: vec![provider],
+            ..Default::default()
+        };
+        assert!(ai.validate().is_ok());
+        ai.providers[0].base_url = "https://example.test".into();
+        assert!(ai.validate().is_err());
+    }
+}
+
+#[test]
+fn unsupported_local_agents_are_refused_even_in_hand_edited_settings() {
+    use kubepit_core::ai::{AiIntent, AiLocale, AiRequest, AiScope};
+    let (_dir, app, _, _) = support::setup_with_secrets(
+        "http://127.0.0.1:9",
+        false,
+        Arc::new(MemorySecretStore::default()),
+    );
+    let mut settings = app.settings();
+    settings.ai.enabled = true;
+    settings.ai.active_provider = Some("cursor-cli".into());
+    settings.ai.providers = vec![AiProviderConfig {
+        id: "cursor-cli".into(),
+        kind: AiProviderKind::CursorCli,
+        name: "Cursor".into(),
+        base_url: String::new(),
+        model: "default".into(),
+        context_window: None,
+        max_output_tokens: 4096,
+    }];
+    app.set_settings(settings).unwrap();
+    // Preview is synchronous and never starts a transport or connects anywhere.
+    app.set_ai_remote_providers(true);
+    assert!(!provider_status(&app, "cursor-cli").allowed);
+    let error = app
+        .ai_preview(AiRequest {
+            session_id: None,
+            intent: AiIntent::Chat,
+            message: "fixture only".into(),
+            scope: AiScope {
+                cluster_id: None,
+                namespace: None,
+                object: None,
+            },
+            sections: vec![],
+            excluded: vec![],
+            locale: AiLocale::En,
+        })
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("cannot disable its host tools"), "{error}");
+}
 
 /// [`support::home_contains`] with a positive control: the data folder
 /// exists and a string known to be in `settings.json` is found there, so

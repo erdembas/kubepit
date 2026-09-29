@@ -54,6 +54,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // Assistant
             ipc::ai_status,
+            ipc::ai_local_agents,
+            ipc::ai_agent_catalog,
             ipc::ai_key_set,
             ipc::ai_key_delete,
             ipc::ai_models,

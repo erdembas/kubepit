@@ -1,5 +1,10 @@
 # Cloud import and local clusters: design
 
+> **Historical design:** The [2026-09-29 commercial strategy](2026-09-29-open-core-commercial-strategy.md)
+> separates paid private cloud-provider discovery/import from free local-cluster
+> lifecycle. The CLI behavior and credential protections below remain useful inputs;
+> the new commercial desktop/cloud specifications own implementation placement and access.
+
 Status: draft for review · Date: 2026-09-28 · Plan: `docs/superpowers/plans/2026-09-28-cloud-import-and-local-clusters.md`
 
 ## Problem

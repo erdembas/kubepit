@@ -1,6 +1,7 @@
 import { createLayoutOps } from './splitLayout';
 import {
   ACTIVITY_TAB_KEY,
+  AI_GUIDE_TAB_KEY,
   DASHBOARD_TAB,
   DASHBOARD_TAB_KEY,
   SEARCH_TAB_KEY,
@@ -23,6 +24,7 @@ export function tabFromKey(key: string): MainTab | null {
   if (key === DASHBOARD_TAB_KEY) return DASHBOARD_TAB;
   if (key.startsWith('cluster:')) return { kind: 'cluster', refId: key.slice('cluster:'.length) };
   if (key === 'settings:settings') return { kind: 'settings' };
+  if (key === AI_GUIDE_TAB_KEY) return { kind: 'ai-guide' };
   if (key === 'port-forwards:port-forwards') return { kind: 'port-forwards' };
   if (key === SEARCH_TAB_KEY) return { kind: 'search' };
   if (key === ACTIVITY_TAB_KEY) return { kind: 'activity' };

@@ -1,5 +1,6 @@
 import * as i18n from '@/i18n/core';
 import {
+  BookOpen,
   History,
   LayoutDashboard,
   Network,
@@ -32,6 +33,12 @@ export function resolveTabMeta(
       return {
         label: i18n.t('Settings'),
         icon: <SettingsIcon className="h-3 w-3" />,
+        closable: true,
+      };
+    case 'ai-guide':
+      return {
+        label: i18n.t('AI capabilities'),
+        icon: <BookOpen className="h-3 w-3" />,
         closable: true,
       };
     case 'port-forwards':

@@ -14,6 +14,23 @@ pub async fn ai_status(state: State<'_, AppState>) -> IpcResult<AiStatus> {
     blocking(move || Ok(core.ai_status())).await
 }
 #[tauri::command]
+pub async fn ai_local_agents(state: State<'_, AppState>) -> IpcResult<Vec<AiLocalAgent>> {
+    let core = state.core.clone();
+    blocking(move || Ok(core.ai_local_agents())).await
+}
+#[tauri::command]
+pub async fn ai_agent_catalog(
+    kind: AiProviderKind,
+    refresh: bool,
+    state: State<'_, AppState>,
+) -> IpcResult<AiAgentCatalog> {
+    state
+        .core
+        .ai_agent_catalog(kind, refresh)
+        .await
+        .map_err(ipc_err)
+}
+#[tauri::command]
 pub async fn ai_key_set(
     provider_id: String,
     key: String,

@@ -77,10 +77,10 @@ export function WorkbenchHeader({
       </div>
       {/* Stays empty once split: every pane then keeps its own tab strip.
           Shrinks first when crowded, since the tabs scroll, but keeps room
-          for one tab. */}
+          for one tab, or three compact pins plus a scrollable tab. */}
       <div
         ref={tabSlotRef}
-        className="flex min-w-0 flex-auto shrink-[16] self-stretch has-[*]:min-w-24"
+        className="flex min-w-0 flex-auto shrink-[16] self-stretch has-[*]:min-w-24 has-[[data-view-tab-pinned]]:min-w-60"
       />
       <NamespacePicker clusterId={cluster.id} isActive={isActive} />
       {showKindJump && <KindJump clusterId={cluster.id} apiResources={apiResources} />}

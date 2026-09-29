@@ -1,5 +1,7 @@
 import { assistantErrorMessage } from '@/lib/ai/errorMessage';
+import { Sparkles } from 'lucide-react';
 import * as i18n from '@/i18n';
+import { cn } from '@/lib/cn';
 import { Markdown } from '@/components/workbench/common/Markdown';
 import { Button } from '@/components/ui/Button';
 import { useAssistantStore, type AssistantSession } from '@/store/useAssistantStore';
@@ -23,16 +25,34 @@ export function AssistantMessage({
       .getState()
       .ask({ intent, message: text, sections: [], scope: session.scope });
   return (
-    <article className="border-border/40 border-b px-3 py-3 last:border-0">
-      <p className="text-fg-dim mb-1 text-[10px] font-semibold tracking-wider uppercase">
+    <article
+      className={cn(
+        'min-w-0',
+        message.role === 'user'
+          ? 'bg-fg/5 ml-auto w-fit max-w-[90%] rounded-2xl rounded-tr-md px-3.5 py-3'
+          : 'w-full',
+      )}
+    >
+      <p
+        className={cn(
+          'text-fg-dim mb-2 flex items-center gap-2 text-[11px] font-medium tracking-wider uppercase',
+          message.role === 'user' && 'sr-only',
+        )}
+      >
+        {message.role === 'assistant' && (
+          <Sparkles className="text-accent h-3.5 w-3.5" aria-hidden="true" />
+        )}
         {message.role === 'user' ? i18n.t('You') : i18n.t('Assistant')}
       </p>
       {message.role === 'user' ? (
-        <p className="text-fg text-[12px] break-words whitespace-pre-wrap">{message.text}</p>
+        <p className="text-fg text-[13px] leading-relaxed [overflow-wrap:anywhere] break-words whitespace-pre-wrap">
+          {message.text}
+        </p>
       ) : (
         <Markdown
           source={message.text}
           variant="chat"
+          className="text-[13px] leading-[1.75] [overflow-wrap:anywhere] [&>p:first-child]:mt-0 [&>p:last-child]:mb-0"
           renderCode={(lang, text) => (
             <SuggestionActions
               lang={lang}
@@ -50,7 +70,7 @@ export function AssistantMessage({
           {message.attachments.map((s, index) => (
             <span
               key={index}
-              className="bg-fg/5 text-fg-dim rounded px-1.5 py-0.5 text-[10px]"
+              className="bg-fg/5 text-fg-muted max-w-full truncate rounded-md px-1.5 py-0.5 text-[11px]"
               title={s.label}
             >
               {sectionKindLabel(s.kind)}
@@ -66,14 +86,15 @@ export function AssistantMessage({
         />
       ))}
       {message.status === 'streaming' && !message.stop && (
-        <p role="status" className="text-fg-dim mt-2 text-[11px]">
+        <p role="status" className="text-fg-dim mt-3 flex items-center gap-2 text-[11px]">
+          <span className="bg-accent h-1.5 w-1.5 rounded-full motion-safe:animate-pulse" />
           {message.thinking ? i18n.t('Thinking…') : i18n.t('Responding…')}
         </p>
       )}
       {message.error && (
         <p
           role="alert"
-          className="text-status-error mt-2 text-[12px] break-words whitespace-pre-wrap"
+          className="border-status-error/20 bg-status-error/5 text-status-error mt-3 rounded-lg border px-3 py-2 text-[12px] leading-relaxed break-words whitespace-pre-wrap"
         >
           {assistantErrorMessage(message.error)}
         </p>
@@ -82,7 +103,8 @@ export function AssistantMessage({
       {message.role === 'assistant' && message.stop && message.retryable && (
         <Button
           size="xs"
-          className="mt-2"
+          variant="ghost"
+          className="hover:bg-fg/5 mt-3"
           disabled={disabled}
           onClick={() => void useAssistantStore.getState().retry(message.id)}
         >
@@ -90,11 +112,23 @@ export function AssistantMessage({
         </Button>
       )}
       {message.role === 'assistant' && message.intent === 'explain' && message.stop === 'end' && (
-        <div className="mt-2 flex flex-wrap gap-1">
-          <Button size="xs" disabled={disabled} onClick={() => ask('fix', i18n.t('Suggest a fix'))}>
+        <div className="mt-3 flex flex-wrap gap-1">
+          <Button
+            size="xs"
+            variant="ghost"
+            className="bg-fg/[0.03] hover:bg-fg/5"
+            disabled={disabled}
+            onClick={() => ask('fix', i18n.t('Suggest a fix'))}
+          >
             {i18n.t('Suggest a fix')}
           </Button>
-          <Button size="xs" disabled={disabled} onClick={() => ask('chat', i18n.t('Explain more'))}>
+          <Button
+            size="xs"
+            variant="ghost"
+            className="bg-fg/[0.03] hover:bg-fg/5"
+            disabled={disabled}
+            onClick={() => ask('chat', i18n.t('Explain more'))}
+          >
             {i18n.t('Explain more')}
           </Button>
         </div>

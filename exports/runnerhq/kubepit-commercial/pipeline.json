@@ -1,0 +1,2296 @@
+{
+  "version": 2,
+  "generatedAt": "2026-09-30T00:00:00+03:00",
+  "name": "Kubepit · Community + Commercial · Otomatik Uygulama",
+  "description": "54 uygulama görevi + 7 lisans/depo iş akışı; 20 sıralı bölüm; 122 adım, test, bağımsız inceleme, en çok 3 düzeltme turu; insan onayı adımı yok. Sonuç yerel release candidate; otomatik yayın/tahsilat yok.",
+  "package": {
+    "selfContained": true,
+    "install": [],
+    "contents": [
+      "README.md",
+      "EXECUTION.md",
+      "phase-map.json",
+      "reference",
+      "phases",
+      "prompts",
+      "scripts",
+      "PHASES.md"
+    ],
+    "runtimeDirectory": "."
+  },
+  "semantics": [
+    "Strict PASS only; CONDITIONAL and FAIL require correction. Four reviews and at most three fixes per phase.",
+    "All tasks are sequential across both repositories. Captured shell gate verifies before readonly snapshot review.",
+    "No human steps. Scoped local checkpoint commits and vendor-pin refreshes are automatic. No push/deploy/publication/live provider actions.",
+    "External legal/merchant/signing/sandbox/platform gates stay pending without actual evidence. Final acceptance is local handoff only."
+  ],
+  "settings": {
+    "pathsRelativeTo": "pipelineFile",
+    "agentWorkingDirectory": "/Users/erdembas/Projects/github.com/erdembas",
+    "shellWorkingDirectory": ".",
+    "agentMode": "agent",
+    "agentPermissions": [
+      "read",
+      "write",
+      "terminal"
+    ],
+    "agentTimeoutMinutes": 240,
+    "shellTimeoutMinutes": 180,
+    "maxConcurrentUnlockedSteps": 1,
+    "locks": {
+      "kubepit-commercial-write": {
+        "maxConcurrent": 1
+      }
+    },
+    "review": {
+      "maxReviewsPerPlan": 4,
+      "maxFixesPerPlan": 3,
+      "acceptConditionalFromReview": 0,
+      "strictPlans": [
+        "p01",
+        "p02",
+        "p03",
+        "p04",
+        "p05",
+        "p06",
+        "p07",
+        "p08",
+        "p09",
+        "p10",
+        "p11",
+        "p12",
+        "p13",
+        "p14",
+        "p15",
+        "p16",
+        "p17",
+        "p18",
+        "p19",
+        "p20"
+      ]
+    },
+    "failurePolicy": {
+      "onMissingOrAmbiguousResultLine": "treatAsFailed",
+      "onHalt": "stopStartingNewSteps",
+      "runningStepsOnHalt": "letFinish",
+      "notifyHuman": true,
+      "resume": "rerunHaltedStep"
+    },
+    "repositories": [
+      {
+        "name": "kubepit",
+        "path": "/Users/erdembas/Projects/github.com/erdembas/kubepit",
+        "branch": "main"
+      },
+      {
+        "name": "kubepit-commercial",
+        "path": "/Users/erdembas/Projects/github.com/erdembas/kubepit-commercial",
+        "branch": "main"
+      }
+    ],
+    "resultLine": {
+      "position": "last",
+      "trimTrailingWhitespace": true,
+      "agentSteps": "^PIPELINE_RESULT: (SUCCESS|BLOCKED|FAILED)$",
+      "reviewSteps": "^REVIEW_VERDICT: (PASS|CONDITIONAL|FAIL)$"
+    }
+  },
+  "steps": [
+    {
+      "id": "p01-implement",
+      "type": "agent",
+      "title": "P01 Uygula · Başlangıç, ücretsiz ürün ve hak envanteri",
+      "dependsOn": [],
+      "promptFile": "prompts/p01-implement.md",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p01-verify",
+      "type": "shell",
+      "title": "P01 Test ve build",
+      "dependsOn": [
+        "p01-implement"
+      ],
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p01",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p01-review",
+      "type": "agent",
+      "title": "P01 Bağımsız inceleme",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "mode": "plan",
+      "dependsOn": [
+        "p01-verify"
+      ],
+      "promptFile": "prompts/p01-review.md",
+      "capture": {
+        "verdict": {
+          "lastLineRegex": "^REVIEW_VERDICT: (PASS|CONDITIONAL|FAIL)$",
+          "group": 1
+        }
+      },
+      "maxRuns": 4
+    },
+    {
+      "id": "p01-fix",
+      "type": "agent",
+      "title": "P01 İnceleme düzeltmesi",
+      "dependsOn": [
+        "p01-review"
+      ],
+      "promptFile": "prompts/p01-fix.md",
+      "runIf": "p01-review.verdict != 'PASS' && p01-review.runCount < 4",
+      "maxRuns": 3,
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p01-fix-verify",
+      "type": "shell",
+      "title": "P01 Düzeltme doğrulaması",
+      "dependsOn": [
+        "p01-fix"
+      ],
+      "maxRuns": 3,
+      "onSuccess": {
+        "rerun": "p01-review"
+      },
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p01",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p01-accepted",
+      "type": "barrier",
+      "title": "P01 PASS kabulü",
+      "dependsOn": [
+        "p01-review"
+      ],
+      "completeIf": "p01-review.verdict == 'PASS'",
+      "haltIf": "p01-review.verdict != 'PASS' && p01-review.runCount >= 4"
+    },
+    {
+      "id": "p02-implement",
+      "type": "agent",
+      "title": "P02 Uygula · Özel workspace, ortak sözleşmeler ve lisans taslakları",
+      "dependsOn": [
+        "p01-accepted"
+      ],
+      "promptFile": "prompts/p02-implement.md",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p02-verify",
+      "type": "shell",
+      "title": "P02 Test ve build",
+      "dependsOn": [
+        "p02-implement"
+      ],
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p02",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p02-review",
+      "type": "agent",
+      "title": "P02 Bağımsız inceleme",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "mode": "plan",
+      "dependsOn": [
+        "p02-verify"
+      ],
+      "promptFile": "prompts/p02-review.md",
+      "capture": {
+        "verdict": {
+          "lastLineRegex": "^REVIEW_VERDICT: (PASS|CONDITIONAL|FAIL)$",
+          "group": 1
+        }
+      },
+      "maxRuns": 4
+    },
+    {
+      "id": "p02-fix",
+      "type": "agent",
+      "title": "P02 İnceleme düzeltmesi",
+      "dependsOn": [
+        "p02-review"
+      ],
+      "promptFile": "prompts/p02-fix.md",
+      "runIf": "p02-review.verdict != 'PASS' && p02-review.runCount < 4",
+      "maxRuns": 3,
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p02-fix-verify",
+      "type": "shell",
+      "title": "P02 Düzeltme doğrulaması",
+      "dependsOn": [
+        "p02-fix"
+      ],
+      "maxRuns": 3,
+      "onSuccess": {
+        "rerun": "p02-review"
+      },
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p02",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p02-accepted",
+      "type": "barrier",
+      "title": "P02 PASS kabulü",
+      "dependsOn": [
+        "p02-review"
+      ],
+      "completeIf": "p02-review.verdict == 'PASS'",
+      "haltIf": "p02-review.verdict != 'PASS' && p02-review.runCount >= 4"
+    },
+    {
+      "id": "p03-implement",
+      "type": "agent",
+      "title": "P03 Uygula · Public edition SDK, React bootstrap ve Tauri host",
+      "dependsOn": [
+        "p02-accepted"
+      ],
+      "promptFile": "prompts/p03-implement.md",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p03-verify",
+      "type": "shell",
+      "title": "P03 Test ve build",
+      "dependsOn": [
+        "p03-implement"
+      ],
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p03",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p03-review",
+      "type": "agent",
+      "title": "P03 Bağımsız inceleme",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "mode": "plan",
+      "dependsOn": [
+        "p03-verify"
+      ],
+      "promptFile": "prompts/p03-review.md",
+      "capture": {
+        "verdict": {
+          "lastLineRegex": "^REVIEW_VERDICT: (PASS|CONDITIONAL|FAIL)$",
+          "group": 1
+        }
+      },
+      "maxRuns": 4
+    },
+    {
+      "id": "p03-fix",
+      "type": "agent",
+      "title": "P03 İnceleme düzeltmesi",
+      "dependsOn": [
+        "p03-review"
+      ],
+      "promptFile": "prompts/p03-fix.md",
+      "runIf": "p03-review.verdict != 'PASS' && p03-review.runCount < 4",
+      "maxRuns": 3,
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p03-fix-verify",
+      "type": "shell",
+      "title": "P03 Düzeltme doğrulaması",
+      "dependsOn": [
+        "p03-fix"
+      ],
+      "maxRuns": 3,
+      "onSuccess": {
+        "rerun": "p03-review"
+      },
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p03",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p03-accepted",
+      "type": "barrier",
+      "title": "P03 PASS kabulü",
+      "dependsOn": [
+        "p03-review"
+      ],
+      "completeIf": "p03-review.verdict == 'PASS'",
+      "haltIf": "p03-review.verdict != 'PASS' && p03-review.runCount >= 4"
+    },
+    {
+      "id": "p03-checkpoint",
+      "type": "agent",
+      "title": "P03 Otomatik yerel commit ve SHA kaydı",
+      "dependsOn": [
+        "p03-accepted"
+      ],
+      "promptFile": "prompts/p03-checkpoint.md",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p04-implement",
+      "type": "agent",
+      "title": "P04 Uygula · İki edition için erken build denemesi",
+      "dependsOn": [
+        "p03-checkpoint"
+      ],
+      "promptFile": "prompts/p04-implement.md",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p04-verify",
+      "type": "shell",
+      "title": "P04 Test ve build",
+      "dependsOn": [
+        "p04-implement"
+      ],
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p04",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p04-review",
+      "type": "agent",
+      "title": "P04 Bağımsız inceleme",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "mode": "plan",
+      "dependsOn": [
+        "p04-verify"
+      ],
+      "promptFile": "prompts/p04-review.md",
+      "capture": {
+        "verdict": {
+          "lastLineRegex": "^REVIEW_VERDICT: (PASS|CONDITIONAL|FAIL)$",
+          "group": 1
+        }
+      },
+      "maxRuns": 4
+    },
+    {
+      "id": "p04-fix",
+      "type": "agent",
+      "title": "P04 İnceleme düzeltmesi",
+      "dependsOn": [
+        "p04-review"
+      ],
+      "promptFile": "prompts/p04-fix.md",
+      "runIf": "p04-review.verdict != 'PASS' && p04-review.runCount < 4",
+      "maxRuns": 3,
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p04-fix-verify",
+      "type": "shell",
+      "title": "P04 Düzeltme doğrulaması",
+      "dependsOn": [
+        "p04-fix"
+      ],
+      "maxRuns": 3,
+      "onSuccess": {
+        "rerun": "p04-review"
+      },
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p04",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p04-accepted",
+      "type": "barrier",
+      "title": "P04 PASS kabulü",
+      "dependsOn": [
+        "p04-review"
+      ],
+      "completeIf": "p04-review.verdict == 'PASS'",
+      "haltIf": "p04-review.verdict != 'PASS' && p04-review.runCount >= 4"
+    },
+    {
+      "id": "p05-implement",
+      "type": "agent",
+      "title": "P05 Uygula · Public import, katkı katmanı ve terminal arayüzleri",
+      "dependsOn": [
+        "p04-accepted"
+      ],
+      "promptFile": "prompts/p05-implement.md",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p05-verify",
+      "type": "shell",
+      "title": "P05 Test ve build",
+      "dependsOn": [
+        "p05-implement"
+      ],
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p05",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p05-review",
+      "type": "agent",
+      "title": "P05 Bağımsız inceleme",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "mode": "plan",
+      "dependsOn": [
+        "p05-verify"
+      ],
+      "promptFile": "prompts/p05-review.md",
+      "capture": {
+        "verdict": {
+          "lastLineRegex": "^REVIEW_VERDICT: (PASS|CONDITIONAL|FAIL)$",
+          "group": 1
+        }
+      },
+      "maxRuns": 4
+    },
+    {
+      "id": "p05-fix",
+      "type": "agent",
+      "title": "P05 İnceleme düzeltmesi",
+      "dependsOn": [
+        "p05-review"
+      ],
+      "promptFile": "prompts/p05-fix.md",
+      "runIf": "p05-review.verdict != 'PASS' && p05-review.runCount < 4",
+      "maxRuns": 3,
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p05-fix-verify",
+      "type": "shell",
+      "title": "P05 Düzeltme doğrulaması",
+      "dependsOn": [
+        "p05-fix"
+      ],
+      "maxRuns": 3,
+      "onSuccess": {
+        "rerun": "p05-review"
+      },
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p05",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p05-accepted",
+      "type": "barrier",
+      "title": "P05 PASS kabulü",
+      "dependsOn": [
+        "p05-review"
+      ],
+      "completeIf": "p05-review.verdict == 'PASS'",
+      "haltIf": "p05-review.verdict != 'PASS' && p05-review.runCount >= 4"
+    },
+    {
+      "id": "p05-checkpoint",
+      "type": "agent",
+      "title": "P05 Otomatik yerel commit ve SHA kaydı",
+      "dependsOn": [
+        "p05-accepted"
+      ],
+      "promptFile": "prompts/p05-checkpoint.md",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p06-implement",
+      "type": "agent",
+      "title": "P06 Uygula · Özel IPC, demo ve Rust/TS sözleşme uyumu",
+      "dependsOn": [
+        "p05-checkpoint"
+      ],
+      "promptFile": "prompts/p06-implement.md",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p06-verify",
+      "type": "shell",
+      "title": "P06 Test ve build",
+      "dependsOn": [
+        "p06-implement"
+      ],
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p06",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p06-review",
+      "type": "agent",
+      "title": "P06 Bağımsız inceleme",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "mode": "plan",
+      "dependsOn": [
+        "p06-verify"
+      ],
+      "promptFile": "prompts/p06-review.md",
+      "capture": {
+        "verdict": {
+          "lastLineRegex": "^REVIEW_VERDICT: (PASS|CONDITIONAL|FAIL)$",
+          "group": 1
+        }
+      },
+      "maxRuns": 4
+    },
+    {
+      "id": "p06-fix",
+      "type": "agent",
+      "title": "P06 İnceleme düzeltmesi",
+      "dependsOn": [
+        "p06-review"
+      ],
+      "promptFile": "prompts/p06-fix.md",
+      "runIf": "p06-review.verdict != 'PASS' && p06-review.runCount < 4",
+      "maxRuns": 3,
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p06-fix-verify",
+      "type": "shell",
+      "title": "P06 Düzeltme doğrulaması",
+      "dependsOn": [
+        "p06-fix"
+      ],
+      "maxRuns": 3,
+      "onSuccess": {
+        "rerun": "p06-review"
+      },
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p06",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p06-accepted",
+      "type": "barrier",
+      "title": "P06 PASS kabulü",
+      "dependsOn": [
+        "p06-review"
+      ],
+      "completeIf": "p06-review.verdict == 'PASS'",
+      "haltIf": "p06-review.verdict != 'PASS' && p06-review.runCount >= 4"
+    },
+    {
+      "id": "p07-implement",
+      "type": "agent",
+      "title": "P07 Uygula · PostgreSQL tenancy, RLS, işler ve idempotency",
+      "dependsOn": [
+        "p06-accepted"
+      ],
+      "promptFile": "prompts/p07-implement.md",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p07-verify",
+      "type": "shell",
+      "title": "P07 Test ve build",
+      "dependsOn": [
+        "p07-implement"
+      ],
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p07",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p07-review",
+      "type": "agent",
+      "title": "P07 Bağımsız inceleme",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "mode": "plan",
+      "dependsOn": [
+        "p07-verify"
+      ],
+      "promptFile": "prompts/p07-review.md",
+      "capture": {
+        "verdict": {
+          "lastLineRegex": "^REVIEW_VERDICT: (PASS|CONDITIONAL|FAIL)$",
+          "group": 1
+        }
+      },
+      "maxRuns": 4
+    },
+    {
+      "id": "p07-fix",
+      "type": "agent",
+      "title": "P07 İnceleme düzeltmesi",
+      "dependsOn": [
+        "p07-review"
+      ],
+      "promptFile": "prompts/p07-fix.md",
+      "runIf": "p07-review.verdict != 'PASS' && p07-review.runCount < 4",
+      "maxRuns": 3,
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p07-fix-verify",
+      "type": "shell",
+      "title": "P07 Düzeltme doğrulaması",
+      "dependsOn": [
+        "p07-fix"
+      ],
+      "maxRuns": 3,
+      "onSuccess": {
+        "rerun": "p07-review"
+      },
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p07",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p07-accepted",
+      "type": "barrier",
+      "title": "P07 PASS kabulü",
+      "dependsOn": [
+        "p07-review"
+      ],
+      "completeIf": "p07-review.verdict == 'PASS'",
+      "haltIf": "p07-review.verdict != 'PASS' && p07-review.runCount >= 4"
+    },
+    {
+      "id": "p08-implement",
+      "type": "agent",
+      "title": "P08 Uygula · Kimlik, organizasyon, koltuk ve davetler",
+      "dependsOn": [
+        "p07-accepted"
+      ],
+      "promptFile": "prompts/p08-implement.md",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p08-verify",
+      "type": "shell",
+      "title": "P08 Test ve build",
+      "dependsOn": [
+        "p08-implement"
+      ],
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p08",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p08-review",
+      "type": "agent",
+      "title": "P08 Bağımsız inceleme",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "mode": "plan",
+      "dependsOn": [
+        "p08-verify"
+      ],
+      "promptFile": "prompts/p08-review.md",
+      "capture": {
+        "verdict": {
+          "lastLineRegex": "^REVIEW_VERDICT: (PASS|CONDITIONAL|FAIL)$",
+          "group": 1
+        }
+      },
+      "maxRuns": 4
+    },
+    {
+      "id": "p08-fix",
+      "type": "agent",
+      "title": "P08 İnceleme düzeltmesi",
+      "dependsOn": [
+        "p08-review"
+      ],
+      "promptFile": "prompts/p08-fix.md",
+      "runIf": "p08-review.verdict != 'PASS' && p08-review.runCount < 4",
+      "maxRuns": 3,
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p08-fix-verify",
+      "type": "shell",
+      "title": "P08 Düzeltme doğrulaması",
+      "dependsOn": [
+        "p08-fix"
+      ],
+      "maxRuns": 3,
+      "onSuccess": {
+        "rerun": "p08-review"
+      },
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p08",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p08-accepted",
+      "type": "barrier",
+      "title": "P08 PASS kabulü",
+      "dependsOn": [
+        "p08-review"
+      ],
+      "completeIf": "p08-review.verdict == 'PASS'",
+      "haltIf": "p08-review.verdict != 'PASS' && p08-review.runCount >= 4"
+    },
+    {
+      "id": "p09-implement",
+      "type": "agent",
+      "title": "P09 Uygula · Masaüstü oturumu ve imzalı lease doğrulama",
+      "dependsOn": [
+        "p08-accepted"
+      ],
+      "promptFile": "prompts/p09-implement.md",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p09-verify",
+      "type": "shell",
+      "title": "P09 Test ve build",
+      "dependsOn": [
+        "p09-implement"
+      ],
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p09",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p09-review",
+      "type": "agent",
+      "title": "P09 Bağımsız inceleme",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "mode": "plan",
+      "dependsOn": [
+        "p09-verify"
+      ],
+      "promptFile": "prompts/p09-review.md",
+      "capture": {
+        "verdict": {
+          "lastLineRegex": "^REVIEW_VERDICT: (PASS|CONDITIONAL|FAIL)$",
+          "group": 1
+        }
+      },
+      "maxRuns": 4
+    },
+    {
+      "id": "p09-fix",
+      "type": "agent",
+      "title": "P09 İnceleme düzeltmesi",
+      "dependsOn": [
+        "p09-review"
+      ],
+      "promptFile": "prompts/p09-fix.md",
+      "runIf": "p09-review.verdict != 'PASS' && p09-review.runCount < 4",
+      "maxRuns": 3,
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p09-fix-verify",
+      "type": "shell",
+      "title": "P09 Düzeltme doğrulaması",
+      "dependsOn": [
+        "p09-fix"
+      ],
+      "maxRuns": 3,
+      "onSuccess": {
+        "rerun": "p09-review"
+      },
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p09",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p09-accepted",
+      "type": "barrier",
+      "title": "P09 PASS kabulü",
+      "dependsOn": [
+        "p09-review"
+      ],
+      "completeIf": "p09-review.verdict == 'PASS'",
+      "haltIf": "p09-review.verdict != 'PASS' && p09-review.runCount >= 4"
+    },
+    {
+      "id": "p10-implement",
+      "type": "agent",
+      "title": "P10 Uygula · Paddle, abonelik, webhook ve entitlement servisi",
+      "dependsOn": [
+        "p09-accepted"
+      ],
+      "promptFile": "prompts/p10-implement.md",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p10-verify",
+      "type": "shell",
+      "title": "P10 Test ve build",
+      "dependsOn": [
+        "p10-implement"
+      ],
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p10",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p10-review",
+      "type": "agent",
+      "title": "P10 Bağımsız inceleme",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "mode": "plan",
+      "dependsOn": [
+        "p10-verify"
+      ],
+      "promptFile": "prompts/p10-review.md",
+      "capture": {
+        "verdict": {
+          "lastLineRegex": "^REVIEW_VERDICT: (PASS|CONDITIONAL|FAIL)$",
+          "group": 1
+        }
+      },
+      "maxRuns": 4
+    },
+    {
+      "id": "p10-fix",
+      "type": "agent",
+      "title": "P10 İnceleme düzeltmesi",
+      "dependsOn": [
+        "p10-review"
+      ],
+      "promptFile": "prompts/p10-fix.md",
+      "runIf": "p10-review.verdict != 'PASS' && p10-review.runCount < 4",
+      "maxRuns": 3,
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p10-fix-verify",
+      "type": "shell",
+      "title": "P10 Düzeltme doğrulaması",
+      "dependsOn": [
+        "p10-fix"
+      ],
+      "maxRuns": 3,
+      "onSuccess": {
+        "rerun": "p10-review"
+      },
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p10",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p10-accepted",
+      "type": "barrier",
+      "title": "P10 PASS kabulü",
+      "dependsOn": [
+        "p10-review"
+      ],
+      "completeIf": "p10-review.verdict == 'PASS'",
+      "haltIf": "p10-review.verdict != 'PASS' && p10-review.runCount >= 4"
+    },
+    {
+      "id": "p11-implement",
+      "type": "agent",
+      "title": "P11 Uygula · Kimlik ve lease uçtan uca uyumluluğu",
+      "dependsOn": [
+        "p10-accepted"
+      ],
+      "promptFile": "prompts/p11-implement.md",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p11-verify",
+      "type": "shell",
+      "title": "P11 Test ve build",
+      "dependsOn": [
+        "p11-implement"
+      ],
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p11",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p11-review",
+      "type": "agent",
+      "title": "P11 Bağımsız inceleme",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "mode": "plan",
+      "dependsOn": [
+        "p11-verify"
+      ],
+      "promptFile": "prompts/p11-review.md",
+      "capture": {
+        "verdict": {
+          "lastLineRegex": "^REVIEW_VERDICT: (PASS|CONDITIONAL|FAIL)$",
+          "group": 1
+        }
+      },
+      "maxRuns": 4
+    },
+    {
+      "id": "p11-fix",
+      "type": "agent",
+      "title": "P11 İnceleme düzeltmesi",
+      "dependsOn": [
+        "p11-review"
+      ],
+      "promptFile": "prompts/p11-fix.md",
+      "runIf": "p11-review.verdict != 'PASS' && p11-review.runCount < 4",
+      "maxRuns": 3,
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p11-fix-verify",
+      "type": "shell",
+      "title": "P11 Düzeltme doğrulaması",
+      "dependsOn": [
+        "p11-fix"
+      ],
+      "maxRuns": 3,
+      "onSuccess": {
+        "rerun": "p11-review"
+      },
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p11",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p11-accepted",
+      "type": "barrier",
+      "title": "P11 PASS kabulü",
+      "dependsOn": [
+        "p11-review"
+      ],
+      "completeIf": "p11-review.verdict == 'PASS'",
+      "haltIf": "p11-review.verdict != 'PASS' && p11-review.runCount >= 4"
+    },
+    {
+      "id": "p12-implement",
+      "type": "agent",
+      "title": "P12 Uygula · Güvenli CLI çalıştırma, EKS/GKE/AKS adaptörleri",
+      "dependsOn": [
+        "p11-accepted"
+      ],
+      "promptFile": "prompts/p12-implement.md",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p12-verify",
+      "type": "shell",
+      "title": "P12 Test ve build",
+      "dependsOn": [
+        "p12-implement"
+      ],
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p12",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p12-review",
+      "type": "agent",
+      "title": "P12 Bağımsız inceleme",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "mode": "plan",
+      "dependsOn": [
+        "p12-verify"
+      ],
+      "promptFile": "prompts/p12-review.md",
+      "capture": {
+        "verdict": {
+          "lastLineRegex": "^REVIEW_VERDICT: (PASS|CONDITIONAL|FAIL)$",
+          "group": 1
+        }
+      },
+      "maxRuns": 4
+    },
+    {
+      "id": "p12-fix",
+      "type": "agent",
+      "title": "P12 İnceleme düzeltmesi",
+      "dependsOn": [
+        "p12-review"
+      ],
+      "promptFile": "prompts/p12-fix.md",
+      "runIf": "p12-review.verdict != 'PASS' && p12-review.runCount < 4",
+      "maxRuns": 3,
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p12-fix-verify",
+      "type": "shell",
+      "title": "P12 Düzeltme doğrulaması",
+      "dependsOn": [
+        "p12-fix"
+      ],
+      "maxRuns": 3,
+      "onSuccess": {
+        "rerun": "p12-review"
+      },
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p12",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p12-accepted",
+      "type": "barrier",
+      "title": "P12 PASS kabulü",
+      "dependsOn": [
+        "p12-review"
+      ],
+      "completeIf": "p12-review.verdict == 'PASS'",
+      "haltIf": "p12-review.verdict != 'PASS' && p12-review.runCount >= 4"
+    },
+    {
+      "id": "p13-implement",
+      "type": "agent",
+      "title": "P13 Uygula · Bulut keşfi, atomik import ve kullanıcı akışları",
+      "dependsOn": [
+        "p12-accepted"
+      ],
+      "promptFile": "prompts/p13-implement.md",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p13-verify",
+      "type": "shell",
+      "title": "P13 Test ve build",
+      "dependsOn": [
+        "p13-implement"
+      ],
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p13",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p13-review",
+      "type": "agent",
+      "title": "P13 Bağımsız inceleme",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "mode": "plan",
+      "dependsOn": [
+        "p13-verify"
+      ],
+      "promptFile": "prompts/p13-review.md",
+      "capture": {
+        "verdict": {
+          "lastLineRegex": "^REVIEW_VERDICT: (PASS|CONDITIONAL|FAIL)$",
+          "group": 1
+        }
+      },
+      "maxRuns": 4
+    },
+    {
+      "id": "p13-fix",
+      "type": "agent",
+      "title": "P13 İnceleme düzeltmesi",
+      "dependsOn": [
+        "p13-review"
+      ],
+      "promptFile": "prompts/p13-fix.md",
+      "runIf": "p13-review.verdict != 'PASS' && p13-review.runCount < 4",
+      "maxRuns": 3,
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p13-fix-verify",
+      "type": "shell",
+      "title": "P13 Düzeltme doğrulaması",
+      "dependsOn": [
+        "p13-fix"
+      ],
+      "maxRuns": 3,
+      "onSuccess": {
+        "rerun": "p13-review"
+      },
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p13",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p13-accepted",
+      "type": "barrier",
+      "title": "P13 PASS kabulü",
+      "dependsOn": [
+        "p13-review"
+      ],
+      "completeIf": "p13-review.verdict == 'PASS'",
+      "haltIf": "p13-review.verdict != 'PASS' && p13-review.runCount >= 4"
+    },
+    {
+      "id": "p14-implement",
+      "type": "agent",
+      "title": "P14 Uygula · Profil şeması, güvenli önizleme ve yerel katmanlar",
+      "dependsOn": [
+        "p13-accepted"
+      ],
+      "promptFile": "prompts/p14-implement.md",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p14-verify",
+      "type": "shell",
+      "title": "P14 Test ve build",
+      "dependsOn": [
+        "p14-implement"
+      ],
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p14",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p14-review",
+      "type": "agent",
+      "title": "P14 Bağımsız inceleme",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "mode": "plan",
+      "dependsOn": [
+        "p14-verify"
+      ],
+      "promptFile": "prompts/p14-review.md",
+      "capture": {
+        "verdict": {
+          "lastLineRegex": "^REVIEW_VERDICT: (PASS|CONDITIONAL|FAIL)$",
+          "group": 1
+        }
+      },
+      "maxRuns": 4
+    },
+    {
+      "id": "p14-fix",
+      "type": "agent",
+      "title": "P14 İnceleme düzeltmesi",
+      "dependsOn": [
+        "p14-review"
+      ],
+      "promptFile": "prompts/p14-fix.md",
+      "runIf": "p14-review.verdict != 'PASS' && p14-review.runCount < 4",
+      "maxRuns": 3,
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p14-fix-verify",
+      "type": "shell",
+      "title": "P14 Düzeltme doğrulaması",
+      "dependsOn": [
+        "p14-fix"
+      ],
+      "maxRuns": 3,
+      "onSuccess": {
+        "rerun": "p14-review"
+      },
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p14",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p14-accepted",
+      "type": "barrier",
+      "title": "P14 PASS kabulü",
+      "dependsOn": [
+        "p14-review"
+      ],
+      "completeIf": "p14-review.verdict == 'PASS'",
+      "haltIf": "p14-review.verdict != 'PASS' && p14-review.runCount >= 4"
+    },
+    {
+      "id": "p15-implement",
+      "type": "agent",
+      "title": "P15 Uygula · Profil API, revision, erişim ve audit",
+      "dependsOn": [
+        "p14-accepted"
+      ],
+      "promptFile": "prompts/p15-implement.md",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p15-verify",
+      "type": "shell",
+      "title": "P15 Test ve build",
+      "dependsOn": [
+        "p15-implement"
+      ],
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p15",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p15-review",
+      "type": "agent",
+      "title": "P15 Bağımsız inceleme",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "mode": "plan",
+      "dependsOn": [
+        "p15-verify"
+      ],
+      "promptFile": "prompts/p15-review.md",
+      "capture": {
+        "verdict": {
+          "lastLineRegex": "^REVIEW_VERDICT: (PASS|CONDITIONAL|FAIL)$",
+          "group": 1
+        }
+      },
+      "maxRuns": 4
+    },
+    {
+      "id": "p15-fix",
+      "type": "agent",
+      "title": "P15 İnceleme düzeltmesi",
+      "dependsOn": [
+        "p15-review"
+      ],
+      "promptFile": "prompts/p15-fix.md",
+      "runIf": "p15-review.verdict != 'PASS' && p15-review.runCount < 4",
+      "maxRuns": 3,
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p15-fix-verify",
+      "type": "shell",
+      "title": "P15 Düzeltme doğrulaması",
+      "dependsOn": [
+        "p15-fix"
+      ],
+      "maxRuns": 3,
+      "onSuccess": {
+        "rerun": "p15-review"
+      },
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p15",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p15-accepted",
+      "type": "barrier",
+      "title": "P15 PASS kabulü",
+      "dependsOn": [
+        "p15-review"
+      ],
+      "completeIf": "p15-review.verdict == 'PASS'",
+      "haltIf": "p15-review.verdict != 'PASS' && p15-review.runCount >= 4"
+    },
+    {
+      "id": "p16-implement",
+      "type": "agent",
+      "title": "P16 Uygula · Profil sync, iptal/detach, komut güveni ve UI",
+      "dependsOn": [
+        "p15-accepted"
+      ],
+      "promptFile": "prompts/p16-implement.md",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p16-verify",
+      "type": "shell",
+      "title": "P16 Test ve build",
+      "dependsOn": [
+        "p16-implement"
+      ],
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p16",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p16-review",
+      "type": "agent",
+      "title": "P16 Bağımsız inceleme",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "mode": "plan",
+      "dependsOn": [
+        "p16-verify"
+      ],
+      "promptFile": "prompts/p16-review.md",
+      "capture": {
+        "verdict": {
+          "lastLineRegex": "^REVIEW_VERDICT: (PASS|CONDITIONAL|FAIL)$",
+          "group": 1
+        }
+      },
+      "maxRuns": 4
+    },
+    {
+      "id": "p16-fix",
+      "type": "agent",
+      "title": "P16 İnceleme düzeltmesi",
+      "dependsOn": [
+        "p16-review"
+      ],
+      "promptFile": "prompts/p16-fix.md",
+      "runIf": "p16-review.verdict != 'PASS' && p16-review.runCount < 4",
+      "maxRuns": 3,
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p16-fix-verify",
+      "type": "shell",
+      "title": "P16 Düzeltme doğrulaması",
+      "dependsOn": [
+        "p16-fix"
+      ],
+      "maxRuns": 3,
+      "onSuccess": {
+        "rerun": "p16-review"
+      },
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p16",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p16-accepted",
+      "type": "barrier",
+      "title": "P16 PASS kabulü",
+      "dependsOn": [
+        "p16-review"
+      ],
+      "completeIf": "p16-review.verdict == 'PASS'",
+      "haltIf": "p16-review.verdict != 'PASS' && p16-review.runCount >= 4"
+    },
+    {
+      "id": "p17-implement",
+      "type": "agent",
+      "title": "P17 Uygula · Web konsolu, ödeme akışları ve veri yaşam döngüsü",
+      "dependsOn": [
+        "p16-accepted"
+      ],
+      "promptFile": "prompts/p17-implement.md",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p17-verify",
+      "type": "shell",
+      "title": "P17 Test ve build",
+      "dependsOn": [
+        "p17-implement"
+      ],
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p17",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p17-review",
+      "type": "agent",
+      "title": "P17 Bağımsız inceleme",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "mode": "plan",
+      "dependsOn": [
+        "p17-verify"
+      ],
+      "promptFile": "prompts/p17-review.md",
+      "capture": {
+        "verdict": {
+          "lastLineRegex": "^REVIEW_VERDICT: (PASS|CONDITIONAL|FAIL)$",
+          "group": 1
+        }
+      },
+      "maxRuns": 4
+    },
+    {
+      "id": "p17-fix",
+      "type": "agent",
+      "title": "P17 İnceleme düzeltmesi",
+      "dependsOn": [
+        "p17-review"
+      ],
+      "promptFile": "prompts/p17-fix.md",
+      "runIf": "p17-review.verdict != 'PASS' && p17-review.runCount < 4",
+      "maxRuns": 3,
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p17-fix-verify",
+      "type": "shell",
+      "title": "P17 Düzeltme doğrulaması",
+      "dependsOn": [
+        "p17-fix"
+      ],
+      "maxRuns": 3,
+      "onSuccess": {
+        "rerun": "p17-review"
+      },
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p17",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p17-accepted",
+      "type": "barrier",
+      "title": "P17 PASS kabulü",
+      "dependsOn": [
+        "p17-review"
+      ],
+      "completeIf": "p17-review.verdict == 'PASS'",
+      "haltIf": "p17-review.verdict != 'PASS' && p17-review.runCount >= 4"
+    },
+    {
+      "id": "p18-implement",
+      "type": "agent",
+      "title": "P18 Uygula · Dağıtım varlıkları, izole CI ve restore provası",
+      "dependsOn": [
+        "p17-accepted"
+      ],
+      "promptFile": "prompts/p18-implement.md",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p18-verify",
+      "type": "shell",
+      "title": "P18 Test ve build",
+      "dependsOn": [
+        "p18-implement"
+      ],
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p18",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p18-review",
+      "type": "agent",
+      "title": "P18 Bağımsız inceleme",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "mode": "plan",
+      "dependsOn": [
+        "p18-verify"
+      ],
+      "promptFile": "prompts/p18-review.md",
+      "capture": {
+        "verdict": {
+          "lastLineRegex": "^REVIEW_VERDICT: (PASS|CONDITIONAL|FAIL)$",
+          "group": 1
+        }
+      },
+      "maxRuns": 4
+    },
+    {
+      "id": "p18-fix",
+      "type": "agent",
+      "title": "P18 İnceleme düzeltmesi",
+      "dependsOn": [
+        "p18-review"
+      ],
+      "promptFile": "prompts/p18-fix.md",
+      "runIf": "p18-review.verdict != 'PASS' && p18-review.runCount < 4",
+      "maxRuns": 3,
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p18-fix-verify",
+      "type": "shell",
+      "title": "P18 Düzeltme doğrulaması",
+      "dependsOn": [
+        "p18-fix"
+      ],
+      "maxRuns": 3,
+      "onSuccess": {
+        "rerun": "p18-review"
+      },
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p18",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p18-accepted",
+      "type": "barrier",
+      "title": "P18 PASS kabulü",
+      "dependsOn": [
+        "p18-review"
+      ],
+      "completeIf": "p18-review.verdict == 'PASS'",
+      "haltIf": "p18-review.verdict != 'PASS' && p18-review.runCount >= 4"
+    },
+    {
+      "id": "p19-implement",
+      "type": "agent",
+      "title": "P19 Uygula · Bağımsız entegrasyon, yük ve iki edition kabulü",
+      "dependsOn": [
+        "p18-accepted"
+      ],
+      "promptFile": "prompts/p19-implement.md",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p19-verify",
+      "type": "shell",
+      "title": "P19 Test ve build",
+      "dependsOn": [
+        "p19-implement"
+      ],
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p19",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p19-review",
+      "type": "agent",
+      "title": "P19 Bağımsız inceleme",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "mode": "plan",
+      "dependsOn": [
+        "p19-verify"
+      ],
+      "promptFile": "prompts/p19-review.md",
+      "capture": {
+        "verdict": {
+          "lastLineRegex": "^REVIEW_VERDICT: (PASS|CONDITIONAL|FAIL)$",
+          "group": 1
+        }
+      },
+      "maxRuns": 4
+    },
+    {
+      "id": "p19-fix",
+      "type": "agent",
+      "title": "P19 İnceleme düzeltmesi",
+      "dependsOn": [
+        "p19-review"
+      ],
+      "promptFile": "prompts/p19-fix.md",
+      "runIf": "p19-review.verdict != 'PASS' && p19-review.runCount < 4",
+      "maxRuns": 3,
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p19-fix-verify",
+      "type": "shell",
+      "title": "P19 Düzeltme doğrulaması",
+      "dependsOn": [
+        "p19-fix"
+      ],
+      "maxRuns": 3,
+      "onSuccess": {
+        "rerun": "p19-review"
+      },
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p19",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p19-accepted",
+      "type": "barrier",
+      "title": "P19 PASS kabulü",
+      "dependsOn": [
+        "p19-review"
+      ],
+      "completeIf": "p19-review.verdict == 'PASS'",
+      "haltIf": "p19-review.verdict != 'PASS' && p19-review.runCount >= 4"
+    },
+    {
+      "id": "p20-implement",
+      "type": "agent",
+      "title": "P20 Uygula · Dağıtım belgeleri ve yayına hazırlık teslimi",
+      "dependsOn": [
+        "p19-accepted"
+      ],
+      "promptFile": "prompts/p20-implement.md",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p20-verify",
+      "type": "shell",
+      "title": "P20 Test ve build",
+      "dependsOn": [
+        "p20-implement"
+      ],
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p20",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p20-review",
+      "type": "agent",
+      "title": "P20 Bağımsız inceleme",
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "mode": "plan",
+      "dependsOn": [
+        "p20-verify"
+      ],
+      "promptFile": "prompts/p20-review.md",
+      "capture": {
+        "verdict": {
+          "lastLineRegex": "^REVIEW_VERDICT: (PASS|CONDITIONAL|FAIL)$",
+          "group": 1
+        }
+      },
+      "maxRuns": 4
+    },
+    {
+      "id": "p20-fix",
+      "type": "agent",
+      "title": "P20 İnceleme düzeltmesi",
+      "dependsOn": [
+        "p20-review"
+      ],
+      "promptFile": "prompts/p20-fix.md",
+      "runIf": "p20-review.verdict != 'PASS' && p20-review.runCount < 4",
+      "maxRuns": 3,
+      "backend": "codex",
+      "model": "",
+      "effort": "",
+      "lock": "kubepit-commercial-write",
+      "success": {
+        "lastLineRegex": "^PIPELINE_RESULT: SUCCESS$"
+      },
+      "haltIf": {
+        "lastLineRegex": "^PIPELINE_RESULT: (BLOCKED|FAILED)$"
+      }
+    },
+    {
+      "id": "p20-fix-verify",
+      "type": "shell",
+      "title": "P20 Düzeltme doğrulaması",
+      "dependsOn": [
+        "p20-fix"
+      ],
+      "maxRuns": 3,
+      "onSuccess": {
+        "rerun": "p20-review"
+      },
+      "lock": "kubepit-commercial-write",
+      "command": "node ./scripts/verify.mjs p20",
+      "success": {
+        "exitCode": 0
+      },
+      "haltIf": {
+        "exitCodeNot": 0
+      },
+      "timeoutMinutes": 180
+    },
+    {
+      "id": "p20-accepted",
+      "type": "barrier",
+      "title": "P20 PASS kabulü",
+      "dependsOn": [
+        "p20-review"
+      ],
+      "completeIf": "p20-review.verdict == 'PASS'",
+      "haltIf": "p20-review.verdict != 'PASS' && p20-review.runCount >= 4"
+    }
+  ]
+}

@@ -2,6 +2,7 @@ import { assistantItems } from './assistantItems';
 import * as i18n from '@/i18n/core';
 import {
   AppWindow,
+  BookOpen,
   Boxes,
   CalendarSearch,
   ChartSpline,
@@ -298,6 +299,15 @@ export function appActions(): PaletteItem[] {
       icon: History,
       group: 'actions',
       run: () => store.openMainTab({ kind: 'activity' }),
+    },
+    {
+      type: 'action',
+      id: 'ai-guide',
+      label: i18n.t('AI capabilities'),
+      icon: BookOpen,
+      keywords: 'ai assistant guide help documentation yetenekler asistan rehber yardım',
+      group: 'actions',
+      run: () => store.openMainTab({ kind: 'ai-guide' }),
     },
     {
       type: 'action',

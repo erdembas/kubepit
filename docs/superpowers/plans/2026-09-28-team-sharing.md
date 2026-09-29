@@ -1,5 +1,11 @@
 # Team Sharing Implementation Plan
 
+> **Superseded implementation direction (2026-09-29):** Team profiles are now a
+> paid private feature backed by the commercial cloud. Start with the
+> [commercial program](2026-09-29-commercial-program.md) and its desktop/cloud
+> plans. This file is a historical reference for validation, mapping and layering;
+> do not place its premium implementation in the public core or execute it unchanged.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Export, import and subscribe to a versioned YAML team profile holding non-secret Kubepit configuration (cluster metadata, saved views, bookmarks, custom actions, health ignores, alert rules). Imported clusters are mapped to local credentials, and a CI validation CLI checks the profile. Credentials are never exported.

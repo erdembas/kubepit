@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_AI_SETTINGS } from '@/lib/ai/defaults';
+import { selectLocalAgent } from './localAgents';
 import type { AiProviderConfig, AiSettings, AiStatus } from '@/types';
 import {
   baseUrlProblem,
@@ -50,6 +51,46 @@ const fields = (issues: SettingsIssue[]) => issues.map((i) => i.field);
 const errors = (issues: SettingsIssue[]) => fields(issues.filter((i) => i.severity === 'error'));
 
 describe('settingsIssues', () => {
+  it('allows CLI login and a default model without a base URL, but refuses local-only mode', () => {
+    const initial = ai();
+    const configured = {
+      ...initial,
+      ...selectLocalAgent(initial, {
+        kind: 'codex-cli',
+        name: 'Codex',
+        executable: '/bin/codex',
+        source: 'PATH',
+        available: true,
+        supported: true,
+      }),
+    };
+    configured.providers.at(-1)!.model = '';
+    const s = status(
+      {},
+      {
+        providers: [
+          {
+            id: 'codex-cli',
+            kind: 'codex-cli',
+            local: false,
+            has_key: false,
+            key_error: null,
+            allowed: true,
+          },
+        ],
+      },
+    );
+    expect(settingsIssues(configured, s)).toEqual([]);
+    expect(errors(settingsIssues({ ...configured, local_only: true }, s))).toEqual([
+      'active_provider',
+    ]);
+    expect(settingsIssues({ ...configured, local_only: true }, s)[0]!.message).toContain(
+      'cloud models',
+    );
+    s.providers[0]!.allowed = false;
+    expect(fields(settingsIssues(configured, s))).toEqual(['providers.codex-cli.executable']);
+    expect(hasBlockingIssues(settingsIssues(configured, s))).toBe(false);
+  });
   it('flags an empty model for the active OpenAI-compatible provider', () => {
     expect(fields(settingsIssues(active('openai', { model: '' }), status()))).toContain(
       'providers.openai.model',

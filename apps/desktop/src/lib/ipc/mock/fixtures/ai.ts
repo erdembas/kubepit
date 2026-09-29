@@ -1,5 +1,6 @@
 import type {
   AiIntent,
+  AiLocalAgent,
   AiLocale,
   AiModelInfo,
   AiPrice,
@@ -25,6 +26,42 @@ import type {
 
 // -- Models --------------------------------------------------------------------
 
+/** Discovery is simulated only; the browser never starts host executables. */
+export const DEMO_LOCAL_AGENTS: AiLocalAgent[] = [
+  {
+    kind: 'codex-cli',
+    name: 'Codex',
+    executable: '/usr/local/bin/codex',
+    source: 'path',
+    available: true,
+    supported: true,
+  },
+  {
+    kind: 'claude-cli',
+    name: 'Claude Code',
+    executable: '/home/demo/.local/bin/claude',
+    source: 'known-location',
+    available: true,
+    supported: true,
+  },
+  {
+    kind: 'opencode-cli',
+    name: 'OpenCode',
+    executable: '/home/demo/.opencode/bin/opencode',
+    source: 'known-location',
+    available: true,
+    supported: true,
+  },
+  {
+    kind: 'cursor-cli',
+    name: 'Cursor Agent',
+    executable: '/home/demo/.local/bin/cursor-agent',
+    source: 'known-location',
+    available: true,
+    supported: false,
+  },
+];
+
 const opus: AiModelInfo = {
   id: 'claude-opus-5',
   display_name: 'Claude Opus 5',
@@ -35,7 +72,21 @@ const opus: AiModelInfo = {
 };
 
 /** What the demo Models API lists per provider kind. */
+const agentModels = (ids: string[]): AiModelInfo[] =>
+  ids.map((id) => ({
+    id,
+    display_name: null,
+    context_window: null,
+    max_output_tokens: null,
+    adaptive_thinking: null,
+    effort: null,
+  }));
+
 export const DEMO_MODELS: Record<AiProviderKind, AiModelInfo[]> = {
+  'codex-cli': agentModels(['default']),
+  'claude-cli': agentModels(['sonnet', 'opus', 'haiku']),
+  'opencode-cli': agentModels(['default']),
+  'cursor-cli': [],
   anthropic: [
     opus,
     {
@@ -110,6 +161,22 @@ export const DEMO_TOOLS = [
 /** Rough size of one tool definition (name, description, JSON Schema). */
 export const TOOL_TOKENS = 120;
 
+type AdditionalLocale = Exclude<AiLocale, 'en' | 'tr'>;
+
+const ADDITIONAL_LANGUAGES: Record<AdditionalLocale, string> = {
+  de: 'German (Deutsch)',
+  fr: 'French (Français)',
+  es: 'Spanish (Español)',
+  it: 'Italian (Italiano)',
+  pt: 'Portuguese (Português)',
+  ru: 'Russian (Русский)',
+  ar: 'Arabic (العربية)',
+  hi: 'Hindi (हिन्दी)',
+  ja: 'Japanese (日本語)',
+  ko: 'Korean (한국어)',
+  zh: 'Chinese (中文)',
+};
+
 /** The frozen system prompt (spec §8) the demo counts tokens for. */
 export function demoSystemPrompt(locale: AiLocale): string {
   const clauses = [
@@ -124,7 +191,9 @@ export function demoSystemPrompt(locale: AiLocale): string {
   const line =
     locale === 'tr'
       ? 'Answer in Turkish (Türkçe). Keep Kubernetes names, kinds, field paths, YAML, commands, log lines and quoted errors verbatim.'
-      : 'Answer in English.';
+      : locale === 'en'
+        ? 'Answer in English.'
+        : `Answer in ${ADDITIONAL_LANGUAGES[locale]}. Keep Kubernetes names, kinds, field paths, YAML, commands, log lines and quoted errors verbatim.`;
   return [...clauses, line].join('\n');
 }
 
@@ -810,7 +879,22 @@ ${cronJob(t)}
 `,
 };
 
-type Answer = Record<AiLocale, (t: AnswerTarget) => string>;
+type Answer = Record<'en' | 'tr', (t: AnswerTarget) => string>;
+
+/** Short, explicitly synthetic model output for locales without full demo scenarios. */
+const ADDITIONAL_ANSWERS: Record<AdditionalLocale, string> = {
+  de: 'Dies ist eine vorgefertigte Demo-Antwort auf Deutsch. Es wurde kein KI-Modell aufgerufen und keine Verbindung zu einem echten Cluster hergestellt.',
+  fr: 'Ceci est une réponse de démonstration prédéfinie en français. Aucun modèle d’IA n’a été appelé et aucune connexion à un cluster réel n’a été établie.',
+  es: 'Esta es una respuesta de demostración predefinida en español. No se ha consultado ningún modelo de IA ni se ha establecido una conexión con un clúster real.',
+  it: 'Questa è una risposta dimostrativa predefinita in italiano. Non è stato contattato alcun modello di IA e non è stata stabilita alcuna connessione a un cluster reale.',
+  pt: 'Esta é uma resposta de demonstração predefinida em português. Nenhum modelo de IA foi consultado e nenhuma conexão com um cluster real foi estabelecida.',
+  ru: 'Это заранее подготовленный демонстрационный ответ на русском языке. Модель ИИ не вызывалась, подключение к реальному кластеру не выполнялось.',
+  ar: 'هذه إجابة تجريبية معدّة مسبقًا باللغة العربية. لم يتم استدعاء أي نموذج ذكاء اصطناعي أو الاتصال بأي عنقود حقيقي.',
+  hi: 'यह हिन्दी में पहले से तैयार किया गया डेमो उत्तर है। किसी AI मॉडल को कॉल नहीं किया गया और किसी वास्तविक क्लस्टर से कनेक्शन नहीं किया गया।',
+  ja: 'これは日本語のデモ用に用意された応答です。AIモデルの呼び出しや実際のクラスタへの接続は行っていません。',
+  ko: '이것은 한국어로 미리 작성된 데모 응답입니다. AI 모델을 호출하거나 실제 클러스터에 연결하지 않았습니다.',
+  zh: '这是预先编写的中文演示回复。未调用任何 AI 模型，也未连接到真实集群。',
+};
 
 const ANSWERS: Record<Exclude<AiIntent, 'explain'>, Answer> = {
   fix,
@@ -829,6 +913,7 @@ export function cannedAnswer(
   target: AnswerTarget,
   crashLoop: boolean,
 ): string {
+  if (locale !== 'en' && locale !== 'tr') return ADDITIONAL_ANSWERS[locale];
   const answer =
     intent === 'explain' ? (crashLoop ? explainCrash : explainHealthy) : ANSWERS[intent];
   return answer[locale](target);
@@ -838,12 +923,34 @@ export function cannedAnswer(
 export const TOOL_LEAD_IN: Record<AiLocale, string> = {
   en: "I'll check the pod's recent events first.\n\n",
   tr: "Önce pod'un son olaylarına bakayım.\n\n",
+  de: 'Ich prüfe zuerst die letzten Ereignisse des Pods.\n\n',
+  fr: 'Je vais d’abord vérifier les événements récents du pod.\n\n',
+  es: 'Primero revisaré los eventos recientes del pod.\n\n',
+  it: 'Controllerò prima gli eventi recenti del pod.\n\n',
+  pt: 'Vou verificar primeiro os eventos recentes do pod.\n\n',
+  ru: 'Сначала проверю последние события pod.\n\n',
+  ar: 'سأتحقق أولًا من أحداث pod الأخيرة.\n\n',
+  hi: 'पहले pod के हाल के इवेंट देखूँगा।\n\n',
+  ja: 'まず、podの最近のイベントを確認します。\n\n',
+  ko: '먼저 pod의 최근 이벤트를 확인하겠습니다.\n\n',
+  zh: '我会先检查 pod 的近期事件。\n\n',
 };
 
 /** Said when the user did not share a tool result. */
 export const TOOL_DECLINED: Record<AiLocale, string> = {
   en: '_The events were not shared, so this is based on the context in the preview only._\n\n',
   tr: '_Olaylar paylaşılmadı; bu yanıt yalnızca önizlemedeki bağlama dayanıyor._\n\n',
+  de: '_Die Ereignisse wurden nicht geteilt; diese Antwort basiert nur auf dem Kontext der Vorschau._\n\n',
+  fr: '_Les événements n’ont pas été partagés ; cette réponse repose uniquement sur le contexte de l’aperçu._\n\n',
+  es: '_Los eventos no se compartieron; esta respuesta se basa únicamente en el contexto de la vista previa._\n\n',
+  it: '_Gli eventi non sono stati condivisi; questa risposta si basa solo sul contesto dell’anteprima._\n\n',
+  pt: '_Os eventos não foram compartilhados; esta resposta se baseia apenas no contexto da prévia._\n\n',
+  ru: '_События не были переданы; ответ основан только на контексте предварительного просмотра._\n\n',
+  ar: '_لم تتم مشاركة الأحداث؛ تعتمد هذه الإجابة فقط على السياق الموجود في المعاينة._\n\n',
+  hi: '_इवेंट साझा नहीं किए गए; यह उत्तर केवल पूर्वावलोकन के संदर्भ पर आधारित है।_\n\n',
+  ja: '_イベントは共有されていないため、この応答はプレビューのコンテキストのみに基づいています。_\n\n',
+  ko: '_이벤트가 공유되지 않았으므로 이 응답은 미리보기의 컨텍스트만을 바탕으로 합니다._\n\n',
+  zh: '_事件未被共享，因此此回复仅基于预览中的上下文。_\n\n',
 };
 
 /** The model the demo falls back to on `#fallback`. */

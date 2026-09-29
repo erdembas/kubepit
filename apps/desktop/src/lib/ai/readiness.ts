@@ -1,4 +1,5 @@
 import type { AiProviderConfig, AiSettings, AiStatus, ClusterDef } from '@/types';
+import { isLocalAgent } from './localAgents';
 
 /**
  * Whether the assistant panel can take a request, and if not, what the
@@ -33,10 +34,11 @@ export function assistantReadiness(
     // Anthropic always needs a key, OpenAI-compatible servers unless local, Ollama never.
     const needsKey =
       provider.kind === 'anthropic' || (provider.kind === 'openai-compatible' && !s.local);
-    if (!s.has_key && (needsKey || s.key_error))
+    if (!isLocalAgent(provider.kind) && !s.has_key && (needsKey || s.key_error))
       return { state: 'no-key', provider, keyError: s.key_error };
   }
-  if (!provider.model.trim()) return { state: 'no-model', provider };
+  if (!isLocalAgent(provider.kind) && !provider.model.trim())
+    return { state: 'no-model', provider };
   if (cluster) {
     if (!ai.clusters.includes(cluster.id))
       return { state: 'cluster', cluster, reacknowledge: false };
