@@ -1373,7 +1373,9 @@ deterministic:
   accounts, classes and cluster roles only expand from the root), drop old
   ReplicaSets and bookkeeping objects, hide kinds (bridging ownership
   chains in linear time through an adjacency index), collapse pods per
-  controller into group nodes, and cap the map at 400 nodes with one
+  controller into group nodes, and cap the map at 800 nodes
+  (`DEFAULT_MAX_NODES`, measured: at 1 200 panning loses a third of the
+  pointer moves) with one
   "+N more" node per kind.
 - `layout.ts` — tier columns (entry → route → service → workload →
   controller → pods → config/storage/identity → bindings → cluster → node),
@@ -1391,12 +1393,63 @@ details tab strip overflows at the panel's 380 px minimum, so it scrolls the
 active tab into view (tab requests open the right-most tabs, such as Map)
 and turns the wheel into horizontal scrolling (`lib/ui/wheelScroll.ts`).
 
+The graph is built and the view derived off the main thread, in the engine
+worker (`lib/perf/worker/`: `engineWorker.ts` runs the pure `engine.ts`;
+`client.ts` starts it lazily as a module worker, and runs the same engine
+inline where there is no `Worker` or it failed to start). Each map owns a
+`TopologyModel` (`topologyModel.ts`), a session in the engine that mirrors
+the watched lists:
+
+- `useTopologyData` hands it the live input (`setSource`), and the model
+  streams what changed at once: per-slot deltas found by object identity
+  (unchanged objects keep their identity across snapshots), so a batch
+  costs its own objects. A slot a patch would not keep in order (a relist,
+  an object deleted and added again) is sent whole, so the engine's lists
+  equal the snapshots, order included. Whenever the engine's copy is new
+  or uncertain (the first delta, after an engine error, a lost worker or
+  leaving the view) the model sends a `reset`, which replaces the session;
+  the engine drops a patch for a session it does not hold (a delta that
+  failed half-way), and its next request fails with `SESSION_MISSING`, so
+  the model resets.
+  Cloning the whole input per build would cost more on the main thread
+  than the build itself (≈ 60 ms to serialise the all-namespaces input of
+  the `m` scale cluster, ≈ 35 ms to receive its graph).
+- It asks for a rebuild (`setBuild`) with a token `CoalescedMemo` renews
+  (below), and `TopologyMap` asks for views (`setView`: root, hops, pod
+  groups, hidden kinds, the cap) tagged with its fit key; the fit and the
+  "synced" refit follow the view that comes back, not the request.
+- Only the view comes back. The graph comes back too while the
+  reachability overlay is on (`withGraph`; `reachOverlay` reads it), and
+  only when it changed. `objectFor` indexes the live objects on first use.
+- One request is in flight for data changes; later ones coalesce behind
+  it. A view change is sent at once, and a reply that a newer request
+  superseded is dropped (sequence numbers).
+- The probe's `map:build` and `map:view` are the engine's own time in the
+  worker; `map:roundtrip` is request → reply on the main thread (both
+  clones, queueing and the worker time); `map:layout` stays on the main
+  thread.
+
 Views stay mounted, so leaving one only turns it inactive, and that must cost
-nothing. `useTopologyData` rebuilds the graph on `topologyDataKey`
-(`dataKey.ts`: each slot's `version`, `synced`, `forbidden` and `error`, never
-the `status` that stopping the watches flips), and returns its previous model
-while disabled. `TopologyMap` likewise keeps its derived view, and so its
-layout, while `active` is false (`pausedMemo`).
+nothing. The input key is `topologyDataKey` (`dataKey.ts`: each slot's
+`version`, `synced`, `forbidden` and `error`, never the `status` that
+stopping the watches flips), and the input is frozen while disabled
+(`pausedMemo`). An inactive model sends nothing and keeps its last result;
+leaving tells the engine to forget the session (one message) and releases
+it, so the worker is terminated `IDLE_MS` (10 s) after the last map went
+inactive. On resume the model asks again only if the input or the view
+options changed meanwhile, sending the whole input first. If the worker
+dies, pending requests reject with `EngineLost` and the models send their
+session again (to the inline engine from then on).
+
+Every batch a watch delivers bumps its `version`, so while a map of many
+kinds syncs its data key changes dozens of times a second. `CoalescedMemo`
+(`dataKey.ts`) asks for a rebuild on a data-only change during the initial
+sync at most every `SYNC_REBUILD_INTERVAL_MS` (250 ms) and re-renders when
+the next one may run; the change that completes the sync, a change of the
+scope, sources or extra object, and every live change after the sync ask at
+once. On the all-namespaces map of the `m` scale cluster this took the
+rebuilds from ≈ 76 to 3, and `ui/map_all_m` from 3.3 s to ≈ 0.55 s; with the
+engine in the worker that map has no long task left.
 
 ## NetworkPolicy simulator
 
@@ -1963,3 +2016,10 @@ in-memory demo backend.
   installs Chromium, runs `perf:ui` at `l` with churn 50 and the 30-minute
   soak, `ttfr,map,health` at `s` and `m`, and
   `compare.mjs --slack ci --only ui`. Neither uses secrets.
+- **Fixes applied** (the spec's Results and Gates tables have the numbers).
+  The Resource Map: its rebuilds are coalesced while the watches sync
+  (plan Task 16a), the graph and views are built in the engine worker
+  (Task 16, H5; health and netpol stay on the main thread, their gate did
+  not fire) and the cap is 800 nodes (Task 22); see "Resource map". The map
+  scenario's summary (`perf-results/ui.json` `raw.mapAll`) counts the
+  builds and the long tasks.

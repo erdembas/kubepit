@@ -103,6 +103,7 @@ Deterministic structural probes (request counts per path) are ordinary tests, no
    - FPS during a programmatic scroll;
    - long tasks;
    - map build/view/layout and health scan durations;
+     - since H5 (plan Task 16) the map is built and its view derived in the engine worker: `map:build` and `map:view` are the engine's own time there, comparable with the benches, and `map:roundtrip` (added then) is request → reply on the main thread, clones and queueing included. `map:layout` stays on the main thread;
    - heap samples and watch-cache statistics.
 
    It is exposed as `window.__kubepitPerf`, with helpers to connect and open views.
@@ -299,9 +300,9 @@ Filled in by plan Task 10 and each gated task.
 | `structural/list_requests_without_limit` | 2 (see note) | 2 ✓ | | H4: no |
 | `structural/fanout` (`tests/perf_probe.rs`) | Task 2 snapshot | pods, nodes, deployments 2 streams; the other 17 paths 1 ✓ | | H1: no |
 | `topology/namespace_l` | 30 ms | 1.1 ms ✓ | | |
-| `topology/all_m` | 1 500 ms | 103 ms ✓ | | |
-| `topology/layout_800` | 250 ms | 2.4 ms ✓ | | MAP: yes |
-| `topology/layout_1200` (informational) | — | 3.6 ms | | MAP: yes |
+| `topology/all_m` | 1 500 ms | 103 ms ✓ | 125 ms ✓ (cap 800, Task 22) | |
+| `topology/layout_800` | 250 ms | 2.4 ms ✓ | 2.4 ms ✓ | MAP: yes → 800 |
+| `topology/layout_1200` (informational) | — | 3.6 ms | 3.9 ms | MAP: yes → 800 |
 | `health/scan_m` | 1 500 ms | 22 ms ✓ | | |
 | `health/scan_l` | 3 000 ms | 55 ms ✓ | | |
 | `netpol/build_l` | 800 ms | 19 ms ✓ | | |
@@ -321,8 +322,9 @@ Filled in by plan Task 10 and each gated task.
 | `ui/scroll_long_task_max_l` | 100 ms | 0 ms ✓ | | |
 | `ui/apply_p95_l_churn50` | 16 ms | 8.6 ms ✓ | 8.5 ms (8.3–8.6) ✓ (H6) | H7: no |
 | Watch lag at `l`, churn 50 (`watch:apply` `latencyMs` p95; H6 gate, no budget id) | 1 s | 13–25 ms | 15.7 ms (11.3–19.2) (H6) | **H6: yes**, from the code (a closed window's watches outlive it); done in Task 17 |
-| `ui/map_namespace_l` | 500 ms | 247 ms ✓ | | H3: no |
-| `ui/map_all_m` | 2.5 s | **2.95 s** (2.66–3.49) ✗ | | H5: yes (map) |
+| `ui/map_namespace_l` | 500 ms | 247 ms ✓ | 201 ms ✓ | H3: no |
+| `ui/map_all_m` | 2.5 s | **2.95 s** (2.66–3.49) ✗ | 0.59 s ✓ (0.51–0.59) | MAP-sync, H5: yes (map) |
+| Long tasks > 50 ms, all-namespaces map at `m` (no budget id) | — | 19–20, max 321 ms | 1, 81–87 ms (the first render of the 800-node canvas) | H5 |
 | `ui/health_scan_m` | 3 s | 79 ms ✓ | | H5: no (health) |
 | `ui/health_long_task_max_m` | 200 ms | 0 ms ✓ | | |
 | `ui/map_leave` (from the synced `l` map) | 200 ms | 33 ms ✓ | | |
@@ -342,6 +344,12 @@ Notes:
   - UI: 3 runs of `pnpm perf:ui -- --preset l --churn 50 --scenarios apply,ttfr --port 4467`; a run just before gave 8.6 ms apply p95 and 12.1 ms latency p95.
   - The demo backend acks as a no-op, so the UI runs show only what acking costs the frontend (one IPC call per batch). The backend's flow control is covered by paused-time tests.
 - **`ui/map_all_m`.** Each run rebuilt the graph 72–76 times while the watches synced (about 1.0–1.5 s of `map:build` in total), so the time is mostly rebuilds, not one slow build. H5 only moves that work off the main thread.
+- **After: the map (plan Tasks 16a, 16, 22), 2026-09-29.** Same machine, shared with other agents; the median of 3 `pnpm perf:ui -- --preset m --scenarios map --port 4517` runs (1-minute load 8.4–8.8) and one `--preset l --scenarios map` run (load 8.1).
+  - Same-machine "before", at `be4e3a1` with the load at 7.5–13: `ui/map_all_m` 3.31 s (2.96–3.50), 76–79 rebuilds, 18–20 long tasks (max 223–286 ms); `ui/map_namespace_l` 260 ms.
+  - Task 16a (rebuilds coalesced, still on the main thread): 0.55 s (0.54–0.58), 3 rebuilds, 2 long tasks (max 128–138 ms). The demo sync itself takes ≈ 0.4 s; the rebuilds were starving it.
+  - Task 16 (engine worker, cap still 400): 0.57 s, 2 builds (in the worker), no long task.
+  - Task 22 (cap 800): 0.59 s (0.51–0.59), 2 builds, one long task of 81–87 ms per run. It is not the engine (`map:build` 42–44 ms and `map:view` 31–35 ms run in the worker): at cap 400 the same code has none, so it is the main thread's first render of twice as many nodes. No budget covers it.
+  - `ui/map_namespace_l`: 201 ms (2 builds, was 28 rebuilds).
 
 **Gates (plan Tasks 12–22)**, from the numbers above:
 
@@ -351,13 +359,14 @@ Notes:
 | H2 | 13 | no | The standard scenario on `m` (pods table `ns-0001`, then health, the map and netpol) never had one (cluster, kind) live with two scopes: every snapshot showed one scope per kind. Across the sequence, pods, services, namespaces, NetworkPolicies and DaemonSets ran `["ns-0001"]` in the table, health and map, and `[]` in netpol, one after another. The fix derives from a *live* cluster-wide entry, so it would not apply here. It only would with both views open at once (split panes), which the scenario does not do. |
 | H3 | 14 | no | `ui/map_namespace_l` 247 ms ≤ 500 ms, so the byte share was not needed. |
 | H4 | 15 | no | The metrics.k8s.io pods list at `l` (20 000) is unpaged. But RSS is 444 MB ≤ 700 MB, and the spec has no overview-latency budget. |
-| H5 | 16 | **yes: map only** | All-namespaces map on `m`: 19–20 long tasks > 50 ms (max 321 ms). From 2.5 s on, each long task of 55–89 ms holds one `map:build` (28–41 ms) and one `map:view` (20–26 ms), measured by polling the probe's sample counts between long tasks. Health (`m`): no long task > 50 ms. Netpol (`m`): none. Only the topology engine moves. |
+| H5 | 16 | **yes: map only** (done: no long task left from the engine; see the After notes) | All-namespaces map on `m`: 19–20 long tasks > 50 ms (max 321 ms). From 2.5 s on, each long task of 55–89 ms holds one `map:build` (28–41 ms) and one `map:view` (20–26 ms), measured by polling the probe's sample counts between long tasks. Health (`m`): no long task > 50 ms. Netpol (`m`): none. Only the topology engine moves. |
+| MAP-sync | 16a | **yes** (added after the baseline) | `ui/map_all_m` misses its budget and the map rebuilds its graph more than 10 times while syncing: 72–76. Done: rebuilds of data-only changes are coalesced to one per 250 ms during the initial sync (3 rebuilds, 0.55 s). |
 | H6 | 17 | **yes, from the code** (manual `tauri dev` check pending) | The lag half does not fire: churn 50 at `l`, arrival → commit (`latencyMs`) p95 13–25 ms ≪ 1 s. The window half fires from the code. The Chromium demo backend dies with its page, so it cannot be measured there. `apps/desktop/src-tauri/src/windows.rs:123-137` (`on_window_destroyed`) stops only the window's terminals. A `resource_watch` stops only when its sink returns `false` (`crates/kubepit-core/src/watch.rs:321-351`), that is, when `on_event.send(batch)` fails (`apps/desktop/src-tauri/src/ipc/resources.rs:45-46`). A quiet resource sends nothing, so its watch outlives the window until the next event. And Tauri 2.12 returns `Ok` for a send of ≥ 8 KB to a dead webview (`tauri/src/ipc/channel.rs:307-316`), so a busy watch with large batches may never stop. Task 17 will be implemented; confirm the window half in `pnpm tauri:dev` with the backend log. **Done (Task 17):** at most 4 unacknowledged batches per watch, latest-wins folding while blocked, a stop after 60 s without an ack (with a final `stopped` batch), and `on_window_destroyed` unwatches the window's watches at once. The `tauri dev` confirmation is still manual. |
 | H7 | 18 | no | `ui/apply_p95_l_churn50` 8.6 ms ≤ 16 ms. |
 | H8 | 19 | no | `ui/soak_heap_ratio` 1.027 (health, minute 6 → 30; map 1.026, pods 1.023) ≤ 1.15. |
 | H9 | 20 | no | `journal/apply_update` 5.4 µs ≤ 60 µs, `journal/details_after_500` 5.2 ms ≤ 50 ms. |
 | H10 | 21 | no | `e2e/fleet_search_l` 0.15 s ≤ 6 s. |
-| MAP | 22 | **yes: 1 200, provisional** until a WKWebView check | The criterion, amended here (D8): build + view + layout ≤ 250 ms, and no dropped frame at 60 Hz while panning, p95 frame ≤ one frame (16.7 ms). Read literally, "≤ 16 ms" fails at every cap, the current 400 included, since one 60 Hz frame is 16.7 ms. Build + view + layout: `topology/all_m` 103 ms (build and view at 400) + `topology/layout_1200` 3.6 ms ≈ 107 ms. Pan on the all-namespaces map of `m`, headless Chromium, 3 × 5 s drags per cap, with the cap swapped at build time: median 59.9 fps at every cap; p95 frame 16.7 ms at 400, 16.8 ms at 800 and 1 200 (within display-timer jitter of one frame); no long frame or long task. Pointer moves delivered in 5 s fell with size: ≈ 280 at 400, ≈ 190 at 800, ≈ 160 at 1 200. So input handling slows even though no frame drops. Task 22 must check panning in WKWebView before it settles on 1 200. |
+| MAP | 22 | **yes**: 1 200 at the baseline (provisional until a WKWebView check); **800** after Tasks 16a and 16 | The criterion, amended here (D8): build + view + layout ≤ 250 ms, and no dropped frame at 60 Hz while panning, p95 frame ≤ one frame (16.7 ms). Read literally, "≤ 16 ms" fails at every cap, the current 400 included, since one 60 Hz frame is 16.7 ms. Build + view + layout: `topology/all_m` 103 ms (build and view at 400) + `topology/layout_1200` 3.6 ms ≈ 107 ms. Pan on the all-namespaces map of `m`, headless Chromium, 3 × 5 s drags per cap, with the cap swapped at build time: median 59.9 fps at every cap; p95 frame 16.7 ms at 400, 16.8 ms at 800 and 1 200 (within display-timer jitter of one frame); no long frame or long task. Pointer moves delivered in 5 s fell with size: ≈ 280 at 400, ≈ 190 at 800, ≈ 160 at 1 200. So input handling slows even though no frame drops. Task 22 must check panning in WKWebView before it settles on 1 200. **Task 22 (after 16a and 16) chose 800**: re-measured with 4 interleaved rounds × 3 drags per cap, the pointer moves were median 300 at 400, 298 at 800 and 202 at 1 200 (≈ 300 is one per frame), and long frames and long tasks appeared in 5 of 12 drags at 1 200, one long task in 12 at 800 and none at 400; p95 frame 16.7–16.8 ms everywhere. 1 200 takes a third fewer moves than 800 (> 25%), so 800, which needs no WKWebView proviso. Build + view + layout at 800: `topology/all_m` 125 ms. |
 
 ## Open questions
 

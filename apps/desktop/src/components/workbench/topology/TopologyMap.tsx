@@ -1,24 +1,22 @@
 import * as i18n from '@/i18n';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { ChevronsDownUp, Info, Loader2, Search, TriangleAlert, Workflow, X } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { kindIcon } from '@/lib/kube/icons';
 import {
   DEFAULT_MAX_NODES,
-  deriveView,
   EDGE_FAMILY,
   layoutTopology,
   matchNodes,
   type EdgeFamily,
-  type TopoGraph,
-  type TopologyView,
   type TopoNode,
+  type ViewOptions,
 } from '@/lib/kube/topology';
-import { perfEnabled, perfNow, recordDuration, recordSince } from '@/lib/perf/probe';
-import { pausedMemo, type PausedMemo } from './dataKey';
+import { perfNow, recordSince } from '@/lib/perf/probe';
 import { TopologyCanvas, type FocusRequest } from './TopologyCanvas';
 import { TopologyLegend } from './TopologyLegend';
 import { isStringArray, usePersistentJson } from './persist';
+import type { TopologyModel } from './topologyModel';
 import type { TopologyWatchError } from './useTopologyData';
 import type { ReachState } from '@/lib/kube/netpol/overlay';
 
@@ -29,14 +27,12 @@ import type { ReachState } from '@/lib/kube/netpol/overlay';
  */
 export function TopologyMap({
   label,
-  graph,
+  model,
   rootId,
   hops,
   selectedId,
   showNamespace,
   persistKey,
-  active,
-  synced,
   errors,
   fitKey,
   focusRequest,
@@ -48,7 +44,11 @@ export function TopologyMap({
   overlayNotice,
 }: {
   label: string;
-  graph: TopoGraph;
+  /**
+   * The map's engine session (`useTopologyData`). It derives the views in
+   * the engine worker, and sends nothing while the surface is inactive.
+   */
+  model: TopologyModel;
   rootId: string | null;
   hops: number;
   /** Highlighted node (accent strip); defaults to the root. */
@@ -56,9 +56,6 @@ export function TopologyMap({
   showNamespace: boolean;
   /** Separate filter preferences per surface. */
   persistKey: string;
-  /** False while the surface is hidden: the view and layout are not recomputed. */
-  active: boolean;
-  synced: boolean;
   errors: readonly TopologyWatchError[];
   /** Changing it (scope, root) refits the map and collapses groups. */
   fitKey: string;
@@ -86,11 +83,26 @@ export function TopologyMap({
   /** Index of the match the last Enter jumped to (-1: none yet). */
   const matchCursor = useRef(-1);
 
+  // The view is derived in the engine worker and lands a little later: the
+  // model sends nothing while the surface is inactive, so leaving the view
+  // never re-derives or re-lays out.
+  const viewOptions = useMemo<ViewOptions>(
+    () => ({ rootId, hops, expanded, hiddenKinds: hidden, maxNodes: DEFAULT_MAX_NODES }),
+    [rootId, hops, expanded, hidden],
+  );
+  useEffect(() => model.setView(viewOptions, fitKey), [model, viewOptions, fitKey]);
+  const result = useSyncExternalStore(model.subscribe, model.getResult);
+  const { view, synced } = result;
+
+  const fittedKey = useRef(fitKey);
   useEffect(() => {
+    if (fittedKey.current === fitKey) return;
+    fittedKey.current = fitKey;
     setExpanded(new Set());
-    setFitRequest((n) => n + 1);
   }, [fitKey]);
-  // Refit once every watch delivered its list (the map grows while they sync).
+  // Fit once the first view for a new scope or root arrives (tagged with its fit key).
+  useEffect(() => setFitRequest((n) => n + 1), [result.tag]);
+  // Refit once the view of the synced lists arrives (the map grows while they sync).
   const wasSynced = useRef(false);
   useEffect(() => {
     if (synced && !wasSynced.current) setFitRequest((n) => n + 1);
@@ -100,31 +112,6 @@ export function TopologyMap({
   useEffect(() => {
     if (focusRequest && synced) setFocus({ ...focusRequest, rev: Date.now() });
   }, [focusRequest, synced]);
-
-  // Paused while hidden, so leaving the view never re-derives or re-lays out.
-  const viewMemo = useRef<PausedMemo<TopologyView> | null>(null);
-  viewMemo.current = pausedMemo(
-    viewMemo.current,
-    [graph, rootId, hops, expanded, hidden],
-    active,
-    () => {
-      const start = perfNow();
-      const derived = deriveView(graph, {
-        rootId,
-        hops,
-        expanded,
-        hiddenKinds: hidden,
-        maxNodes: DEFAULT_MAX_NODES,
-      });
-      if (perfEnabled())
-        recordDuration('map:view', performance.now() - start, {
-          nodes: derived.nodes.length,
-          synced: synced ? 1 : 0,
-        });
-      return derived;
-    },
-  );
-  const view = viewMemo.current.value;
 
   // Layout only depends on structure, so status changes never move nodes.
   const structure = useMemo(

@@ -1117,10 +1117,19 @@ git commit -m "perf(core): page resource lists, the cluster overview and metrics
   - `type EngineTask = { kind: 'health'; input: HealthInput; locale: Locale } | { kind: 'netpol'; input: NpInput } | { kind: 'topology'; input: TopologyInput; view: ViewOptions }`.
   - `runEngine<T>(task: EngineTask): Promise<T>`. It uses a lazily created module worker (`new Worker(new URL('./engineWorker.ts', import.meta.url), { type: 'module' })`). Without `Worker` (Node, tests) it runs inline.
   - The worker calls `setLocale(task.locale, false)` before health scans. Only engines named by the gate move to the worker.
+- **As built** (the gate fired for the map only, so only topology moved; health and netpol stay on the main thread and `EngineTask` has no `health`/`netpol` kinds):
+  - A stateless `{ kind: 'topology'; input; view }` would clone the whole watch cache per build: ≈ 60 ms to serialise the all-namespaces `m` input and ≈ 35 ms to receive its graph, both on the main thread and more than the build. So the engine keeps one **topology session** per map with a mirror of the watched lists:
+    - `EngineTask` = `{ kind: 'topology-data'; session; delta: TopologyDelta }` (one-way; per-slot upserts/removes, or a whole slot when a patch would not keep its order; `reset: true` replaces the session and is sent whenever the engine's copy is new or uncertain, and a patch for an unknown session is dropped so the next request fails with `SESSION_MISSING`) | `{ kind: 'topology'; session; view: ViewOptions; withGraph; graphRev; timed }` → `TopologyEngineResult` (`view`, `graphRev`, `graph` only when asked for and changed, `buildMs`/`viewMs` when timed) | `{ kind: 'topology-dispose'; session }`.
+    - Files: `lib/perf/worker/engine.ts` (the pure `EngineHost`, used by the worker and inline), `engineWorker.ts`, `client.ts` (`runEngine`, `postEngine`, `acquireEngine`, `stopEngine`, `engineGeneration`, `EngineLost`, `IDLE_MS`), and `components/workbench/topology/topologyModel.ts` (`TopologyModel`, `topologyDelta`).
+  - `useTopologyData` streams the deltas as batches arrive and asks for rebuilds with the `CoalescedMemo` token (Task 16a). `TopologyMap` takes the model instead of a graph and asks it for views; the fit follows the view that comes back.
+  - One request in flight for data changes; view changes go at once and stale replies are dropped by sequence number. An inactive map sends nothing, keeps its last result and releases the engine; the worker is terminated `IDLE_MS` (10 s) after the last release. A dead worker rejects pending requests with `EngineLost`; the models send their sessions again, to the inline engine from then on.
+  - The graph only comes back while the reachability overlay is on (`withGraph`).
+  - Probe ids: `map:build`, `map:view` = engine time in the worker (comparable with the benches); `map:roundtrip` (new) = request → reply on the main thread; `map:layout` unchanged (main thread).
+  - Tests: `lib/perf/worker/client.test.ts` (inline fallback, deltas, lazy module worker, idle termination, failure fallback), `components/workbench/topology/topologyModel.test.ts` (deltas, streaming, bounded builds while syncing, coalescing, stale replies, inactive, lost sessions, `withGraph`), `topologyModel.faults.test.ts` (engine errors, failed applies, lost workers and graph revisions across a session reset, plus 20 random rounds × 60 steps of changes, skipped renders and faults, checking the engine's graph against a fresh `buildTopology`, order included).
 
-- [ ] **Step 1: Check the gate.** It fires if the probe's long tasks > 50 ms during `health`, `map` or netpol scenarios at `m` point at that engine (a matching `recordDuration` id in the same frame).
+- [x] **Step 1: Check the gate.** It fires if the probe's long tasks > 50 ms during `health`, `map` or netpol scenarios at `m` point at that engine (a matching `recordDuration` id in the same frame). _Fired for the map only (spec, Gates)._
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 ```ts
 it('inline fallback returns what the engine returns', async () => {
@@ -1129,15 +1138,44 @@ it('inline fallback returns what the engine returns', async () => {
 });
 ```
 
-- [ ] **Step 3: Run the test to verify it fails, implement, then run to verify it passes.** Run: `pnpm --filter @kubepit/desktop test -- src/lib/perf/worker && pnpm --filter @kubepit/desktop build`. Expected: PASS, and the build emits the worker chunk. The Tauri CSP already allows `worker-src 'self' blob:`.
+- [x] **Step 3: Run the test to verify it fails, implement, then run to verify it passes.** Run: `pnpm --filter @kubepit/desktop test -- src/lib/perf/worker && pnpm --filter @kubepit/desktop build`. Expected: PASS, and the build emits the worker chunk. The Tauri CSP already allows `worker-src 'self' blob:`. _Verified: `tauri.conf.json` has `worker-src 'self' blob:`; the build emits `assets/engineWorker-<hash>.js` (≈ 29 kB, an IIFE, so it also runs where module workers are not supported)._
 
-- [ ] **Step 4: Re-run `pnpm perf:ui -- --preset m --scenarios health,map`.** Expected: no long task > 50 ms from the moved engines. Record the After value.
+- [x] **Step 4: Re-run `pnpm perf:ui -- --preset m --scenarios health,map`.** Expected: no long task > 50 ms from the moved engines. Record the After value. _Map at `m`: no long task at all (was 18–20, max 223–321 ms); After values in the spec's Results._
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/desktop/src docs/superpowers/specs
 git commit -m "perf(ui): run health, netpol or topology engines in a worker"
+```
+
+---
+
+### Task 16a (MAP-sync): Coalesce graph rebuilds while the map syncs
+
+Added after the baseline, and done before Task 16: the baseline's `ui/map_all_m` miss is mostly rebuilds, not one slow build (spec, Results notes). No task above covered it.
+
+**Files:**
+- Modify: `apps/desktop/src/components/workbench/topology/dataKey.ts` (`CoalescedMemo`, `SYNC_REBUILD_INTERVAL_MS`), `components/workbench/topology/useTopologyData.ts`, `docs/ARCHITECTURE.md` (Resource map)
+- Test: `apps/desktop/src/components/workbench/topology/dataKey.test.ts`
+
+**Interfaces:**
+- Produces: `SYNC_REBUILD_INTERVAL_MS = 250` and `CoalescedMemo<T>` (`new CoalescedMemo(onDue, interval?, now?)`, `get(structure, data, active, syncing, compute): T`, `cancel()`).
+  - While `syncing`, a change of `data` alone rebuilds at most once every `interval`; the previous value is returned meanwhile and `onDue` (the hook's re-render) fires when the next rebuild may run.
+  - The first value, a change of `structure` (scope, sources, the extra object), the change that completes the sync and every change after it rebuild at once.
+  - Inactive: the previous value, nothing scheduled (the `pausedMemo` semantics).
+
+- [x] **Step 1: Check the gate.** `ui/map_all_m` misses its budget and the map rebuilds its graph more than 10 times while syncing. Baseline: 2.95 s with 72–76 rebuilds (fires).
+
+- [x] **Step 2: Write the failing tests** (fake timers): 100 batches over 2 s build at most `1 + 2000 / 250` times, the batch that completes the sync builds once more and the graph holds every pod, a due rebuild builds the latest data, live changes after the sync and structure changes rebuild at once, and nothing is built or scheduled while inactive.
+
+- [x] **Step 3: Implement, run the tests, then `pnpm perf:ui -- --preset m --scenarios map`.** Result: 3 rebuilds (was 76–79 on the same machine) and `ui/map_all_m` ≈ 0.55 s (was 3.3 s). The demo sync itself takes ≈ 0.4 s; the rebuilds were starving it.
+
+- [x] **Step 4: Commit**
+
+```bash
+git add apps/desktop/src docs
+git commit -m "perf(map): coalesce graph rebuilds while the map's watches sync"
 ```
 
 ---
@@ -1323,9 +1361,14 @@ git commit -m "perf(fleet): larger metadata pages and more kind concurrency for 
 **Interfaces:**
 - Produces: `DEFAULT_MAX_NODES` = the largest of 400, 800 and 1 200 for which build + view + layout ≤ 250 ms (`topology/layout_800`, `topology/layout_1200` plus the build/view part of `topology/all_m`) **and** no dropped frame at 60 Hz while panning at that size in Chromium (the probe's pan p95 frame ≤ one frame, 16.7 ms; amended in the spec's D8, since one 60 Hz frame already exceeds 16 ms). _(Baseline: 1 200 fits, provisional until a WKWebView check. The pointer moves delivered fell from ≈ 280 at 400 nodes to ≈ 160 at 1 200.)_
 
-- [ ] **Step 1: Check the gate.** Measure 800 and 1 200 with the benches and a manual pan in `pnpm dev:ui?scale=m&perf=1` (`scrollTable` does not apply; use `__kubepitPerf.startFps()` while dragging for 5 s). If only 400 fits, record the numbers and stop.
+- [x] **Step 1: Check the gate.** Measure 800 and 1 200 with the benches and a manual pan in `pnpm dev:ui?scale=m&perf=1` (`scrollTable` does not apply; use `__kubepitPerf.startFps()` while dragging for 5 s). If only 400 fits, record the numbers and stop.
+  - _As measured, after Tasks 16a and 16 (2026-09-29):_
+    - Benches: `topology/all_m` ≈ 108 ms at 400 and ≈ 125 ms at 800 (build + view + layout), `topology/layout_800` 2.4 ms, `topology/layout_1200` 3.7–3.9 ms, so ≈ 130 ms at 1 200: both fit 250 ms. Build and view now run in the engine worker anyway.
+    - Pan on the all-namespaces map of `m` (production build, headless Chromium, 1600 × 1000, a 5 s drag of Playwright mouse moves as fast as the page takes them, frames from `startFps()`/`stopFps()`), the cap swapped at build time, 4 interleaved rounds × 3 drags per cap (load 12–20): pointer moves median **300** at 400, **298** at 800, **202** at 1 200 (147–243). Median 59.9 fps and p95 frame 16.7–16.8 ms at every cap. Long frames (> 50 ms) and long tasks: none at 400, one long task in 12 drags at 800, in 5 of 12 drags at 1 200.
+    - About 300 moves in 5 s is one per frame, so 400 and 800 take every move. 1 200 loses a third of them (> 25% fewer than 800) and drops frames now and then.
+  - **Chosen: 800.** It needs no WKWebView proviso (1 200 would have); a WKWebView pan check can still raise it later.
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test** (`chainGraph(3000)`, the helper the file already has, in place of `bigGraph`)
 
 ```ts
 it('caps the view at DEFAULT_MAX_NODES with one "+N more" node per kind', () => {
@@ -1336,9 +1379,9 @@ it('caps the view at DEFAULT_MAX_NODES with one "+N more" node per kind', () => 
 });
 ```
 
-- [ ] **Step 3: Run the test to verify it fails, change the constant and the docs, then run the tests to verify they pass.** Run: `pnpm --filter @kubepit/desktop test -- src/lib/kube/topology`. Expected: PASS.
+- [x] **Step 3: Run the test to verify it fails, change the constant and the docs, then run the tests to verify they pass.** Run: `pnpm --filter @kubepit/desktop test -- src/lib/kube/topology`. Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/desktop/src docs
