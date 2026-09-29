@@ -159,6 +159,9 @@ export interface UiSlice {
   clearFilters: () => void;
   sidebarPinned: boolean;
   setSidebarPinned: (pinned: boolean) => void;
+  /** An unpinned sidebar expands while hovered; off keeps it a compact rail. */
+  sidebarHoverExpand: boolean;
+  setSidebarHoverExpand: (hoverExpand: boolean) => void;
   rightPanel: RightPanel | null;
   rightPanelWidth: number;
   toggleRightPanel: (panel: RightPanel) => void;

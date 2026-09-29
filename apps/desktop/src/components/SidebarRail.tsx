@@ -1,6 +1,6 @@
 import * as i18n from '@/i18n';
-import { useCallback, useEffect, useState } from 'react';
-import { FileSearch, PanelLeftClose, Pin, Plus } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { FileSearch, MousePointer2Off, PanelLeftClose, Pin, Plus } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { openAndConnect, requestRemoveCluster } from '@/lib/clusterActions';
 import { cn } from '@/lib/cn';
@@ -21,7 +21,8 @@ import {
 
 /**
  * Left explorer: fleet destinations on top, then the cluster tree (sections or
- * a derived grouping). Unpinned it folds into a hotbar of cluster avatars.
+ * a derived grouping). Unpinned it folds into a hotbar of cluster avatars that
+ * expands while hovered, unless hover expansion is off (compact mode).
  */
 export function SidebarRail() {
   i18n.useLocale();
@@ -41,11 +42,28 @@ export function SidebarRail() {
   const toggleSectionCollapsed = useAppStore((s) => s.toggleSectionCollapsed);
   const pinned = useAppStore((s) => s.sidebarPinned);
   const setPinned = useAppStore((s) => s.setSidebarPinned);
+  const hoverExpand = useAppStore((s) => s.sidebarHoverExpand);
+  const asideRef = useRef<HTMLElement | null>(null);
   const [hovered, setHovered] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const { width, onResizeStart, onResizeMove, onResizeEnd } = useSidebarRailResize();
 
-  const expanded = pinned || hovered;
+  const expanded = pinned || (hoverExpand && hovered);
+
+  // React counts the rail's portal menus as inside it, so no mouseleave fires
+  // when one closes over the main area: fold the rail on the next pointer move
+  // outside it (menus and popovers still count as inside).
+  useEffect(() => {
+    if (!hovered) return;
+    const onOver = (e: PointerEvent) => {
+      const target = e.target as Element | null;
+      if (!target || asideRef.current?.contains(target)) return;
+      if (target.closest('[role="menu"], [role="dialog"]')) return;
+      setHovered(false);
+    };
+    document.addEventListener('pointerover', onOver);
+    return () => document.removeEventListener('pointerover', onOver);
+  }, [hovered]);
 
   // Let native drag-and-drop land anywhere inside the rail.
   useEffect(() => {
@@ -114,12 +132,11 @@ export function SidebarRail() {
       aria-label={i18n.t('Explorer')}
       className="chrome-gradient border-border/70 bg-surface-raised relative flex h-full shrink-0 flex-col border-r"
       style={{ width: currentWidth }}
+      ref={asideRef}
       onMouseEnter={() => {
-        if (!pinned) setHovered(true);
+        if (!pinned && hoverExpand) setHovered(true);
       }}
-      onMouseLeave={() => {
-        if (!pinned) setHovered(false);
-      }}
+      onMouseLeave={() => setHovered(false)}
       onKeyDown={onKeyDown}
     >
       <div
@@ -134,16 +151,29 @@ export function SidebarRail() {
             {i18n.t('Explorer')}
           </span>
         )}
-        <IconButton
-          label={
-            pinned
-              ? i18n.t('Collapse sidebar ({shortcut})', { shortcut: modChord('B') })
-              : i18n.t('Pin sidebar open ({shortcut})', { shortcut: modChord('B') })
-          }
-          icon={pinned ? <PanelLeftClose /> : <Pin />}
-          size="xs"
-          onClick={() => setPinned(!pinned)}
-        />
+        <div className="flex items-center">
+          {expanded && !pinned && (
+            <IconButton
+              label={i18n.t("Don't expand on hover")}
+              icon={<MousePointer2Off />}
+              size="xs"
+              onClick={() => {
+                useAppStore.getState().setSidebarHoverExpand(false);
+                setHovered(false);
+              }}
+            />
+          )}
+          <IconButton
+            label={
+              pinned
+                ? i18n.t('Collapse sidebar ({shortcut})', { shortcut: modChord('B') })
+                : i18n.t('Pin sidebar open ({shortcut})', { shortcut: modChord('B') })
+            }
+            icon={pinned ? <PanelLeftClose /> : <Pin />}
+            size="xs"
+            onClick={() => setPinned(!pinned)}
+          />
+        </div>
       </div>
 
       <FleetNav expanded={expanded} />

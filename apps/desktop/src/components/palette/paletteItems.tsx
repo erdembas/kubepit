@@ -332,6 +332,17 @@ export function appActions(): PaletteItem[] {
     },
     {
       type: 'action',
+      id: 'sidebar-hover',
+      label: store.sidebarHoverExpand
+        ? i18n.t("Sidebar: don't expand on hover")
+        : i18n.t('Sidebar: expand on hover'),
+      icon: PanelLeft,
+      keywords: 'sidebar compact rail hover collapse',
+      group: 'actions',
+      run: () => store.setSidebarHoverExpand(!store.sidebarHoverExpand),
+    },
+    {
+      type: 'action',
       id: 'language',
       label: i18n.getLocale() === 'tr' ? 'Switch to English' : 'Türkçe’ye geç',
       icon: Languages,

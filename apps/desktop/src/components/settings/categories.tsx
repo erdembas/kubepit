@@ -5,7 +5,9 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Switch } from '@/components/ui/Switch';
 import { KubepitMark } from '@/components/ui/KubepitMark';
+import { setSidebarMode, sidebarModeOf, type SidebarMode } from '@/components/sidebar/sidebarMode';
 import { ipc, isTauri } from '@/lib/ipc';
+import { modChord } from '@/lib/platform';
 import { rebaseDraft } from '@/lib/settingsSync';
 import { useAppStore } from '@/store/useAppStore';
 import type { Settings } from '@/types';
@@ -87,6 +89,7 @@ export function GeneralCategory({ description }: { description: string }) {
           </option>
         </select>
       </SettingsSection>
+      <SidebarModeSection />
       {draft ? (
         <>
           <SettingsSection title={i18n.t('Safety')}>
@@ -143,6 +146,41 @@ export function GeneralCategory({ description }: { description: string }) {
         <Unavailable />
       )}
     </SettingsPageShell>
+  );
+}
+
+/** Layout preference of this machine: applies immediately, outside the settings draft. */
+function SidebarModeSection() {
+  i18n.useLocale();
+  const mode = useAppStore((s) => sidebarModeOf(s.sidebarPinned, s.sidebarHoverExpand));
+  const options: Array<{ value: SidebarMode; label: string }> = [
+    { value: 'expanded', label: i18n.t('Always expanded') },
+    { value: 'hover', label: i18n.t('Compact, expands on hover') },
+    { value: 'compact', label: i18n.t('Compact') },
+  ];
+  return (
+    <SettingsSection
+      title={i18n.t('Sidebar')}
+      description={i18n.t(
+        'How the left explorer behaves. {shortcut} pins it open or collapses it.',
+        {
+          shortcut: modChord('B'),
+        },
+      )}
+    >
+      <select
+        aria-label={i18n.t('Sidebar')}
+        value={mode}
+        onChange={(event) => setSidebarMode(event.target.value as SidebarMode)}
+        className="border-border bg-surface-raised text-fg rounded-app-sm border px-3 py-2 text-sm"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </SettingsSection>
   );
 }
 

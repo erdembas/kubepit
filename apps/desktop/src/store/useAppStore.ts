@@ -35,6 +35,7 @@ const PREFS_KEY = 'kubepit.ui.v1';
 
 interface UiPrefs {
   sidebarPinned: boolean;
+  sidebarHoverExpand: boolean;
   rightPanelWidth: number;
   pinnedMainTabKeys: string[];
   sidebarGroupBy: AppState['sidebarGroupBy'];
@@ -427,6 +428,11 @@ const createUiSlice: Slice<UiSlice> = (set, get) => ({
   setSidebarPinned: (sidebarPinned) => {
     savePrefs({ sidebarPinned });
     set({ sidebarPinned });
+  },
+  sidebarHoverExpand: prefs.sidebarHoverExpand ?? true,
+  setSidebarHoverExpand: (sidebarHoverExpand) => {
+    savePrefs({ sidebarHoverExpand });
+    set({ sidebarHoverExpand });
   },
   rightPanel: null,
   rightPanelWidth: prefs.rightPanelWidth ?? 360,
