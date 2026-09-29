@@ -6,7 +6,6 @@ import type {
   PortForwardRequest,
   SavedPortForward,
   SavedPortForwardInput,
-  Settings,
 } from '@/types';
 import { demoForwards, writeBackendOwned } from './app';
 import { mockEmit, sleep } from './bus';
@@ -190,11 +189,8 @@ register({
     demoProxyInfo(String(id), clusters().find((c) => c.id === id)?.proxy_url),
   kubeconfig_storage_set: async ({ keychain }: MockArgs) => {
     await sleep(400);
-    const current = handlers.settings_get!({}) as Settings;
     // The one command that flips it (`settings_set` keeps the stored value).
-    return writeBackendOwned(() =>
-      handlers.settings_set!({ settings: { ...current, keychain_kubeconfigs: !!keychain } }),
-    );
+    return writeBackendOwned((current) => ({ ...current, keychain_kubeconfigs: !!keychain }));
   },
 });
 

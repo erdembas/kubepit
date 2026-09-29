@@ -191,14 +191,13 @@ function normalizeAi(ai: AiSettings): AiSettings {
 
 /**
  * Saves a change of the backend-owned lists (`ai.clusters`,
- * `ai.production_acknowledged`) through the settings handler, which keeps
- * them as stored for every other caller (`writeBackendOwned` in `app.ts`).
+ * `ai.production_acknowledged`) straight into the store
+ * (`writeBackendOwned` in `app.ts`); `settings_set` keeps them as stored
+ * for every other caller.
  */
-function saveAi(change: (ai: AiSettings) => AiSettings): unknown {
-  const current = settings();
-  return writeBackendOwned(() =>
-    handlers.settings_set!({ settings: { ...current, ai: change(aiSettings()) } }),
-  );
+function saveAi(change: (ai: AiSettings) => AiSettings): Settings {
+  const ai = aiSettings();
+  return writeBackendOwned((current) => ({ ...current, ai: change(ai) }));
 }
 
 {

@@ -229,26 +229,33 @@ let settings: Settings = (() => {
   }
 })();
 
-let ownedWrite = false;
+/** Stores, persists and broadcasts the settings (every window hears it). */
+function commitSettings(next: Settings): Settings {
+  settings = next;
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    /* ignore */
+  }
+  const changed: SettingsChanged = { source: windowLabel, settings };
+  mockEmitAllWindows('settings://changed', changed);
+  return settings;
+}
 
 /**
- * Runs `write` (a `settings_set` call) as a backend-owned write: the fields
- * `settings_set` otherwise keeps as stored (`keychain_kubeconfigs`,
- * `ai.clusters`, `ai.production_acknowledged`, like `app.rs`) take the
- * given values. Only their dedicated commands use it
- * (`kubeconfig_storage_set`, `ai_cluster_set`, cluster removal).
+ * Changes backend-owned fields: the ones `settings_set` keeps as stored
+ * (`keychain_kubeconfigs`, `ai.clusters`, `ai.production_acknowledged`,
+ * like `app.rs`). Only their dedicated commands call it
+ * (`kubeconfig_storage_set`, `ai_cluster_set`, cluster removal). It writes
+ * the store directly instead of going through the `settings_set` handler,
+ * which other demo modules wrap: no flag has to survive their wrappers, and
+ * their after-save hooks do not run for these fields.
  */
-export function writeBackendOwned<T>(write: () => T): T {
-  ownedWrite = true;
-  try {
-    return write();
-  } finally {
-    ownedWrite = false;
-  }
+export function writeBackendOwned(change: (current: Settings) => Settings): Settings {
+  return commitSettings(change(settings));
 }
 
 function keepBackendOwned(next: Settings): Settings {
-  if (ownedWrite) return next;
   const ai = next.ai ?? settings.ai;
   return {
     ...next,
@@ -367,17 +374,8 @@ register({
     helm: { path: '/opt/homebrew/bin/helm', version: 'v3.17.1' },
   }),
   settings_get: () => settings,
-  settings_set: ({ settings: next }: MockArgs) => {
-    settings = keepBackendOwned(next as Settings);
-    try {
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-    } catch {
-      /* ignore */
-    }
-    const changed: SettingsChanged = { source: windowLabel, settings };
-    mockEmitAllWindows('settings://changed', changed);
-    return settings;
-  },
+  settings_set: ({ settings: next }: MockArgs) =>
+    commitSettings(keepBackendOwned(next as Settings)),
   workspace_load: () => {
     try {
       const raw = localStorage.getItem(WORKSPACE_KEY);
