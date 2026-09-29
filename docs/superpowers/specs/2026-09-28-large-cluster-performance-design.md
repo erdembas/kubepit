@@ -300,9 +300,9 @@ Filled in by plan Task 10 and each gated task.
 | `structural/list_requests_without_limit` | 2 (see note) | 2 ✓ | | H4: no |
 | `structural/fanout` (`tests/perf_probe.rs`) | Task 2 snapshot | pods, nodes, deployments 2 streams; the other 17 paths 1 ✓ | | H1: no |
 | `topology/namespace_l` | 30 ms | 1.1 ms ✓ | | |
-| `topology/all_m` | 1 500 ms | 103 ms ✓ | | |
-| `topology/layout_800` | 250 ms | 2.4 ms ✓ | | MAP: yes |
-| `topology/layout_1200` (informational) | — | 3.6 ms | | MAP: yes |
+| `topology/all_m` | 1 500 ms | 103 ms ✓ | 125 ms ✓ (cap 800, Task 22) | |
+| `topology/layout_800` | 250 ms | 2.4 ms ✓ | 2.4 ms ✓ | MAP: yes → 800 |
+| `topology/layout_1200` (informational) | — | 3.6 ms | 3.9 ms | MAP: yes → 800 |
 | `health/scan_m` | 1 500 ms | 22 ms ✓ | | |
 | `health/scan_l` | 3 000 ms | 55 ms ✓ | | |
 | `netpol/build_l` | 800 ms | 19 ms ✓ | | |
@@ -353,7 +353,7 @@ Notes:
 | H8 | 19 | no | `ui/soak_heap_ratio` 1.027 (health, minute 6 → 30; map 1.026, pods 1.023) ≤ 1.15. |
 | H9 | 20 | no | `journal/apply_update` 5.4 µs ≤ 60 µs, `journal/details_after_500` 5.2 ms ≤ 50 ms. |
 | H10 | 21 | no | `e2e/fleet_search_l` 0.15 s ≤ 6 s. |
-| MAP | 22 | **yes: 1 200, provisional** until a WKWebView check | The criterion, amended here (D8): build + view + layout ≤ 250 ms, and no dropped frame at 60 Hz while panning, p95 frame ≤ one frame (16.7 ms). Read literally, "≤ 16 ms" fails at every cap, the current 400 included, since one 60 Hz frame is 16.7 ms. Build + view + layout: `topology/all_m` 103 ms (build and view at 400) + `topology/layout_1200` 3.6 ms ≈ 107 ms. Pan on the all-namespaces map of `m`, headless Chromium, 3 × 5 s drags per cap, with the cap swapped at build time: median 59.9 fps at every cap; p95 frame 16.7 ms at 400, 16.8 ms at 800 and 1 200 (within display-timer jitter of one frame); no long frame or long task. Pointer moves delivered in 5 s fell with size: ≈ 280 at 400, ≈ 190 at 800, ≈ 160 at 1 200. So input handling slows even though no frame drops. Task 22 must check panning in WKWebView before it settles on 1 200. |
+| MAP | 22 | **yes**: 1 200 at the baseline (provisional until a WKWebView check); **800** after Tasks 16a and 16 | The criterion, amended here (D8): build + view + layout ≤ 250 ms, and no dropped frame at 60 Hz while panning, p95 frame ≤ one frame (16.7 ms). Read literally, "≤ 16 ms" fails at every cap, the current 400 included, since one 60 Hz frame is 16.7 ms. Build + view + layout: `topology/all_m` 103 ms (build and view at 400) + `topology/layout_1200` 3.6 ms ≈ 107 ms. Pan on the all-namespaces map of `m`, headless Chromium, 3 × 5 s drags per cap, with the cap swapped at build time: median 59.9 fps at every cap; p95 frame 16.7 ms at 400, 16.8 ms at 800 and 1 200 (within display-timer jitter of one frame); no long frame or long task. Pointer moves delivered in 5 s fell with size: ≈ 280 at 400, ≈ 190 at 800, ≈ 160 at 1 200. So input handling slows even though no frame drops. Task 22 must check panning in WKWebView before it settles on 1 200. **Task 22 (after 16a and 16) chose 800**: re-measured with 4 interleaved rounds × 3 drags per cap, the pointer moves were median 300 at 400, 298 at 800 and 202 at 1 200 (≈ 300 is one per frame), and long frames and long tasks appeared in 5 of 12 drags at 1 200, one long task in 12 at 800 and none at 400; p95 frame 16.7–16.8 ms everywhere. 1 200 takes a third fewer moves than 800 (> 25%), so 800, which needs no WKWebView proviso. Build + view + layout at 800: `topology/all_m` 125 ms. |
 
 ## Open questions
 

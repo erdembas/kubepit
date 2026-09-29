@@ -1347,9 +1347,14 @@ git commit -m "perf(fleet): larger metadata pages and more kind concurrency for 
 **Interfaces:**
 - Produces: `DEFAULT_MAX_NODES` = the largest of 400, 800 and 1 200 for which build + view + layout ≤ 250 ms (`topology/layout_800`, `topology/layout_1200` plus the build/view part of `topology/all_m`) **and** no dropped frame at 60 Hz while panning at that size in Chromium (the probe's pan p95 frame ≤ one frame, 16.7 ms; amended in the spec's D8, since one 60 Hz frame already exceeds 16 ms). _(Baseline: 1 200 fits, provisional until a WKWebView check. The pointer moves delivered fell from ≈ 280 at 400 nodes to ≈ 160 at 1 200.)_
 
-- [ ] **Step 1: Check the gate.** Measure 800 and 1 200 with the benches and a manual pan in `pnpm dev:ui?scale=m&perf=1` (`scrollTable` does not apply; use `__kubepitPerf.startFps()` while dragging for 5 s). If only 400 fits, record the numbers and stop.
+- [x] **Step 1: Check the gate.** Measure 800 and 1 200 with the benches and a manual pan in `pnpm dev:ui?scale=m&perf=1` (`scrollTable` does not apply; use `__kubepitPerf.startFps()` while dragging for 5 s). If only 400 fits, record the numbers and stop.
+  - _As measured, after Tasks 16a and 16 (2026-09-29):_
+    - Benches: `topology/all_m` ≈ 108 ms at 400 and ≈ 125 ms at 800 (build + view + layout), `topology/layout_800` 2.4 ms, `topology/layout_1200` 3.7–3.9 ms, so ≈ 130 ms at 1 200: both fit 250 ms. Build and view now run in the engine worker anyway.
+    - Pan on the all-namespaces map of `m` (production build, headless Chromium, 1600 × 1000, a 5 s drag of Playwright mouse moves as fast as the page takes them, frames from `startFps()`/`stopFps()`), the cap swapped at build time, 4 interleaved rounds × 3 drags per cap (load 12–20): pointer moves median **300** at 400, **298** at 800, **202** at 1 200 (147–243). Median 59.9 fps and p95 frame 16.7–16.8 ms at every cap. Long frames (> 50 ms) and long tasks: none at 400, one long task in 12 drags at 800, in 5 of 12 drags at 1 200.
+    - About 300 moves in 5 s is one per frame, so 400 and 800 take every move. 1 200 loses a third of them (> 25% fewer than 800) and drops frames now and then.
+  - **Chosen: 800.** It needs no WKWebView proviso (1 200 would have); a WKWebView pan check can still raise it later.
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test** (`chainGraph(3000)`, the helper the file already has, in place of `bigGraph`)
 
 ```ts
 it('caps the view at DEFAULT_MAX_NODES with one "+N more" node per kind', () => {
@@ -1360,9 +1365,9 @@ it('caps the view at DEFAULT_MAX_NODES with one "+N more" node per kind', () => 
 });
 ```
 
-- [ ] **Step 3: Run the test to verify it fails, change the constant and the docs, then run the tests to verify they pass.** Run: `pnpm --filter @kubepit/desktop test -- src/lib/kube/topology`. Expected: PASS.
+- [x] **Step 3: Run the test to verify it fails, change the constant and the docs, then run the tests to verify they pass.** Run: `pnpm --filter @kubepit/desktop test -- src/lib/kube/topology`. Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/desktop/src docs

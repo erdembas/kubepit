@@ -1232,7 +1232,9 @@ deterministic:
   accounts, classes and cluster roles only expand from the root), drop old
   ReplicaSets and bookkeeping objects, hide kinds (bridging ownership
   chains in linear time through an adjacency index), collapse pods per
-  controller into group nodes, and cap the map at 400 nodes with one
+  controller into group nodes, and cap the map at 800 nodes
+  (`DEFAULT_MAX_NODES`, measured: at 1 200 panning loses a third of the
+  pointer moves) with one
   "+N more" node per kind.
 - `layout.ts` — tier columns (entry → route → service → workload →
   controller → pods → config/storage/identity → bindings → cluster → node),
