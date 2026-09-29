@@ -1746,3 +1746,73 @@ overlay and Settings → Keyboard.
   the cluster runs. Conflicts with global shortcuts, keyboard mode keys and
   other actions are listed in the editor, Settings → Keyboard and the
   overlay; the app and keyboard mode win.
+
+## Performance
+
+A reproducible large-cluster harness (spec
+`docs/superpowers/specs/2026-09-28-large-cluster-performance-design.md`,
+plan `docs/superpowers/plans/2026-09-28-large-cluster-performance.md`).
+Nothing in it contacts a real cluster: Rust runs against the in-process
+fake API server on 127.0.0.1 with temp-dir `Paths`, the UI against the
+in-memory demo backend.
+
+- **Presets.** `perf/scale-presets.json` defines `s` (1 000 pods, 50
+  nodes), `m` (10 000 pods, 500 nodes) and `l` (20 000 pods, 1 000 nodes,
+  5 000 services, 200 CRDs). The Rust fixture
+  (`crates/kubepit-core/tests/support/scale.rs`: paged, selector-aware,
+  metadata-only lists, quiet or bursting watches) and the demo backend
+  (`?scale=s|m|l&churn=<pod changes/s>` adds `c-scale-<preset>`,
+  `lib/ipc/mock/fixtures/scale.ts`) generate the same objects from it.
+- **Suites.** Each writes JSON that `scripts/perf/compare.mjs` reads.
+  - `pnpm perf:rust` (`cargo bench -p kubepit-core -- --noplot`):
+    Criterion benches in `crates/kubepit-core/benches/` (watch batching,
+    metrics history, alerts, change journal, history writer, fleet-search
+    matchers, Prometheus/Loki parsing) →
+    `target/criterion/<group>/<name>/new/estimates.json`. `e2e.rs` runs
+    against the `l` fixture (watch to synced, fleet search, a proxied
+    Prometheus query) and writes `target/perf/backend-e2e.json` (peak RSS of
+    a child with every background watcher on, and the count of lists
+    requested without `limit=`).
+  - `cargo test -p kubepit-core --test perf_probe` pins watch streams per
+    resource path and the unpaged lists (`-- --ignored` repeats it at `m`
+    and `l`).
+  - `pnpm perf:bench`: Vitest benches (`src/**/*.bench.ts`, Node) of the
+    topology, health, netpol, log and table engines →
+    `perf-results/frontend-bench.json`.
+  - `pnpm perf:ui -- --preset s|m|l --scenarios ttfr,scroll,apply,map,health,leave [--churn N] [--soak <min>] [--port P] [--out F]`:
+    Playwright + Chromium against `vite preview` of the production build
+    (`pnpm --filter @kubepit/desktop build` first, and
+    `pnpm exec playwright install chromium` once). It drives the dev-only
+    in-app probe
+    (`lib/perf/`, on only with `?perf=1` or `localStorage['kubepit.perf']`;
+    `window.__kubepitPerf`), blocks every request outside the preview
+    server and refuses a Tauri page → `perf-results/ui.json`. WKWebView is
+    measured by hand with the same probe in `pnpm tauri:dev`.
+- **Budgets.** `perf/budgets.json` holds one budget per result id (group,
+  value, unit, `max`/`min`, whether it is a timing, `per` for per-line
+  budgets, `abs` for drifts), set for the reference machine (Apple
+  M-series, macOS, on AC power). Ids listed as `informational` (other
+  presets of a budgeted id) print without a budget. The spec's Results
+  table records the baseline, which budgets it misses and which gated
+  optimizations that fires; a missed budget stays as the target of its
+  gated task.
+- **Compare.** `pnpm perf:compare -- [--slack N|ci] [--only rust,e2e,engines,ui,structural]`
+  prints every budget with its value and exits 1 when one is missed or a
+  budgeted result is missing. `--slack` multiplies timing budgets (divides
+  `min` budgets); `--slack ci` takes `ci_slack` from the budget file.
+  Structural counts, memory and ratios stay exact. Unknown ids only warn.
+  Tests: `pnpm perf:test` (`node --test scripts/perf/`).
+- **CI.** `.github/workflows/perf-guard.yml` (pull requests and pushes to
+  `main`) runs the compare tests, the structural probe
+  (`cargo test -p kubepit-core --test perf_probe`), Criterion in quick mode
+  (`--warm-up-time 1 --measurement-time 3`) and the Vitest benches, then
+  `compare.mjs --slack ci --only rust,e2e,engines,structural`, and uploads
+  the results. The compare step is `continue-on-error` until calibrated on
+  a runner (the first run after the remote exists): the budgets are set on
+  an Apple M-series machine, where three Rust ids already miss, so a runner
+  more than ~1.8× slower fails them even at slack 2.5. It moves into
+  `ci.yml` as its `perf-guard` job when the CI plan lands.
+  `.github/workflows/perf-nightly.yml` (03:00 UTC and manual) builds the UI,
+  installs Chromium, runs `perf:ui` at `l` with churn 50 and the 30-minute
+  soak, `ttfr,map,health` at `s` and `m`, and
+  `compare.mjs --slack ci --only ui`. Neither uses secrets.

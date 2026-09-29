@@ -40,6 +40,22 @@ test('soakSummary compares the end with the 5-minute sample', () => {
   assert.equal(s.heapRatio, 1.1);
   assert.equal(s.domDrift, 0.05);
 });
+test('soakSummary compares the end with the first sample from minute 5 in the same view', () => {
+  const views = ['pods', '@resource-map', '@health'];
+  // The map is the heaviest view: against minute 5 (the map), the health view
+  // at minute 30 would hide 25% growth.
+  const heap = { pods: 400, '@resource-map': 500, '@health': 400 };
+  const samples = Array.from({ length: 30 }, (_, i) => {
+    const view = views[i % 3];
+    return { minute: i + 1, view, heap: heap[view] * (1 + i / 100), dom: 1000 };
+  });
+  const s = soakSummary(samples);
+  assert.equal(samples[4].view, '@resource-map');
+  assert.equal(samples[29].view, '@health');
+  // Minute 6 is the first health sample at or after minute 5.
+  assert.equal(s.heapRatio, (400 * 1.29) / (400 * 1.05));
+  assert.equal(s.domDrift, 0);
+});
 test('soakSummary of a short soak uses its first sample', () => {
   const s = soakSummary([
     { minute: 1, heap: 100, dom: 1000 },

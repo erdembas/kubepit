@@ -1,0 +1,395 @@
+{
+  "$comment": "Performance budgets (spec docs/superpowers/specs/2026-09-28-large-cluster-performance-design.md, Budgets). Values are medians on the reference machine in the result's unit; `pnpm perf:compare -- --slack N` multiplies timing budgets by N (CI: ci_slack) and never touches the others. `per` divides a measured total (per-line budgets). `abs` compares the absolute value. Ids matching `informational` are printed without a budget instead of warning as unknown.",
+  "ci_slack": 2.5,
+  "budgets": {
+    "watch/aggregator_initial_20k": {
+      "group": "rust",
+      "value": 120000000,
+      "unit": "ns",
+      "direction": "max",
+      "timing": true
+    },
+    "watch/reset_batch_20k": {
+      "group": "rust",
+      "value": 60000000,
+      "unit": "ns",
+      "direction": "max",
+      "timing": true
+    },
+    "watch/steady_500": {
+      "group": "rust",
+      "value": 3000000,
+      "unit": "ns",
+      "direction": "max",
+      "timing": true
+    },
+    "metrics_history/record_5k_pods_1k_nodes": {
+      "group": "rust",
+      "value": 4000000,
+      "unit": "ns",
+      "direction": "max",
+      "timing": true
+    },
+    "metrics_history/series_cluster": {
+      "group": "rust",
+      "value": 50000,
+      "unit": "ns",
+      "direction": "max",
+      "timing": true
+    },
+    "metrics_history/series_100_pods": {
+      "group": "rust",
+      "value": 1000000,
+      "unit": "ns",
+      "direction": "max",
+      "timing": true
+    },
+    "alerts/tracker_initial_20k": {
+      "group": "rust",
+      "value": 150000000,
+      "unit": "ns",
+      "direction": "max",
+      "timing": true
+    },
+    "alerts/tracker_pod_update": {
+      "group": "rust",
+      "value": 5000,
+      "unit": "ns",
+      "direction": "max",
+      "timing": true
+    },
+    "alerts/book_record": {
+      "group": "rust",
+      "value": 10000,
+      "unit": "ns",
+      "direction": "max",
+      "timing": true
+    },
+    "journal/prepare_configmap_4k": {
+      "group": "rust",
+      "value": 40000,
+      "unit": "ns",
+      "direction": "max",
+      "timing": true
+    },
+    "journal/apply_update": {
+      "group": "rust",
+      "value": 60000,
+      "unit": "ns",
+      "direction": "max",
+      "timing": true
+    },
+    "journal/details_after_500": {
+      "group": "rust",
+      "value": 50000000,
+      "unit": "ns",
+      "direction": "max",
+      "timing": true
+    },
+    "history/writer_events_10k": {
+      "group": "rust",
+      "value": 1000000000,
+      "unit": "ns",
+      "direction": "max",
+      "timing": true,
+      "note": "0 dropped: the bench asserts it"
+    },
+    "fleet_search/matcher_substring_50k": {
+      "group": "rust",
+      "value": 5000000,
+      "unit": "ns",
+      "direction": "max",
+      "timing": true
+    },
+    "fleet_search/matcher_glob_50k": {
+      "group": "rust",
+      "value": 15000000,
+      "unit": "ns",
+      "direction": "max",
+      "timing": true
+    },
+    "fleet_search/matcher_regex_50k": {
+      "group": "rust",
+      "value": 15000000,
+      "unit": "ns",
+      "direction": "max",
+      "timing": true
+    },
+    "prometheus/parse_200x240": {
+      "group": "rust",
+      "value": 8000000,
+      "unit": "ns",
+      "direction": "max",
+      "timing": true
+    },
+    "loki/parse_5000_lines_50_streams": {
+      "group": "rust",
+      "value": 10000000,
+      "unit": "ns",
+      "direction": "max",
+      "timing": true
+    },
+
+    "e2e/watch_pods_synced_l": {
+      "group": "e2e",
+      "value": 3000000000,
+      "unit": "ns",
+      "direction": "max",
+      "timing": true
+    },
+    "e2e/fleet_search_l": {
+      "group": "e2e",
+      "value": 6000000000,
+      "unit": "ns",
+      "direction": "max",
+      "timing": true
+    },
+    "e2e/prometheus_query": {
+      "group": "e2e",
+      "value": 50000000,
+      "unit": "ns",
+      "direction": "max",
+      "timing": true
+    },
+    "e2e/max_rss_l_all_watchers": {
+      "group": "e2e",
+      "value": 700000000,
+      "unit": "bytes",
+      "direction": "max",
+      "timing": false,
+      "note": "700 MB; memory does not scale with runner speed, so no slack"
+    },
+
+    "structural/list_requests_without_limit": {
+      "group": "structural",
+      "value": 2,
+      "unit": "count",
+      "direction": "max",
+      "timing": false,
+      "note": "the snapshot pinned by tests/perf_probe.rs (metrics.k8s.io nodes and pods); H4 lowers it to 0"
+    },
+
+    "topology/namespace_l": {
+      "group": "engines",
+      "value": 30,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true
+    },
+    "topology/all_m": {
+      "group": "engines",
+      "value": 1500,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true
+    },
+    "topology/layout_800": {
+      "group": "engines",
+      "value": 250,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true
+    },
+    "health/scan_m": {
+      "group": "engines",
+      "value": 1500,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true
+    },
+    "health/scan_l": {
+      "group": "engines",
+      "value": 3000,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true
+    },
+    "netpol/build_l": {
+      "group": "engines",
+      "value": 800,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true
+    },
+    "netpol/matrix_namespace_l": {
+      "group": "engines",
+      "value": 300,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true
+    },
+    "logs/parse_json": {
+      "group": "engines",
+      "value": 0.004,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true,
+      "per": 10000,
+      "note": "4 µs per line; the bench parses 10 000 lines"
+    },
+    "logs/parse_logfmt": {
+      "group": "engines",
+      "value": 0.004,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true,
+      "per": 10000,
+      "note": "4 µs per line"
+    },
+    "logs/parse_text": {
+      "group": "engines",
+      "value": 0.003,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true,
+      "per": 10000,
+      "note": "3 µs per line"
+    },
+    "logs/detect_level": {
+      "group": "engines",
+      "value": 0.0008,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true,
+      "per": 10000,
+      "note": "0.8 µs per line"
+    },
+    "logs/record_index_50k": {
+      "group": "engines",
+      "value": 250,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true
+    },
+    "table/filter_sort_20k": {
+      "group": "engines",
+      "value": 60,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true
+    },
+
+    "ui/ttfr_pods_s": {
+      "group": "ui",
+      "value": 400,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true
+    },
+    "ui/ttfr_pods_m": {
+      "group": "ui",
+      "value": 900,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true
+    },
+    "ui/ttfr_pods_l": {
+      "group": "ui",
+      "value": 1500,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true
+    },
+    "ui/synced_pods_l": {
+      "group": "ui",
+      "value": 4000,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true
+    },
+    "ui/scroll_fps_l": {
+      "group": "ui",
+      "value": 55,
+      "unit": "fps",
+      "direction": "min",
+      "timing": true,
+      "note": "median fps"
+    },
+    "ui/scroll_p95_frame_l": {
+      "group": "ui",
+      "value": 25,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true,
+      "note": "part of the ui/scroll_fps_l budget"
+    },
+    "ui/scroll_long_task_max_l": {
+      "group": "ui",
+      "value": 100,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true,
+      "note": "part of the ui/scroll_fps_l budget"
+    },
+    "ui/apply_p95_l_churn50": {
+      "group": "ui",
+      "value": 16,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true
+    },
+    "ui/map_namespace_l": {
+      "group": "ui",
+      "value": 500,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true
+    },
+    "ui/map_all_m": {
+      "group": "ui",
+      "value": 2500,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true
+    },
+    "ui/health_scan_m": {
+      "group": "ui",
+      "value": 3000,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true
+    },
+    "ui/health_long_task_max_m": {
+      "group": "ui",
+      "value": 200,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true,
+      "note": "part of the ui/health_scan_m budget"
+    },
+    "ui/map_leave": {
+      "group": "ui",
+      "value": 200,
+      "unit": "ms",
+      "direction": "max",
+      "timing": true
+    },
+    "ui/soak_heap_ratio": {
+      "group": "ui",
+      "value": 1.15,
+      "unit": "ratio",
+      "direction": "max",
+      "timing": false
+    },
+    "ui/soak_dom_nodes": {
+      "group": "ui",
+      "value": 0.1,
+      "unit": "ratio",
+      "direction": "max",
+      "timing": false,
+      "abs": true,
+      "note": "DOM node drift within ±10%"
+    }
+  },
+  "informational": [
+    "topology/layout_1200",
+    "ui/ttfr_pods_*",
+    "ui/synced_pods_*",
+    "ui/scroll_*",
+    "ui/apply_p95_*",
+    "ui/map_namespace_*",
+    "ui/map_all_*",
+    "ui/health_scan_*",
+    "ui/health_long_task_max_*"
+  ]
+}
