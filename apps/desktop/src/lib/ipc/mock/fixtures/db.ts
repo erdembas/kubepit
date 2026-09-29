@@ -263,6 +263,8 @@ interface Watcher {
   listed: boolean;
   /** A `synced` batch went out. */
   syncedSent: boolean;
+  /** `seq` of the last batch (the demo backend ignores acks). */
+  seq: number;
 }
 
 export type WatcherSource = 'resource_watch' | 'internal';
@@ -305,6 +307,7 @@ export function addWatcher(
     first: listing,
     listed: !listing,
     syncedSent: !listing,
+    seq: 0,
   });
   return id;
 }
@@ -349,6 +352,8 @@ function flush(w: Watcher) {
     synced: w.listed,
     error: null,
     recovered: false,
+    seq: ++w.seq,
+    stopped: false,
   };
   w.first = false;
   if (w.listed) w.syncedSent = true;
@@ -397,7 +402,13 @@ export function deliverList(id: string, items: readonly KubeObject[]) {
     if (!alive(w)) return;
     const chunk = chunks[i]!;
     if (chunk.upserts.length === WATCH_BATCH_MAX) {
-      w.emit({ ...chunk, reset: w.first, upserts: structuredClone(chunk.upserts), synced: false });
+      w.emit({
+        ...chunk,
+        reset: w.first,
+        upserts: structuredClone(chunk.upserts),
+        synced: false,
+        seq: ++w.seq,
+      });
       w.first = false;
       if (i + 1 < chunks.length) {
         window.setTimeout(() => send(i + 1), 0);

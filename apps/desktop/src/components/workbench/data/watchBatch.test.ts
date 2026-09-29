@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { KubeObject, WatchBatch } from '@/types';
-import { applyBatch, batchFlush, batchPatch } from './watchBatch';
+import { applyBatch, batchFlush, batchPatch, routeBatch } from './watchBatch';
 import type { WatchSnapshot } from './watchCache';
 
 const pod = (uid: string, namespace = 'a') =>
@@ -13,7 +13,51 @@ const batch = (b: Partial<WatchBatch>): WatchBatch => ({
   synced: false,
   error: null,
   recovered: false,
+  seq: 1,
+  stopped: false,
   ...b,
+});
+
+describe('routeBatch', () => {
+  const route = () => {
+    const calls: string[] = [];
+    return {
+      calls,
+      route: {
+        apply: (b: WatchBatch) => void calls.push(`apply ${b.seq}`),
+        ack: (b: WatchBatch) => void calls.push(`ack ${b.seq}`),
+        restart: () => void calls.push('restart'),
+      },
+    };
+  };
+
+  it('acks a current batch after applying it', () => {
+    const { calls, route: r } = route();
+    routeBatch(batch({ seq: 3 }), true, r);
+    expect(calls).toEqual(['apply 3', 'ack 3']);
+  });
+  it('acks a superseded watch’s batch without applying it', () => {
+    const { calls, route: r } = route();
+    routeBatch(batch({ seq: 7 }), false, r);
+    expect(calls).toEqual(['ack 7']);
+  });
+  it('acks even when applying throws', () => {
+    const { calls, route: r } = route();
+    const failing = {
+      ...r,
+      apply: () => {
+        throw new Error('boom');
+      },
+    };
+    expect(() => routeBatch(batch({ seq: 2 }), true, failing)).toThrow('boom');
+    expect(calls).toEqual(['ack 2']);
+  });
+  it('restarts a current watch the backend stopped, and only then', () => {
+    const { calls, route: r } = route();
+    routeBatch(batch({ seq: 5, stopped: true }), true, r);
+    routeBatch(batch({ seq: 5, stopped: true }), false, r);
+    expect(calls).toEqual(['restart']);
+  });
 });
 
 describe('watch batches', () => {

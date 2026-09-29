@@ -65,8 +65,11 @@ pub fn pods() -> Gvk {
 }
 
 /// Start a cluster-wide `resource_watch` of `gvk` and wait for its first
-/// `synced` batch; returns the watch id. The watch keeps running (its sink
-/// never refuses a batch) until unwatched or disconnected.
+/// `synced` batch, acknowledging each batch like the UI; returns the watch
+/// id. The watch keeps running (its sink never refuses a batch) until
+/// unwatched or disconnected, or until later batches, which nobody
+/// acknowledges, fill its window for `watch::ACK_TIMEOUT` (the quiet
+/// fixture sends none).
 pub async fn wait_synced(app: &Kubepit, id: &str, gvk: &Gvk) -> String {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<WatchBatch>();
     let watch = app
@@ -82,6 +85,7 @@ pub async fn wait_synced(app: &Kubepit, id: &str, gvk: &Gvk) -> String {
             .expect("the watch syncs within 60 s")
             .expect("the watch is running");
         assert!(batch.error.is_none(), "watch error: {:?}", batch.error);
+        app.resource_watch_ack(&watch, batch.seq);
         if batch.synced {
             return watch;
         }

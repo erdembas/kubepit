@@ -3,7 +3,7 @@ import { ipc } from '@/lib/ipc';
 import { kindKey } from '@/lib/kube/catalog';
 import { perfNow, recordWatchCommit } from '@/lib/perf/probe';
 import type { ClusterId, Gvk, KubeObject, WatchBatch } from '@/types';
-import { applyBatch, batchFlush, isForbidden } from './watchBatch';
+import { applyBatch, batchFlush, isForbidden, routeBatch } from './watchBatch';
 
 /**
  * Shared, ref-counted resource watches. Every table, mini-table and overview
@@ -14,6 +14,9 @@ import { applyBatch, batchFlush, isForbidden } from './watchBatch';
  *
  * The last snapshot is kept after the watch stops (hidden tab, disconnected
  * view) so returning to a view paints instantly while the new watch resyncs.
+ * Hidden tabs hold no backend watch, so the backend's flow control (every
+ * batch is acknowledged once applied, see `routeBatch`) only concerns live
+ * views.
  *
  * A batch that reports an error still carries its objects (`watchBatch.ts`):
  * the list only turns `error` when nothing is left; otherwise the rows stay
@@ -45,6 +48,11 @@ const EMPTY: WatchSnapshot = {
 
 function errorText(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Tells the backend a batch is applied (an ended watch ignores it). */
+function acknowledge(batch: WatchBatch) {
+  void ipc.resourceWatchAck(batch.watch_id, batch.seq).catch(() => undefined);
 }
 
 class WatchEntry {
@@ -87,10 +95,15 @@ class WatchEntry {
   private start() {
     const generation = ++this.generation;
     this.update({ status: 'loading', error: null, forbidden: false, synced: false });
+    const route = {
+      apply: (batch: WatchBatch) => this.apply(batch),
+      ack: acknowledge,
+      restart: () => this.restart(),
+    };
     ipc
-      .resourceWatch(this.clusterId, this.gvk, this.namespaces, (batch) => {
-        if (generation === this.generation) this.apply(batch);
-      })
+      .resourceWatch(this.clusterId, this.gvk, this.namespaces, (batch) =>
+        routeBatch(batch, generation === this.generation, route),
+      )
       .then((id) => {
         if (generation === this.generation) this.watchId = id;
         else void ipc.resourceUnwatch(id).catch(() => undefined);

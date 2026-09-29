@@ -9,7 +9,7 @@ use serde::Serialize;
 use tauri::Emitter;
 
 use crate::terminal::TerminalManager;
-use crate::windows::WindowTerminals;
+use crate::windows::WindowOwned;
 
 /// `cluster://status`
 pub const EVENT_CLUSTER_STATUS: &str = "cluster://status";
@@ -106,7 +106,9 @@ pub fn emit_settings_changed(app: &tauri::AppHandle, source: &str, settings: &Se
 pub struct AppState {
     pub core: Arc<Kubepit>,
     pub terminals: TerminalManager,
-    pub window_terminals: WindowTerminals,
+    pub window_terminals: WindowOwned,
+    /// Resource watches by window: closing a window stops them.
+    pub window_watches: WindowOwned,
 }
 
 #[cfg(test)]

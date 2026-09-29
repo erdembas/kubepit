@@ -25,6 +25,16 @@
 //! `Delete`); once no source is failing, the next batch has `recovered` set
 //! and the UI clears the error it shows. The task stops as soon as the
 //! channel to the webview is gone.
+//!
+//! Batches are acknowledged ([`AckWindow`]): each carries a `seq`, and the
+//! webview acks it once applied (`resource_watch_ack`). With
+//! [`MAX_UNACKED`] batches in flight the watch keeps folding events (the
+//! pending upserts are latest-wins) and sends nothing, so a slow webview
+//! gets fewer, larger batches instead of a growing queue. A watch whose
+//! batches get no ack for [`ACK_TIMEOUT`] stops, which ends the watches of
+//! a closed window even when the channel still accepts sends (Tauri's
+//! larger payloads do). Its last batch has `stopped` set, so a webview that
+//! was only frozen restarts the watch when it runs again.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -280,6 +290,8 @@ impl WatchAggregator {
                 synced,
                 error,
                 recovered,
+                seq: 0,
+                stopped: false,
             });
         }
         let order = std::mem::take(&mut self.upsert_order);
@@ -298,16 +310,121 @@ impl WatchAggregator {
             synced,
             error,
             recovered,
+            seq: 0,
+            stopped: false,
         })
     }
 }
 
-/// Drive the merged watcher streams until the sink rejects a batch.
+/// Batches a watch may have sent and not had acknowledged yet. While the
+/// window is full, the watch keeps folding events (latest wins) and sends
+/// nothing, so a slow or dead webview bounds its IPC queue.
+pub const MAX_UNACKED: u64 = 4;
+/// A watch whose sent batches get no acknowledgement for this long stops:
+/// its webview is gone (or frozen; the final `stopped` batch tells it to
+/// start over once it runs again).
+pub const ACK_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Flow control of one watch: batches are numbered from 1 (`WatchBatch.seq`)
+/// and an acknowledgement of `seq` covers every batch up to it.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct AckWindow {
+    sent: u64,
+    acked: u64,
+}
+
+impl AckWindow {
+    pub fn can_send(&self) -> bool {
+        self.unacked() < MAX_UNACKED
+    }
+
+    /// Records a sent batch; returns its `seq`.
+    pub fn on_sent(&mut self) -> u64 {
+        self.sent += 1;
+        self.sent
+    }
+
+    /// Acknowledges every batch up to `seq`. Stale or duplicate acks change
+    /// nothing, and an ack beyond the last sent batch counts up to it only.
+    pub fn on_ack(&mut self, seq: u64) {
+        self.acked = self.acked.max(seq.min(self.sent));
+    }
+
+    pub fn unacked(&self) -> u64 {
+        self.sent - self.acked
+    }
+}
+
+type AckSenders = Arc<parking_lot::Mutex<HashMap<String, tokio::sync::watch::Sender<u64>>>>;
+
+/// Acknowledgement channels of the running watches, by watch id
+/// ([`Kubepit::resource_watch_ack`] → the watch's task).
+#[derive(Clone, Default)]
+pub(crate) struct WatchAcks(AckSenders);
+
+impl WatchAcks {
+    /// Registers `watch_id`; dropping the registration unregisters it.
+    fn register(&self, watch_id: &str) -> AckRegistration {
+        let (tx, rx) = tokio::sync::watch::channel(0);
+        self.0.lock().insert(watch_id.to_string(), tx);
+        AckRegistration {
+            rx,
+            _unregister: Unregister {
+                senders: self.0.clone(),
+                watch_id: watch_id.to_string(),
+            },
+        }
+    }
+
+    /// Forwards an acknowledgement of `seq`; unknown ids are ignored.
+    fn ack(&self, watch_id: &str, seq: u64) {
+        if let Some(tx) = self.0.lock().get(watch_id) {
+            tx.send_if_modified(|acked| {
+                let newer = seq > *acked;
+                if newer {
+                    *acked = seq;
+                }
+                newer
+            });
+        }
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.0.lock().len()
+    }
+}
+
+struct AckRegistration {
+    rx: tokio::sync::watch::Receiver<u64>,
+    _unregister: Unregister,
+}
+
+struct Unregister {
+    senders: AckSenders,
+    watch_id: String,
+}
+
+impl Drop for Unregister {
+    fn drop(&mut self) {
+        self.senders.lock().remove(&self.watch_id);
+    }
+}
+
+/// Watcher events of every source, tagged with the source index.
+type SourceEvent = (
+    usize,
+    std::result::Result<Event<DynamicObject>, watcher::Error>,
+);
+
+/// Drive the merged watcher streams until the sink rejects a batch or the
+/// webview stops acknowledging them.
 async fn run_watch<F>(
     watch_id: String,
     ar: ApiResource,
     apis: Vec<kube::Api<DynamicObject>>,
     sink: F,
+    acks: AckRegistration,
 ) where
     F: Fn(WatchBatch) -> bool + Send + Sync + 'static,
 {
@@ -318,44 +435,145 @@ async fn run_watch<F>(
             .map(move |event| (index, event))
             .boxed()
     });
-    let mut merged = futures::stream::select_all(streams);
-    let mut agg = WatchAggregator::new(watch_id, sources);
+    let merged = futures::stream::select_all(streams);
+    // `acks` stays registered until this future ends or is dropped (abort).
+    let AckRegistration {
+        rx,
+        _unregister: _registered,
+    } = acks;
+    drive(watch_id, sources, merged, &ar, sink, rx).await;
+}
+
+/// What [`flush`] did.
+#[derive(Debug, PartialEq, Eq)]
+enum Flush {
+    /// Sent a batch, or there was nothing to send.
+    Done,
+    /// The ack window is full: nothing was taken.
+    Blocked,
+    /// The sink refused the batch: the webview is gone.
+    Refused,
+}
+
+/// Send the pending batch when the ack window allows it.
+fn flush<F: Fn(WatchBatch) -> bool>(
+    agg: &mut WatchAggregator,
+    window: &mut AckWindow,
+    ack_deadline: std::pin::Pin<&mut tokio::time::Sleep>,
+    sink: &F,
+) -> Flush {
+    if !window.can_send() {
+        return Flush::Blocked;
+    }
+    let Some(mut batch) = agg.take_batch() else {
+        return Flush::Done;
+    };
+    if window.unacked() == 0 {
+        ack_deadline.reset(tokio::time::Instant::now() + ACK_TIMEOUT);
+    }
+    batch.seq = window.on_sent();
+    if sink(batch) {
+        Flush::Done
+    } else {
+        Flush::Refused
+    }
+}
+
+/// The watch loop: fold `events`, flush every [`FLUSH_INTERVAL`] or at
+/// [`FLUSH_MAX_OBJECTS`] pending changes while the ack window allows it
+/// (a flush that fell due while it was full goes out with the ack that
+/// frees it), and stop once sent batches get no ack for [`ACK_TIMEOUT`].
+async fn drive<S, F>(
+    watch_id: String,
+    sources: usize,
+    mut events: S,
+    ar: &ApiResource,
+    sink: F,
+    mut acks: tokio::sync::watch::Receiver<u64>,
+) where
+    S: futures::Stream<Item = SourceEvent> + Unpin,
+    F: Fn(WatchBatch) -> bool,
+{
+    let mut agg = WatchAggregator::new(watch_id.clone(), sources);
+    let mut window = AckWindow::default();
     // First flush one interval in, so the initial batch already carries the
     // first page of objects instead of an empty reset.
     let mut ticker =
         tokio::time::interval_at(tokio::time::Instant::now() + FLUSH_INTERVAL, FLUSH_INTERVAL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-
-    let flush = |agg: &mut WatchAggregator| -> bool {
-        match agg.take_batch() {
-            Some(batch) => sink(batch),
-            None => true,
-        }
-    };
+    // Armed (reset) by the first unacknowledged batch and by every ack that
+    // makes progress; only polled while something is unacknowledged.
+    let ack_deadline = tokio::time::sleep(ACK_TIMEOUT);
+    tokio::pin!(ack_deadline);
+    let mut acks_open = true;
+    let mut flush_due = false;
 
     loop {
         tokio::select! {
-            item = merged.next() => {
+            item = events.next() => {
                 match item {
-                    Some((index, Ok(event))) => agg.on_event(index, event, &ar),
+                    Some((index, Ok(event))) => agg.on_event(index, event, ar),
                     Some((index, Err(err))) => {
                         let message = watcher_error_message(&err);
                         tracing::debug!("watch {} source {index}: {message}", ar.plural);
                         agg.on_error(index, message);
                     }
                     None => {
-                        flush(&mut agg);
+                        flush(&mut agg, &mut window, ack_deadline.as_mut(), &sink);
                         return;
                     }
                 }
-                if agg.pending() >= FLUSH_MAX_OBJECTS && !flush(&mut agg) {
-                    return;
+                if agg.pending() >= FLUSH_MAX_OBJECTS {
+                    match flush(&mut agg, &mut window, ack_deadline.as_mut(), &sink) {
+                        Flush::Done => {}
+                        Flush::Blocked => flush_due = true,
+                        Flush::Refused => return,
+                    }
                 }
             }
             _ = ticker.tick() => {
-                if !flush(&mut agg) {
-                    return;
+                match flush(&mut agg, &mut window, ack_deadline.as_mut(), &sink) {
+                    Flush::Done => {}
+                    Flush::Blocked => flush_due = true,
+                    Flush::Refused => return,
                 }
+            }
+            changed = acks.changed(), if acks_open => {
+                if changed.is_err() {
+                    acks_open = false;
+                    continue;
+                }
+                let unacked = window.unacked();
+                window.on_ack(*acks.borrow_and_update());
+                if window.unacked() < unacked {
+                    ack_deadline.as_mut().reset(tokio::time::Instant::now() + ACK_TIMEOUT);
+                }
+                if flush_due && window.can_send() {
+                    flush_due = false;
+                    if flush(&mut agg, &mut window, ack_deadline.as_mut(), &sink) == Flush::Refused {
+                        return;
+                    }
+                }
+            }
+            () = &mut ack_deadline, if window.unacked() > 0 => {
+                tracing::debug!(
+                    "watch {} ({}): no acknowledgement for {}s, stopping",
+                    ar.plural,
+                    watch_id,
+                    ACK_TIMEOUT.as_secs()
+                );
+                sink(WatchBatch {
+                    watch_id,
+                    reset: false,
+                    upserts: Vec::new(),
+                    deletes: Vec::new(),
+                    synced: agg.synced(),
+                    error: None,
+                    recovered: false,
+                    seq: window.on_sent(),
+                    stopped: true,
+                });
+                return;
             }
         }
     }
@@ -392,10 +610,12 @@ impl Kubepit {
                 .collect()
         };
         let watch_id = uuid::Uuid::new_v4().to_string();
+        // Registered before the task starts, so no ack can arrive too early.
+        let acks = self.watch_acks.register(&watch_id);
         self.watches.spawn(
             &watch_id,
             cluster_id,
-            run_watch(watch_id.clone(), ar, apis, sink),
+            run_watch(watch_id.clone(), ar, apis, sink, acks),
         );
         Ok(watch_id)
     }
@@ -404,6 +624,14 @@ impl Kubepit {
     /// have ended because its webview went away).
     pub fn resource_unwatch(&self, watch_id: &str) {
         self.watches.stop(watch_id);
+    }
+
+    /// `resource_watch_ack`: the webview applied every batch of `watch_id`
+    /// up to `seq`. At most [`MAX_UNACKED`] batches are ever in flight; a
+    /// watch that gets no ack for [`ACK_TIMEOUT`] stops. Unknown ids (an
+    /// ended watch) are ignored.
+    pub fn resource_watch_ack(&self, watch_id: &str, seq: u64) {
+        self.watch_acks.ack(watch_id, seq);
     }
 }
 
@@ -681,5 +909,182 @@ mod tests {
         assert!(batch.upserts[0]["metadata"].get("managedFields").is_none());
         agg.on_event(0, Event::Delete(dynamic), &ar);
         assert_eq!(agg.take_batch().unwrap().deletes, vec!["u-1"]);
+    }
+
+    #[test]
+    fn ack_window_blocks_after_four_unacked() {
+        let mut window = AckWindow::default();
+        assert!(window.can_send());
+        let seqs: Vec<u64> = (0..4).map(|_| window.on_sent()).collect();
+        assert_eq!(seqs, [1, 2, 3, 4]);
+        assert!(!window.can_send());
+        window.on_ack(2);
+        assert!(window.can_send());
+        assert_eq!(window.unacked(), 2);
+        // Stale, duplicate and future acks.
+        window.on_ack(1);
+        assert_eq!(window.unacked(), 2);
+        window.on_ack(99);
+        assert_eq!(window.unacked(), 0);
+        assert_eq!(window.on_sent(), 5);
+    }
+
+    #[test]
+    fn ack_registry_forwards_the_newest_seq_while_the_watch_runs() {
+        let acks = WatchAcks::default();
+        let mut registration = acks.register("w");
+        assert_eq!(acks.len(), 1);
+        acks.ack("w", 3);
+        acks.ack("w", 2);
+        acks.ack("unknown", 9);
+        assert!(registration.rx.has_changed().unwrap());
+        assert_eq!(*registration.rx.borrow_and_update(), 3);
+        drop(registration);
+        assert_eq!(acks.len(), 0, "an ended watch unregisters");
+        acks.ack("w", 4);
+    }
+
+    fn pods_ar() -> ApiResource {
+        api_resource(&Gvk {
+            group: String::new(),
+            version: "v1".into(),
+            kind: "Pod".into(),
+            plural: "pods".into(),
+            namespaced: true,
+        })
+    }
+
+    fn pod(i: usize, rv: u32) -> DynamicObject {
+        serde_json::from_value(json!({
+            "metadata": {"name": format!("p{i}"), "namespace": "ns",
+                         "uid": format!("u{i:05}"), "resourceVersion": rv.to_string()}
+        }))
+        .unwrap()
+    }
+
+    /// An initial list of `pods` pods, then `rounds` MODIFIED events for
+    /// each of the first `modified`, then an open stream with no events.
+    fn burst(
+        pods: usize,
+        modified: usize,
+        rounds: u32,
+    ) -> impl futures::Stream<Item = SourceEvent> {
+        let mut events = vec![Event::Init];
+        events.extend((0..pods).map(|i| Event::InitApply(pod(i, 1))));
+        events.push(Event::InitDone);
+        for round in 0..rounds {
+            events.extend((0..modified).map(|i| Event::Apply(pod(i, 2 + round))));
+        }
+        futures::stream::iter(events.into_iter().map(|e| (0, Ok(e))))
+            .chain(futures::stream::pending())
+    }
+
+    type Received = Arc<parking_lot::Mutex<Vec<(tokio::time::Instant, WatchBatch)>>>;
+
+    /// `drive` on its own task with a sink that records every batch.
+    fn spawn_drive(
+        events: impl futures::Stream<Item = SourceEvent> + Send + Unpin + 'static,
+        acks: tokio::sync::watch::Receiver<u64>,
+    ) -> (tokio::task::JoinHandle<()>, Received) {
+        let received = Received::default();
+        let sink = {
+            let received = received.clone();
+            move |batch: WatchBatch| {
+                received.lock().push((tokio::time::Instant::now(), batch));
+                true
+            }
+        };
+        let task = tokio::spawn(async move {
+            drive("w".into(), 1, events, &pods_ar(), sink, acks).await;
+        });
+        (task, received)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn unacked_watch_coalesces_and_stops_after_timeout() {
+        let (_ack_tx, ack_rx) = tokio::sync::watch::channel(0);
+        let started = tokio::time::Instant::now();
+        // 2 000 pods listed, then 2 000 more events: 2 000 Apply of 1 000 pods.
+        let (task, received) = spawn_drive(Box::pin(burst(2_000, 1_000, 2)), ack_rx);
+        tokio::time::sleep(ACK_TIMEOUT - Duration::from_secs(1)).await;
+        {
+            let batches = received.lock();
+            let seqs: Vec<u64> = batches.iter().map(|(_, b)| b.seq).collect();
+            assert_eq!(seqs, [1, 2, 3, 4], "no batch beyond the window");
+            assert!(batches[0].1.reset);
+            assert_eq!(
+                batches.iter().map(|(_, b)| b.upserts.len()).sum::<usize>(),
+                2_000
+            );
+            assert!(batches.iter().all(|(_, b)| !b.stopped));
+        }
+        assert!(!task.is_finished(), "still waiting for an ack");
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert!(
+            task.is_finished(),
+            "stopped after ACK_TIMEOUT without an ack"
+        );
+        let batches = received.lock();
+        assert_eq!(batches.len(), 5);
+        let (at, last) = &batches[4];
+        assert!(last.stopped && last.upserts.is_empty() && last.deletes.is_empty());
+        assert_eq!(last.seq, 5);
+        assert_about(*at - started, ACK_TIMEOUT);
+    }
+
+    /// Equal up to the timer's millisecond resolution.
+    fn assert_about(actual: Duration, expected: Duration) {
+        assert!(
+            actual >= expected && actual <= expected + Duration::from_millis(2),
+            "{actual:?}, expected {expected:?}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_ack_releases_one_coalesced_latest_wins_batch() {
+        let (ack_tx, ack_rx) = tokio::sync::watch::channel(0);
+        let (task, received) = spawn_drive(Box::pin(burst(2_000, 1_000, 2)), ack_rx);
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert_eq!(received.lock().len(), 4);
+        ack_tx.send(4).unwrap();
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        {
+            let batches = received.lock();
+            assert_eq!(batches.len(), 5, "the due flush goes out with the ack");
+            let batch = &batches[4].1;
+            assert_eq!(batch.seq, 5);
+            assert!(batch.synced && !batch.reset);
+            // 2 000 events for 1 000 pods fold into one upsert each, the last.
+            assert_eq!(batch.upserts.len(), 1_000);
+            assert!(batch
+                .upserts
+                .iter()
+                .all(|o| o["metadata"]["resourceVersion"] == "3"));
+        }
+        // Acked in time, the watch keeps running past the first timeout.
+        ack_tx.send(5).unwrap();
+        tokio::time::sleep(ACK_TIMEOUT * 2).await;
+        assert!(!task.is_finished());
+        assert_eq!(received.lock().len(), 5, "an idle watch sends nothing");
+        task.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn every_ack_that_makes_progress_restarts_the_timeout() {
+        let (ack_tx, ack_rx) = tokio::sync::watch::channel(0);
+        let started = tokio::time::Instant::now();
+        let (task, received) = spawn_drive(Box::pin(burst(2_000, 1_000, 2)), ack_rx);
+        tokio::time::sleep(Duration::from_secs(50)).await;
+        // One ack: the due batch goes out and the window is full again.
+        ack_tx.send(1).unwrap();
+        tokio::time::sleep(Duration::from_secs(55)).await;
+        assert!(!task.is_finished(), "105 s in, 55 s after the last ack");
+        assert_eq!(received.lock().len(), 5);
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        assert!(task.is_finished());
+        let batches = received.lock();
+        let (at, last) = batches.last().unwrap();
+        assert!(last.stopped);
+        assert_about(*at - started, Duration::from_secs(50) + ACK_TIMEOUT);
     }
 }

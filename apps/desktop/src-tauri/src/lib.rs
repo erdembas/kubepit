@@ -87,6 +87,7 @@ pub fn run() {
             ipc::resource_list,
             ipc::resource_watch,
             ipc::resource_unwatch,
+            ipc::resource_watch_ack,
             ipc::resource_get,
             ipc::resource_get_yaml,
             ipc::resource_apply_yaml,

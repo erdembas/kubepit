@@ -53,6 +53,8 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 
 [dev-dependencies]
 tempfile = "3"
+# Paused time (`start_paused`) for the watch flow-control tests.
+tokio = { version = "1", features = ["test-util"] }
 # Benchmarks (`benches/`, large-cluster performance harness); dev-only.
 criterion = { version = "0.7", features = ["async_tokio"] }
 

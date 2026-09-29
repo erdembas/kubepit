@@ -1158,19 +1158,33 @@ git commit -m "perf(ui): run health, netpol or topology engines in a worker"
   - `Kubepit::resource_watch_ack(&self, watch_id: &str, seq: u64)`, a Tauri command `resource_watch_ack(watchId, seq)`, and `ipc.resourceWatchAck`.
   - `WatchEntry` acks after `applyBatch`. The mock acks as a no-op.
 
-- [ ] **Step 1: Check the gate.** It fires if the churn run at `l` (the `apply` scenario with `--churn 50`) shows a watch lag > 1 s, or a watch still running (`watchStats`/backend log) after its window closed. The lag is `watch:apply`'s `latencyMs` meta (the first batch's arrival → React commit; the driver's `raw.apply.latencyP95`), not the `watch:apply` duration, which only measures apply + flush → commit.
+_As built (2026-09-29):_
+- **`stopped`.** `WatchBatch.stopped: bool` (serde default) was added. The watch that times out sends one last, empty batch with it, and a `WatchEntry` that still has subscribers restarts. A webview that was only frozen (JS suspended for over a minute) gets it on resume instead of keeping a dead list. No UI and no strings.
+- **Window close.** The window half of the gate is fixed directly too. `resource_watch` takes the calling `tauri::Window` and records the watch in `AppState.window_watches` (`windows.rs` `WindowOwned`, which `WindowTerminals` became). `resource_unwatch` forgets it, and `on_window_destroyed` unwatches the rest. The ack timeout remains the fallback.
+- **Flush timing.** A flush that falls due while the window is full (a tick, or 500 pending) goes out with the ack that frees it. Every ack that makes progress restarts the timeout, which is armed by the first unacknowledged batch.
+- **Frontend.** `watchBatch.ts` `routeBatch` holds the frontend rule: apply a current batch, then ack every batch (superseded generations and throwing applies included); `stopped` → restart. Hidden tabs hold no backend watch (`useWatch` unsubscribes, no linger), so nothing needs keeping alive for them.
+- **Callers in tests.** They now ack what they read: `support::perf::wait_synced` and the fake-server watch test.
 
-- [ ] **Step 2: Write the failing tests.**
+- [x] **Step 1: Check the gate.** It fires if the churn run at `l` (the `apply` scenario with `--churn 50`) shows a watch lag > 1 s, or a watch still running (`watchStats`/backend log) after its window closed. The lag is `watch:apply`'s `latencyMs` meta (the first batch's arrival → React commit; the driver's `raw.apply.latencyP95`), not the `watch:apply` duration, which only measures apply + flush → commit. _(Fired from the code: see the spec's gates table.)_
+
+- [x] **Step 2: Write the failing tests.**
   - `ack_window_blocks_after_four_unacked`: four `on_sent` → `!can_send`; `on_ack(2)` → `can_send`.
   - `unacked_watch_coalesces_and_stops_after_timeout`, with tokio time paused:
     - a sink that never acks receives exactly 4 batches while 2 000 burst events arrive (`ScaleWatch::PodBurst(2000)`);
     - the task ends once 60 s have been advanced.
+  - _As built:_
+    - The burst test is in `tests/fake_apiserver.rs`. It uses the `s` preset with 8 replicas (2 000 pods), and pauses time only after `resource_watch` returns, because connecting waits on real time. The fifth and last batch is the `stopped` one, at 60 s.
+    - `watch.rs` repeats it on a synthetic stream (`drive` is generic over the event stream). It adds:
+      - `an_ack_releases_one_coalesced_latest_wins_batch`: 2 000 events for 1 000 pods → one batch of 1 000, each at its last `resourceVersion`;
+      - `every_ack_that_makes_progress_restarts_the_timeout`;
+      - `ack_registry_forwards_the_newest_seq_while_the_watch_runs`.
+    - `windows.rs` adds `closing_a_window_hands_back_only_its_live_watches`, and `watchBatch.test.ts` the `routeBatch` cases.
 
-- [ ] **Step 3: Run the tests to verify they fail, implement, then run to verify they pass.** Run: `cargo test -p kubepit-core watch && pnpm typecheck && pnpm --filter @kubepit/desktop test`. Expected: PASS.
+- [x] **Step 3: Run the tests to verify they fail, implement, then run to verify they pass.** Run: `cargo test -p kubepit-core watch && pnpm typecheck && pnpm --filter @kubepit/desktop test`. Expected: PASS.
 
-- [ ] **Step 4: Re-run the churn soak.** Record the After values.
+- [x] **Step 4: Re-run the churn soak.** Record the After values. _(As built: the `apply,ttfr` scenarios at `l` with churn 50 (3 runs) and `e2e/watch_pods_synced_l`, not the 30-minute soak. The demo backend acks as a no-op, so the UI numbers show only the frontend's cost of acking; the flow control itself is covered by the paused-time tests.)_
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates apps/desktop docs/superpowers/specs

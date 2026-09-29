@@ -12,6 +12,33 @@ export function isForbidden(message: string) {
   return /forbidden|\b403\b|cannot (list|watch|get)/i.test(message);
 }
 
+export interface BatchRoute {
+  apply(batch: WatchBatch): void;
+  ack(batch: WatchBatch): void;
+  restart(): void;
+}
+
+/**
+ * Routes one batch of a backend watch. The watch's `current` generation
+ * applies it; then every batch is acknowledged, a superseded generation's
+ * too (that watch is being stopped anyway) and one whose apply threw, so
+ * the backend's ack window (4 batches) never stalls on a live view. Acks
+ * do not wait for a frame: a background window keeps its watches. A
+ * `stopped` batch (the backend gave up after 60 s without acks, the webview
+ * was frozen) restarts a current watch instead.
+ */
+export function routeBatch(batch: WatchBatch, current: boolean, route: BatchRoute) {
+  if (batch.stopped) {
+    if (current) route.restart();
+    return;
+  }
+  try {
+    if (current) route.apply(batch);
+  } finally {
+    route.ack(batch);
+  }
+}
+
 /**
  * Applies `reset`, then `upserts`, then `deletes` (uids), whether or not the
  * batch has an error. Returns false for a batch that carries no rows at all

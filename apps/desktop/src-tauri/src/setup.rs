@@ -41,6 +41,7 @@ pub(crate) fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::
         core,
         terminals,
         window_terminals: Default::default(),
+        window_watches: Default::default(),
     });
     Ok(())
 }

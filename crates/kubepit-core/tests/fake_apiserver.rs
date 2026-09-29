@@ -140,6 +140,7 @@ async fn connect_list_watch_apply_against_fake_apiserver() {
             break;
         };
         assert_eq!(batch.watch_id, watch_id);
+        app.resource_watch_ack(&watch_id, batch.seq);
         if batch.reset {
             store.clear();
         }
@@ -558,4 +559,79 @@ async fn logs_helm_and_overview_against_fake_apiserver() {
         .collect();
     assert_eq!(warnings, vec!["new", "old"]);
     assert_eq!(overview.warnings[0]["kind"], "Event");
+}
+
+/// Task 17 (H6): a webview that never acknowledges gets at most
+/// `MAX_UNACKED` batches while the watch folds the rest (the list and a
+/// burst of 2 000 MODIFIED events), and the watch stops `ACK_TIMEOUT` after
+/// its first unacknowledged batch, telling the webview with `stopped`.
+/// Time is paused once the watch is requested (connecting waits on real
+/// time).
+#[tokio::test]
+async fn unacked_watch_coalesces_and_stops_after_timeout() {
+    use kubepit_core::watch::{ACK_TIMEOUT, MAX_UNACKED};
+    use support::scale::{preset, ScaleCluster, ScaleServe, ScaleWatch};
+    use tokio::sync::mpsc::error::TryRecvError;
+    use tokio::time::Instant;
+
+    let mut two_thousand_pods = preset("s");
+    two_thousand_pods.replicas = 8;
+    let cluster = Arc::new(ScaleCluster::generate(&two_thousand_pods));
+    assert_eq!(cluster.count("/api/v1/pods"), Some(2_000));
+    let server = start(cluster.router(ScaleServe {
+        watch: ScaleWatch::PodBurst(2_000),
+    }))
+    .await;
+    let (_dir, app, id) = support::perf::scale_setup(&server.url);
+    app.cluster_connect(&id).await.unwrap();
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(Instant, WatchBatch)>();
+    app.resource_watch(&id, &support::perf::pods(), vec![], move |batch| {
+        let _ = tx.send((Instant::now(), batch));
+        true
+    })
+    .await
+    .unwrap();
+    // The watch task has not run yet (current-thread runtime).
+    tokio::time::pause();
+
+    // The burst is served once the pods watch request is in the log.
+    let bursting = || {
+        server
+            .log
+            .lock()
+            .iter()
+            .any(|r| r.path_only() == "/api/v1/pods" && r.path.contains("watch=true"))
+    };
+    while !bursting() {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let mut batches = Vec::new();
+    while let Ok(received) = rx.try_recv() {
+        batches.push(received);
+    }
+    let seqs: Vec<u64> = batches.iter().map(|(_, b)| b.seq).collect();
+    assert_eq!(seqs.len() as u64, MAX_UNACKED, "{seqs:?}");
+    assert_eq!(seqs, [1, 2, 3, 4]);
+    assert!(batches[0].1.reset);
+    assert!(batches.iter().all(|(_, b)| !b.stopped && b.error.is_none()));
+
+    let first = batches[0].0;
+    tokio::time::sleep_until(first + ACK_TIMEOUT - Duration::from_secs(1)).await;
+    assert!(
+        matches!(rx.try_recv(), Err(TryRecvError::Empty)),
+        "nothing more is sent, and the watch still runs"
+    );
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let (at, last) = rx.recv().await.expect("a final batch");
+    assert!(last.stopped && last.upserts.is_empty());
+    assert_eq!(last.seq, 5);
+    // Timers have millisecond resolution.
+    let waited = at - first;
+    assert!(
+        waited >= ACK_TIMEOUT && waited <= ACK_TIMEOUT + Duration::from_millis(2),
+        "{waited:?}"
+    );
+    assert!(rx.recv().await.is_none(), "the watch task ended");
 }

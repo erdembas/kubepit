@@ -211,6 +211,9 @@ export const ipc = {
       onBatch,
     ),
   resourceUnwatch: (watchId: string) => call<void>('resource_unwatch', { watchId }),
+  /** Every batch of `watchId` up to `seq` is applied (`WatchBatch.seq`). */
+  resourceWatchAck: (watchId: string, seq: number) =>
+    call<void>('resource_watch_ack', { watchId, seq }),
   resourceGet: (clusterId: ClusterId, gvk: Gvk, namespace: string | null, name: string) =>
     call<KubeObject>('resource_get', { clusterId, gvk, namespace, name }),
   resourceGetYaml: (clusterId: ClusterId, gvk: Gvk, namespace: string | null, name: string) =>
