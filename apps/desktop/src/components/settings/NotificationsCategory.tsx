@@ -15,8 +15,10 @@ import {
   alertSettingsOf,
   isSnoozed,
   mutedUntil,
+  savingAlertsOn,
   snoozeUntil,
   withMute,
+  withSavingAlerts,
 } from '@/lib/alerts/policy';
 import { reasonDescription } from '@/lib/alerts/text';
 import { clusterColor } from '@/lib/clusterMeta';
@@ -202,18 +204,32 @@ export function NotificationsCategory({ description }: { description: string }) 
                 <div className="text-fg font-mono text-[11.5px]">{reason}</div>
                 <div className="text-fg-dim text-[11px]">{reasonDescription(reason)}</div>
               </div>
-              <Switch
-                bare
-                checked={!alerts.disabled_reasons.includes(reason)}
-                disabled={!alerts.enabled}
-                onChange={(on) =>
-                  set({
-                    disabled_reasons: on
-                      ? alerts.disabled_reasons.filter((r) => r !== reason)
-                      : [...alerts.disabled_reasons, reason],
-                  })
-                }
-              />
+              {reason === 'RightsizingSaving' ? (
+                // The recommendations' opt-in (off by default), also in Settings → History.
+                <Switch
+                  bare
+                  checked={savingAlertsOn(draft)}
+                  disabled={!alerts.enabled}
+                  onChange={(on) => {
+                    const next = withSavingAlerts(draft, on);
+                    update('recommendations', next.recommendations);
+                    update('alerts', next.alerts);
+                  }}
+                />
+              ) : (
+                <Switch
+                  bare
+                  checked={!alerts.disabled_reasons.includes(reason)}
+                  disabled={!alerts.enabled}
+                  onChange={(on) =>
+                    set({
+                      disabled_reasons: on
+                        ? alerts.disabled_reasons.filter((r) => r !== reason)
+                        : [...alerts.disabled_reasons, reason],
+                    })
+                  }
+                />
+              )}
             </div>
           ))}
         </div>

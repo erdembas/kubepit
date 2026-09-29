@@ -299,6 +299,9 @@ pub struct ClusterRecommendationSummary {
     pub source_changed: bool,
     /// Its latest successful run (with the summary), if any.
     pub run: Option<RecommendationRun>,
+    /// The newest failed or interrupted run after that one (or of a
+    /// cluster that never had a successful scan).
+    pub last_failure: Option<RecommendationRun>,
 }
 
 /// `recommendations_export` formats.

@@ -1616,6 +1616,7 @@ async fn fleet_trend_and_export_read_the_store() {
     assert_eq!(mine.run.as_ref().unwrap().id, second);
     assert!(!mine.scheduled && !mine.source_changed);
     assert!(mine.run.as_ref().unwrap().summary.is_some());
+    assert!(mine.last_failure.is_none());
     let theirs = fleet.iter().find(|c| c.cluster_id == other.id).unwrap();
     assert!(theirs.run.is_none() && !theirs.source_changed);
 

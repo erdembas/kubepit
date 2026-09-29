@@ -15,7 +15,34 @@ export const ALERT_REASONS: readonly AlertReason[] = [
   'NodeNotReady',
   'NodePressure',
   'ProgressDeadlineExceeded',
+  'RightsizingSaving',
 ];
+
+/**
+ * Whether new high-confidence savings raise alerts: the recommendations'
+ * opt-in (off by default) and the reason not disabled.
+ */
+export function savingAlertsOn(settings: Settings | null | undefined): boolean {
+  return (
+    !!settings?.recommendations.alerts &&
+    !alertSettingsOf(settings).disabled_reasons.includes('RightsizingSaving')
+  );
+}
+
+/** Turn saving alerts on (also re-enabling the reason) or off (the opt-in only). */
+export function withSavingAlerts(settings: Settings, on: boolean): Settings {
+  const alerts = alertSettingsOf(settings);
+  return {
+    ...settings,
+    recommendations: { ...settings.recommendations, alerts: on },
+    alerts: on
+      ? {
+          ...alerts,
+          disabled_reasons: alerts.disabled_reasons.filter((r) => r !== 'RightsizingSaving'),
+        }
+      : alerts,
+  };
+}
 
 export const DEFAULT_ALERT_SETTINGS: AlertSettings = {
   enabled: true,

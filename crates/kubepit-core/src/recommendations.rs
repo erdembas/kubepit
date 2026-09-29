@@ -204,13 +204,19 @@ impl Kubepit {
     }
 
     /// `recommendations_fleet`: every registered cluster with its latest
-    /// successful run (stored data only, no cluster access).
+    /// successful run and the newest failure after it (stored data only,
+    /// no cluster access).
     pub fn recommendations_fleet(&self) -> Result<Vec<ClusterRecommendationSummary>> {
-        let stored: HashMap<String, (RecommendationRun, String)> = self
+        let (stored, failures) = self
             .history
-            .rec_read(rec::fleet)?
+            .rec_read(|conn| Ok((rec::fleet(conn)?, rec::fleet_failures(conn)?)))?;
+        let stored: HashMap<String, (RecommendationRun, String)> = stored
             .into_iter()
             .map(|(cluster_id, run, config)| (cluster_id, (run, config)))
+            .collect();
+        let mut failures: HashMap<String, RecommendationRun> = failures
+            .into_iter()
+            .map(|run| (run.cluster_id.clone(), run))
             .collect();
         let scheduled: HashSet<String> = self
             .recommendations
@@ -231,6 +237,7 @@ impl Kubepit {
                     source_changed: entry
                         .is_some_and(|(_, config)| *config != source_config(cluster)),
                     run: entry.map(|(run, _)| run.clone()),
+                    last_failure: failures.remove(&cluster.id),
                 }
             })
             .collect())
