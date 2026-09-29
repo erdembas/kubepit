@@ -1,5 +1,5 @@
 import * as i18n from '@/i18n';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowRight,
@@ -117,13 +117,20 @@ function ValueRow({
   );
 }
 
-/** Per container: every value that changes (limits raised with their requests called out) and the strategy's caveats. */
+/**
+ * Per container: every value that changes (limits raised with their
+ * requests called out) and the strategy's caveats. Shared with the
+ * Recommendations drawer, which adds each container's evidence (`detail`).
+ */
 export function ContainerChanges({
   containers,
   includeLimits,
+  detail,
 }: {
   containers: readonly ContainerRecommendation[];
   includeLimits: boolean;
+  /** More about one container, under its caveats. */
+  detail?: (container: ContainerRecommendation) => ReactNode;
 }) {
   i18n.useLocale();
   return (
@@ -204,6 +211,7 @@ export function ContainerChanges({
                 ))}
               </ul>
             )}
+            {detail?.(c)}
           </div>
         );
       })}
