@@ -1,10 +1,13 @@
 import * as i18n from '@/i18n';
 import { useLocaleMemo as useMemo } from '@/i18n';
 import { useCallback, useState } from 'react';
+import { workloadKey } from '@/lib/kube/recommendations/model';
+import { useRecommendationsStore } from '@/store/useRecommendationsStore';
 import type { WorkloadRecommendation } from '@/types';
 import { RightsizingDialog } from '../cost/RightsizingDialog';
 import { DrawerFrame, MissingRecommendation, RecommendationDrawer } from './RecommendationDrawer';
 import { findRecommendation } from './drawerModel';
+import { useQuickApply } from './quickApply';
 import type { SectionProps } from './sectionProps';
 import { updateRecommendationsView, useRecommendationsView } from './viewState';
 
@@ -13,8 +16,9 @@ import { updateRecommendationsView, useRecommendationsView } from './viewState';
  * for the row whose `workloadKey` is `useRecommendationsView`'s `open`,
  * looked up in the whole report (the list's filters do not hide it; other
  * sections and "Open in Recommendations" set `open` too). Closing clears
- * `open`. Apply opens the audited `RightsizingDialog`; one-click apply
- * (Task 26) plugs into `onApply`.
+ * `open`. "Apply" of a one-click row is `quickApply`; what it refuses, and
+ * "Review & apply", open the audited `RightsizingDialog`. A past run or a
+ * disconnected cluster applies nothing.
  */
 export function DrawerSection({ clusterId, report, runId, past, connected }: SectionProps) {
   i18n.useLocale();
@@ -26,6 +30,7 @@ export function DrawerSection({ clusterId, report, runId, past, connected }: Sec
     [clusterId],
   );
   const review = useCallback((r: WorkloadRecommendation) => setReviewing(r), []);
+  const apply = useQuickApply(clusterId, { past, connected }, review);
 
   return (
     <>
@@ -39,7 +44,7 @@ export function DrawerSection({ clusterId, report, runId, past, connected }: Sec
             past={past}
             connected={connected}
             onClose={close}
-            onApply={review}
+            onApply={apply}
             onReview={review}
           />
         ) : (
@@ -52,6 +57,10 @@ export function DrawerSection({ clusterId, report, runId, past, connected }: Sec
           clusterId={clusterId}
           rec={reviewing}
           currency={report.currency}
+          requireAck={reviewing.confidence !== 'high'}
+          onApplied={() =>
+            useRecommendationsStore.getState().markApplied(clusterId, workloadKey(reviewing))
+          }
           onClose={() => setReviewing(null)}
         />
       )}

@@ -384,4 +384,10 @@ describe('drawerAction', () => {
     );
     expect(drawerAction('review', { past: false, connected: false }).disabled).toMatch(/Connect/);
   });
+  it('explains an RBAC denial, except for the read-only review', () => {
+    const blocked = { ...live, blocked: "You don't have permission to patch deployments" };
+    expect(drawerAction('one-click', blocked).disabled).toBe(blocked.blocked);
+    expect(drawerAction('review', blocked).disabled).toBe(blocked.blocked);
+    expect(drawerAction('read-only', blocked).disabled).toBeNull();
+  });
 });

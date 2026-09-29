@@ -42,7 +42,9 @@ import { runMutation } from '../actions/guard';
 import { DiffView } from '../common/DiffView';
 import { reviewSides } from '../dock/editor/review';
 import { GitOpsNotice } from '../gitops/ManagedNotice';
+import { rowFlags } from '../recommendations/listModel';
 import { errorText } from '../util';
+import { acknowledgementText, applyBlockedReason } from './rightsizingAck';
 import { refreshRightsizing } from './useCost';
 import { CONFIDENCE_TONE } from './tones';
 
@@ -225,20 +227,66 @@ type Review =
   | { status: 'error'; message: string };
 
 /**
+ * The flags of a recommendation below high confidence, listed first, and
+ * the "I reviewed: {flags}" checkbox "Apply" waits for.
+ */
+export function Acknowledgement({
+  rec,
+  checked,
+  onChange,
+}: {
+  rec: WorkloadRecommendation;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  i18n.useLocale();
+  const flags = useMemo(() => rowFlags(rec), [rec]);
+  return (
+    <div className="border-status-starting/30 bg-status-starting/8 space-y-2 rounded-lg border px-3 py-2.5">
+      <p className="text-fg flex items-center gap-1.5 text-[12px] font-medium">
+        <TriangleAlert className="text-status-starting h-3.5 w-3.5 shrink-0" />
+        {rec.confidence === 'low'
+          ? i18n.t('Low confidence: review these flags before applying')
+          : i18n.t('Medium confidence: review these flags before applying')}
+      </p>
+      {flags.length > 0 && (
+        <ul className="space-y-1">
+          {flags.map((f) => (
+            <li key={f.code} className="text-fg-muted text-[11.5px]">
+              <span className="text-fg font-medium">{f.label}</span>
+              <span className="block whitespace-pre-line">{f.detail}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <label className="text-fg flex cursor-pointer items-start gap-2 text-[12px]">
+        <Checkbox checked={checked} onChange={(e) => onChange(e.target.checked)} />
+        <span>{acknowledgementText(flags.map((f) => f.label))}</span>
+      </label>
+    </div>
+  );
+}
+
+/**
  * Apply a right-sizing recommendation: the changes per container, a
  * server-side dry run shown as a live → after diff, then the patch
- * (blocked on read-only clusters, typed confirmation on production).
+ * (blocked on read-only clusters, typed confirmation on production). Below
+ * high confidence the flags come first and "Apply" waits for the
+ * acknowledgement.
  */
 export function RightsizingDialog({
   clusterId,
   rec,
   currency,
+  requireAck = rec.confidence !== 'high',
   onApplied,
   onClose,
 }: {
   clusterId: string;
   rec: WorkloadRecommendation;
   currency: string;
+  /** "Apply" waits for "I reviewed: {flags}" (default: below high confidence). */
+  requireAck?: boolean;
   /** Called after the patch succeeded, before `onClose`. */
   onApplied?: () => void;
   onClose: () => void;
@@ -255,6 +303,7 @@ export function RightsizingDialog({
   const [live, setLive] = useState<KubeObject | null>(null);
   const [review, setReview] = useState<Review>({ status: 'loading' });
   const [busy, setBusy] = useState(false);
+  const [acknowledged, setAcknowledged] = useState(false);
   const seq = useRef(0);
   const target = useMemo(
     () => ({ kind: rec.kind, namespace: rec.namespace, name: rec.name }),
@@ -310,6 +359,8 @@ export function RightsizingDialog({
   );
 
   const apply = async () => {
+    // The confirmation may have waited: a cluster made read-only meanwhile never applies.
+    if (useAppStore.getState().clusters.find((c) => c.id === clusterId)?.read_only) return;
     setBusy(true);
     const ok = await runMutation(
       () => ipc.rightsizingApply(clusterId, target, changes, false),
@@ -323,6 +374,7 @@ export function RightsizingDialog({
     }
   };
   const submit = () => {
+    if (blocked || busy) return;
     if (production) {
       useAppStore.getState().requestConfirm({
         title: i18n.t('Apply recommendation'),
@@ -343,13 +395,15 @@ export function RightsizingDialog({
     } else void apply();
   };
 
-  const blocked = gate?.blocked
-    ? (gate.message ?? i18n.t('Read-only cluster: changes are blocked'))
-    : !changes.length
-      ? i18n.t('Nothing to change')
-      : review.status === 'error'
-        ? i18n.t('Fix the dry-run error first')
-        : null;
+  const blocked = applyBlockedReason({
+    gate:
+      gate?.blocked || readOnly
+        ? (gate?.message ?? i18n.t('Read-only cluster: changes are blocked'))
+        : null,
+    hasChanges: changes.length > 0,
+    reviewFailed: review.status === 'error',
+    unacknowledged: requireAck && !acknowledged,
+  });
   const delta = rec.monthly_delta;
 
   const dialog = (
@@ -393,6 +447,9 @@ export function RightsizingDialog({
               'This cluster is read-only: you can review the change, but it cannot be applied.',
             )}
           </div>
+        )}
+        {requireAck && (
+          <Acknowledgement rec={rec} checked={acknowledged} onChange={setAcknowledged} />
         )}
         <div className="flex flex-wrap items-center gap-2 text-[11.5px]">
           <Badge tone={CONFIDENCE_TONE[rec.confidence]}>{confidenceLabel(rec.confidence)}</Badge>

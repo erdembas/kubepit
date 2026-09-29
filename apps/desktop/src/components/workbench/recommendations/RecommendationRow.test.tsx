@@ -106,6 +106,17 @@ describe('RecommendationRow', () => {
     expect(buttonText(applied)).toEqual(['web']);
   });
 
+  it('waits while the row is applying and explains an RBAC denial', () => {
+    const applying = render({ mode: 'one-click', applying: true });
+    expect(applying).toMatch(/title="Applying…"[^>]*><button[^>]*disabled=""[^>]*aria-busy="true"/);
+    const reason = "You don't have permission to patch deployments.apps in shop";
+    const blocked = render({ mode: 'one-click', blocked: reason });
+    expect(blocked).toContain(`title="${reason.replace("'", '&#x27;')}"`);
+    expect(blocked).toMatch(/<button[^>]*disabled=""/);
+    // A read-only cluster still reviews: the gate is not asked there.
+    expect(render({ mode: 'read-only', blocked: 'denied' })).not.toMatch(/<button[^>]*disabled=""/);
+  });
+
   it('marks the open row with the accent strip and a checked row with its tint', () => {
     expect(render({ active: true })).toContain('shadow-[inset_2px_0_0_rgb(var(--accent))]');
     expect(render({ active: true })).toContain('aria-current="true"');
