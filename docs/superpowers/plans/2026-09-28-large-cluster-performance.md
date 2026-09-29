@@ -905,7 +905,7 @@ Every gated task starts by checking its gate against the Results table from Task
   - `pub fn informer_keys(&self, cluster_id: &str) -> Vec<String>` on `Kubepit`: the live informers of a cluster as `"<plural>[/<namespace>]"`, sorted. Used by tests and the probe.
   - Alerts convert with `serde_json::from_value::<SlimPod>(serde_json::to_value(&*obj))`. The journal and persist use the `DynamicObject` directly.
 
-- [ ] **Step 1: Check the gate.** It fires if Task 2 shows ≥ 2 streams for one path **and** `e2e/max_rss_l_all_watchers` or `e2e/watch_pods_synced_l` misses its budget.
+- [x] **Step 1: Check the gate.** It fires if Task 2 shows ≥ 2 streams for one path **and** `e2e/max_rss_l_all_watchers` or `e2e/watch_pods_synced_l` misses its budget. _(Checked on 2026-09-29: the gate does not fire, see the spec's Gates table and Results (Task 10 baseline, Task 23 final); the remaining steps are skipped.)_
 
 - [ ] **Step 2: Write the failing tests**
 
@@ -989,7 +989,7 @@ git commit -m "perf(core): share one watcher per resource between UI, alerts, jo
   - `subscribeWatch(clusterId: ClusterId, gvk: Gvk, namespaces: readonly string[], listener: () => void): { snapshot(): WatchSnapshot; unsubscribe(): void }`: the non-hook subscription that `useWatch` now wraps. Tests use it directly.
   - `useWatch(…, namespaces≠[])`, while `entries` holds a cluster-wide entry for the same (cluster, gvk, version) that has listeners, is `synced` and is not forbidden, subscribes to that entry and returns `deriveScoped(...)` instead of starting its own backend watch.
 
-- [ ] **Step 1: Check the gate.** It fires if `mockWatchStats()` (probe `watchStats()`) during the standard scenario (pods table with namespace `ns-0001`, the health view, the Resource Map and the netpol view on `?scale=m`) shows the same (cluster, kind) with more than one scope.
+- [x] **Step 1: Check the gate.** It fires if `mockWatchStats()` (probe `watchStats()`) during the standard scenario (pods table with namespace `ns-0001`, the health view, the Resource Map and the netpol view on `?scale=m`) shows the same (cluster, kind) with more than one scope. _(Checked on 2026-09-29: the gate does not fire, see the spec's Gates table and Results (Task 10 baseline, Task 23 final); the remaining steps are skipped.)_
 
 - [ ] **Step 2: Write the failing tests**
 
@@ -1046,7 +1046,7 @@ git commit -m "perf(ui): namespaced watches derive from a live cluster-wide watc
   - TS `resourceWatch(clusterId, gvk, namespaces, onBatch, options?: { metadataOnly?: boolean })` and `useWatch(clusterId, gvk, namespaces, enabled, options?)`.
   - Topology marks a slot `metadataOnly` only when `build.ts`/`refs.ts` read nothing but `metadata` from that kind. Check with grep before flagging. The candidates are Secret, ConfigMap and ServiceAccount.
 
-- [ ] **Step 1: Check the gate.** It fires if, at `l` and a namespace-scoped map, Secrets + ConfigMaps are > 30% of the initial batch bytes (probe `watchStats()` with JSON sizes) **and** `ui/map_namespace_l` misses its budget.
+- [x] **Step 1: Check the gate.** It fires if, at `l` and a namespace-scoped map, Secrets + ConfigMaps are > 30% of the initial batch bytes (probe `watchStats()` with JSON sizes) **and** `ui/map_namespace_l` misses its budget. _(Checked on 2026-09-29: the gate does not fire, see the spec's Gates table and Results (Task 10 baseline, Task 23 final); the remaining steps are skipped.)_
 
 - [ ] **Step 2: Write the failing tests.**
   - Rust `metadata_only_watch_sends_identity_only` against the scale fixture:
@@ -1084,7 +1084,7 @@ git commit -m "perf: metadata-only watches for map slots that only need identity
   - Past `max_items` (50 000) it fails with "more than {max} {plural}; narrow the namespace or label selector".
   - `resource_list`, `cluster_overview` (which uses `list_metadata` where it only counts) and both metrics lists use it.
 
-- [ ] **Step 1: Check the gate.** It fires if `unpaged_lists` at `l` includes a collection above 5 000 objects **and** `e2e/max_rss_l_all_watchers` or the overview latency misses its budget.
+- [x] **Step 1: Check the gate.** It fires if `unpaged_lists` at `l` includes a collection above 5 000 objects **and** `e2e/max_rss_l_all_watchers` or the overview latency misses its budget. _(Checked on 2026-09-29: the gate does not fire, see the spec's Gates table and Results (Task 10 baseline, Task 23 final); the remaining steps are skipped.)_
 
 - [ ] **Step 2: Write the failing tests.**
   - `list_paged_follows_continue_and_caps`: 10 000 pods from `m` come back in 20 requests with `limit=500`; `max_items = 5_000` fails with the message above.
@@ -1245,7 +1245,7 @@ git commit -m "perf: acknowledged watch batches bound IPC queues and stop orphan
   - `mergeSorted(prev: readonly KubeObject[], byUid: ReadonlyMap<string, KubeObject>, change: WatchSnapshot['change'], compare: (a: KubeObject, b: KubeObject) => number): KubeObject[]`: it removes changed or deleted uids and binary-inserts the changed objects.
   - `useKindTable` uses it when the filter and sort are unchanged and `!change.reset`.
 
-- [ ] **Step 1: Check the gate.** It fires if `ui/apply_p95_l_churn50` > 16 ms.
+- [x] **Step 1: Check the gate.** It fires if `ui/apply_p95_l_churn50` > 16 ms. _(Checked on 2026-09-29: the gate does not fire, see the spec's Gates table and Results (Task 10 baseline, Task 23 final); the remaining steps are skipped.)_
 
 - [ ] **Step 2: Write the failing test**
 
@@ -1278,7 +1278,7 @@ git commit -m "perf(ui): incremental watch snapshots and sorted merges for busy 
 **Interfaces:**
 - Produces: `export const IDLE_EVICT_MS = 300_000`. `stop()` schedules the removal of the entry from `entries` after `IDLE_EVICT_MS`. A new subscriber cancels the timer.
 
-- [ ] **Step 1: Check the gate.** It fires if `ui/soak_heap_ratio` > 1.15.
+- [x] **Step 1: Check the gate.** It fires if `ui/soak_heap_ratio` > 1.15. _(Checked on 2026-09-29: the gate does not fire, see the spec's Gates table and Results (Task 10 baseline, Task 23 final); the remaining steps are skipped.)_
 
 - [ ] **Step 2: Write the failing tests** (fake timers, mocked ipc):
   - `idle entries are evicted after five minutes`: subscribe, unsubscribe, advance `IDLE_EVICT_MS + 1` → `watchStats()` no longer lists the key.
@@ -1309,7 +1309,7 @@ git commit -m "perf(ui): evict watch snapshots idle for five minutes"
   - `bytes()` accounting keeps using the serialized size computed on insert.
   - `JournalReader::details_after` clones the entries under the lock and renders YAML after releasing it.
 
-- [ ] **Step 1: Check the gate.** It fires if `journal/apply_update` > 60 µs or `journal/details_after_500` > 50 ms.
+- [x] **Step 1: Check the gate.** It fires if `journal/apply_update` > 60 µs or `journal/details_after_500` > 50 ms. _(Checked on 2026-09-29: the gate does not fire, see the spec's Gates table and Results (Task 10 baseline, Task 23 final); the remaining steps are skipped.)_
 
 - [ ] **Step 2: Write the failing test.** Add `apply_does_not_reparse_the_baseline` to `journal.rs`:
   - Add a `#[cfg(test)]` thread-local `BASELINE_PARSES` counter, incremented wherever a baseline string is parsed.
@@ -1336,7 +1336,7 @@ git commit -m "perf(journal): keep parsed baselines and render YAML outside the 
 **Interfaces:**
 - Produces: `PAGE_SIZE = 2_000` for the metadata-only search lists, `KIND_CONCURRENCY = 8`, and `CLUSTER_TIMEOUT` unchanged at 10 s unless the benchmark still misses its budget after the first two changes.
 
-- [ ] **Step 1: Check the gate.** It fires if `e2e/fleet_search_l` > 6 s.
+- [x] **Step 1: Check the gate.** It fires if `e2e/fleet_search_l` > 6 s. _(Checked on 2026-09-29: the gate does not fire, see the spec's Gates table and Results (Task 10 baseline, Task 23 final); the remaining steps are skipped.)_
 
 - [ ] **Step 2: Write the failing test.** `fleet_search_pages_by_2000`: a search for `api` over pods on the `m` fixture, with `limit_per_kind` above 10 000, streams all 10 000 pods, and every list request it makes carries `limit=2000`.
 
@@ -1427,13 +1427,32 @@ git commit -m "docs(perf): R1 backend hot paths and their results"
 **Files:**
 - Modify: `docs/superpowers/specs/2026-09-28-large-cluster-performance-design.md` (Results complete; budgets tightened where the After values allow, with a note)
 - Modify: `docs/ARCHITECTURE.md` ("Performance" section: gates fired and fixes applied)
+- _As built, also: `perf/budgets.json` (the tightened budgets, each with a `note`) and a comment in `.github/workflows/perf-guard.yml`. The commit adds `docs perf .github`._
 
-- [ ] **Step 1: Run every check and the perf guard**
+- [x] **Step 1: Run every check and the perf guard**
 
 Run: `pnpm typecheck && pnpm i18n:check && cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && pnpm --filter @kubepit/desktop build && pnpm --filter @kubepit/desktop test && node --test scripts/perf/ && pnpm perf:rust && pnpm perf:bench && pnpm perf:compare -- --slack 1 --only rust,e2e,engines,structural`
 Expected: every command exits 0.
 
-- [ ] **Step 2: Commit**
+_As built (2026-09-29, at `cff503d`, same M5 Max, 1-minute load 3.5–7.3, up to 18–42 around the first bench build, and 2.5–15 during the soaks):_
+- _Every command exits 0. `pnpm perf:rust` and `pnpm perf:bench` ran 3 times each._
+- _`pnpm perf:ui` ran in 3 interleaved rounds on port 4611: `--preset l --churn 50`, then `s` and `m` with `ttfr,map,health`. The 30-minute soak ran twice on its own (`--scenarios= --soak 30`): ratios 1.125 and 1.037, no DOM drift. Both runs show a ≈ 40 MiB step at minute 28 (spec, Final-run note)._
+- _The spec's Results table now has a Final column (medians of 3) and the Gates table a Final check. Every budget is met, and no gate that stayed shut fires now._
+- _Budgets tightened: only the five R1 ids, each to ≥ 3× headroom and below its pre-R1 value:_
+  - _`watch/aggregator_initial_20k` 120 → 90 ms;_
+  - _`watch/reset_batch_20k` 60 → 5 ms;_
+  - _`watch/steady_500` 3 → 1 ms;_
+  - _`fleet_search/matcher_substring_50k` 5 → 2.5 ms;_
+  - _`fleet_search/matcher_glob_50k` 15 → 4 ms._
+
+  _The rest, the UI ids and `ci_slack` stay until CI is calibrated (spec, Results, "Budgets tightened"). `perf-guard.yml`'s comment on `continue-on-error` now gives the current headroom._
+- _Still open, all manual (spec, Results, "Open manual checks"):_
+  - _H6's window close in `tauri dev`;_
+  - _the 800-node pan in WKWebView;_
+  - _calibrating the CI guard on a GitHub runner, then dropping `continue-on-error`._
+- _Open follow-up (not manual): whether the soak's step at minute 28 keeps growing in a longer soak._
+
+- [x] **Step 2: Commit**
 
 ```bash
 git add docs
