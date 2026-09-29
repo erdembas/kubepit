@@ -7,7 +7,10 @@
 //!   before the first table exists); a full `VACUUM` only runs after a clear
 //!   or when a prune left most of the file free.
 //! - Paging is newest first with an opaque `"<ts>:<id>"` cursor (audit,
-//!   events) or the row id (changes, which are inserted in time order).
+//!   events, the assistant log) or the row id (changes, which are inserted
+//!   in time order).
+//! - Migrations: 1 audit, events and changes; 2 recommendation scans; 3 the
+//!   assistant request log (`ai_log`).
 
 use std::path::Path;
 
@@ -18,10 +21,11 @@ use serde_json::Value;
 
 use super::recommendations;
 use super::types::{
-    AuditAction, AuditDetail, AuditEntry, AuditFilter, AuditObject, AuditOutcome, AuditPage,
-    AuditTarget, HistoryChangePage, HistoryEventFilter, HistoryEventPage, HistoryKind,
-    HistoryTableStatus,
+    AiLogDetail, AiLogEntry, AiLogFilter, AiLogOutcome, AiLogPage, AiLogRecord, AuditAction,
+    AuditDetail, AuditEntry, AuditFilter, AuditObject, AuditOutcome, AuditPage, AuditTarget,
+    HistoryChangePage, HistoryEventFilter, HistoryEventPage, HistoryKind, HistoryTableStatus,
 };
+use crate::ai::{AiIntent, AiUsage};
 use crate::change_journal::{ChangeDetail, ChangeFilter, ChangeSummary};
 
 /// Largest page any query returns.
@@ -107,7 +111,22 @@ CREATE INDEX changes_ts ON changes (ts);
 "#,
     ),
     (2, recommendations::MIGRATION),
+    (3, AI_LOG_MIGRATION),
 ];
+
+/// Migration 3: the assistant request log (spec §7.4).
+const AI_LOG_MIGRATION: &str = r#"
+CREATE TABLE ai_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL,
+  cluster_id TEXT, cluster_name TEXT, provider_id TEXT NOT NULL, model TEXT NOT NULL,
+  intent TEXT NOT NULL, outcome TEXT NOT NULL, error TEXT, duration_ms INTEGER NOT NULL,
+  input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL,
+  cache_read_tokens INTEGER NOT NULL, cache_write_tokens INTEGER NOT NULL,
+  cost REAL, tool_calls INTEGER NOT NULL,
+  request TEXT NOT NULL, response TEXT NOT NULL, tools TEXT NOT NULL, search TEXT NOT NULL
+);
+CREATE INDEX ai_log_ts ON ai_log (ts DESC, id DESC);
+"#;
 
 /// Newest schema this build knows.
 pub fn latest_version() -> i64 {
@@ -458,6 +477,93 @@ pub fn insert_changes(tx: &Transaction<'_>, rows: &[ChangeRow]) -> Result<()> {
     Ok(())
 }
 
+/// The wire spelling of a unit enum (`explain-query`, `cancelled`).
+fn wire<T: serde::Serialize>(value: &T) -> String {
+    match serde_json::to_value(value) {
+        Ok(Value::String(text)) => text,
+        _ => String::new(),
+    }
+}
+
+fn from_wire<T: serde::de::DeserializeOwned>(text: &str) -> Option<T> {
+    serde_json::from_value(Value::String(text.to_string())).ok()
+}
+
+/// Bytes of the response that feed the search column.
+const AI_SEARCH_RESPONSE_BYTES: usize = 2 * 1024;
+
+/// The longest prefix of `text` of at most `max` bytes.
+fn prefix(text: &str, max: usize) -> &str {
+    if text.len() <= max {
+        return text;
+    }
+    let mut cut = max;
+    while !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    &text[..cut]
+}
+
+/// Search text: cluster, provider, model, intent, outcome, error and the
+/// start of the response.
+fn ai_search(record: &AiLogRecord) -> String {
+    let intent = wire(&record.intent);
+    let outcome = wire(&record.outcome);
+    let parts = [
+        record.cluster_name.as_deref(),
+        record.cluster_id.as_deref(),
+        Some(record.provider_id.as_str()),
+        Some(record.model.as_str()),
+        Some(intent.as_str()),
+        Some(outcome.as_str()),
+        record.error.as_deref(),
+        Some(prefix(&record.response, AI_SEARCH_RESPONSE_BYTES)),
+    ];
+    parts
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+fn sql_count(value: u64) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
+}
+
+/// Insert one assistant run (bodies already capped by the caller).
+pub fn insert_ai(tx: &Transaction<'_>, record: &AiLogRecord) -> Result<i64> {
+    tx.execute(
+        "INSERT INTO ai_log (ts, cluster_id, cluster_name, provider_id, model, intent, outcome,
+             error, duration_ms, input_tokens, output_tokens, cache_read_tokens,
+             cache_write_tokens, cost, tool_calls, request, response, tools, search)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+             ?18, ?19)",
+        params![
+            record.ts,
+            record.cluster_id,
+            record.cluster_name,
+            record.provider_id,
+            record.model,
+            wire(&record.intent),
+            wire(&record.outcome),
+            record.error,
+            record.duration_ms,
+            sql_count(record.usage.input_tokens),
+            sql_count(record.usage.output_tokens),
+            sql_count(record.usage.cache_read_tokens),
+            sql_count(record.usage.cache_write_tokens),
+            record.cost.filter(|c| c.is_finite()),
+            record.tool_calls,
+            record.request,
+            record.response,
+            serde_json::to_string(&record.tools)?,
+            ai_search(record),
+        ],
+    )?;
+    Ok(tx.last_insert_rowid())
+}
+
 /// Delete rows of `kind` (optionally of one cluster).
 pub fn clear(conn: &Connection, kind: HistoryKind, cluster_id: Option<&str>) -> Result<()> {
     let tables: &[&str] = match kind {
@@ -465,7 +571,8 @@ pub fn clear(conn: &Connection, kind: HistoryKind, cluster_id: Option<&str>) -> 
         HistoryKind::Events => &["events"],
         HistoryKind::Changes => &["changes"],
         HistoryKind::Recommendations => &[],
-        HistoryKind::All => &["audit", "events", "changes"],
+        HistoryKind::Ai => &["ai_log"],
+        HistoryKind::All => &["audit", "events", "changes", "ai_log"],
     };
     if matches!(kind, HistoryKind::Recommendations | HistoryKind::All) {
         recommendations::clear(conn, cluster_id)?;
@@ -491,7 +598,7 @@ pub fn clear(conn: &Connection, kind: HistoryKind, cluster_id: Option<&str>) -> 
 /// What pruning keeps (epoch ms cutoffs and a byte budget).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PrunePolicy {
-    /// Audit entries older than this are deleted.
+    /// Audit entries (and assistant log rows) older than this are deleted.
     pub audit_before: i64,
     /// Events and changes older than this are deleted.
     pub data_before: i64,
@@ -512,6 +619,8 @@ pub struct PruneReport {
     pub changes: u64,
     /// Recommendation runs deleted or stripped of their rows.
     pub recommendations: u64,
+    /// Assistant log rows.
+    pub ai: u64,
     pub vacuumed: bool,
 }
 
@@ -536,6 +645,9 @@ const CAP_MIN_ROWS: i64 = 100;
 /// Audit entries one size-cap round deletes at least: the audit log goes
 /// last and only as far as needed, so no 100-row minimum takes more of it.
 const AUDIT_CAP_MIN_ROWS: i64 = 1;
+/// Assistant log rows one size-cap round deletes at least: like the audit
+/// log (whose retention it shares), only as far as needed.
+const AI_CAP_MIN_ROWS: i64 = 1;
 /// Safety net only: every round deletes something or ends the loop.
 const CAP_MAX_ROUNDS: u32 = 10_000;
 
@@ -564,8 +676,9 @@ fn delete_oldest(
 
 /// Apply retention (and the thinning of recommendation scans), then the
 /// size cap (oldest events and changes first, then the rows of the oldest
-/// recommendation scans, the audit log only when nothing else is left),
-/// then reclaim space.
+/// recommendation scans, then the oldest assistant log rows, the audit log
+/// only when nothing else is left), then reclaim space. The assistant log
+/// follows the audit retention.
 pub fn prune(conn: &Connection, policy: &PrunePolicy) -> Result<PruneReport> {
     let mut report = PruneReport {
         audit: conn.execute("DELETE FROM audit WHERE ts < ?1", [policy.audit_before])? as u64,
@@ -575,6 +688,7 @@ pub fn prune(conn: &Connection, policy: &PrunePolicy) -> Result<PruneReport> {
         )? as u64,
         changes: conn.execute("DELETE FROM changes WHERE ts < ?1", [policy.data_before])? as u64,
         recommendations: recommendations::prune(conn, policy)?,
+        ai: conn.execute("DELETE FROM ai_log WHERE ts < ?1", [policy.audit_before])? as u64,
         vacuumed: false,
     };
     // Until the cap is reached or nothing is left to delete: a fixed number
@@ -594,6 +708,11 @@ pub fn prune(conn: &Connection, policy: &PrunePolicy) -> Result<PruneReport> {
         if scans > 0 {
             continue;
         }
+        let ai = delete_oldest(conn, "ai_log", "ts", CAP_FRACTION, AI_CAP_MIN_ROWS)?;
+        report.ai += ai;
+        if ai > 0 {
+            continue;
+        }
         let audit = delete_oldest(conn, "audit", "ts", CAP_FRACTION, AUDIT_CAP_MIN_ROWS)?;
         if audit == 0 {
             break;
@@ -604,7 +723,7 @@ pub fn prune(conn: &Connection, policy: &PrunePolicy) -> Result<PruneReport> {
         "DELETE FROM audit_objects WHERE audit_id NOT IN (SELECT id FROM audit)",
         [],
     )?;
-    if report.audit + report.events + report.changes + report.recommendations > 0 {
+    if report.audit + report.events + report.changes + report.recommendations + report.ai > 0 {
         report.vacuumed = reclaim(conn)?;
     }
     Ok(report)
@@ -827,6 +946,174 @@ pub fn export_audit(conn: &Connection, filter: &AuditFilter) -> Result<String> {
     let mut out = String::new();
     for entry in stmt.query_map(params_from_iter(args.iter()), audit_row)? {
         out.push_str(&serde_json::to_string(&entry?)?);
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+fn ai_where(filter: &AiLogFilter, args: &mut Vec<Sql>) -> String {
+    let mut clauses = vec!["1 = 1".to_string()];
+    if !filter.cluster_ids.is_empty() {
+        let list = in_list(filter.cluster_ids.iter().cloned(), args);
+        clauses.push(format!("cluster_id IN {list}"));
+    }
+    if let Some(text) = clean_text(&filter.text) {
+        args.push(Sql::Text(like_pattern(&text)));
+        clauses.push("search LIKE ? ESCAPE '\\'".into());
+    }
+    if let Some(since) = filter.since {
+        args.push(Sql::Integer(since));
+        clauses.push("ts >= ?".into());
+    }
+    clauses.join(" AND ")
+}
+
+const AI_COLUMNS: &str = "id, ts, cluster_id, cluster_name, provider_id, model, intent, outcome,
+    error, duration_ms, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+    cost, tool_calls";
+
+fn sql_u64(value: i64) -> u64 {
+    u64::try_from(value).unwrap_or(0)
+}
+
+fn ai_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AiLogEntry> {
+    let intent: String = row.get(6)?;
+    let outcome: String = row.get(7)?;
+    Ok(AiLogEntry {
+        id: row.get(0)?,
+        ts: row.get(1)?,
+        cluster_id: row.get(2)?,
+        cluster_name: row.get(3)?,
+        provider_id: row.get(4)?,
+        model: row.get(5)?,
+        intent: from_wire(&intent).unwrap_or(AiIntent::Chat),
+        outcome: from_wire(&outcome).unwrap_or(AiLogOutcome::Error),
+        error: row.get(8)?,
+        duration_ms: row.get(9)?,
+        usage: AiUsage {
+            input_tokens: sql_u64(row.get(10)?),
+            output_tokens: sql_u64(row.get(11)?),
+            cache_read_tokens: sql_u64(row.get(12)?),
+            cache_write_tokens: sql_u64(row.get(13)?),
+        },
+        cost: row.get(14)?,
+        tool_calls: row.get(15)?,
+    })
+}
+
+/// Summed usage and cost of the rows matching a filter.
+type AiTotals = (i64, i64, i64, i64, i64, Option<f64>);
+
+/// Assistant runs matching `filter`, newest first, with the row count, the
+/// summed usage and the summed cost of every matching row (all pages).
+pub fn list_ai(conn: &Connection, filter: &AiLogFilter) -> Result<AiLogPage> {
+    let mut args = Vec::new();
+    let base = ai_where(filter, &mut args);
+    let (total, input, output, cache_read, cache_write, cost): AiTotals = conn.query_row(
+        &format!(
+            "SELECT COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0),
+                    COALESCE(SUM(cache_read_tokens), 0), COALESCE(SUM(cache_write_tokens), 0),
+                    SUM(cost)
+             FROM ai_log WHERE {base}"
+        ),
+        params_from_iter(args.iter()),
+        |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+            ))
+        },
+    )?;
+    let mut clause = base;
+    if let Some((ts, id)) = filter.cursor.as_deref().and_then(parse_cursor) {
+        args.extend([Sql::Integer(ts), Sql::Integer(ts), Sql::Integer(id)]);
+        clause.push_str(" AND (ts < ? OR (ts = ? AND id < ?))");
+    }
+    let limit = page_limit(filter.limit);
+    args.push(Sql::Integer(limit + 1));
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {AI_COLUMNS} FROM ai_log WHERE {clause} ORDER BY ts DESC, id DESC LIMIT ?"
+    ))?;
+    let mut entries: Vec<AiLogEntry> = stmt
+        .query_map(params_from_iter(args.iter()), ai_row)?
+        .collect::<rusqlite::Result<_>>()?;
+    let next_cursor = if entries.len() as i64 > limit {
+        entries.truncate(limit as usize);
+        entries.last().map(|e| cursor_of(e.ts, e.id))
+    } else {
+        None
+    };
+    Ok(AiLogPage {
+        entries,
+        next_cursor,
+        total: sql_u64(total),
+        usage: AiUsage {
+            input_tokens: sql_u64(input),
+            output_tokens: sql_u64(output),
+            cache_read_tokens: sql_u64(cache_read),
+            cache_write_tokens: sql_u64(cache_write),
+        },
+        cost,
+    })
+}
+
+const AI_DETAIL_COLUMNS: &str = "request, response, tools";
+
+fn ai_detail(row: &rusqlite::Row<'_>) -> rusqlite::Result<AiLogDetail> {
+    let entry = ai_row(row)?;
+    let tools: String = row.get(18)?;
+    Ok(AiLogDetail {
+        entry,
+        request: row.get(16)?,
+        response: row.get(17)?,
+        tools: serde_json::from_str(&tools).unwrap_or(Value::Null),
+    })
+}
+
+/// One assistant run with its bodies.
+pub fn get_ai(conn: &Connection, id: i64) -> Result<Option<AiLogDetail>> {
+    Ok(conn
+        .query_row(
+            &format!("SELECT {AI_COLUMNS}, {AI_DETAIL_COLUMNS} FROM ai_log WHERE id = ?1"),
+            [id],
+            ai_detail,
+        )
+        .optional()?)
+}
+
+/// One line of the assistant log export: the entry and its bodies.
+#[derive(serde::Serialize)]
+struct AiExportLine<'a> {
+    #[serde(flatten)]
+    entry: &'a AiLogEntry,
+    request: &'a str,
+    response: &'a str,
+    tools: &'a Value,
+}
+
+/// The filtered runs as JSON lines, newest first, bodies included (the
+/// record of what left the machine). The cursor and limit are ignored.
+pub fn export_ai(conn: &Connection, filter: &AiLogFilter) -> Result<String> {
+    let mut args = Vec::new();
+    let clause = ai_where(filter, &mut args);
+    args.push(Sql::Integer(i64::from(MAX_EXPORT)));
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {AI_COLUMNS}, {AI_DETAIL_COLUMNS} FROM ai_log WHERE {clause}
+         ORDER BY ts DESC, id DESC LIMIT ?"
+    ))?;
+    let mut out = String::new();
+    for detail in stmt.query_map(params_from_iter(args.iter()), ai_detail)? {
+        let detail = detail?;
+        out.push_str(&serde_json::to_string(&AiExportLine {
+            entry: &detail.entry,
+            request: &detail.request,
+            response: &detail.response,
+            tools: &detail.tools,
+        })?);
         out.push('\n');
     }
     Ok(out)
@@ -1521,5 +1808,281 @@ mod tests {
         assert!((30..50).contains(&left.rows), "{left:?}");
         assert!(left.oldest_ts.unwrap() > 1_000);
         assert!(used_bytes(&conn).unwrap() <= before - 40 * 1024);
+    }
+
+    fn ai_record(ts: i64, cluster: Option<&str>, input: u64, cost: Option<f64>) -> AiLogRecord {
+        AiLogRecord {
+            ts,
+            cluster_id: cluster.map(str::to_string),
+            cluster_name: cluster.map(|c| format!("{c}-name")),
+            provider_id: "anthropic".into(),
+            model: "claude-opus-5".into(),
+            intent: AiIntent::ExplainQuery,
+            outcome: AiLogOutcome::Cancelled,
+            error: None,
+            duration_ms: 1_500,
+            usage: AiUsage {
+                input_tokens: input,
+                output_tokens: 10,
+                cache_read_tokens: 2,
+                cache_write_tokens: 1,
+            },
+            cost,
+            tool_calls: 2,
+            request: format!("{{\"messages\":[\"request {ts}\"]}}"),
+            response: format!("The pod web-{ts} is OOMKilled."),
+            tools: json!([{"name": "get_pod_logs", "status": "sent"}]),
+        }
+    }
+
+    fn insert_ai_rows(conn: &mut Connection, records: &[AiLogRecord]) {
+        let tx = conn.transaction().unwrap();
+        for r in records {
+            insert_ai(&tx, r).unwrap();
+        }
+        tx.commit().unwrap();
+    }
+
+    #[test]
+    fn ai_log_pages_newest_first_with_usage_totals() {
+        let (_dir, mut conn) = temp_db();
+        insert_ai_rows(
+            &mut conn,
+            &[
+                ai_record(1_000, Some("c1"), 100, Some(0.5)),
+                ai_record(3_000, Some("c2"), 300, None),
+                ai_record(2_000, None, 200, Some(0.25)),
+                // Same timestamp as the newest: the id breaks the tie.
+                ai_record(3_000, Some("c1"), 400, Some(1.0)),
+            ],
+        );
+        let mut filter = AiLogFilter {
+            limit: 3,
+            ..AiLogFilter::default()
+        };
+        let first = list_ai(&conn, &filter).unwrap();
+        assert_eq!(first.total, 4);
+        let ts: Vec<i64> = first.entries.iter().map(|e| e.ts).collect();
+        assert_eq!(ts, vec![3_000, 3_000, 2_000]);
+        assert_eq!(
+            first.entries[0].usage.input_tokens, 400,
+            "later insert first"
+        );
+        assert_eq!(first.usage.input_tokens, 1_000, "totals cover every page");
+        assert_eq!(first.usage.output_tokens, 40);
+        assert_eq!(first.usage.cache_read_tokens, 8);
+        assert_eq!(first.usage.cache_write_tokens, 4);
+        assert_eq!(first.cost, Some(1.75));
+        let entry = &first.entries[2];
+        assert_eq!(entry.intent, AiIntent::ExplainQuery);
+        assert_eq!(entry.outcome, AiLogOutcome::Cancelled);
+        assert_eq!(entry.cluster_id, None);
+        assert_eq!((entry.duration_ms, entry.tool_calls), (1_500, 2));
+
+        filter.cursor = first.next_cursor.clone();
+        let rest = list_ai(&conn, &filter).unwrap();
+        assert_eq!(rest.entries.len(), 1);
+        assert_eq!(rest.entries[0].ts, 1_000);
+        assert!(rest.next_cursor.is_none());
+
+        let only = |f: AiLogFilter| list_ai(&conn, &f).unwrap();
+        let c1 = only(AiLogFilter {
+            cluster_ids: vec!["c1".into()],
+            ..AiLogFilter::default()
+        });
+        assert_eq!(
+            (c1.total, c1.usage.input_tokens, c1.cost),
+            (2, 500, Some(1.5))
+        );
+        let c2 = only(AiLogFilter {
+            cluster_ids: vec!["c2".into()],
+            ..AiLogFilter::default()
+        });
+        assert_eq!(c2.cost, None, "no row has a cost");
+        let text = only(AiLogFilter {
+            text: Some("WEB-2000 IS oomkilled".into()),
+            ..AiLogFilter::default()
+        });
+        assert_eq!(text.total, 1);
+        let by_intent = only(AiLogFilter {
+            text: Some("explain-query".into()),
+            ..AiLogFilter::default()
+        });
+        assert_eq!(by_intent.total, 4);
+        let since = only(AiLogFilter {
+            since: Some(2_000),
+            ..AiLogFilter::default()
+        });
+        assert_eq!(since.total, 3);
+
+        let detail = get_ai(&conn, entry.id).unwrap().unwrap();
+        assert_eq!(detail.entry, *entry);
+        assert_eq!(detail.request, "{\"messages\":[\"request 2000\"]}");
+        assert_eq!(detail.tools[0]["name"], "get_pod_logs");
+        assert!(get_ai(&conn, 999).unwrap().is_none());
+
+        let jsonl = export_ai(&conn, &AiLogFilter::default()).unwrap();
+        let lines: Vec<Value> = jsonl
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[0]["usage"]["input_tokens"], 400);
+        assert_eq!(lines[0]["intent"], "explain-query");
+        assert!(lines[3]["request"]
+            .as_str()
+            .unwrap()
+            .contains("request 1000"));
+        assert!(lines[3]["response"].as_str().unwrap().contains("OOMKilled"));
+    }
+
+    #[test]
+    fn ai_log_limits_are_clamped_to_the_largest_page() {
+        let (_dir, mut conn) = temp_db();
+        let records: Vec<AiLogRecord> = (0..(MAX_PAGE as i64 + 5))
+            .map(|i| ai_record(i, Some("c1"), 1, None))
+            .collect();
+        insert_ai_rows(&mut conn, &records);
+        let page = list_ai(
+            &conn,
+            &AiLogFilter {
+                limit: 50_000,
+                ..AiLogFilter::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(page.entries.len(), MAX_PAGE as usize);
+        assert!(page.next_cursor.is_some());
+        assert_eq!(page.total, MAX_PAGE as u64 + 5);
+        let zero = list_ai(
+            &conn,
+            &AiLogFilter {
+                limit: 0,
+                ..AiLogFilter::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(zero.entries.len(), 1);
+    }
+
+    #[test]
+    fn clear_ai_only_touches_the_ai_log() {
+        let (_dir, mut conn) = temp_db();
+        insert(&mut conn, &[audit_record(10, "c1", AuditAction::Scale)]);
+        insert_ai_rows(
+            &mut conn,
+            &[
+                ai_record(10, Some("c1"), 1, None),
+                ai_record(11, Some("c2"), 1, None),
+                ai_record(12, None, 1, None),
+            ],
+        );
+        clear(&conn, HistoryKind::Ai, Some("c1")).unwrap();
+        assert_eq!(table_status(&conn, "ai_log", "ts").unwrap().rows, 2);
+        clear(&conn, HistoryKind::Audit, None).unwrap();
+        assert_eq!(table_status(&conn, "ai_log", "ts").unwrap().rows, 2);
+        insert(&mut conn, &[audit_record(10, "c1", AuditAction::Scale)]);
+        clear(&conn, HistoryKind::Ai, None).unwrap();
+        assert_eq!(table_status(&conn, "ai_log", "ts").unwrap().rows, 0);
+        assert_eq!(table_status(&conn, "audit", "ts").unwrap().rows, 1);
+        insert_ai_rows(&mut conn, &[ai_record(13, None, 1, None)]);
+        clear(&conn, HistoryKind::All, None).unwrap();
+        assert_eq!(table_status(&conn, "ai_log", "ts").unwrap().rows, 0);
+        assert_eq!(table_status(&conn, "audit", "ts").unwrap().rows, 0);
+    }
+
+    #[test]
+    fn prune_uses_the_audit_cutoff_and_drops_ai_rows_before_audit_under_the_size_cap() {
+        let (_dir, mut conn) = temp_db();
+        insert_ai_rows(
+            &mut conn,
+            &[
+                ai_record(10, Some("c1"), 1, None),
+                ai_record(500, Some("c1"), 1, None),
+            ],
+        );
+        let report = prune(
+            &conn,
+            &PrunePolicy {
+                audit_before: 100,
+                // The data retention does not apply to the assistant log.
+                data_before: 1_000,
+                max_bytes: u64::MAX,
+                rec_before: 0,
+                rec_rows_before: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(report.ai, 1);
+        assert_eq!(
+            table_status(&conn, "ai_log", "ts").unwrap().oldest_ts,
+            Some(500)
+        );
+
+        // Size cap: bulky assistant rows go before the audit log, oldest first.
+        let big = "x".repeat(16 * 1024);
+        insert(
+            &mut conn,
+            &[
+                audit_record(20, "c1", AuditAction::Scale),
+                audit_record(21, "c1", AuditAction::Scale),
+            ],
+        );
+        let rows: Vec<AiLogRecord> = (0..60)
+            .map(|i| AiLogRecord {
+                request: format!("{big}{i}"),
+                ..ai_record(1_000 + i, Some("c1"), 1, None)
+            })
+            .collect();
+        insert_ai_rows(&mut conn, &rows);
+        let before = used_bytes(&conn).unwrap();
+        assert!(before > 900_000, "{before}");
+        let report = prune(
+            &conn,
+            &PrunePolicy {
+                audit_before: 0,
+                data_before: 0,
+                max_bytes: before - 200 * 1024,
+                rec_before: 0,
+                rec_rows_before: 0,
+            },
+        )
+        .unwrap();
+        assert!(used_bytes(&conn).unwrap() <= before - 200 * 1024);
+        assert!(report.ai > 0 && report.audit == 0, "{report:?}");
+        assert_eq!(table_status(&conn, "audit", "ts").unwrap().rows, 2);
+        let left = table_status(&conn, "ai_log", "ts").unwrap();
+        assert!(left.rows > 30 && left.rows < 61, "{left:?}");
+        assert!(left.oldest_ts.unwrap() > 1_000, "oldest first");
+    }
+
+    #[test]
+    fn a_version_2_database_gains_the_ai_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = Connection::open(dir.path().join("history.db")).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL);",
+        )
+        .unwrap();
+        for (version, sql) in &MIGRATIONS[..2] {
+            conn.execute_batch(sql).unwrap();
+            conn.execute(
+                "INSERT INTO schema_version (version, applied_at) VALUES (?1, 0)",
+                [version],
+            )
+            .unwrap();
+        }
+        assert_eq!(schema_version(&conn).unwrap(), 2);
+        assert_eq!(migrate(&conn).unwrap(), 3);
+        assert_eq!(latest_version(), 3);
+        let columns: Vec<String> = conn
+            .prepare("SELECT name FROM pragma_table_info('ai_log')")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(columns.len(), 20);
+        assert!(columns.iter().any(|c| c == "search"));
     }
 }

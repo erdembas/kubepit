@@ -35,7 +35,7 @@ use rusqlite::Connection;
 
 use super::db::{self, AuditRecord, ChangeRow, EventRow, PrunePolicy, PruneReport};
 use super::recommendations::{self as rec, ScanBegin, ScanOutcome};
-use super::types::HistoryKind;
+use super::types::{AiLogRecord, HistoryKind};
 use crate::objects::now_millis;
 
 /// Queued operations before producers start dropping writes.
@@ -61,6 +61,8 @@ pub enum WriteOp {
     Audit(Box<AuditRecord>),
     Events(Vec<EventRow>),
     Changes(Vec<ChangeRow>),
+    /// One assistant run (bodies already capped).
+    Ai(Box<AiLogRecord>),
     Prune(PrunePolicy, Option<mpsc::Sender<Result<PruneReport>>>),
     Clear(HistoryKind, Option<String>, mpsc::Sender<Result<()>>),
     /// Barrier: answered once everything queued before it is written.
@@ -77,7 +79,10 @@ pub enum WriteOp {
 
 impl WriteOp {
     fn is_data(&self) -> bool {
-        matches!(self, Self::Audit(_) | Self::Events(_) | Self::Changes(_))
+        matches!(
+            self,
+            Self::Audit(_) | Self::Events(_) | Self::Changes(_) | Self::Ai(_)
+        )
     }
 }
 
@@ -297,6 +302,9 @@ fn commit(conn: &mut Connection, ops: Vec<WriteOp>, stats: &WriterStats) {
                 }
                 WriteOp::Events(rows) => db::upsert_events(&tx, rows)?,
                 WriteOp::Changes(rows) => db::insert_changes(&tx, rows)?,
+                WriteOp::Ai(record) => {
+                    db::insert_ai(&tx, record)?;
+                }
                 _ => {}
             }
         }
@@ -358,7 +366,7 @@ fn control(conn: &mut Connection, op: WriteOp) {
         WriteOp::Block(gate) => {
             let _ = gate.recv();
         }
-        WriteOp::Audit(_) | WriteOp::Events(_) | WriteOp::Changes(_) => {}
+        WriteOp::Audit(_) | WriteOp::Events(_) | WriteOp::Changes(_) | WriteOp::Ai(_) => {}
     }
 }
 
@@ -466,6 +474,48 @@ mod tests {
 
     fn data_op() -> WriteOp {
         WriteOp::Audit(Box::new(record(1)))
+    }
+
+    fn ai_op(ts: i64) -> WriteOp {
+        WriteOp::Ai(Box::new(AiLogRecord {
+            ts,
+            cluster_id: Some("c1".into()),
+            cluster_name: Some("one".into()),
+            provider_id: "ollama".into(),
+            model: "llama3".into(),
+            intent: crate::ai::AiIntent::Chat,
+            outcome: crate::history::types::AiLogOutcome::Ok,
+            error: None,
+            duration_ms: 5,
+            usage: crate::ai::AiUsage::default(),
+            cost: None,
+            tool_calls: 0,
+            request: "{}".into(),
+            response: "hi".into(),
+            tools: serde_json::json!([]),
+        }))
+    }
+
+    #[test]
+    fn ai_records_are_batched_data_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.db");
+        let writer = Writer::start(path.clone(), 8).unwrap();
+        assert!(ai_op(1).is_data());
+        assert!(writer.submit(ai_op(1)));
+        assert!(writer.submit(data_op()));
+        assert!(writer.submit(ai_op(2)));
+        assert!(writer.flush(Duration::from_secs(10)));
+        assert_eq!(writer.stats().written.load(Ordering::Relaxed), 3);
+        let conn = db::open(&path).unwrap();
+        assert_eq!(db::table_status(&conn, "ai_log", "ts").unwrap().rows, 2);
+        writer.clear(HistoryKind::Ai, None).unwrap();
+        assert_eq!(db::table_status(&conn, "ai_log", "ts").unwrap().rows, 0);
+        assert_eq!(
+            audit_rows(&path),
+            1,
+            "clearing the assistant log keeps the audit log"
+        );
     }
 
     fn audit_rows(path: &std::path::Path) -> u64 {
