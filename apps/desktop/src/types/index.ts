@@ -2649,6 +2649,8 @@ export interface ClusterRecommendationSummary {
   source_changed: boolean;
   /** The latest successful run (with its summary). */
   run: RecommendationRun | null;
+  /** The newest failed or interrupted run after it (or of a cluster that never succeeded). */
+  last_failure: RecommendationRun | null;
 }
 
 export type RecommendationExportFormat = 'json' | 'yaml';

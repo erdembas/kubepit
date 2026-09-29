@@ -1195,8 +1195,8 @@ applying a recommendation only reads, so read-only clusters get it all.
   (`MultiSeriesChart`), a breakdown by namespace / workload / label (key
   configurable, suggestions such as `team`, `app.kubernetes.io/part-of`)
   filtered by the workbench namespaces with CSV export (`lib/tableExport`),
-  and the right-sizing list (filters, headroom settings, strategy picker
-  when there are several). A cost card on the cluster overview, a fleet
+  and the Right-sizing card of the latest stored scan (see
+  "Recommendations"). A cost card on the cluster overview, a fleet
   total per currency in the dashboard's status bar, a right-sizing section
   in Deployment / StatefulSet / DaemonSet / CronJob details and two Health rules
   (`workload-overprovisioned`, `workload-underprovisioned`, category
@@ -1294,6 +1294,60 @@ history") and re-evaluated for the UI with the current settings.
   queries; the UI sends no pod names for a row whose list was truncated,
   so the name pattern is used). All are classified read-only in
   `ipc/audit_coverage.rs`; applying stays the audited `rightsizing_apply`.
+  The fleet read also carries each cluster's `last_failure`
+  (`rec::fleet_failures`: its newest failed or interrupted run when newer
+  than its latest success, or of a cluster that never succeeded).
+- **UI.** Stored scans are read through `store/useRecommendationsStore.ts`:
+  per cluster the latest scan (`useLatestRecommendations`), a picked past
+  run and the runs (`useShownRecommendations`) and the scan status, with
+  sequence-guarded loads; a scan event that ends a scan reloads the scan
+  and then the runs, and `onScanEnded` tells listeners about every ended
+  scan, also of clusters no view has loaded; a change of the saved
+  strategy, overrides or Prometheus configuration re-reads the scan;
+  `forget` drops a cluster after a clear or removal so open views read it
+  again. View models (lenses, risk, totals, spotlight, usage ranking,
+  capacity, apply mode, scan texts) live in
+  `lib/kube/recommendations/model.ts`.
+  - **The view** (`@recommendations`, Cluster section next to Cost;
+    `components/workbench/recommendations/`): `ScanHeader` shows the scope,
+    source badge, strategy, the scan state (progress "{completed}/{total}
+    queries", the last failure with the time of the results shown, or the
+    scan age), "Scan now" (disabled while disconnected, scanning or within
+    the cooldown, with the reason as tooltip), the per-cluster "Background
+    scans" switch with the interval (saved at once, `saveSettings.ts`), the
+    run picker (a past run is read-only) and the Settings (strategy and its
+    settings, `SettingsCard`) and Export slots. `RecommendationNotes` lists
+    a hidden scan of another Prometheus configuration, stale results
+    (disconnected, or older than twice the interval), a changed window,
+    the automatic strategy's fallback and the scan's notes. The sections
+    (summary, usage ranking, list, drawer, export) share `viewState.ts`
+    (namespace, verdict tab, lenses, sort, the open row);
+    `openRecommendationsView(clusterId, workloadKey?)` opens the view from
+    outside its workbench (a disconnected cluster connects, like opening
+    it from its card).
+  - **Cost view**: its Right-sizing tab is a card of the latest stored scan
+    (`cost/RightsizingSummaryCard.tsx`): potential saving, over- and
+    under-provisioned counts, scan age and source, the last failure, and
+    "Open recommendations".
+  - **Dashboard**: `dashboard/RecommendationsFleetCard.tsx` reads
+    `recommendations_fleet` (polled every 5 minutes, re-read whenever any
+    scan ends) and lists every cluster with a stored scan, connected or
+    not: scan age (or the running scan's progress), a stale badge
+    (disconnected, or older than twice the interval), "Source changed"
+    (amounts hidden like the view), the potential saving, over- and
+    under-provisioned counts, the one-click count (none on read-only or
+    production clusters), the last failure (`runErrorText`) and "Scan now"
+    while connected; the header sums the savings per currency and "Top
+    across the fleet" merges the runs' `summary.top` by monthly delta (at
+    most five). A row opens the cluster's view, a top entry opens it with
+    that workload in the drawer; the card is hidden while no cluster has a
+    scan. Pure parts in `dashboard/recommendationsFleet.ts`.
+  - **Settings → History**: a Recommendations block with the stored rows
+    and oldest scan, the retention (1–90 days), the background-scan
+    interval and a per-cluster opt-in (part of the page's draft, saved with
+    it), the scan age per cluster, and "Clear" per cluster and for every
+    cluster (`history_clear` with `recommendations`, then `forget` and a
+    fleet re-read).
 - **Demo** (`mock/recommendations.ts`, `mock/fixtures/recommendations.ts`,
   registered after `./cost` and before `./history`): every command, with a
   seeded history per cluster — prod-eu-west-1 30 days of scans (hourly

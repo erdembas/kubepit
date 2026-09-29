@@ -506,13 +506,7 @@ function latest(clusterId: string, runId: number | null): RecommendationLatest {
     if (!picked) throw new Error(`scan ${runId} is no longer stored`);
   }
   const shown = picked ?? (sourceChanged ? undefined : last);
-  const failure = [...list]
-    .reverse()
-    .find(
-      (r) =>
-        (r.run.status === 'failed' || r.run.status === 'interrupted') &&
-        r.run.id > (last?.run.id ?? 0),
-    );
+  const failure = lastFailure(list, last);
   return {
     scan: shown ? scanView(clusterId, shown) : null,
     source_changed: sourceChanged,
@@ -610,14 +604,28 @@ async function usageHistory(args: MockArgs): Promise<WorkloadUsageHistory> {
   };
 }
 
+/** The newest failed or interrupted run after the latest success (like `rec::latest`). */
+function lastFailure(list: readonly DemoRun[], after: DemoRun | undefined): DemoRun | undefined {
+  return [...list]
+    .reverse()
+    .find(
+      (r) =>
+        (r.run.status === 'failed' || r.run.status === 'interrupted') &&
+        r.run.id > (after?.run.id ?? 0),
+    );
+}
+
 function fleet(): ClusterRecommendationSummary[] {
   return clusters().map((c) => {
-    const last = [...runsOf(c.id)].reverse().find((r) => r.run.status === 'success' && r.inputs);
+    const list = runsOf(c.id);
+    const last = [...list].reverse().find((r) => r.run.status === 'success' && r.inputs);
+    const failure = lastFailure(list, last);
     return {
       cluster_id: c.id,
       scheduled: schedules.has(c.id),
       source_changed: !!last && last.sourceConfig !== sourceConfig(c),
       run: last ? runView(c.id, last) : null,
+      last_failure: failure ? structuredClone(failure.run) : null,
     };
   });
 }

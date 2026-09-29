@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type {
   ClusterDef,
+  ClusterRecommendationSummary,
   RecommendationLatest,
   RecommendationRun,
   RecommendationScanStatus,
@@ -127,6 +128,17 @@ describe('demo recommendation scans', () => {
       invoke<RecommendationLatest>('recommendations_latest', { clusterId: 'c-kind', runId: null }),
     );
     expect(kind.scan).toBeNull();
+  });
+
+  it('reports every cluster in the fleet with its last failure', async () => {
+    const fleet = await settle(invoke<ClusterRecommendationSummary[]>('recommendations_fleet'));
+    const byId = Object.fromEntries(fleet.map((f) => [f.cluster_id, f]));
+    expect(byId['c-dev']!.run!.summary).not.toBeNull();
+    expect(byId['c-dev']!.last_failure!.status).toBe('failed');
+    expect(byId['c-dev']!.last_failure!.id).toBeGreaterThan(byId['c-dev']!.run!.id);
+    expect(byId['c-prod-eu']!.last_failure).toBeNull();
+    expect(byId['c-kind']!.run).toBeNull();
+    expect(byId['c-kind']!.last_failure).toBeNull();
   });
 
   it('re-evaluates the stored scan with the current settings', async () => {

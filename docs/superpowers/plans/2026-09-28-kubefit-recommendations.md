@@ -2455,15 +2455,15 @@ git commit -m "feat(ui): stored recommendations in details and Health"
 
 Steps:
 
-- [ ] **Step 1: Implement the card and the settings block, and update the docs**
+- [x] **Step 1: Implement the card and the settings block, and update the docs**
 
-- [ ] **Step 2: Translate, run the checks**
+- [x] **Step 2: Translate, run the checks**
 
 Run: `pnpm i18n:check -- --fix`, add the Turkish, then `pnpm typecheck && pnpm i18n:check`.
 
 Expected: PASS.
 
-- [ ] **Step 3: Verify the demo**
+- [x] **Step 3: Verify the demo**
 
 Run: `pnpm dev:ui`.
 - The dashboard shows the fleet card: prod stale after disconnecting it, dev with a
@@ -2472,7 +2472,7 @@ Run: `pnpm dev:ui`.
   reflects it.
 - Clear removes dev's scans, and the view shows "No scan yet".
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/desktop/src docs/ARCHITECTURE.md
