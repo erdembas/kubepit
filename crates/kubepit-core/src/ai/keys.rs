@@ -10,13 +10,15 @@
 //! **A key is bound to the endpoint it was saved for.** The entry is
 //! `{"v":1,"kind":"anthropic","origin":"https://api.anthropic.com","key":"…"}`
 //! where `origin` is `scheme://host[:port]` of the provider's base URL at
-//! the time ([`settings::origin`]). [`read_key`] only returns the key while
-//! the provider still has that kind and origin, so editing a base URL can
-//! never send a stored key to another server; anything else (another
-//! origin or kind, an older raw entry, another app's value) is a
-//! [`KeyMismatch`] and the user sets the key again. Keys are only bound to
-//! `https://` or loopback origins ([`settings::key_safe`]): never sent in
-//! plain text over the network.
+//! the time ([`settings::origin`]). The binding is per origin: the path is
+//! ignored, so `https://gw.example/a` and `https://gw.example/b` share one
+//! (the same server is trusted with the key either way). [`read_key`] only
+//! returns the key while the provider still has that kind and origin, so
+//! editing a base URL can never send a stored key to another server;
+//! anything else (another origin or kind, an older raw entry, another
+//! app's value) is a [`KeyMismatch`] and the user sets the key again.
+//! Keys are only bound to `https://` or loopback origins
+//! ([`settings::key_safe`]): never sent in plain text over the network.
 
 use std::collections::HashMap;
 

@@ -476,19 +476,88 @@ fn a_failed_forget_fails_the_cluster_change() {
 }
 
 #[tokio::test]
-async fn a_failed_forget_fails_the_removal_until_it_is_retried() {
+async fn a_failed_cleanup_does_not_fail_the_removal() {
     let (dir, app, _r, id) =
         support::setup_with_secrets("http://127.0.0.1:9", false, Default::default());
     app.ai_cluster_set(&id, true, false).unwrap();
     let file = break_settings_file(dir.path());
-    let err = format!("{:#}", app.cluster_remove(&id).await.unwrap_err());
-    assert!(err.contains("remove it again"), "{err}");
+    // The cluster is gone; its leftover id is harmless (an unregistered
+    // cluster cannot be used) and is dropped by the next start.
+    app.cluster_remove(&id).await.unwrap();
     assert!(app.cluster_list().is_empty());
     assert_eq!(app.settings().ai.clusters, vec![id.clone()]);
 
     std::fs::remove_dir(&file).unwrap();
-    app.cluster_remove(&id).await.unwrap();
+    std::fs::write(&file, serde_json::to_vec(&app.settings()).unwrap()).unwrap();
+    drop(app);
+    let app = Kubepit::open(Paths::new(dir.path().join("home")), Arc::new(NullSink)).unwrap();
     assert!(app.settings().ai.clusters.is_empty());
+}
+
+/// Holds the first `ai/` write after it reached the store, until released.
+struct PausingStore {
+    inner: MemorySecretStore,
+    gate: parking_lot::Mutex<Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>>,
+}
+
+impl SecretStore for PausingStore {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+    fn get(&self, key: &str) -> anyhow::Result<Option<Vec<u8>>> {
+        self.inner.get(key)
+    }
+    fn set(&self, key: &str, value: &[u8]) -> anyhow::Result<()> {
+        self.inner.set(key, value)?;
+        let gate = self.gate.lock().take();
+        if let Some((entered, release)) = gate {
+            entered.send(()).unwrap();
+            release.recv().unwrap();
+        }
+        Ok(())
+    }
+    fn delete(&self, key: &str) -> anyhow::Result<()> {
+        self.inner.delete(key)
+    }
+}
+
+#[test]
+fn key_changes_are_serialized_with_the_status_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let (entered_tx, entered) = std::sync::mpsc::channel();
+    let (release, release_rx) = std::sync::mpsc::channel();
+    let store = Arc::new(PausingStore {
+        inner: MemorySecretStore::default(),
+        gate: parking_lot::Mutex::new(Some((entered_tx, release_rx))),
+    });
+    let app = Arc::new(
+        Kubepit::open_with_secrets(
+            Paths::new(dir.path().join("home")),
+            Arc::new(NullSink),
+            store.clone(),
+        )
+        .unwrap(),
+    );
+    // The set has written the key but not yet updated the cache...
+    let set = {
+        let app = app.clone();
+        std::thread::spawn(move || app.ai_key_set("anthropic", KEY).map(|_| ()))
+    };
+    entered
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap();
+    // ... when a delete comes in. It must wait for the set to finish.
+    let delete = {
+        let app = app.clone();
+        std::thread::spawn(move || app.ai_key_delete("anthropic").map(|_| ()))
+    };
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    release.send(()).unwrap();
+    set.join().unwrap().unwrap();
+    delete.join().unwrap().unwrap();
+    let stored = store.inner.raw("ai/anthropic").is_some();
+    assert!(!stored, "the delete ran last");
+    assert_eq!(provider_status(&app, "anthropic").has_key, stored);
 }
 
 #[test]

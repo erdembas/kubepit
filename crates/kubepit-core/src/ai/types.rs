@@ -167,11 +167,18 @@ pub struct AiProviderStatus {
     pub kind: AiProviderKind,
     /// The base URL is a loopback address.
     pub local: bool,
-    /// An API key is stored for it.
+    /// A usable API key is stored for it: false when there is none, and
+    /// also when the stored key was saved for another origin or provider
+    /// kind (`ai/keys.rs`).
     pub has_key: bool,
-    /// The credential store could not be read (locked, missing).
+    /// Why there is no usable key: the credential store could not be read
+    /// (locked, missing), or the stored key was saved for another origin or
+    /// kind (a `KeyMismatch` message). Never contains the key.
     pub key_error: Option<String>,
-    /// Requests may go to it (loopback, or remote egress on and not local-only).
+    /// Requests may go to it: a valid base URL, loopback or remote egress
+    /// on and not local-only; when a key is involved (Anthropic, or a key
+    /// is stored) only over `https://` or to a loopback address
+    /// (`settings::provider_allowed`).
     pub allowed: bool,
 }
 

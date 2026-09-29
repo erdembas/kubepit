@@ -50,6 +50,9 @@ pub struct AiState {
     remote_allowed: AtomicBool,
     /// What each provider's stored key is bound to (never the key).
     key_bindings: keys::BindingCache,
+    /// Held across a key write or delete *and* its cache update, so the
+    /// cache always describes the entry the credential store ends up with.
+    key_writes: parking_lot::Mutex<()>,
 }
 
 impl Kubepit {
@@ -138,19 +141,22 @@ impl Kubepit {
             bail!("the API key must not contain spaces or line breaks");
         }
         let binding = keys::binding_for(provider)?;
-        let written = keys::write_key(self.secrets.as_ref(), provider, key).map_err(|e| {
-            anyhow!(
-                "could not store the {} API key in the {}: {e:#}",
-                provider.name,
-                self.secrets.name()
-            )
-        });
-        match written {
-            Ok(()) => self.ai.key_bindings.set(&provider.id, binding),
-            Err(e) => {
-                // A partial write may have left anything behind.
-                self.ai.key_bindings.forget(&provider.id);
-                return Err(e);
+        {
+            let _serialized = self.ai.key_writes.lock();
+            let written = keys::write_key(self.secrets.as_ref(), provider, key).map_err(|e| {
+                anyhow!(
+                    "could not store the {} API key in the {}: {e:#}",
+                    provider.name,
+                    self.secrets.name()
+                )
+            });
+            match written {
+                Ok(()) => self.ai.key_bindings.set(&provider.id, binding),
+                Err(e) => {
+                    // A partial write may have left anything behind.
+                    self.ai.key_bindings.forget(&provider.id);
+                    return Err(e);
+                }
             }
         }
         Ok(self.ai_status())
@@ -163,20 +169,23 @@ impl Kubepit {
         if provider_id.is_empty() {
             bail!("no assistant provider given");
         }
-        let deleted = keys::delete_key(self.secrets.as_ref(), provider_id).map_err(|e| {
-            anyhow!(
-                "could not remove the API key from the {}: {e:#}",
-                self.secrets.name()
-            )
-        });
-        match deleted {
-            Ok(()) => self
-                .ai
-                .key_bindings
-                .set(provider_id, keys::KeyBinding::Missing),
-            Err(e) => {
-                self.ai.key_bindings.forget(provider_id);
-                return Err(e);
+        {
+            let _serialized = self.ai.key_writes.lock();
+            let deleted = keys::delete_key(self.secrets.as_ref(), provider_id).map_err(|e| {
+                anyhow!(
+                    "could not remove the API key from the {}: {e:#}",
+                    self.secrets.name()
+                )
+            });
+            match deleted {
+                Ok(()) => self
+                    .ai
+                    .key_bindings
+                    .set(provider_id, keys::KeyBinding::Missing),
+                Err(e) => {
+                    self.ai.key_bindings.forget(provider_id);
+                    return Err(e);
+                }
             }
         }
         Ok(self.ai_status())
@@ -232,14 +241,34 @@ impl Kubepit {
     /// Make a cluster's enablement match the registry after it changed or
     /// was removed ([`AiSettings::reconcile_cluster`]): an unregistered
     /// cluster is forgotten, a production one without an acknowledgement
-    /// is disabled. Reads the cluster under the settings lock.
+    /// is disabled, a stale acknowledgement is dropped. Reads the cluster
+    /// under the settings lock.
+    ///
+    /// Fails only when saving fails while a registered production cluster
+    /// without an acknowledgement had to be disabled. Any other leftover
+    /// (a stale acknowledgement, the id of a removed cluster) cannot enable
+    /// anything ([`AiSettings::cluster_allowed`]) and is dropped at the
+    /// next start, so failing to save it is logged.
     pub(crate) fn ai_reconcile_cluster(&self, cluster_id: &str) -> Result<()> {
-        self.store
-            .update_settings(|settings| {
-                let cluster = self.store.cluster(cluster_id);
-                settings.ai.reconcile_cluster(cluster_id, cluster.as_ref());
+        let mut disables_production = false;
+        let saved = self.store.update_settings(|settings| {
+            let cluster = self.store.cluster(cluster_id);
+            let was_enabled = settings.ai.is_cluster_enabled(cluster_id);
+            settings.ai.reconcile_cluster(cluster_id, cluster.as_ref());
+            disables_production =
+                cluster.is_some() && was_enabled && !settings.ai.is_cluster_enabled(cluster_id);
+            Ok(())
+        });
+        match saved {
+            Ok(_) => Ok(()),
+            Err(e) if disables_production => Err(e),
+            Err(e) => {
+                tracing::warn!(
+                    cluster = cluster_id,
+                    "could not tidy the assistant's cluster lists (done at the next start): {e:#}"
+                );
                 Ok(())
-            })
-            .map(|_| ())
+            }
+        }
     }
 }

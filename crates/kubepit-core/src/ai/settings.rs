@@ -127,10 +127,12 @@ pub fn trim_base_url(url: &str) -> &str {
     }
 }
 
-/// A usable provider base URL: `http://` or `https://` with a host, and no
-/// user info, query, fragment, whitespace or backslash (WHATWG parsers,
-/// like the HTTP client's, read `\` as `/`, so `http://evil\@127.0.0.1`
-/// goes to `evil`). `url` is already trimmed.
+/// A usable provider base URL: `http://` or `https://` with a host and an
+/// optional port, and no user info, query, fragment, whitespace or
+/// backslash (WHATWG parsers, like the HTTP client's, read `\` as `/`, so
+/// `http://evil\@127.0.0.1` goes to `evil`). Query strings are refused, so
+/// endpoints that need one on every request (Azure OpenAI's
+/// `?api-version=…`) are not supported for now. `url` is already trimmed.
 fn parse_base_url(url: &str) -> Result<http::Uri, &'static str> {
     if url.is_empty() {
         return Err("it is empty");
@@ -165,10 +167,34 @@ fn parse_base_url(url: &str) -> Result<http::Uri, &'static str> {
     if host.is_empty() {
         return Err("it has no host");
     }
-    // `host:99999` parses, but has no port.
-    let port = &authority.as_str()[host.len()..];
-    if port.len() > 1 && authority.port_u16().is_none() {
-        return Err("its port is not valid");
+    // After the host only `:<digits>` (a valid port): `http` reads
+    // `http://[::1]evil.com:4000` as `[::1]`, other parsers do not.
+    let rest = &authority.as_str()[host.len()..];
+    let port_ok = match rest.strip_prefix(':') {
+        None => rest.is_empty(),
+        Some(digits) => {
+            !digits.is_empty()
+                && digits.bytes().all(|b| b.is_ascii_digit())
+                && authority.port_u16().is_some()
+        }
+    };
+    if !port_ok {
+        return Err("its host or port is not valid");
+    }
+    // The HTTP client parses URLs the WHATWG way (`url`): it must reach the
+    // same scheme, host and port, or the URL is refused (`http://127.1`,
+    // `0x7f.0.0.1`, percent-encoded hosts, …).
+    let scheme = uri.scheme_str().unwrap_or_default().to_ascii_lowercase();
+    let port = authority
+        .port_u16()
+        .unwrap_or(if scheme == "https" { 443 } else { 80 });
+    let agrees = url::Url::parse(url).is_ok_and(|parsed| {
+        parsed.scheme() == scheme
+            && parsed.host_str() == Some(host.to_ascii_lowercase().as_str())
+            && parsed.port_or_known_default() == Some(port)
+    });
+    if !agrees {
+        return Err("its host is not written plainly (the HTTP client would read it differently)");
     }
     Ok(uri)
 }
@@ -304,8 +330,9 @@ fn insert_sorted(ids: &mut Vec<String>, id: &str) {
 impl AiSettings {
     /// Clamp out-of-range values and restore missing defaults instead of
     /// persisting them: the budget range, blank provider fields, the three
-    /// default providers, an unknown active provider, duplicate or invalid
-    /// ids. Idempotent: `normalized(normalized(x)) == normalized(x)`.
+    /// default providers, duplicate or invalid ids. An unknown active
+    /// provider becomes `None` (not chosen). Idempotent:
+    /// `normalized(normalized(x)) == normalized(x)`.
     pub fn normalized(mut self) -> Self {
         self.max_context_tokens = self
             .max_context_tokens
@@ -324,17 +351,13 @@ impl AiSettings {
         }
         self.providers = providers;
 
+        // An unknown provider is not silently swapped for another one (and
+        // its data sent there): no provider is chosen until the user picks.
+        let providers = &self.providers;
         self.active_provider = self
             .active_provider
             .map(|id| id.trim().to_string())
-            .filter(|id| !id.is_empty())
-            .map(|id| {
-                if self.providers.iter().any(|p| p.id == id) {
-                    id
-                } else {
-                    DEFAULT_PROVIDER.to_string()
-                }
-            });
+            .filter(|id| providers.iter().any(|p| &p.id == id));
 
         self.clusters = normalized_ids(std::mem::take(&mut self.clusters));
         let clusters = &self.clusters;
@@ -430,9 +453,11 @@ impl AiSettings {
             .and_then(|id| self.provider(id))
     }
 
-    /// The id is in the enabled list. Use [`Self::cluster_allowed`] to
-    /// decide whether the assistant may be used with a cluster.
-    pub fn is_cluster_enabled(&self, cluster_id: &str) -> bool {
+    /// The id is in the enabled list, whatever the cluster is now. Crate
+    /// internal on purpose: to decide whether the assistant may be used
+    /// with a cluster, call [`Self::cluster_allowed`], which also requires
+    /// the acknowledgement of a production cluster.
+    pub(crate) fn is_cluster_enabled(&self, cluster_id: &str) -> bool {
         self.clusters.iter().any(|id| id == cluster_id)
     }
 
@@ -570,6 +595,9 @@ mod tests {
             // 127.0.0.1 in the first, `evil` in the second. Both are refused.
             "http://127.0.0.1\\@evil",
             "http://evil\\@127.0.0.1",
+            // Junk after an IPv6 host: `[::1]` to one parser, not another.
+            "http://[::1]x:4000",
+            "http://[::1]evil.com:4000",
         ] {
             assert!(!is_loopback(url), "{url}");
         }
@@ -656,6 +684,15 @@ mod tests {
             "http://a b",
             "http://evil\\@127.0.0.1",
             "https://",
+            "http://[::1]x:4000",
+            "https://a.com:+443",
+            "http://[::1]evil.com:4000",
+            "https://a.com:",
+            "https://a.com:44x",
+            // Hosts the HTTP client (WHATWG `url`) reads differently.
+            "http://127.1:4000",
+            "http://0x7f.0.0.1",
+            "https://a.com%2eevil.com",
         ] {
             assert_eq!(origin(url), None, "{url}");
             assert!(base_url_problem(url).is_some(), "{url}");
@@ -942,7 +979,10 @@ mod tests {
         );
         assert_eq!(n.provider("ollama").unwrap().context_window, None);
         assert_eq!(n.providers.len(), 3);
-        assert_eq!(n.active_provider.as_deref(), Some(DEFAULT_PROVIDER));
+        assert_eq!(
+            n.active_provider, None,
+            "an unknown provider is not replaced"
+        );
         assert_eq!(n.clusters, vec!["a".to_string(), "b".to_string()]);
         assert_eq!(n.prices.len(), 1);
         assert_eq!(n.prices[0].model, "claude-opus-5");

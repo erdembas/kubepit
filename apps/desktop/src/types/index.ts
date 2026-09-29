@@ -2737,6 +2737,13 @@ export interface AiSettings {
    * change it with `aiClusterSet` (production needs a typed confirmation).
    */
   clusters: ClusterId[];
+  /**
+   * The production clusters of `clusters` that were enabled with the typed
+   * acknowledgement while they were production. Backend-owned: read-only in
+   * `settingsSet` (set by `aiClusterSet`, dropped when the cluster is
+   * disabled, removed, or leaves production).
+   */
+  production_acknowledged: ClusterId[];
   redaction: AiRedactionSettings;
   tool_policy: AiToolPolicy;
   /** Keep every request in the local `ai_log` of `history.db`. */
@@ -2762,11 +2769,23 @@ export interface AiProviderStatus {
   kind: AiProviderKind;
   /** The base URL is a loopback address. */
   local: boolean;
-  /** An API key is stored for it. */
+  /**
+   * A usable API key is stored for it: false when there is none, and also
+   * when the stored key was saved for another origin (scheme://host:port)
+   * or provider kind — keys are bound to where they were saved.
+   */
   has_key: boolean;
-  /** The credential store could not be read (locked, missing). */
+  /**
+   * Why there is no usable key: the credential store could not be read
+   * (locked, missing), or the stored key was saved for another origin or
+   * kind ("The key was saved for …; set it again …"). Never contains the key.
+   */
   key_error: string | null;
-  /** Requests may go to it (loopback, or remote egress allowed and not local-only). */
+  /**
+   * Requests may go to it: a valid base URL, loopback or remote egress
+   * allowed and not local-only; when a key is involved (Anthropic, or a key
+   * is stored) only over https:// or to a loopback address.
+   */
   allowed: boolean;
 }
 

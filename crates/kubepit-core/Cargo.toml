@@ -37,6 +37,9 @@ regex = "1"
 # Raw GETs through the API server: the service proxy (Prometheus queries)
 # and `/openapi/v3` documents (already in kube's tree).
 http = "1"
+# Assistant base URLs must parse the same way under the WHATWG parser the
+# HTTP client uses (already in the workspace's tree).
+url = "2"
 # Authenticated Prometheus: HTTP/1.1, and TLS for `https` services, over an
 # in-process port-forward stream (all already in kube's tree).
 hyper = { version = "1", features = ["client", "http1"] }
