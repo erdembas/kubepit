@@ -1,0 +1,27 @@
+<context>
+<section id="scope" kind="scope" label="scope">
+cluster: eval-local
+namespace: shop
+</section>
+<section id="object" kind="object" label="object">
+apiVersion: v1
+kind: Pod
+metadata:
+  name: catalog-9c3
+  namespace: shop
+spec:
+  containers:
+  - image: example/catalog:v404
+    name: app
+status:
+  containerStatuses:
+  - name: app
+    state:
+      waiting:
+        reason: ImagePullBackOff
+</section>
+<section id="events" kind="events" label="events">
+Warning Failed: Failed to pull image "example/catalog:v404": manifest unknown
+Warning BackOff: Back-off pulling image
+</section>
+</context>

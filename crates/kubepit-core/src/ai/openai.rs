@@ -45,6 +45,7 @@ pub struct OpenAiCompatProvider {
     timeouts: AiTimeouts,
     retry: RetryPolicy,
     egress: EgressCell,
+    request_hook: Option<super::provider::RequestHook>,
     /// Send `max_completion_tokens` instead of `max_tokens`.
     completion_tokens: AtomicBool,
     /// Send `stream_options.include_usage` (cleared when rejected).
@@ -80,6 +81,7 @@ impl OpenAiCompatProvider {
             timeouts,
             retry,
             egress: EgressCell::default(),
+            request_hook: None,
             completion_tokens: AtomicBool::new(false),
             stream_options: AtomicBool::new(true),
         })
@@ -89,6 +91,26 @@ impl OpenAiCompatProvider {
     pub fn with_egress(self, egress: Egress) -> Self {
         self.egress.set(egress);
         self
+    }
+
+    /// Session-owned gate and audit callback for every HTTP chat attempt.
+    pub fn with_request_hook(mut self, hook: super::provider::RequestHook) -> Self {
+        self.request_hook = Some(hook);
+        self
+    }
+
+    async fn before_request(
+        &self,
+        body: Value,
+        cancel: &CancellationToken,
+    ) -> Result<(), ProviderError> {
+        if cancel.is_cancelled() {
+            return Err(ProviderError::cancelled());
+        }
+        if let Some(hook) = &self.request_hook {
+            hook(body, cancel.clone()).await?;
+        }
+        Ok(())
     }
 
     /// The JSON body `chat` sends for `req`.
@@ -200,6 +222,8 @@ impl OpenAiCompatProvider {
         let mut switches = 0;
         let (call, response) = loop {
             let call = Call::new(NAME, &url, &secrets, &self.timeouts, deadlines, cancel);
+            self.before_request(self.body(req, self.shape()), cancel)
+                .await?;
             match call
                 .send(self.completion_request(&url, req, self.shape())?)
                 .await

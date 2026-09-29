@@ -35,13 +35,14 @@ export function mainTabKey(tab: MainTab): string {
 
 export type SidebarGroupBy = 'none' | 'environment' | 'status' | 'tag';
 export type SidebarStatusFilter = 'all' | 'connected' | 'disconnected';
-export type RightPanel = 'events' | 'forwards' | 'alerts';
+export type RightPanel = 'events' | 'forwards' | 'alerts' | 'assistant';
 export type SettingsCategory =
   | 'general'
   | 'kubeconfig'
   | 'terminal'
   | 'notifications'
   | 'history'
+  | 'assistant'
   // Power user: custom actions and keyboard mode.
   | 'custom-actions'
   | 'keyboard'

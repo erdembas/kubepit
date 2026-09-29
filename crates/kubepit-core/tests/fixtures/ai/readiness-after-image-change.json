@@ -1,0 +1,78 @@
+{
+  "name": "readiness-after-image-change",
+  "locale": "tr",
+  "intent": "explain",
+  "scope": {
+    "cluster_id": null,
+    "namespace": "shop",
+    "object": {
+      "api_version": "v1",
+      "kind": "Pod",
+      "namespace": "shop",
+      "name": "frontend-5fd"
+    }
+  },
+  "sections": [
+    {
+      "id": "scope",
+      "kind": "scope",
+      "label": "scope",
+      "priority": 0,
+      "format": "text",
+      "content": "cluster: eval-local\nnamespace: shop"
+    },
+    {
+      "id": "object",
+      "kind": "object",
+      "label": "object",
+      "priority": 0,
+      "format": "json",
+      "content": "{\n  \"apiVersion\": \"v1\",\n  \"kind\": \"Pod\",\n  \"metadata\": {\n    \"name\": \"frontend-5fd\",\n    \"namespace\": \"shop\"\n  },\n  \"spec\": {\n    \"containers\": [\n      {\n        \"name\": \"app\",\n        \"image\": \"example/frontend:v2\"\n      }\n    ]\n  },\n  \"status\": {\n    \"conditions\": [\n      {\n        \"type\": \"Ready\",\n        \"status\": \"False\"\n      }\n    ]\n  }\n}"
+    },
+    {
+      "id": "changes",
+      "kind": "changes",
+      "label": "changes",
+      "priority": 1,
+      "format": "text",
+      "content": "2026-09-28T10:00Z Deployment/frontend image changed example/frontend:v1 → example/frontend:v2"
+    },
+    {
+      "id": "events",
+      "kind": "events",
+      "label": "events",
+      "priority": 1,
+      "format": "text",
+      "content": "Warning Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503"
+    },
+    {
+      "id": "logs",
+      "kind": "logs",
+      "label": "logs",
+      "priority": 2,
+      "format": "log",
+      "content": "GET /ready 503: upstream not initialized"
+    }
+  ],
+  "secrets": [],
+  "expect_sections": [
+    "scope",
+    "object",
+    "changes",
+    "events",
+    "logs"
+  ],
+  "max_input_tokens": 12000,
+  "scripted_reply": "Readiness probe 503 hatası image değişikliğinden sonra başlamış. Upstream bağlantısını ve uygulamanın hazır olma koşulunu kontrol edin; yalnızca probe gecikmesini artırmak nedeni çözmez.\n```sh\nkubectl -n shop describe pod frontend-5fd\n```\n```logql\n{namespace=\"shop\",app=\"frontend\"} |= \"upstream\"\n```",
+  "expect_suggestions": {
+    "manifest": 0,
+    "kubectl": 1,
+    "promql": 0,
+    "logql": 1
+  },
+  "keywords": [
+    "readiness",
+    "503",
+    "upstream"
+  ]
+}

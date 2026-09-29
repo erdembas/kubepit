@@ -10,6 +10,20 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-28-ai-assistant-design.md`
 
+## Completion record — 2026-09-29
+
+Implementation resumed from the interrupted assistant session and completed across the Rust
+session engine, Tauri IPC, assistant panel, provider/privacy settings, request history,
+workload/query/editor entry points, and English/Turkish catalogs. The original task steps
+below remain as the design and implementation recipe, rather than a historical test-run log.
+
+Validation covers the full Rust workspace and frontend suites, strict Clippy, formatting,
+typechecking, catalog checks, production frontend and macOS app builds, the complete native
+main window and Assistant settings, and demo flows for preview, tool consent, streamed
+answers, YAML handoff and switching language during a response. The live-provider evaluator
+is implemented but was intentionally not run; automated tests use synthetic data and local
+fake providers and do not connect to real clusters.
+
 ## Global Constraints
 
 - IPC contract: every new command or shape changes `apps/desktop/src/types/index.ts`, `apps/desktop/src/lib/ipc.ts`, the serde types in `crates/kubepit-core` and `apps/desktop/src-tauri/src/ipc/ai.rs` in the same commit. Serde fields are snake_case, JS arguments camelCase, errors cross as `Err(String)` through `ipc_err`, and streams use a `tauri::ipc::Channel<AiEvent>` parameter named `on_event`.

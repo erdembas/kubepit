@@ -188,6 +188,7 @@ impl Kubepit {
     /// safely. Backend-owned fields keep their stored values.
     pub fn set_settings(&self, mut settings: Settings) -> Result<Settings> {
         settings.ai.validate()?;
+        let previous_ai = self.settings().ai;
         let blank_to_none =
             |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
         settings.kubectl_path = blank_to_none(settings.kubectl_path);
@@ -224,6 +225,9 @@ impl Kubepit {
             *current = settings;
             Ok(())
         })?;
+        if previous_ai != saved.ai {
+            self.ai_stop_all();
+        }
         self.apply_alert_settings(&saved.alerts);
         self.sync_change_journals();
         self.sync_history();
@@ -242,6 +246,7 @@ impl Kubepit {
     /// Stop background work and delete node-shell helper pods. Called when
     /// the app exits; bounded so a dead cluster cannot block shutdown.
     pub async fn shutdown(&self) {
+        self.ai_shutdown().await;
         self.stop_kubeconfig_watch();
         self.remove_transient_run_kubeconfigs();
         self.watches.stop_all();

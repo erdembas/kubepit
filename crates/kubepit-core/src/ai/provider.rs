@@ -169,6 +169,13 @@ pub enum StreamEvent {
 }
 
 /// Where stream events go.
+/// Session hook before each actual chat HTTP attempt (including retries and
+/// protocol compatibility fallbacks). It may wait for a shared rate-limit slot,
+/// revalidate consent and record the exact JSON body; never receives headers.
+pub type RequestHook = Arc<
+    dyn Fn(Value, CancellationToken) -> BoxFuture<'static, Result<(), ProviderError>> + Send + Sync,
+>;
+
 pub type EventSink<'a> = &'a (dyn Fn(StreamEvent) + Send + Sync);
 
 // ---------------------------------------------------------------------------

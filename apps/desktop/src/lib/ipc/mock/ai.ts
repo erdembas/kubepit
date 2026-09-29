@@ -707,6 +707,7 @@ function finish(run: Run, stop: AiStop, error: string | null = null) {
     usage: { ...run.usage },
     cost,
     placeholders: restoreMap(session.names),
+    refusal_category: stop === 'refusal' ? 'cyber' : null,
   });
   session.messages += 2;
   session.historyTokens +=

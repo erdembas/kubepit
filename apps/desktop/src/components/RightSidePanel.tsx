@@ -4,6 +4,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { AlertsPanel } from '@/components/alerts/AlertsPanel';
 import { FleetEventsPanel } from '@/components/panels/FleetEventsPanel';
 import { PortForwardsPanel } from '@/components/panels/PortForwardsPanel';
+import { AssistantPanel } from '@/components/assistant/AssistantPanel';
 import { cn } from '@/lib/cn';
 
 /** Keep panel state mounted, but resize the workspace only once per toggle.
@@ -59,6 +60,9 @@ export function RightSidePanel() {
   const hasOpenedAlerts = useRef(false);
   if (active === 'alerts') hasOpenedAlerts.current = true;
 
+  const hasOpenedAssistant = useRef(false);
+  if (active === 'assistant') hasOpenedAssistant.current = true;
+
   const isOpen = active != null;
   const renderedWidth = isOpen ? width : 0;
 
@@ -96,6 +100,11 @@ export function RightSidePanel() {
           {hasOpenedForwards.current && (
             <div className={active === 'forwards' ? 'flex h-full min-h-0 flex-1' : 'hidden'}>
               <PortForwardsPanel />
+            </div>
+          )}
+          {hasOpenedAssistant.current && (
+            <div className={active === 'assistant' ? 'flex h-full min-h-0 flex-1' : 'hidden'}>
+              <AssistantPanel visible={active === 'assistant'} />
             </div>
           )}
           {hasOpenedAlerts.current && (

@@ -41,9 +41,11 @@ pub mod keys;
 pub mod logs;
 pub mod ollama;
 pub mod openai;
+pub mod pricing;
 pub mod prompts;
 pub mod provider;
 pub mod redact;
+pub mod session;
 pub mod settings;
 pub mod sse;
 pub mod tools;
@@ -69,6 +71,7 @@ pub struct AiState {
     /// Held across a key write or delete *and* its cache update, so the
     /// cache always describes the entry the credential store ends up with.
     key_writes: parking_lot::Mutex<()>,
+    pub(crate) engine: session::Engine,
 }
 
 impl Kubepit {
@@ -77,6 +80,9 @@ impl Kubepit {
     /// test can reach a real provider.
     pub fn set_ai_remote_providers(&self, on: bool) {
         self.ai.remote_allowed.store(on, Ordering::SeqCst);
+        if !on {
+            self.ai_stop_all();
+        }
     }
 
     pub fn ai_remote_allowed(&self) -> bool {
@@ -175,6 +181,7 @@ impl Kubepit {
                 }
             }
         }
+        self.ai_cancel_provider(provider_id);
         Ok(self.ai_status())
     }
 
@@ -204,6 +211,7 @@ impl Kubepit {
                 }
             }
         }
+        self.ai_cancel_provider(provider_id);
         Ok(self.ai_status())
     }
 
@@ -239,6 +247,9 @@ impl Kubepit {
             settings.ai.enable_cluster(cluster_id, production);
             Ok(())
         })?;
+        if !enabled {
+            self.ai_stop_cluster(cluster_id);
+        }
         Ok(saved)
     }
 
@@ -246,6 +257,7 @@ impl Kubepit {
     /// membership check runs under the settings lock; nothing is written
     /// when it was not enabled.
     pub(crate) fn ai_forget_cluster(&self, cluster_id: &str) -> Result<()> {
+        self.ai_stop_cluster(cluster_id);
         self.store
             .update_settings(|settings| {
                 settings.ai.forget_cluster(cluster_id);

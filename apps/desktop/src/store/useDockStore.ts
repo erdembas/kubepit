@@ -37,6 +37,8 @@ export type DockTab =
       mode: 'create';
       /** Initial YAML (template or empty). */
       yaml: string;
+      /** Forces an assistant hand-off even when YAML matches the original template. */
+      assistantRevision?: number;
       namespace: string | null;
       /** Start with the dry-run review of `yaml` (manifests handed over by wizards). */
       review?: boolean;

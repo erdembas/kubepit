@@ -1,0 +1,60 @@
+{
+  "name": "imagepull-manifest-unknown",
+  "locale": "tr",
+  "intent": "explain",
+  "scope": {
+    "cluster_id": null,
+    "namespace": "shop",
+    "object": {
+      "api_version": "v1",
+      "kind": "Pod",
+      "namespace": "shop",
+      "name": "catalog-9c3"
+    }
+  },
+  "sections": [
+    {
+      "id": "scope",
+      "kind": "scope",
+      "label": "scope",
+      "priority": 0,
+      "format": "text",
+      "content": "cluster: eval-local\nnamespace: shop"
+    },
+    {
+      "id": "object",
+      "kind": "object",
+      "label": "object",
+      "priority": 0,
+      "format": "json",
+      "content": "{\n  \"apiVersion\": \"v1\",\n  \"kind\": \"Pod\",\n  \"metadata\": {\n    \"name\": \"catalog-9c3\",\n    \"namespace\": \"shop\"\n  },\n  \"spec\": {\n    \"containers\": [\n      {\n        \"name\": \"app\",\n        \"image\": \"example/catalog:v404\"\n      }\n    ]\n  },\n  \"status\": {\n    \"containerStatuses\": [\n      {\n        \"name\": \"app\",\n        \"state\": {\n          \"waiting\": {\n            \"reason\": \"ImagePullBackOff\"\n          }\n        }\n      }\n    ]\n  }\n}"
+    },
+    {
+      "id": "events",
+      "kind": "events",
+      "label": "events",
+      "priority": 1,
+      "format": "text",
+      "content": "Warning Failed: Failed to pull image \"example/catalog:v404\": manifest unknown\nWarning BackOff: Back-off pulling image"
+    }
+  ],
+  "secrets": [],
+  "expect_sections": [
+    "scope",
+    "object",
+    "events"
+  ],
+  "max_input_tokens": 12000,
+  "scripted_reply": "ImagePullBackOff nedeni manifest unknown: image etiketi kayıt deposunda bulunamıyor. Geçerli etiketi doğrulayın; kimlik bilgileri hatası olduğuna dair kanıt yok.\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: catalog\n  namespace: shop\nspec:\n  template:\n    spec:\n      containers:\n      - name: app\n        image: example/catalog:v1\n```\n```sh\nkubectl -n shop describe pod catalog-9c3\n```",
+  "expect_suggestions": {
+    "manifest": 1,
+    "kubectl": 1,
+    "promql": 0,
+    "logql": 0
+  },
+  "keywords": [
+    "ImagePullBackOff",
+    "manifest unknown",
+    "etiket"
+  ]
+}

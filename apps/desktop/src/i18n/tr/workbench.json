@@ -1042,6 +1042,8 @@
   "Explain field at cursor": "İmleçteki alanı açıkla",
   "Explain in the simulator": "Simülatörde açıkla",
   "Explain the fields of {kind}": "{kind} alanlarını açıkla",
+  "Explain the selected workload and its current problems.": "Seçili iş yükünü ve mevcut sorunlarını açıkla.",
+  "Explain with assistant": "Asistanla açıkla",
   "Explain works in a manifest with apiVersion and kind.": "Açıklama, apiVersion ve kind içeren bir manifestte çalışır.",
   "Explanation": "Açıklama",
   "Explicitly denied by an authorizer.": "Bir yetkilendirici tarafından açıkça reddedildi.",

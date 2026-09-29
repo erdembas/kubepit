@@ -381,6 +381,7 @@ impl Kubepit {
     }
 
     pub(crate) fn stop_cluster_work(&self, id: &str) {
+        self.ai_stop_cluster(id);
         self.watches.stop_cluster(id);
         self.log_streams.stop_cluster(id);
         self.metrics_history.stop_cluster(id);

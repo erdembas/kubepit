@@ -13,7 +13,18 @@ import { CodeBlock } from '../details/primitives';
  * scroll within the document, images are shown as alt-text links (remote
  * images are blocked by the CSP anyway).
  */
-export function Markdown({ source, className }: { source: string; className?: string }) {
+type RenderCode = (lang: string, text: string) => ReactNode | null;
+export function Markdown({
+  source,
+  className,
+  renderCode,
+  variant = 'readme',
+}: {
+  source: string;
+  className?: string;
+  renderCode?: RenderCode;
+  variant?: 'readme' | 'chat';
+}) {
   i18n.useLocale();
   const blocks = useMemo(() => parseMarkdown(source), [source]);
   const root = useRef<HTMLDivElement>(null);
@@ -29,7 +40,13 @@ export function Markdown({ source, className }: { source: string; className?: st
   };
   return (
     <div ref={root} className={cn('text-fg-muted min-w-0 text-[12.5px] leading-[1.65]', className)}>
-      <Blocks blocks={blocks} follow={follow} tight={false} />
+      <Blocks
+        blocks={blocks}
+        follow={follow}
+        tight={false}
+        renderCode={renderCode}
+        chat={variant === 'chat'}
+      />
     </div>
   );
 }
@@ -46,22 +63,59 @@ const HEADING = [
   'text-fg-dim mt-4 mb-1.5 text-[11px] font-semibold tracking-[0.08em] uppercase first:mt-0',
 ];
 
-function Blocks({ blocks, follow, tight }: { blocks: Block[]; follow: Follow; tight: boolean }) {
+function Blocks({
+  blocks,
+  follow,
+  tight,
+  renderCode,
+  chat,
+}: {
+  blocks: Block[];
+  follow: Follow;
+  tight: boolean;
+  renderCode?: RenderCode;
+  chat?: boolean;
+}) {
   return (
     <>
       {blocks.map((b, i) => (
-        <BlockView key={i} block={b} follow={follow} tight={tight} />
+        <BlockView
+          key={i}
+          block={b}
+          follow={follow}
+          tight={tight}
+          renderCode={renderCode}
+          chat={chat}
+        />
       ))}
     </>
   );
 }
 
-function BlockView({ block, follow, tight }: { block: Block; follow: Follow; tight: boolean }) {
+function BlockView({
+  block,
+  follow,
+  tight,
+  renderCode,
+  chat,
+}: {
+  block: Block;
+  follow: Follow;
+  tight: boolean;
+  renderCode?: RenderCode;
+  chat?: boolean;
+}) {
   switch (block.t) {
     case 'heading': {
       const Tag = `h${Math.min(block.level, 6)}` as 'h1';
       return (
-        <Tag data-md-anchor={block.id} className={cn(HEADING[block.level], 'scroll-mt-3')}>
+        <Tag
+          data-md-anchor={block.id}
+          className={cn(
+            chat ? 'text-fg mt-3 mb-1 text-[13px] font-semibold first:mt-0' : HEADING[block.level],
+            'scroll-mt-3',
+          )}
+        >
           <Inlines nodes={block.c} follow={follow} />
         </Tag>
       );
@@ -79,13 +133,21 @@ function BlockView({ block, follow, tight }: { block: Block; follow: Follow; tig
     case 'code':
       return (
         <div className="my-3">
-          <CodeBlock text={block.v} maxHeight="max-h-[480px]" />
+          {renderCode?.(block.lang, block.v) ?? (
+            <CodeBlock text={block.v} maxHeight="max-h-[480px]" />
+          )}
         </div>
       );
     case 'quote':
       return (
         <blockquote className="border-border-strong/70 bg-fg/[0.02] text-fg-muted my-3 rounded-r-md border-l-2 py-0.5 pr-3 pl-3 [&>*:first-child]:mt-1.5 [&>*:last-child]:mb-1.5">
-          <Blocks blocks={block.c} follow={follow} tight={false} />
+          <Blocks
+            blocks={block.c}
+            follow={follow}
+            tight={false}
+            renderCode={renderCode}
+            chat={chat}
+          />
         </blockquote>
       );
     case 'list': {
@@ -113,11 +175,23 @@ function BlockView({ block, follow, tight }: { block: Block; follow: Follow; tig
                     className="accent-accent mt-[5px]"
                   />
                   <span className="min-w-0 flex-1">
-                    <Blocks blocks={item.c} follow={follow} tight={!block.loose} />
+                    <Blocks
+                      blocks={item.c}
+                      follow={follow}
+                      tight={!block.loose}
+                      renderCode={renderCode}
+                      chat={chat}
+                    />
                   </span>
                 </span>
               ) : (
-                <Blocks blocks={item.c} follow={follow} tight={!block.loose} />
+                <Blocks
+                  blocks={item.c}
+                  follow={follow}
+                  tight={!block.loose}
+                  renderCode={renderCode}
+                  chat={chat}
+                />
               )}
             </li>
           ))}

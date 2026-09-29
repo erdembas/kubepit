@@ -41,6 +41,9 @@ and a React UI.
 - **RBAC-aware.** Actions and kinds you may not use are locked with the reason, and
   _My Permissions_ shows who you are and what you can do, like `kubectl auth can-i`.
 - **Safety.** Read-only clusters, typed confirmation for destructive actions on production.
+- **AI assistant (opt-in).** Bring your own Anthropic/OpenAI-compatible key or use a
+  local Ollama model. Diagnose workloads, draft kubectl/PromQL/LogQL and generate YAML
+  with redacted context previews, read-only tools and mandatory review before applying.
 - **English and Turkish** UI.
 
 ## Local-first
@@ -66,6 +69,7 @@ Checks:
 ```bash
 pnpm typecheck
 pnpm i18n:check
+pnpm test:ui
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all

@@ -1,3 +1,5 @@
+import { explainable } from '@/lib/ai/intents';
+import { explainObject } from './aiActions';
 import * as i18n from '@/i18n/core';
 import {
   ArrowRightLeft,
@@ -11,6 +13,7 @@ import {
   Play,
   RotateCcw,
   Scaling,
+  Sparkles,
   ScrollText,
   SquareTerminal,
   Terminal,
@@ -173,6 +176,14 @@ export function resourceActions({
       icon: CalendarSearch,
       mutating: false,
       run: () => openLokiForObject(clusterId, obj),
+    });
+  if (useAppStore.getState().settings?.ai.enabled && explainable(kind))
+    add({
+      id: 'ai-explain',
+      label: i18n.t('Explain with assistant'),
+      icon: Sparkles,
+      mutating: false,
+      run: () => explainObject(clusterId, gvk, obj),
     });
   if (SCALABLE.has(kind))
     add({

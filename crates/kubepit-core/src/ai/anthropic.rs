@@ -71,6 +71,7 @@ pub struct AnthropicProvider {
     retry: RetryPolicy,
     model_info: Option<AiModelInfo>,
     egress: EgressCell,
+    request_hook: Option<super::provider::RequestHook>,
     /// Send `fallbacks: "default"` (cleared when the server rejects it).
     fallbacks: AtomicBool,
 }
@@ -99,6 +100,7 @@ impl AnthropicProvider {
             retry,
             model_info,
             egress: EgressCell::default(),
+            request_hook: None,
             fallbacks: AtomicBool::new(true),
         })
     }
@@ -107,6 +109,26 @@ impl AnthropicProvider {
     pub fn with_egress(self, egress: Egress) -> Self {
         self.egress.set(egress);
         self
+    }
+
+    /// Session-owned gate and audit callback for every HTTP chat attempt.
+    pub fn with_request_hook(mut self, hook: super::provider::RequestHook) -> Self {
+        self.request_hook = Some(hook);
+        self
+    }
+
+    async fn before_request(
+        &self,
+        body: Value,
+        cancel: &CancellationToken,
+    ) -> Result<(), ProviderError> {
+        if cancel.is_cancelled() {
+            return Err(ProviderError::cancelled());
+        }
+        if let Some(hook) = &self.request_hook {
+            hook(body, cancel.clone()).await?;
+        }
+        Ok(())
     }
 
     /// The JSON body `chat` sends for `req` (in its current fallback state).
@@ -263,12 +285,15 @@ impl AnthropicProvider {
         let secrets = [self.api_key.as_str()];
         let fallbacks = self.fallbacks.load(Ordering::SeqCst);
         let call = Call::new(NAME, &url, &secrets, &self.timeouts, deadlines, cancel);
+        self.before_request(self.body(req, fallbacks), cancel)
+            .await?;
         let sent = call.send(self.message_request(&url, req, fallbacks)?).await;
         let (call, response) = match sent {
             Err(error) if fallbacks && rejects_fallbacks(&error) => {
                 self.fallbacks.store(false, Ordering::SeqCst);
                 tracing::info!("Anthropic rejected server-side fallbacks; sending without them");
                 let call = Call::new(NAME, &url, &secrets, &self.timeouts, deadlines, cancel);
+                self.before_request(self.body(req, false), cancel).await?;
                 let response = call.send(self.message_request(&url, req, false)?).await?;
                 (call, response)
             }

@@ -11,6 +11,7 @@
 //! stall on disk I/O.
 
 mod access;
+mod ai;
 mod app;
 mod clusters;
 mod fleet;
@@ -61,6 +62,7 @@ mod recommendations;
 mod audit_coverage;
 
 pub use access::*;
+pub use ai::*;
 pub use alerts::*;
 pub use app::*;
 pub use changes::*;

@@ -2971,6 +2971,7 @@ export type AiEvent =
   | {
       type: 'done';
       stop: AiStop;
+      refusal_category?: string | null;
       usage: AiUsage;
       cost: number | null;
       placeholders: Record<string, string>;

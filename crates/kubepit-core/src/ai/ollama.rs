@@ -36,6 +36,7 @@ pub struct OllamaProvider {
     timeouts: AiTimeouts,
     retry: RetryPolicy,
     egress: EgressCell,
+    request_hook: Option<super::provider::RequestHook>,
 }
 
 impl OllamaProvider {
@@ -62,6 +63,7 @@ impl OllamaProvider {
             timeouts,
             retry,
             egress: EgressCell::default(),
+            request_hook: None,
         })
     }
 
@@ -69,6 +71,26 @@ impl OllamaProvider {
     pub fn with_egress(self, egress: Egress) -> Self {
         self.egress.set(egress);
         self
+    }
+
+    /// Session-owned gate and audit callback for every HTTP chat attempt.
+    pub fn with_request_hook(mut self, hook: super::provider::RequestHook) -> Self {
+        self.request_hook = Some(hook);
+        self
+    }
+
+    async fn before_request(
+        &self,
+        body: Value,
+        cancel: &CancellationToken,
+    ) -> Result<(), ProviderError> {
+        if cancel.is_cancelled() {
+            return Err(ProviderError::cancelled());
+        }
+        if let Some(hook) = &self.request_hook {
+            hook(body, cancel.clone()).await?;
+        }
+        Ok(())
     }
 
     /// The JSON body `chat` sends for `req`.
@@ -105,6 +127,7 @@ impl OllamaProvider {
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(body);
         let call = Call::new(NAME, &url, &[], &self.timeouts, deadlines, cancel);
+        self.before_request(self.request_body(req), cancel).await?;
         let response = call.send(request).await?;
         let mut stream = ChatLines::new(&req.model);
         call.read_stream(response, &mut stream, on_event).await?;

@@ -14,8 +14,14 @@ import type { Settings } from '@/types';
 import { SettingsPageShell, SettingsSection } from './SettingsView';
 import { UpdatesSection } from './UpdatesSection';
 
-/** Local draft of backend settings with an explicit Save, like RunHQ's settings pages. */
-export function useSettingsDraft() {
+/**
+ * Local draft of backend settings with an explicit Save, like RunHQ's settings pages.
+ * `saveBlocked` returns why the draft cannot be saved yet (shown in the
+ * footer, Save disabled), or null; the fields themselves show the details.
+ */
+export function useSettingsDraft(
+  options: { saveBlocked?: (draft: Settings) => string | null } = {},
+) {
   const settings = useAppStore((s) => s.settings);
   const [draft, setDraft] = useState<Settings | null>(settings);
   const [saving, setSaving] = useState(false);
@@ -28,8 +34,9 @@ export function useSettingsDraft() {
     setDraft((d) => rebaseDraft(d, previous, settings));
   }, [settings]);
   const dirty = JSON.stringify(draft) !== JSON.stringify(settings);
+  const blocked = draft && options.saveBlocked ? options.saveBlocked(draft) : null;
   const save = async () => {
-    if (!draft) return;
+    if (!draft || blocked) return;
     setSaving(true);
     try {
       const saved = await ipc.settingsSet(draft);
@@ -45,11 +52,27 @@ export function useSettingsDraft() {
   };
   const footer = dirty ? (
     <>
-      <span className="text-fg-dim text-[11.5px]">{i18n.t('You have unsaved changes.')}</span>
+      {blocked ? (
+        <span
+          role="alert"
+          className="text-status-error min-w-0 truncate text-[11.5px]"
+          title={blocked}
+        >
+          {blocked}
+        </span>
+      ) : (
+        <span className="text-fg-dim text-[11.5px]">{i18n.t('You have unsaved changes.')}</span>
+      )}
       <Button variant="ghost" size="sm" className="ml-auto" onClick={() => setDraft(settings)}>
         {i18n.t('Discard')}
       </Button>
-      <Button variant="primary" size="sm" disabled={saving} onClick={() => void save()}>
+      <Button
+        variant="primary"
+        size="sm"
+        disabled={saving || !!blocked}
+        title={blocked ?? undefined}
+        onClick={() => void save()}
+      >
         {i18n.t('Save')}
       </Button>
     </>

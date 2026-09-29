@@ -116,6 +116,8 @@ pub struct AppState {
     pub window_terminals: WindowOwned,
     /// Resource watches by window: closing a window stops them.
     pub window_watches: WindowOwned,
+    /// Assistant runs, including tool results waiting for consent.
+    pub window_ai: WindowOwned,
 }
 
 #[cfg(test)]

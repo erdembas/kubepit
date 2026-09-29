@@ -1042,6 +1042,8 @@
   "Explain field at cursor": "Explain field at cursor",
   "Explain in the simulator": "Explain in the simulator",
   "Explain the fields of {kind}": "Explain the fields of {kind}",
+  "Explain the selected workload and its current problems.": "Explain the selected workload and its current problems.",
+  "Explain with assistant": "Explain with assistant",
   "Explain works in a manifest with apiVersion and kind.": "Explain works in a manifest with apiVersion and kind.",
   "Explanation": "Explanation",
   "Explicitly denied by an authorizer.": "Explicitly denied by an authorizer.",

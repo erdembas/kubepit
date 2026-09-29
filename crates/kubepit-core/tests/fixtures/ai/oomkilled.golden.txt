@@ -1,0 +1,32 @@
+<context>
+<section id="scope" kind="scope" label="scope">
+cluster: eval-local
+namespace: shop
+</section>
+<section id="object" kind="object" label="object">
+apiVersion: v1
+kind: Pod
+metadata:
+  name: payments-667
+  namespace: shop
+spec:
+  containers:
+  - image: example/web:v2
+    name: app
+status:
+  containerStatuses:
+  - lastState:
+      terminated:
+        exitCode: 137
+        reason: OOMKilled
+    name: app
+    restartCount: 4
+</section>
+<section id="metrics" kind="metrics" label="metrics">
+app memory peak: 246Mi
+app memory limit: 256Mi
+</section>
+<section id="events" kind="events" label="events">
+Normal Killing: Stopping container app
+</section>
+</context>

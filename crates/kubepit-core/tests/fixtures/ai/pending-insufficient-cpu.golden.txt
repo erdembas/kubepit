@@ -1,0 +1,26 @@
+<context>
+<section id="scope" kind="scope" label="scope">
+cluster: eval-local
+namespace: shop
+</section>
+<section id="object" kind="object" label="object">
+apiVersion: v1
+kind: Pod
+metadata:
+  name: worker-2b8
+  namespace: shop
+spec:
+  containers:
+  - image: example/web:v2
+    name: app
+status:
+  conditions:
+  - reason: Unschedulable
+    status: 'False'
+    type: PodScheduled
+  phase: Pending
+</section>
+<section id="events" kind="events" label="events">
+Warning FailedScheduling: 0/3 nodes are available: 3 Insufficient cpu. preemption: No preemption victims found.
+</section>
+</context>

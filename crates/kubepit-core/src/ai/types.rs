@@ -153,10 +153,14 @@ pub struct AiUsage {
 
 impl AiUsage {
     pub fn add(&mut self, other: &AiUsage) {
-        self.input_tokens += other.input_tokens;
-        self.output_tokens += other.output_tokens;
-        self.cache_read_tokens += other.cache_read_tokens;
-        self.cache_write_tokens += other.cache_write_tokens;
+        self.input_tokens = self.input_tokens.saturating_add(other.input_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(other.output_tokens);
+        self.cache_read_tokens = self
+            .cache_read_tokens
+            .saturating_add(other.cache_read_tokens);
+        self.cache_write_tokens = self
+            .cache_write_tokens
+            .saturating_add(other.cache_write_tokens);
     }
 }
 
@@ -481,6 +485,8 @@ pub enum AiEvent {
         usage: AiUsage,
         cost: Option<f64>,
         placeholders: BTreeMap<String, String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        refusal_category: Option<String>,
     },
     Error {
         message: String,
@@ -622,6 +628,7 @@ mod tests {
     fn events_are_tagged_by_type_with_snake_case_fields() {
         let done = AiEvent::Done {
             stop: AiStop::MaxTokens,
+            refusal_category: None,
             usage: AiUsage {
                 input_tokens: 10,
                 output_tokens: 2,

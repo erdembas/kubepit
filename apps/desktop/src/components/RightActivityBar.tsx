@@ -1,5 +1,5 @@
 import * as i18n from '@/i18n';
-import { Activity, Bell, Network } from 'lucide-react';
+import { Activity, Bell, Network, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { selectUnreadCount, useAlertStore } from '@/store/useAlertStore';
 import { useAppStore, type RightPanel } from '@/store/useAppStore';
@@ -25,6 +25,13 @@ interface RailItem {
 }
 
 const ITEMS: RailItem[] = [
+  {
+    id: 'assistant',
+    get label() {
+      return i18n.t('Assistant');
+    },
+    icon: Sparkles,
+  },
   {
     id: 'events',
     get label() {
@@ -52,6 +59,7 @@ export function RightActivityBar() {
   i18n.useLocale();
   const active = useAppStore((s) => s.rightPanel);
   const toggle = useAppStore((s) => s.toggleRightPanel);
+  const assistantEnabled = useAppStore((s) => s.settings?.ai?.enabled ?? false);
   const unreadAlerts = useAlertStore(selectUnreadCount);
 
   return (
@@ -59,7 +67,7 @@ export function RightActivityBar() {
       className="bg-surface border-border/60 z-30 flex w-9 shrink-0 flex-col items-center gap-1 border-l py-1.5"
       aria-label={i18n.t('Right activity bar')}
     >
-      {ITEMS.map((item) => {
+      {ITEMS.filter((item) => item.id !== 'assistant' || assistantEnabled).map((item) => {
         const isActive = active === item.id;
         const Icon = item.icon;
         return (

@@ -27,6 +27,8 @@ pub(crate) fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::
     core.set_change_journal_recording(true);
     // ... and keeps the audit log and opted-in persistent history (see `history.rs`).
     core.set_history_recording(true);
+    // ... and may reach remote model providers the user configured (see ai.rs).
+    core.set_ai_remote_providers(true);
     // ... and samples metrics-server usage for charts (see `metrics_history.rs`).
     core.set_metrics_sampling(true);
     // ... and scans opted-in clusters for recommendations in the background
@@ -45,6 +47,7 @@ pub(crate) fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::
         terminals,
         window_terminals: Default::default(),
         window_watches: Default::default(),
+        window_ai: Default::default(),
     });
     Ok(())
 }

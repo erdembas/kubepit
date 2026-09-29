@@ -1,3 +1,4 @@
+import { AssistantQueryActions } from '../AssistantQueryActions';
 import * as i18n from '@/i18n';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -580,6 +581,7 @@ export function LokiView({
           ariaLabel={i18n.t('Line limit')}
           className="h-6.5 shrink-0"
         />
+        <AssistantQueryActions clusterId={clusterId} language="logql" query={query} />
         <button
           type="button"
           onClick={() => void run('new')}

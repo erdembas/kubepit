@@ -1,0 +1,69 @@
+{
+  "name": "crashloop-go-panic",
+  "locale": "en",
+  "intent": "explain",
+  "scope": {
+    "cluster_id": null,
+    "namespace": "shop",
+    "object": {
+      "api_version": "v1",
+      "kind": "Pod",
+      "namespace": "shop",
+      "name": "checkout-7b9"
+    }
+  },
+  "sections": [
+    {
+      "id": "scope",
+      "kind": "scope",
+      "label": "scope",
+      "priority": 0,
+      "format": "text",
+      "content": "cluster: eval-local\nnamespace: shop"
+    },
+    {
+      "id": "object",
+      "kind": "object",
+      "label": "object",
+      "priority": 0,
+      "format": "json",
+      "content": "{\n  \"apiVersion\": \"v1\",\n  \"kind\": \"Pod\",\n  \"metadata\": {\n    \"name\": \"checkout-7b9\",\n    \"namespace\": \"shop\"\n  },\n  \"spec\": {\n    \"containers\": [\n      {\n        \"name\": \"app\",\n        \"image\": \"example/web:v2\"\n      }\n    ]\n  },\n  \"status\": {\n    \"containerStatuses\": [\n      {\n        \"name\": \"app\",\n        \"restartCount\": 12,\n        \"state\": {\n          \"waiting\": {\n            \"reason\": \"CrashLoopBackOff\"\n          }\n        }\n      }\n    ]\n  }\n}"
+    },
+    {
+      "id": "events",
+      "kind": "events",
+      "label": "events",
+      "priority": 1,
+      "format": "text",
+      "content": "Warning BackOff: Back-off restarting failed container app"
+    },
+    {
+      "id": "logs",
+      "kind": "logs",
+      "label": "logs",
+      "priority": 2,
+      "format": "log",
+      "content": "panic: runtime error: invalid memory address or nil pointer dereference\ngoroutine 1 [running]:\nmain.loadConfig()\n  /app/main.go:42 +0x20"
+    }
+  ],
+  "secrets": [],
+  "expect_sections": [
+    "scope",
+    "object",
+    "events",
+    "logs"
+  ],
+  "max_input_tokens": 12000,
+  "scripted_reply": "The container is in CrashLoopBackOff because the Go process panics in main.loadConfig. Check the config and roll back the broken image after reviewing the diff.\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: checkout\n  namespace: shop\nspec:\n  template:\n    spec:\n      containers:\n      - name: app\n        image: example/web:v1\n```\n```sh\nkubectl -n shop describe pod checkout-7b9\n```",
+  "expect_suggestions": {
+    "manifest": 1,
+    "kubectl": 1,
+    "promql": 0,
+    "logql": 0
+  },
+  "keywords": [
+    "CrashLoopBackOff",
+    "panic",
+    "config"
+  ]
+}

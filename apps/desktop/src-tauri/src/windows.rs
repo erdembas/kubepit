@@ -153,6 +153,9 @@ pub(crate) fn on_window_destroyed(window: &tauri::Window) {
     for id in state.window_watches.close_window(window.label()) {
         state.core.resource_unwatch(&id);
     }
+    for id in state.window_ai.close_window(window.label()) {
+        state.core.ai_cancel(&id);
+    }
     let ids = state.window_terminals.close_window(window.label());
     if ids.is_empty() {
         return;

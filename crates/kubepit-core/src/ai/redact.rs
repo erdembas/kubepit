@@ -95,55 +95,6 @@ const FILE_EXTENSIONS: &[&str] = &[
     "html", "md", "rb", "rs", "jar", "class", "so", "lock", "tmp", "pid", "sock", "crt", "key",
     "pem", "cfg", "ini",
 ];
-/// Generic top-level domains a hostname may end with; any two-letter
-/// country code counts too.
-const GENERIC_TLDS: &[&str] = &[
-    "com",
-    "net",
-    "org",
-    "info",
-    "biz",
-    "dev",
-    "app",
-    "cloud",
-    "tech",
-    "xyz",
-    "site",
-    "online",
-    "page",
-    "gov",
-    "edu",
-    "mil",
-    "int",
-    "mobi",
-    "pro",
-    "asia",
-    "live",
-    "store",
-    "shop",
-    "blog",
-    "network",
-    "systems",
-    "services",
-    "solutions",
-    "digital",
-    "studio",
-    "global",
-];
-/// Suffixes of private networks.
-const PRIVATE_TLDS: &[&str] = &[
-    "internal",
-    "local",
-    "lan",
-    "corp",
-    "svc",
-    "home",
-    "intranet",
-    "private",
-    "localdomain",
-];
-/// Two-letter labels that are field names far more often than countries.
-const FIELD_LABELS: &[&str] = &["id", "ip", "os", "ms", "ns"];
 /// First labels of field paths (`spec.template`, `status.phase`).
 const FIELD_ROOTS: &[&str] = &[
     "metadata",
@@ -275,7 +226,7 @@ static PEM_STOP_BEFORE: LazyLock<Regex> = LazyLock::new(|| {
 /// `binaryData`).
 static PEM_BASE64: LazyLock<Regex> = LazyLock::new(|| {
     compile(&format!(
-        r"[A-Za-z0-9+/]*(?:{})[A-Za-z0-9+/]*={{0,2}}",
+        r"[A-Za-z0-9+/_-]*(?:{})(?:[A-Za-z0-9+/_=-]|[ \t]*\r?\n[ \t]*|\\[nrt/])*",
         PEM_BASE64_NEEDLES.join("|")
     ))
 });
@@ -296,6 +247,16 @@ static TOKENS: LazyLock<Regex> = LazyLock::new(|| {
         r"|(?-u:\b)[sr]k_(?:live|test)_[A-Za-z0-9]{16,}",
         // kubeadm bootstrap tokens
         r"|(?-u:\b)[a-z0-9]{6}\.[a-z0-9]{16}(?-u:\b)",
+    ))
+});
+static QUOTED_CREDENTIAL: LazyLock<Regex> = LazyLock::new(|| {
+    compile(&format!(
+        r#"(?i)(?:{CREDENTIAL_KEY})(?:["']?[ \t]*[:=][ \t]*|[ \t]+)(?P<value>"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')"#
+    ))
+});
+static YAML_CREDENTIAL: LazyLock<Regex> = LazyLock::new(|| {
+    compile(&format!(
+        r"(?im)(?:^|[ \t])(?:[a-z0-9_-]*{CREDENTIAL_KEY})[ \t]*:[ \t]+(?P<value>[^\r\n]+)$"
     ))
 });
 /// `password=…`, `"token": "…"`, `\"secret\":\"…\"`, `password%3D…`: the
@@ -355,7 +316,9 @@ static DATA_KEY: LazyLock<Regex> = LazyLock::new(|| {
     )
 });
 static EMBEDDED_KEY: LazyLock<Regex> = LazyLock::new(|| {
-    compile(r#"(?:^|[\s{,])["']?(?:kind|apiVersion|data|stringData|encryptedData)["']?[ \t]*:"#)
+    compile(
+        r#"(?:^|[\s{,])["']?(?:kind|apiVersion|data|stringData|encryptedData|name|value)["']?[ \t]*:"#,
+    )
 });
 /// A YAML alias (`*name`), which copies a value somewhere else.
 static ALIAS: LazyLock<Regex> = LazyLock::new(|| compile(r"(?:^|[\s\[{,])\*[A-Za-z0-9_]"));
@@ -370,11 +333,6 @@ static FLOW_KEY: LazyLock<Regex> = LazyLock::new(|| {
     )
 });
 // Messages
-static FENCE: LazyLock<Regex> = LazyLock::new(|| {
-    compile(
-        r"(?m)(?P<open>^[ \t]*```[ \t]*(?P<lang>[A-Za-z0-9_+-]*)[^\n]*\n)(?P<body>(?s:.*?))^[ \t]*```",
-    )
-});
 static MANIFEST_START: LazyLock<Regex> = LazyLock::new(|| {
     compile(
         r#"(?m)^[ \t]*(?:["']?(?:apiVersion|kind|metadata|data|stringData|encryptedData|items)["']?[ \t]*:|[{\[])"#,
@@ -387,6 +345,14 @@ static MANIFEST_START: LazyLock<Regex> = LazyLock::new(|| {
 
 /// Redacts free text (logs, events, labels, tool results).
 pub fn redact_text(
+    text: &str,
+    opts: &RedactOptions,
+    pseudo: &mut Pseudonyms,
+) -> (String, RedactionCounts) {
+    redact_message(text, opts, pseudo)
+}
+
+fn redact_plain(
     text: &str,
     opts: &RedactOptions,
     pseudo: &mut Pseudonyms,
@@ -428,6 +394,42 @@ fn redact_str<'t>(
 /// armor headers do not end them) or before their header (masked back to
 /// the same stops), and base64-wrapped keys.
 fn mask_keys(cur: &mut Cow<'_, str>, counts: &mut RedactionCounts) {
+    if cur.contains("PRIVATE KEY") && cur.contains('\n') {
+        let suspicious = PEM_HEADER.find(cur).is_some_and(|header| {
+            let tail = &cur[header.end()..];
+            let first_line = tail.lines().next().unwrap_or("");
+            let mut body_seen = false;
+            let mut gap = false;
+            let split_body = tail.lines().any(|line| {
+                let line = line.trim();
+                if line.is_empty() {
+                    gap |= body_seen;
+                    return false;
+                }
+                let base64 = line.len() >= 16
+                    && line
+                        .bytes()
+                        .all(|c| c.is_ascii_alphanumeric() || b"+/=".contains(&c));
+                let split = gap && base64;
+                body_seen |= base64;
+                split
+            });
+            let quoted_armor = tail.lines().any(|line| {
+                ARMOR_HEADERS
+                    .iter()
+                    .any(|h| line.trim_start().starts_with(h))
+                    && line.contains(['"', '\''])
+            });
+            first_line.contains(['"', '\'']) || split_body || quoted_armor
+        }) || (PEM_FOOTER.is_match(cur)
+            && !PEM_HEADER.is_match(cur)
+            && (cur.contains("msg=") || cur.contains("\"msg\"")));
+        if suspicious {
+            *cur = Cow::Owned(SECRET_MARKER.to_string());
+            counts.secrets += 1;
+            return;
+        }
+    }
     if cur.contains("PRIVATE KEY") {
         replace(cur, &PEM_BLOCK, |_, _| {
             counts.secrets += 1;
@@ -465,7 +467,7 @@ fn mask_keys(cur: &mut Cow<'_, str>, counts: &mut RedactionCounts) {
                 return None;
             }
             counts.secrets += 1;
-            Some(SECRET_MARKER.to_string())
+            Some(format!("{SECRET_MARKER}{}", &run[run.trim_end().len()..]))
         });
     }
 }
@@ -496,13 +498,42 @@ fn only_armor_headers(region: &str) -> bool {
 
 /// Undecodable runs count as keys (fail closed); certificates do not.
 fn base64_holds_private_key(run: &str) -> bool {
-    match BASE64.decode(run) {
+    let normalized = run
+        .replace("\\r", "")
+        .replace("\\n", "")
+        .replace("\\t", "")
+        .replace("\\/", "/")
+        .replace('-', "+")
+        .replace('_', "/");
+    let normalized: String = normalized.chars().filter(|c| !c.is_whitespace()).collect();
+    match BASE64.decode(normalized) {
         Ok(bytes) => bytes.windows(11).any(|w| w == b"PRIVATE KEY"),
         Err(_) => true,
     }
 }
 
 fn mask_tokens(cur: &mut Cow<'_, str>, counts: &mut RedactionCounts) {
+    for pattern in [&*QUOTED_CREDENTIAL, &*YAML_CREDENTIAL] {
+        replace(cur, pattern, |_, caps| {
+            let value = caps.name("value")?;
+            let raw = value.as_str();
+            let plain = raw.trim_matches(['"', '\'']);
+            if starts_with_marker(plain)
+                || (!raw.starts_with(['"', '\''])
+                    && (plain.contains(": ") || plain.starts_with(['{', '['])))
+            {
+                return None;
+            }
+            let whole = caps.get(0)?;
+            let offset = value.start() - whole.start();
+            let quote = raw.chars().next().filter(|c| matches!(c, '"' | '\''));
+            counts.tokens += 1;
+            Some(match quote {
+                Some(q) => format!("{}{q}{TOKEN_MARKER}{q}", &whole.as_str()[..offset]),
+                None => format!("{}{TOKEN_MARKER}", &whole.as_str()[..offset]),
+            })
+        });
+    }
     replace(cur, &TOKENS, |_, caps| {
         let (keep, value) = match (caps.name("auth"), caps.name("bearer")) {
             (Some(prefix), _) => (prefix.as_str(), caps.name("authv")?.as_str()),
@@ -731,8 +762,8 @@ fn ipv6_span(hay: &str, start: usize, end: usize) -> Option<(usize, usize)> {
 }
 
 /// Dotted names that are not hosts: files, public project and registry
-/// domains, field paths, class names, package paths, and anything whose
-/// last label is not a known top-level domain.
+/// domains and recognizable field/package paths. Unknown domain suffixes
+/// remain private: a short allowlist of TLDs silently misses real hosts.
 fn host_exempt(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     let first = lower.split('.').next().unwrap_or("");
@@ -753,16 +784,27 @@ fn host_exempt(name: &str) -> bool {
         && name
             .split('.')
             .any(|label| label.starts_with(|c: char| c.is_ascii_uppercase()));
-    let tld = (last.len() == 2 && !FIELD_LABELS.contains(&last))
-        || GENERIC_TLDS.contains(&last)
-        || PRIVATE_TLDS.contains(&last);
+    let field_path = (FIELD_ROOTS.contains(&first)
+        && lower.split('.').all(|part| {
+            FIELD_ROOTS.contains(&part) || matches!(part, "app" | "phase" | "name" | "namespace")
+        }))
+        || matches!(
+            lower.as_str(),
+            "user.id"
+                | "http.host"
+                | "deployment.apps"
+                | "replicaset.apps"
+                | "statefulset.apps"
+                | "daemonset.apps"
+                | "v1.apps"
+                | "apps.v1"
+        );
     FILE_EXTENSIONS.contains(&last)
         || under(ALLOWED_DOMAINS)
         || under(PROJECT_DOMAINS)
-        || FIELD_ROOTS.contains(&first)
+        || field_path
         || camel_case
         || package
-        || !tld
 }
 
 // ---------------------------------------------------------------------------
@@ -855,7 +897,15 @@ impl<'a> Walker<'a> {
         match value {
             Value::Object(map) => {
                 let kind = map.get("kind").and_then(Value::as_str);
-                let is_secret = kind.map_or(inherited_secret, secret_like);
+                let is_secret = kind.map_or_else(
+                    || {
+                        inherited_secret
+                            || SECRET_DATA_FIELDS
+                                .iter()
+                                .any(|field| map.contains_key(*field))
+                    },
+                    secret_like,
+                );
                 let items_secret = kind.is_some_and(list_of_secrets);
                 self.object(map, is_secret, items_secret, depth);
             }
@@ -939,7 +989,7 @@ impl<'a> Walker<'a> {
                 Some(self.documents(docs, false, json, depth + 1))
             }
             Some(_) => None,
-            None if doc_is_secret(text) => {
+            None if looks_like_manifest(text) => {
                 let (masked, n) = mask_unparsed_manifest(text, false);
                 self.counts.secrets += n;
                 Some(redact_str(&masked, self.opts, self.pseudo, &mut self.counts).into_owned())
@@ -961,7 +1011,11 @@ impl<'a> Walker<'a> {
         let mut out = String::new();
         for (i, (mut doc, raw)) in docs.into_iter().enumerate() {
             // An alias in a Secret may copy a value out of its data.
-            if doc_names_secret(raw) && ALIAS.is_match(raw) {
+            if ALIAS.is_match(raw)
+                && (contains_sensitive_structure(&doc)
+                    || doc_names_secret(raw)
+                    || (raw.contains("value") && SECRET_NAME.is_match(raw)))
+            {
                 self.mask_document(&mut doc);
             } else {
                 self.document(&mut doc, force, depth);
@@ -1027,6 +1081,24 @@ impl<'a> Walker<'a> {
     }
 }
 
+fn contains_sensitive_structure(value: &Value) -> bool {
+    match value {
+        Value::Object(map) => {
+            map.get("kind")
+                .and_then(Value::as_str)
+                .is_some_and(secret_kind)
+                || (map
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| SECRET_NAME.is_match(name))
+                    && map.contains_key("value"))
+                || map.values().any(contains_sensitive_structure)
+        }
+        Value::Array(items) => items.iter().any(contains_sensitive_structure),
+        _ => false,
+    }
+}
+
 fn list_of_secrets(kind: &str) -> bool {
     kind.strip_suffix("List").is_some_and(secret_like)
 }
@@ -1053,14 +1125,25 @@ fn token_leaf(key: &str, value: &Value) -> bool {
 }
 
 fn looks_like_manifest(s: &str) -> bool {
+    // A JSON key can encode any character. Let the parser classify these;
+    // if it cannot, withhold the ambiguous fragment rather than guess.
+    if s.contains("\\u") && s.contains(['{', '[']) {
+        return true;
+    }
     s.len() >= 6
-        && (s.contains("kind") || s.contains("ata") || s.contains("apiVersion"))
+        && (s.contains("kind")
+            || s.contains("ata")
+            || s.contains("apiVersion")
+            || (s.contains("name") && s.contains("value")))
         && EMBEDDED_KEY.is_match(s)
 }
 
 fn manifest_like(value: &Value) -> bool {
     match value {
-        Value::Object(map) => MANIFEST_KEYS.iter().any(|k| map.contains_key(*k)),
+        Value::Object(map) => {
+            MANIFEST_KEYS.iter().any(|k| map.contains_key(*k))
+                || (map.contains_key("name") && map.contains_key("value"))
+        }
         Value::Array(items) => items.iter().any(manifest_like),
         _ => false,
     }
@@ -1071,9 +1154,9 @@ fn manifest_like(value: &Value) -> bool {
 // ---------------------------------------------------------------------------
 
 /// Redacts multi-document YAML or JSON and returns YAML. Text that does not
-/// parse as objects (a cut, half-edited or duplicate-key manifest) goes
-/// through a line-based pass that still masks Secret values, secret-named
-/// pair values and the last-applied annotation, then [`redact_text`].
+/// parse as objects (a cut, half-edited or duplicate-key manifest) is
+/// withheld as a whole when it contains structural keys. Recovering values
+/// lexically cannot safely handle escaped keys, aliases or multiline scalars.
 pub fn redact_manifest_text(
     text: &str,
     opts: &RedactOptions,
@@ -1092,7 +1175,12 @@ pub(crate) fn redact_manifest_prefix(
     opts: &RedactOptions,
     pseudo: &mut Pseudonyms,
 ) -> (String, RedactionCounts) {
-    redact_manifest(prefix, doc_is_secret(whole), opts, pseudo)
+    redact_manifest(
+        prefix,
+        doc_is_secret(whole) || DATA_KEY.is_match(whole),
+        opts,
+        pseudo,
+    )
 }
 
 fn redact_manifest(
@@ -1103,7 +1191,7 @@ fn redact_manifest(
 ) -> (String, RedactionCounts) {
     let Some(docs) = parse_documents(text) else {
         let (masked, secrets) = mask_unparsed_manifest(text, force);
-        let (out, mut counts) = redact_text(&masked, opts, pseudo);
+        let (out, mut counts) = redact_plain(&masked, opts, pseudo);
         counts.secrets += secrets;
         return (out, counts);
     };
@@ -1112,9 +1200,9 @@ fn redact_manifest(
     (out, walker.counts)
 }
 
-/// Redacts a typed message: fenced `yaml` / `json` blocks (and unlabelled
-/// ones holding a manifest) as manifests, an unfenced Secret-like manifest
-/// from its first line, then everything through the text passes.
+/// Redacts a typed message: YAML/JSON and any other fence containing
+/// structured resource data, including unclosed fences and pasted console
+/// output. The remainder also receives structural and plain-text masking.
 pub fn redact_message(
     text: &str,
     opts: &RedactOptions,
@@ -1123,26 +1211,20 @@ pub fn redact_message(
     let mut counts = RedactionCounts::default();
     let mut out = String::with_capacity(text.len());
     let mut last = 0;
-    for c in FENCE.captures_iter(text) {
-        let (Some(open), Some(body)) = (c.name("open"), c.name("body")) else {
-            continue;
-        };
+    for (open_start, body_start, body_end, lang) in fence_ranges(text) {
         out.push_str(&unfenced(
-            &text[last..open.start()],
+            &text[last..open_start],
             opts,
             pseudo,
             &mut counts,
         ));
-        out.push_str(open.as_str());
-        let lang = c
-            .name("lang")
-            .map_or("", |m| m.as_str())
-            .to_ascii_lowercase();
-        let content = body.as_str();
+        out.push_str(&text[open_start..body_start]);
+        let lang = lang.to_ascii_lowercase();
+        let content = &text[body_start..body_end];
         let redacted = match lang.as_str() {
             "yaml" | "yml" => Some(redact_manifest(content, false, opts, pseudo)),
             "json" => Some(redact_json(content, opts, pseudo)),
-            "" if MANIFEST_START.is_match(content) => {
+            _ if looks_like_manifest(content) => {
                 Some(redact_manifest(content, false, opts, pseudo))
             }
             _ => None,
@@ -1157,12 +1239,52 @@ pub fn redact_message(
             }
             None => out.push_str(content),
         }
-        last = body.end();
+        last = body_end;
     }
     out.push_str(&unfenced(&text[last..], opts, pseudo, &mut counts));
-    let (out, n) = redact_text(&out, opts, pseudo);
+    let (out, n) = redact_plain(&out, opts, pseudo);
     counts.add(&n);
     (out, counts)
+}
+
+/// Markdown fences may be backticks or tildes, longer than three, and
+/// unclosed. An indented fence inside a YAML scalar is part of its body.
+fn fence_ranges(text: &str) -> Vec<(usize, usize, usize, &str)> {
+    let mut ranges = Vec::new();
+    let mut open: Option<(usize, usize, usize, u8, usize, &str)> = None;
+    let mut pos = 0;
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim_start_matches([' ', '\t']);
+        let indent = line.len() - trimmed.len();
+        let byte = trimmed.as_bytes().first().copied().unwrap_or(0);
+        let count = trimmed.bytes().take_while(|b| *b == byte).count();
+        if matches!(byte, b'`' | b'~') && count >= 3 {
+            if let Some((start, body, col, mark, size, lang)) = open {
+                if mark == byte
+                    && count >= size
+                    && indent <= col
+                    && trimmed[count..].trim().is_empty()
+                {
+                    ranges.push((start, body, pos, lang));
+                    open = None;
+                }
+            } else {
+                open = Some((
+                    pos,
+                    pos + line.len(),
+                    indent,
+                    byte,
+                    count,
+                    trimmed[count..].trim(),
+                ));
+            }
+        }
+        pos += line.len();
+    }
+    if let Some((start, body, _, _, _, lang)) = open {
+        ranges.push((start, body, text.len(), lang));
+    }
+    ranges
 }
 
 /// Message text outside fences: a Secret-like manifest in it is redacted
@@ -1173,7 +1295,7 @@ fn unfenced<'t>(
     pseudo: &mut Pseudonyms,
     counts: &mut RedactionCounts,
 ) -> Cow<'t, str> {
-    if !doc_is_secret(text) {
+    if !looks_like_manifest(text) {
         return Cow::Borrowed(text);
     }
     let start = MANIFEST_START.find(text).map_or(0, |m| m.start());
@@ -1332,6 +1454,9 @@ fn split_documents(text: &str) -> Vec<&str> {
 /// scalars and multi-line quoted values go with their key. Returns the
 /// text and the number of masked values.
 fn mask_unparsed_manifest(text: &str, force: bool) -> (String, u32) {
+    if force || looks_like_manifest(text) {
+        return (SECRET_MARKER.to_string(), 1);
+    }
     let mut out = String::with_capacity(text.len());
     let mut masked = 0u32;
     for doc in split_documents(text) {

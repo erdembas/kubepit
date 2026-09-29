@@ -494,7 +494,26 @@ describe('demo assistant: preview and send', () => {
     const run = await send(preview.preview_id);
     await waitFor(run.done);
     expect(run.events).toContainEqual(expect.objectContaining({ type: 'error', retryable: true }));
-    expect(run.events.at(-1)).toMatchObject({ type: 'done', stop: 'error' });
+    expect(run.events.at(-1)).toMatchObject({
+      type: 'done',
+      stop: 'error',
+      refusal_category: null,
+    });
+  });
+});
+
+describe('demo assistant: refusal', () => {
+  it('names the refusal category of a refused run', async () => {
+    const preview = await settle(
+      invoke<AiPreview>('ai_preview', { request: chatRequest(null, 'chat', 'trigger #refusal') }),
+    );
+    const run = await send(preview.preview_id);
+    await waitFor(run.done);
+    expect(run.events.at(-1)).toMatchObject({
+      type: 'done',
+      stop: 'refusal',
+      refusal_category: 'cyber',
+    });
   });
 });
 

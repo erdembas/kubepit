@@ -4,6 +4,7 @@ import {
   Bell,
   FileCode2,
   History,
+  Sparkles,
   Keyboard,
   Puzzle,
   Info,
@@ -22,6 +23,7 @@ import {
   ToolsCategory,
 } from './categories';
 import { HistoryCategory } from './HistoryCategory';
+import { AssistantCategory } from './AssistantCategory';
 import { NotificationsCategory } from './NotificationsCategory';
 // Power user: custom actions and keyboard mode.
 import { CustomActionsCategory } from './CustomActionsCategory';
@@ -91,6 +93,17 @@ const CATEGORIES: ReadonlyArray<CategoryDef> = [
       );
     },
     icon: History,
+    group: 'workspace',
+  },
+  {
+    id: 'assistant',
+    get label() {
+      return i18n.t('Assistant');
+    },
+    get description() {
+      return i18n.t('Model providers, privacy, cluster access and assistant request history.');
+    },
+    icon: Sparkles,
     group: 'workspace',
   },
   {
@@ -214,6 +227,7 @@ export function SettingsView() {
             <NotificationsCategory description={current.description} />
           )}
           {active === 'history' && <HistoryCategory description={current.description} />}
+          {active === 'assistant' && <AssistantCategory description={current.description} />}
           {active === 'custom-actions' && (
             <CustomActionsCategory description={current.description} />
           )}
@@ -272,7 +286,7 @@ export function SettingsSection({
   return (
     <section className="mb-6">
       {(title || trailing) && (
-        <div className="mb-2 flex items-baseline justify-between gap-3">
+        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-3">
           {title && (
             <h3 className="text-fg text-[12px] font-semibold tracking-wide uppercase">{title}</h3>
           )}

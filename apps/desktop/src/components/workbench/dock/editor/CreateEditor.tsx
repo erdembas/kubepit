@@ -1,3 +1,5 @@
+import { clearEditorDraft, setEditorDraft } from '@/lib/ai/editorDrafts';
+import { AssistantYamlBar } from './AssistantYamlBar';
 import * as i18n from '@/i18n';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BookOpenText, FilePlus2, Layers, ScanSearch, Send } from 'lucide-react';
@@ -43,6 +45,8 @@ export const CreateEditor = memo(function CreateEditor({
   // Production clusters review every change first (read-only ones cannot apply anyway).
   const reviewFirst = cluster?.environment === 'production' && !readOnly;
 
+  const assistantEnabled = useAppStore((s) => s.settings?.ai.enabled);
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const [yaml, setYaml] = useState(tab.yaml);
   const [baseline, setBaseline] = useState(tab.yaml);
   const [templateId, setTemplateId] = useState('');
@@ -57,10 +61,33 @@ export const CreateEditor = memo(function CreateEditor({
   const dirty = yaml.trim() !== '' && yaml !== baseline;
   // Read by Cmd+S, which can fire before the re-render after a keystroke.
   const yamlRef = useRef(yaml);
-  const setText = useCallback((text: string) => {
-    yamlRef.current = text;
-    setYaml(text);
-  }, []);
+  const setText = useCallback(
+    (text: string) => {
+      yamlRef.current = text;
+      setEditorDraft(tab.id, text);
+      setYaml(text);
+    },
+    [tab.id],
+  );
+
+  useEffect(() => {
+    setEditorDraft(tab.id, yamlRef.current);
+    return () => clearEditorDraft(tab.id);
+  }, [tab.id]);
+
+  const receivedYaml = useRef({ yaml: tab.yaml, revision: tab.assistantRevision });
+  useEffect(() => {
+    if (
+      receivedYaml.current.yaml === tab.yaml &&
+      receivedYaml.current.revision === tab.assistantRevision
+    )
+      return;
+    receivedYaml.current = { yaml: tab.yaml, revision: tab.assistantRevision };
+    setText(tab.yaml);
+    setBaseline('');
+    setResults(null);
+    closeReview();
+  }, [tab.yaml, tab.assistantRevision, setText, closeReview]);
 
   useEffect(() => {
     setDirty(tab.id, dirty);
@@ -284,6 +311,21 @@ export const CreateEditor = memo(function CreateEditor({
             </Button>
           </div>
         </EditorBar>
+        {assistantEnabled && (
+          <div className="border-border/60 border-b px-2 py-1">
+            <Button size="xs" variant="ghost" onClick={() => setAssistantOpen(!assistantOpen)}>
+              {i18n.t('Assistant')}
+            </Button>
+          </div>
+        )}
+        {assistantEnabled && assistantOpen && (
+          <AssistantYamlBar
+            clusterId={clusterId}
+            tabId={tab.id}
+            yaml={yaml}
+            namespace={namespace}
+          />
+        )}
         {readOnly && <ReadOnlyNotice />}
         <div className="relative min-h-0 flex-1">
           <YamlEditor

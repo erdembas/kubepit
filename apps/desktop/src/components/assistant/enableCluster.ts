@@ -1,3 +1,4 @@
+import { assistantErrorMessage } from '@/lib/ai/errorMessage';
 import * as i18n from '@/i18n/core';
 import { ipc } from '@/lib/ipc';
 import type { ConfirmRequest } from '@/store/types';
@@ -24,7 +25,10 @@ export function enableAssistantFor(cluster: ClusterDef): Promise<boolean> {
       (error: unknown) => {
         useAppStore
           .getState()
-          .pushToast('error', error instanceof Error ? error.message : String(error));
+          .pushToast(
+            'error',
+            assistantErrorMessage(error instanceof Error ? error.message : String(error)),
+          );
         return false;
       },
     );

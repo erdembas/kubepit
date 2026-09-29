@@ -216,6 +216,22 @@ const NOT_MUTATING: &[&str] = &[
     "alerts_list",
     "alerts_mark_read",
     "alerts_clear",
+    // Assistant: local settings, keys, previews and request history. Its
+    // tools are read-only; suggested mutations use the audited editor path.
+    // Model requests are recorded separately in ai_log by the session guard.
+    "ai_status",
+    "ai_key_set",
+    "ai_key_delete",
+    "ai_models",
+    "ai_cluster_set",
+    "ai_preview",
+    "ai_send",
+    "ai_tool_decision",
+    "ai_cancel",
+    "ai_session_end",
+    "ai_log_list",
+    "ai_log_get",
+    "ai_log_export",
     // Custom action definitions and previews (local state).
     "custom_actions_list",
     "custom_actions_save",

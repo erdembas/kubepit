@@ -1,3 +1,4 @@
+import { AssistantQueryActions } from '../AssistantQueryActions';
 import * as i18n from '@/i18n';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Flame, History, Loader2, Play, RefreshCw, Settings2 } from 'lucide-react';
@@ -296,6 +297,7 @@ export function PromqlView({
           aria-label={i18n.t('PromQL expression')}
           className="border-border bg-surface-raised text-fg placeholder:text-fg-dim focus:border-accent rounded-app-sm min-w-0 flex-1 resize-none border px-2 py-1 font-mono text-[12px] leading-[18px] outline-none"
         />
+        <AssistantQueryActions clusterId={clusterId} language="promql" query={draft} />
         <button
           type="button"
           onClick={() => void run(draft, tab.range)}

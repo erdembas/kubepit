@@ -1,0 +1,34 @@
+<context>
+<section id="scope" kind="scope" label="scope">
+cluster: eval-local
+namespace: shop
+</section>
+<section id="object" kind="object" label="object">
+apiVersion: v1
+kind: Pod
+metadata:
+  name: import-6d2
+  namespace: shop
+spec:
+  containers:
+  - image: example/web:v2
+    name: app
+status:
+  containerStatuses:
+  - name: app
+    state:
+      terminated:
+        exitCode: 1
+        reason: Error
+  phase: Failed
+</section>
+<section id="events" kind="events" label="events">
+Warning BackoffLimitExceeded: Job has reached the specified backoff limit
+</section>
+<section id="logs" kind="logs" label="logs">
+Traceback (most recent call last):
+  File "/app/import.py", line 31, in main
+    rows = parse(source)
+ValueError: invalid delimiter
+</section>
+</context>

@@ -424,35 +424,27 @@ fn cut_or_broken_manifests_still_hide_secret_values() {
     let cut_json = r#"{"apiVersion":"v1","kind":"Secret","metadata":{"name":"db"},"data":{"PASSWORD":"aHVudGVyMg==","TOKEN":"czNjcjN0"#;
     let (out, c) = redact_manifest_text(cut_json, &NONE, &mut Pseudonyms::default());
     clean(&out);
-    assert!(
-        !out.contains("czNjcjN0") && out.contains(r#""kind":"Secret""#),
-        "{out}"
-    );
-    assert!(c.secrets >= 2);
+    // Ambiguous malformed structures are withheld whole, rather than guessed.
+    assert_eq!(out, SECRET_MARKER);
+    assert_eq!(c.secrets, 1);
 
     let tabs = "apiVersion: v1\nkind: Secret\nmetadata:\n  name: db\ntype: Opaque\ndata:\n\tPASSWORD: aHVudGVyMg==\n\
                 stringData:\n  cert: |\n    line-one-s3cr3t\n    line-two\n  note: \"multi\n    hunter2\"\n";
     let out = manifest(tabs);
     assert!(!out.contains("line-two"), "{out}");
-    assert!(
-        out.contains("kind: Secret") && out.contains("name: db") && out.contains("type: Opaque"),
-        "{out}"
-    );
+    assert_eq!(out, SECRET_MARKER);
 
     let pod = "kind: Pod\nmetadata:\n  name: web\n  annotations:\n    kubectl.kubernetes.io/last-applied-configuration: |\n      {\"env\":\"hunter2\"}\n\
                spec:\n  containers:\n  - name: app\n    image: [broken\n    env:\n    - name: DB_PASSWORD\n      value: hunter2\n\
                \x20   - {name: API_TOKEN, value: s3cr3t}\n    - name: LOG_LEVEL\n      value: debug\n";
     let (out, c) = redact_manifest_text(pod, &NONE, &mut Pseudonyms::default());
     clean(&out);
-    assert!(
-        out.contains("value: debug") && out.contains("name: app"),
-        "{out}"
-    );
-    assert_eq!(c.secrets, 3);
+    assert_eq!(out, SECRET_MARKER);
+    assert_eq!(c.secrets, 1);
 
     let cut_pretty = "{\n  \"kind\": \"Pod\",\n  \"spec\": {\"containers\": [{\"env\": [\n    {\n      \"name\": \"DB_PASSWORD\",\n      \"value\": \"hunter2\"\n    },\n    {\"name\": \"MODE\", \"value\": \"prod\"";
     let out = manifest(cut_pretty);
-    assert!(out.contains("\"prod\""), "{out}");
+    assert_eq!(out, SECRET_MARKER);
 }
 
 // -- Review fixes ------------------------------------------------------------
@@ -748,7 +740,7 @@ fn more_token_shapes_are_masked() {
 fn duplicate_keys_and_aliases_fail_closed() {
     let dup = "apiVersion: v1\nkind: Secret\nkind: ConfigMap\ndata:\n  A: aHVudGVyMg==\n";
     let out = manifest(dup);
-    assert!(out.contains("A: __SECRET__"), "{out}");
+    assert_eq!(out, SECRET_MARKER);
     let dup_json = r#"{"kind":"Secret","kind":"ConfigMap","data":{"A":"aHVudGVyMg=="}}"#;
     manifest(dup_json);
     let alias =
@@ -764,7 +756,7 @@ fn duplicate_keys_and_aliases_fail_closed() {
 fn broken_manifests_pair_values_names_and_quotes() {
     let before = "kind: Pod\nspec:\n  image: [broken\n  env:\n  - value: hunter2\n    description: db\n    name: DB_PASSWORD\n  - name: MODE\n    value: prod\n";
     let out = manifest(before);
-    assert!(out.contains("value: prod"), "{out}");
+    assert_eq!(out, SECRET_MARKER);
     let tagged = "apiVersion: v1\nkind: !!str Secret\ndata: [broken\n  A: aHVudGVyMg==\n";
     manifest(tagged);
     let data_kind = r#"{"apiVersion":"v1","kind":"Secret","data":{"kind":"aHVudGVyMg==","apiVersion":"czNjcjN0""#;
@@ -772,7 +764,7 @@ fn broken_manifests_pair_values_names_and_quotes() {
     assert!(!out.contains("czNjcjN0"), "{out}");
     let quoted = "kind: Pod\nmetadata:\n  annotations:\n    kubectl.kubernetes.io/last-applied-configuration: '{\"a\":\n      \"hunter2\"}'\n    team: x\nspec: [broken\n";
     let out = manifest(quoted);
-    assert!(out.contains("team: x"), "{out}");
+    assert_eq!(out, SECRET_MARKER);
 }
 
 /// Low: cheap IP fixes.
@@ -791,4 +783,108 @@ fn ip_shapes() {
     ] {
         assert_eq!(text(input, &IPS_ONLY), expected, "{input}");
     }
+}
+
+#[test]
+fn recovered_review_structured_secrets_in_logs_and_all_fence_styles() {
+    let pod = "apiVersion: v1\nkind: Pod\nspec:\n  containers:\n  - env:\n    - name: DB_PASSWORD\n      value: hunter2\n";
+    let secret = "kind: Secret\ndata:\n  DB_URL: cG9zdGdyZXM6Ly9hcHA6aHVudGVyMkBkYg==\n";
+    for input in [
+        format!("~~~yaml\n{pod}~~~\n"),
+        format!("```yaml\n{pod}"),
+        format!("why?\n{pod}"),
+        format!("```console\n$ kubectl get secret\n{secret}```\n"),
+        format!("````markdown\n```yaml\n{pod}```\n````\n"),
+        r#"INFO object {"kind":"Secret","data":{"DB_URL":"cG9zdGdyZXM6Ly9hcHA6aHVudGVyMkBkYg=="}}"#
+            .to_string(),
+    ] {
+        for redact in [redact_text, redact_message] {
+            let out = redact(&input, &NONE, &mut Pseudonyms::default()).0;
+            assert!(
+                !out.contains("hunter2") && !out.contains("cG9zdGdyZXM6"),
+                "{out}"
+            );
+        }
+    }
+}
+
+#[test]
+fn recovered_review_malformed_embedded_and_escaped_structures_fail_closed() {
+    for input in [
+        r#"{"kind":"\u0053ecret","data":{"A":"hunter2""#,
+        "kind: Pod\nspec:\n  image: [broken\n  env:\n  - {name: DB_PASSWORD,\n     value: hunter2}\n",
+        "kind: Pod\nspec:\n  image: [broken\n  env:\n  - name: DB_PASSWORD\n    value: &pw |\n      hunter2\n",
+        "kind: Pod\nx: &pw hunter2\nspec:\n  env:\n  - name: DB_PASSWORD\n    value: *pw\n",
+    ] {
+        assert!(!manifest(input).contains("hunter2"), "{input}");
+    }
+    for embedded in [
+        r#"[{"name":"DB_PASSWORD","value":"hunter2"}]"#,
+        r#"{"kind":"Pod","spec":{"env":[{"name":"DB_PASSWORD","value":"hunter2""#,
+    ] {
+        let input = json!({"kind":"Deployment","metadata":{"annotations":{"copy":embedded}}});
+        assert!(!redact_value(&input, &NONE, &mut Pseudonyms::default())
+            .0
+            .to_string()
+            .contains("hunter2"));
+    }
+    let input = json!({"kind":"List","items":[{"data":{"A":"hunter2"},"type":"Opaque"}]});
+    assert!(!redact_value(&input, &NONE, &mut Pseudonyms::default())
+        .0
+        .to_string()
+        .contains("hunter2"));
+}
+
+#[test]
+fn recovered_review_wrapped_pem_and_quoted_credentials() {
+    let encoded = STANDARD.encode(PEM);
+    let wrapped = encoded
+        .as_bytes()
+        .chunks(76)
+        .map(|c| std::str::from_utf8(c).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let out = text(&wrapped, &NONE);
+    assert!(!out.contains(&encoded[76..100]), "{out}");
+    for input in [
+        r#"{"password":"correct horse battery staple"}"#,
+        r#"{"password":"hun\"ter2abc"}"#,
+        "--password 'hunter2 xyz'",
+        "password: correct horse battery staple\n",
+    ] {
+        let out = text(input, &TOKENS_ONLY);
+        assert!(
+            !out.contains("horse") && !out.contains("ter2abc") && !out.contains("xyz"),
+            "{out}"
+        );
+    }
+}
+
+#[test]
+fn final_review_escaped_keys_aliases_and_quoted_armor_fail_closed() {
+    for password in ["correct: horse battery staple", "{hunter2}", "[hunter2]"] {
+        let out = text(&json!({"password":password}).to_string(), &TOKENS_ONLY);
+        assert!(!out.contains("horse") && !out.contains("hunter2"), "{out}");
+    }
+    let alias = "kind: \"Secr\\x65t\"\ndata: {A: &pw hunter2}\nmetadata: {name: *pw}\n";
+    assert!(!manifest(alias).contains("hunter2"));
+    let encoded = r#"{"k\u0069nd":"Secret","d\u0061ta":{"A":"hunter2"}}"#;
+    assert!(!text(encoded, &NONE).contains("hunter2"));
+    let body = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC";
+    for input in [
+        format!("-----BEGIN PRIVATE KEY-----\nComment: \"quoted comment\"\n\n{body}\n"),
+        format!("{{\"msg\":\"{body}\"}}\n{{\"msg\":\"-----END PRIVATE KEY-----\"}}\n"),
+    ] {
+        assert!(!text(&input, &NONE).contains(body));
+    }
+}
+
+#[test]
+fn hostname_masking_does_not_exempt_real_domains_that_look_like_field_roots() {
+    let names = "status.acme.com data.prod.acme.io api.acme.bank db.acme.zone";
+    let out = text(names, &HOSTS_ONLY);
+    for name in names.split(' ') {
+        assert!(!out.contains(name), "{out}");
+    }
+    assert_eq!(out, "__HOST_1__ __HOST_2__ __HOST_3__ __HOST_4__");
 }

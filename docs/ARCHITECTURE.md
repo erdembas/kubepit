@@ -66,7 +66,7 @@ watches stopped with the window that created them
 | `kubeconfigs/<id>.yaml` | backend  | pasted kubeconfigs (`managed: true`), mode 0600     |
 | `run/<id>.kubeconfig`   | backend  | single-context kubeconfig for kubectl/helm/terminal |
 | `port_forwards.json`    | backend  | `SavedPortForward[]` (saved port forwards)          |
-| `history.db`            | backend  | audit log, events / changes, scans (SQLite)         |
+| `history.db`            | backend  | audit log, events / changes, scans, assistant request log (SQLite)         |
 | `actions.json`          | backend  | `CustomActionsFile` (custom actions, see below)     |
 
 With `settings.keychain_kubeconfigs` the pasted kubeconfigs live in the OS
@@ -2000,6 +2000,107 @@ Custom actions).
   memory, resolves with POSIX quoting, fakes plausible output
   (`kubectl top`, `-o wide`, `neat`, `annotate`) and plays terminal runs;
   `lib/ipc/mock/history.ts` audits mutating runs like the backend.
+
+## AI assistant
+
+The assistant is off by default. Settings → Assistant configures the provider,
+OS-keychain API keys, privacy, per-cluster access, optional model prices and the
+request log. Enabling a production cluster requires typing its name. Main and
+other windows use the existing settings broadcast. The request locale selects the
+answer language; app-owned labels follow the UI language.
+
+- **Core** (`crates/kubepit-core/src/ai/`): `settings` and `keys` own opt-in and
+  provider-bound secrets; `redact`, `context`, `budget` and `prompts` produce the
+  payload; `provider`, `anthropic`, `openai`, `ollama` and `sse` implement transport;
+  `tools` issues read-only Kubernetes requests; `session` owns preview/run state,
+  consent, limits and cancellation; `pricing` uses the user's per-model table.
+  `apps/desktop/src-tauri/src/ipc/ai.rs` is the thin command adapter; no provider
+  SDK or provider key lives in the webview. Keys pass through the password input
+  once and are never persisted in a settings draft or plaintext fallback.
+- **Egress** is opt-in per process (`set_ai_remote_providers`), enabled by the
+  desktop shell. Tests use fake loopback providers and explicitly constructed
+  temporary `Paths` with `MemorySecretStore`. Local-only mode refuses all remote
+  endpoints. Key-bearing traffic requires HTTPS or strict loopback; keys are
+  bound to the provider kind and origin. Redirects cannot forward credentials.
+- **Preview then send:** `ai_preview` performs no network request. It redacts,
+  budgets and stores the payload under a single-use ID; `ai_send` uses that stored
+  payload and rejects changed settings, scope or session state. Sections show
+  the exact text, token estimate, trimming and masking before consent. Typed-only
+  follow-ups with no included sections send directly. Explicit model discovery
+  can populate metadata without sending cluster context.
+- **Privacy:** Secret-like object values, sensitive environment values and private
+  keys are masked; managed fields and last-applied copies are removed. Optional
+  token masking defaults on; IP/host masking defaults off. Consistent session
+  placeholders can be restored locally in suggestions. The backend applies
+  redaction to context, messages and tool results; the local token estimator
+  never calls a provider's token-count endpoint. Untrusted context is enclosed
+  separately from the system prompt.
+- **Read-only tools:** tool schemas are fixed and sorted, arguments are validated,
+  and the tool layer only reads. The default `ask` policy previews each redacted
+  result before it goes back to the provider. “Send for this session” grants
+  consent for later results; `off` exposes no tools. All results of one turn are
+  returned together. Refusal or truncation does not execute tools. kubectl
+  suggestions are copied, never run; YAML changes go through the existing
+  dry-run review, production confirmation, RBAC and read-only checks.
+- **Bounds:** previews expire after 10 minutes (maximum 32); sessions expire
+  lazily after two hours idle (maximum 20). Runs allow eight tool rounds,
+  at most 16 calls per round, and 30 provider requests per minute. Transport
+  handles retry-before-content, idle timeouts and cancellation. Closing the
+  panel/window, starting a new chat, ending a session or disconnecting its
+  cluster stops the run. No assistant background poller or expiry task runs.
+- **Caching and accounting:** the frozen locale-specific system prompt, sorted
+  tools and first context block form a stable prefix; Anthropic caching uses
+  explicit breakpoints and the growing tail. Stream usage events are cumulative
+  run totals; the final event is authoritative. No prices are built in. Input,
+  output, cache-read and cache-write counts determine cost only when the model
+  has a configured price.
+- **History:** `history.db` migration **3** adds `ai_log` with the redacted request
+  bodies actually sent (up to 256 KiB), response (up to 64 KiB), tool calls,
+  outcome, usage and cost. The existing writer queue, retention and size cap
+  apply. Recording requires process history opt-in and `ai.log_requests`.
+  Settings → Assistant offers filtering, cursor paging, exact payload expansion,
+  JSONL export and confirmed deletion. Chats themselves remain in memory.
+- **UI:** `store/useAssistantStore.ts` coordinates the right panel, context sheet,
+  streamed answer, consent cards and suggestion actions. Resource actions and
+  palette intents gather bounded context; PromQL/Loki and the YAML editor can
+  request help. YAML uses the cluster schema outline and local validation before
+  insertion. All app-owned labels ship in EN/TR; model output, identifiers and
+  supplied cluster content are preserved.
+- **Demo:** `pnpm dev:ui` uses `lib/ipc/mock/ai.ts` with in-memory keys, usage and
+  history. Enable the assistant and a demo cluster in Settings, then ask about
+  `checkout/payment-api-7c9d8b6f5-x2kqp`. The message markers `#error`, `#refusal`,
+  `#truncate`, `#fallback` and `#retry` exercise the corresponding UI states
+  without any provider network calls.
+
+### Assistant evaluations
+
+Seven shared JSON fixtures in `crates/kubepit-core/tests/fixtures/ai/` cover a Go
+panic, OOMKilled, a missing image, insufficient CPU, readiness after an image
+change, a Secret reference error and a Python Job failure. Fake-provider Rust
+integration tests compare golden context bytes, verify preview/send identity,
+stable EN/TR prompt prefixes and absence of fixture secrets in both payloads and
+the database/WAL. The TS test reads the same scripted replies and checks extracted
+manifest, kubectl, PromQL and LogQL suggestions.
+
+```bash
+cargo test -p kubepit-core --test ai_eval
+pnpm --filter @kubepit/desktop exec vitest run src/lib/ai/eval.test.ts
+# Only after intentionally changing rendering; review every resulting golden:
+KUBEPIT_UPDATE_GOLDEN=1 cargo test -p kubepit-core --test ai_eval
+```
+
+The live evaluation is ignored and separately gated. It sends only these
+synthetic fixtures, uses no real cluster, and may incur charges. It reports token
+usage and a simple keyword/fence score; it is a diagnostic aid, not proof of
+operational correctness. Run manually with your own key already in
+`ANTHROPIC_API_KEY`:
+
+```bash
+KUBEPIT_AI_LIVE_EVAL=1 cargo test -p kubepit-core --test ai_live_eval -- --ignored --nocapture
+```
+
+`KUBEPIT_AI_LIVE_MODEL` optionally selects a model. The automated suite never
+sets the live flag or enables remote egress.
 
 ## Keyboard mode
 

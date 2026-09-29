@@ -1,0 +1,33 @@
+<context>
+<section id="scope" kind="scope" label="scope">
+cluster: eval-local
+namespace: shop
+</section>
+<section id="object" kind="object" label="object">
+apiVersion: v1
+kind: Pod
+metadata:
+  name: checkout-7b9
+  namespace: shop
+spec:
+  containers:
+  - image: example/web:v2
+    name: app
+status:
+  containerStatuses:
+  - name: app
+    restartCount: 12
+    state:
+      waiting:
+        reason: CrashLoopBackOff
+</section>
+<section id="events" kind="events" label="events">
+Warning BackOff: Back-off restarting failed container app
+</section>
+<section id="logs" kind="logs" label="logs">
+panic: runtime error: invalid memory address or nil pointer dereference
+goroutine 1 [running]:
+main.loadConfig()
+  /app/main.go:42 +0x20
+</section>
+</context>

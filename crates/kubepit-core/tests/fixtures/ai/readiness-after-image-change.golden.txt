@@ -1,0 +1,30 @@
+<context>
+<section id="scope" kind="scope" label="scope">
+cluster: eval-local
+namespace: shop
+</section>
+<section id="object" kind="object" label="object">
+apiVersion: v1
+kind: Pod
+metadata:
+  name: frontend-5fd
+  namespace: shop
+spec:
+  containers:
+  - image: example/frontend:v2
+    name: app
+status:
+  conditions:
+  - status: 'False'
+    type: Ready
+</section>
+<section id="changes" kind="changes" label="changes">
+2026-09-28T10:00Z Deployment/frontend image changed example/frontend:v1 → example/frontend:v2
+</section>
+<section id="events" kind="events" label="events">
+Warning Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503
+</section>
+<section id="logs" kind="logs" label="logs">
+GET /ready 503: upstream not initialized
+</section>
+</context>

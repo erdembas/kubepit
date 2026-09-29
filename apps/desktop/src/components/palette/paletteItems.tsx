@@ -1,3 +1,4 @@
+import { assistantItems } from './assistantItems';
 import * as i18n from '@/i18n/core';
 import {
   AppWindow,
@@ -234,6 +235,7 @@ export function resourceJumps(cluster: ClusterDef): PaletteItem[] {
 export function appActions(): PaletteItem[] {
   const store = useAppStore.getState();
   return [
+    ...assistantItems(),
     {
       type: 'action',
       id: 'add-cluster',

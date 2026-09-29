@@ -1,0 +1,60 @@
+{
+  "name": "pending-insufficient-cpu",
+  "locale": "en",
+  "intent": "explain",
+  "scope": {
+    "cluster_id": null,
+    "namespace": "shop",
+    "object": {
+      "api_version": "v1",
+      "kind": "Pod",
+      "namespace": "shop",
+      "name": "worker-2b8"
+    }
+  },
+  "sections": [
+    {
+      "id": "scope",
+      "kind": "scope",
+      "label": "scope",
+      "priority": 0,
+      "format": "text",
+      "content": "cluster: eval-local\nnamespace: shop"
+    },
+    {
+      "id": "object",
+      "kind": "object",
+      "label": "object",
+      "priority": 0,
+      "format": "json",
+      "content": "{\n  \"apiVersion\": \"v1\",\n  \"kind\": \"Pod\",\n  \"metadata\": {\n    \"name\": \"worker-2b8\",\n    \"namespace\": \"shop\"\n  },\n  \"spec\": {\n    \"containers\": [\n      {\n        \"name\": \"app\",\n        \"image\": \"example/web:v2\"\n      }\n    ]\n  },\n  \"status\": {\n    \"phase\": \"Pending\",\n    \"conditions\": [\n      {\n        \"type\": \"PodScheduled\",\n        \"status\": \"False\",\n        \"reason\": \"Unschedulable\"\n      }\n    ]\n  }\n}"
+    },
+    {
+      "id": "events",
+      "kind": "events",
+      "label": "events",
+      "priority": 1,
+      "format": "text",
+      "content": "Warning FailedScheduling: 0/3 nodes are available: 3 Insufficient cpu. preemption: No preemption victims found."
+    }
+  ],
+  "secrets": [],
+  "expect_sections": [
+    "scope",
+    "object",
+    "events"
+  ],
+  "max_input_tokens": 12000,
+  "scripted_reply": "The scheduler cannot place this Pending pod because every node reports Insufficient cpu. Check requested CPU and node capacity before reducing requests or adding nodes.\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: worker\n  namespace: shop\nspec:\n  template:\n    spec:\n      containers:\n      - name: app\n        resources:\n          requests:\n            cpu: 500m\n```\n```sh\nkubectl -n shop describe pod worker-2b8\n```",
+  "expect_suggestions": {
+    "manifest": 1,
+    "kubectl": 1,
+    "promql": 0,
+    "logql": 0
+  },
+  "keywords": [
+    "Insufficient cpu",
+    "requests",
+    "capacity"
+  ]
+}

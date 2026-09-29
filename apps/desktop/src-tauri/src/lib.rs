@@ -52,6 +52,20 @@ pub fn run() {
         .manage(updater)
         .setup(setup_app)
         .invoke_handler(tauri::generate_handler![
+            // Assistant
+            ipc::ai_status,
+            ipc::ai_key_set,
+            ipc::ai_key_delete,
+            ipc::ai_models,
+            ipc::ai_cluster_set,
+            ipc::ai_preview,
+            ipc::ai_send,
+            ipc::ai_tool_decision,
+            ipc::ai_cancel,
+            ipc::ai_session_end,
+            ipc::ai_log_list,
+            ipc::ai_log_get,
+            ipc::ai_log_export,
             // App
             ipc::app_info,
             ipc::settings_get,
