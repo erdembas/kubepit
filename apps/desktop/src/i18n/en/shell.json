@@ -186,6 +186,7 @@
   "Arguments after the script were ignored: {detail}": "Arguments after the script were ignored: {detail}",
   "Ask before running": "Ask before running",
   "Asks {endpoint} once after launch. Nothing is downloaded without your click.": "Asks {endpoint} once after launch. Nothing is downloaded without your click.",
+  "Assistant requests": "Assistant requests",
   "Audit log": "Audit log",
   "Audit log of your actions, persistent events and changes, retention and storage.": "Audit log of your actions, persistent events and changes, retention and storage.",
   "Audit log retention in days": "Audit log retention in days",

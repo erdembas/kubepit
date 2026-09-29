@@ -186,6 +186,7 @@
   "Arguments after the script were ignored: {detail}": "Betikten sonraki argümanlar yok sayıldı: {detail}",
   "Ask before running": "Çalıştırmadan önce sor",
   "Asks {endpoint} once after launch. Nothing is downloaded without your click.": "Açıldıktan sonra {endpoint} adresine bir kez sorar. Siz tıklamadan hiçbir şey indirilmez.",
+  "Assistant requests": "Asistan istekleri",
   "Audit log": "Denetim kaydı",
   "Audit log of your actions, persistent events and changes, retention and storage.": "İşlemlerinizin denetim kaydı, kalıcı event'ler ve değişiklikler, saklama süresi ve depolama.",
   "Audit log retention in days": "Denetim kaydının gün cinsinden saklama süresi",

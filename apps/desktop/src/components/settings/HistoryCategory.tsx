@@ -227,6 +227,7 @@ export function HistoryCategory({ description }: { description: string }) {
           <Rows label={i18n.t('Actions')} table={s?.audit} />
           <Rows label={i18n.t('Events')} table={s?.events} />
           <Rows label={i18n.t('Changes')} table={s?.changes} />
+          <Rows label={i18n.t('Assistant requests')} table={s?.ai} />
           {!!s?.dropped && (
             <p className="text-status-starting text-[11px]">
               {i18n.plural(
