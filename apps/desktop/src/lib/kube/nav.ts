@@ -32,6 +32,7 @@ export const VIEW_KEYS = {
   upgradeReadiness: '@upgrade',
   security: '@security',
   cost: '@cost',
+  recommendations: '@recommendations',
 } as const;
 
 export interface NavItem {
@@ -111,6 +112,7 @@ export function viewLabel(key: string, apiResources?: readonly ApiResourceInfo[]
   if (key === VIEW_KEYS.upgradeReadiness) return i18n.t('Upgrade Readiness');
   if (key === VIEW_KEYS.security) return i18n.t('Security');
   if (key === VIEW_KEYS.cost) return i18n.t('Cost');
+  if (key === VIEW_KEYS.recommendations) return i18n.t('Recommendations');
   const builtin = Object.values(BUILTIN).find((k) => k.key === key);
   if (builtin)
     return builtin.key === BUILTIN.CustomResourceDefinition.key
@@ -201,6 +203,11 @@ export function buildNav(apiResources: readonly ApiResourceInfo[] | null): NavGr
           VIEW_KEYS.cost,
           i18n.t('Cost'),
           'cost money spend opencost kubecost finops budget right-sizing rightsizing requests efficiency idle',
+        ),
+        viewItem(
+          VIEW_KEYS.recommendations,
+          i18n.t('Recommendations'),
+          'recommendations right-sizing rightsizing requests kubefit krr',
         ),
         ...items('cluster'),
         viewItem(

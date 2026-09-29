@@ -18,15 +18,12 @@ import {
 import { MiniTable, Section } from '../details/primitives';
 import type { SectionProps } from '../details/sections/types';
 import { ChangeCell, RaisedTag, RightsizingDialog } from './RightsizingDialog';
-import { useCostPrefs } from './prefs';
 import { CONFIDENCE_TONE, VERDICT_TONE } from './tones';
 import { useRightsizing } from './useCost';
 
 /** Compact right-sizing of one workload in its details panel. */
 export function RightsizingSection({ obj, ctx, isActive }: SectionProps) {
   i18n.useLocale();
-  const settings = useCostPrefs((s) => s.settings);
-  const strategy = useCostPrefs((s) => s.strategy);
   const [applying, setApplying] = useState(false);
   const workload = useMemo(
     () =>
@@ -35,14 +32,7 @@ export function RightsizingSection({ obj, ctx, isActive }: SectionProps) {
         : null,
     [obj.kind, obj.metadata.namespace, obj.metadata.name],
   );
-  const report = useRightsizing(
-    ctx.clusterId,
-    [],
-    workload,
-    settings,
-    strategy,
-    isActive && !!workload,
-  );
+  const report = useRightsizing(ctx.clusterId, [], workload, isActive && !!workload);
   if (!workload) return null;
   const data = report.data;
   const rec = data?.workloads[0];

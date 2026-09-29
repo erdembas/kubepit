@@ -30,7 +30,7 @@ import { MultiSeriesChart } from '../overview/MultiSeriesChart';
 import { Card, Legend, SegmentBar, StatTile, type Segment } from '../overview/charts';
 import { CostBreakdown } from './CostBreakdown';
 import { CostNotes } from './CostNotes';
-import { RightsizingPanel } from './RightsizingPanel';
+import { RightsizingSummaryCard } from './RightsizingSummaryCard';
 import { useCostPrefs, type CostTab } from './prefs';
 import { EFFICIENCY_TEXT } from './tones';
 import { useCostReport } from './useCost';
@@ -255,7 +255,7 @@ function TrendCard({ report }: { report: CostReport }) {
   );
 }
 
-/** The `@cost` view: monthly cost, breakdown, trend and right-sizing. */
+/** The `@cost` view: monthly cost, breakdown, trend and the right-sizing summary. */
 export function CostPage({
   clusterId,
   namespaces,
@@ -401,7 +401,7 @@ export function CostPage({
               <CostBreakdown clusterId={clusterId} report={report} namespaces={namespaces} />
             ) : null
           ) : (
-            <RightsizingPanel clusterId={clusterId} namespaces={namespaces} isActive={isActive} />
+            <RightsizingSummaryCard clusterId={clusterId} enabled={isActive} />
           )}
         </div>
       </div>

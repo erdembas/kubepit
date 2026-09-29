@@ -1,11 +1,11 @@
 import { create } from 'zustand';
-import { DEFAULT_RIGHTSIZING } from '@/lib/kube/rightsizing/model';
-import type { CostAggregate, CostWindow, RightsizingSettings } from '@/types';
+import type { CostAggregate, CostWindow } from '@/types';
 
 /**
  * Per-viewer preferences of the Cost view (window, grouping, label key,
- * idle row, right-sizing headroom). Conveniences only: kept in this
- * webview's localStorage and safe to lose.
+ * idle row, tab). Conveniences only: kept in this webview's localStorage
+ * and safe to lose. Recommendation settings live in the backend
+ * (`Settings.recommendations`).
  */
 
 export type CostTab = 'breakdown' | 'rightsizing';
@@ -16,9 +16,6 @@ export interface CostPrefs {
   label: string;
   showIdle: boolean;
   tab: CostTab;
-  settings: RightsizingSettings;
-  /** Right-sizing strategy id; null = the backend's default. */
-  strategy: string | null;
 }
 
 const KEY = 'kubepit.cost.v1';
@@ -29,8 +26,6 @@ const DEFAULTS: CostPrefs = {
   label: 'team',
   showIdle: true,
   tab: 'breakdown',
-  settings: DEFAULT_RIGHTSIZING,
-  strategy: null,
 };
 
 function load(): CostPrefs {
@@ -44,8 +39,6 @@ function load(): CostPrefs {
       label: typeof raw.label === 'string' && raw.label.trim() ? raw.label : DEFAULTS.label,
       showIdle: raw.showIdle !== false,
       tab: raw.tab === 'rightsizing' ? 'rightsizing' : 'breakdown',
-      settings: { ...DEFAULT_RIGHTSIZING, ...(raw.settings ?? {}) },
-      strategy: typeof raw.strategy === 'string' && raw.strategy ? raw.strategy : null,
     };
   } catch {
     return DEFAULTS;

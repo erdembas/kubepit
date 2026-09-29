@@ -43,6 +43,7 @@ export const VIEW_COMMANDS: Record<string, string> = {
   explain: VIEW_KEYS.apiExplorer,
   gitops: VIEW_KEYS.gitops,
   changes: VIEW_KEYS.changes,
+  recommendations: VIEW_KEYS.recommendations,
 };
 
 const ALL_NAMESPACES = new Set(['all', '-a', '*']);

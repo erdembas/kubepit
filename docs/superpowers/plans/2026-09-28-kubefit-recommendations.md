@@ -2048,15 +2048,15 @@ git commit -m "feat(ui): recommendations store and view models"
 
 Steps:
 
-- [ ] **Step 1: Implement the components and the removals listed under Files**
+- [x] **Step 1: Implement the components and the removals listed under Files**
 
-- [ ] **Step 2: Translate, run the checks**
+- [x] **Step 2: Translate, run the checks**
 
 Run: `pnpm i18n:check -- --fix`, add the Turkish, then `pnpm typecheck && pnpm i18n:check`.
 
 Expected: PASS.
 
-- [ ] **Step 3: Verify the demo**
+- [x] **Step 3: Verify the demo**
 
 Run: `pnpm dev:ui`.
 - prod-eu-west-1 → Cluster → Recommendations: the header shows "Prometheus · 7 days",
@@ -2066,7 +2066,7 @@ Run: `pnpm dev:ui`.
 - kind shows the empty state "No scan yet".
 - Cost → Right-sizing shows the summary card, and its link opens the view.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/desktop/src

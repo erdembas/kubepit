@@ -8,7 +8,7 @@ import type {
   CostStatus,
   CostWindow,
   RightsizingReport,
-  RightsizingSettings,
+  RightsizingRequest,
   WorkloadRef,
 } from '@/types';
 import { refreshPolled, refreshPolledPrefix, usePolled } from '../data/polled';
@@ -87,41 +87,39 @@ export function useCostReport(
   return { ...state, forceRefresh };
 }
 
-function settingsKey(settings: RightsizingSettings): string {
-  return [
-    settings.cpu_headroom_percent,
-    settings.memory_headroom_percent,
-    settings.memory_limit_headroom_percent,
-    settings.min_cpu_millicores,
-    settings.min_memory_bytes,
-    settings.days,
-  ].join(',');
+/**
+ * Cache-key fragment of what the backend's effective settings depend on:
+ * the saved strategy and the per-strategy overrides.
+ */
+function useRecommendationSettingsKey(): string {
+  return useAppStore((s) => {
+    const rec = s.settings?.recommendations;
+    return JSON.stringify([rec?.strategy ?? null, rec?.overrides ?? null]);
+  });
 }
 
 /**
- * Right-sizing for `namespaces` (all when empty) or one workload. The
- * Cost view, the Health scan and the details panel share entries.
+ * Right-sizing for `namespaces` (all when empty) or one workload, with the
+ * saved strategy and settings (`Settings.recommendations`). The Health
+ * scan and the details panel share entries.
  */
 export function useRightsizing(
   clusterId: ClusterId,
   namespaces: readonly string[],
   workload: WorkloadRef | null,
-  settings: RightsizingSettings,
-  strategy: string | null,
   enabled = true,
 ) {
   const source = useCostSourceKey(clusterId);
+  const settings = useRecommendationSettingsKey();
   const scope = workload
     ? `w:${workload.kind}/${workload.namespace}/${workload.name}`
     : `n:${[...namespaces].sort().join(',')}`;
-  const key = source
-    ? `${clusterId}|rightsizing|${source}|${scope}|${settingsKey(settings)}|${strategy ?? ''}`
-    : null;
-  const request = useMemo(
-    () => ({ namespaces: [...namespaces], workload, settings, strategy }),
-    // `scope` and the settings key capture the inputs by value.
+  const key = source ? `${clusterId}|rightsizing|${source}|${scope}|${settings}` : null;
+  const request = useMemo<RightsizingRequest>(
+    () => ({ namespaces: [...namespaces], workload, settings: null, strategy: null }),
+    // `scope` captures the inputs by value.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [scope, settingsKey(settings), strategy],
+    [scope],
   );
   return usePolled<RightsizingReport>(
     key,

@@ -16,6 +16,7 @@ import { HelmPage } from './helm/HelmPage';
 import { ClusterOverviewPage } from './overview/ClusterOverviewPage';
 import { WorkloadsOverviewPage } from './overview/WorkloadsOverviewPage';
 import { PortForwardsPage } from './portforward/PortForwardsPage';
+import { RecommendationsPage } from './recommendations/RecommendationsPage';
 import { ResourcePage } from './table/ResourcePage';
 import { ResourceMapPage } from './topology/ResourceMapPage';
 import { NetpolPage } from './netpol/NetpolPage';
@@ -117,6 +118,10 @@ export const ViewHost = memo(function ViewHost({
     );
   if (activeKind === VIEW.cost)
     return <CostPage clusterId={clusterId} namespaces={namespaces} isActive={isActive} />;
+  if (activeKind === VIEW.recommendations)
+    return (
+      <RecommendationsPage clusterId={clusterId} namespaces={namespaces} isActive={isActive} />
+    );
   if (activeKind === VIEW.gitops)
     return (
       <GitOpsPage
