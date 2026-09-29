@@ -564,6 +564,26 @@ pub fn fleet(conn: &Connection) -> Result<Vec<(String, RecommendationRun, String
     Ok(fleet)
 }
 
+/// Per cluster, its newest failed or interrupted run when that run is
+/// newer than the latest successful one (or the cluster has none): what
+/// [`latest`] reports as `last_failure`, for every cluster at once.
+pub fn fleet_failures(conn: &Connection) -> Result<Vec<RecommendationRun>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {RUN_COLUMNS} FROM rec_runs r
+         WHERE r.status IN ('failed', 'interrupted')
+           AND r.id = (SELECT MAX(f.id) FROM rec_runs f
+                       WHERE f.cluster_id = r.cluster_id
+                         AND f.status IN ('failed', 'interrupted'))
+           AND r.id > COALESCE((SELECT l.run_id FROM rec_latest l
+                                WHERE l.cluster_id = r.cluster_id), 0)
+         ORDER BY r.cluster_id"
+    ))?;
+    let failures = stmt
+        .query_map([], run_row)?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(failures)
+}
+
 // -- Retention and clear -----------------------------------------------------------
 
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
@@ -1061,6 +1081,27 @@ mod tests {
             vec![
                 ("c1".to_string(), a, CONFIG.to_string()),
                 ("c2".to_string(), other, CONFIG.to_string())
+            ]
+        );
+
+        // The interruption after c1's success is its last failure (the
+        // running scan is none); c4's failure before its success is not; c3
+        // only ever failed (its newest failure counts).
+        run(&mut conn, "c4", 1_000, &ScanOutcome::Failed("boom".into()));
+        run(&mut conn, "c4", 1_100, &success(report_of(vec![web()])));
+        run(&mut conn, "c3", 1_000, &ScanOutcome::Failed("x".into()));
+        let newest = run(&mut conn, "c3", 1_100, &ScanOutcome::Failed("y".into()));
+        let failures: Vec<(String, i64, Option<String>)> = fleet_failures(&conn)
+            .unwrap()
+            .into_iter()
+            .map(|r| (r.cluster_id, r.id, r.error))
+            .collect();
+        let interrupted = ids[1];
+        assert_eq!(
+            failures,
+            vec![
+                ("c1".to_string(), interrupted, Some("stopped".to_string())),
+                ("c3".to_string(), newest, Some("y".to_string())),
             ]
         );
     }

@@ -1,4 +1,5 @@
 import type {
+  AlertSettings,
   ClusterDef,
   ClusterRecommendationSummary,
   ClusterStatus,
@@ -19,6 +20,8 @@ import type {
   WorkloadRef,
   WorkloadUsageHistory,
 } from '@/types';
+import { DEFAULT_ALERT_SETTINGS, alertSettingsOf, namespaceAllowed } from '@/lib/alerts/policy';
+import { healthVerdict, workloadGvk } from '@/lib/kube/rightsizing/model';
 import { mockEmit, sleep } from './bus';
 import { collect, effectiveSettings, pricingOf, savedStrategy, usageSource } from './cost';
 import { resolveStrategy, workloadRecommendations } from './fixtures/cost';
@@ -42,6 +45,7 @@ import {
   workloadCount,
 } from './fixtures/recommendations';
 import { DAY } from './fixtures/util';
+import { raiseAlert, raiseAlertGroup } from './alerts';
 import { provideRecommendationHistory } from './history';
 import { handlers, register, type MockArgs } from './registry';
 
@@ -397,6 +401,10 @@ async function runScan(clusterId: string, trigger: ScanTrigger) {
       return;
     }
     const report = collect(clusterId, source, { namespaces: [] }, startedAt);
+    const before = [...runsOf(clusterId)]
+      .reverse()
+      .find((r) => r !== run && r.run.status === 'success' && r.inputs);
+    const previous = before ? storedReport(clusterId, before) : null;
     const now = Date.now();
     run.inputs = {
       source,
@@ -413,6 +421,7 @@ async function runScan(clusterId: string, trigger: ScanTrigger) {
       strategy: report.strategy,
       rows_kept: true,
     });
+    alertNewSavings(clusterId, previous, report);
     end('success', null);
   } finally {
     if (token.cancelled && run && run.run.status === 'running') {
@@ -423,6 +432,103 @@ async function runScan(clusterId: string, trigger: ScanTrigger) {
       });
     }
     if (token.cancelled) end('interrupted', ERROR_STOPPED);
+  }
+}
+
+/**
+ * Like `scan.rs::saving_alerts`: the workloads of `next` with a large,
+ * high-confidence saving (the Health "over" threshold, `healthVerdict`)
+ * that `previous`, the latest successful run before it, did not have.
+ */
+export function newSavings(
+  previous: RightsizingReport | null,
+  next: RightsizingReport,
+): WorkloadRecommendation[] {
+  const key = (w: WorkloadRecommendation) => `${w.kind}/${w.namespace}/${w.name}`;
+  const before = new Set(
+    (previous?.workloads ?? []).filter((w) => healthVerdict(w) === 'over').map(key),
+  );
+  return next.workloads.filter((w) => healthVerdict(w) === 'over' && !before.has(key(w)));
+}
+
+/** Like `scan.rs`: new savings alerted one by one per scan; the rest share one group alert. */
+export const SAVING_ALERTS_PER_SCAN = 5;
+const GROUP_NAME_LIMIT = 50;
+
+export type SavingAlertPlan =
+  | { kind: 'one'; workload: WorkloadRecommendation }
+  | { kind: 'group'; more: boolean; workloads: WorkloadRecommendation[] };
+
+/**
+ * Like `scan.rs::plan_saving_alerts`, largest saving first: without a
+ * previous run one summary for the cluster; otherwise the five largest one
+ * by one and a group for the rest.
+ */
+export function planSavingAlerts(
+  previous: RightsizingReport | null,
+  next: RightsizingReport,
+  alerts: AlertSettings = DEFAULT_ALERT_SETTINGS,
+): SavingAlertPlan[] {
+  // Only namespaces the alert filters allow: a cluster-wide group passes them by itself.
+  const found = newSavings(previous, next)
+    .filter((w) => namespaceAllowed(alerts, w.namespace))
+    .sort(
+      (a, b) =>
+        a.monthly_delta - b.monthly_delta ||
+        `${a.namespace}/${a.kind}/${a.name}`.localeCompare(`${b.namespace}/${b.kind}/${b.name}`),
+    );
+  if (!found.length) return [];
+  if (!previous) return [{ kind: 'group', more: false, workloads: found }];
+  const plan: SavingAlertPlan[] = found
+    .slice(0, SAVING_ALERTS_PER_SCAN)
+    .map((workload) => ({ kind: 'one', workload }));
+  const rest = found.slice(SAVING_ALERTS_PER_SCAN);
+  if (rest.length) plan.push({ kind: 'group', more: true, workloads: rest });
+  return plan;
+}
+
+/** A successful scan's alerts (`Settings.recommendations.alerts`; the alert filters apply). */
+function alertNewSavings(
+  clusterId: string,
+  previous: RightsizingReport | null,
+  next: RightsizingReport,
+) {
+  if (!settings()?.alerts) return;
+  const filters = alertSettingsOf(handlers.settings_get?.({}) as Settings | undefined);
+  for (const item of planSavingAlerts(previous, next, filters)) {
+    if (item.kind === 'group') {
+      const total = item.workloads.length;
+      raiseAlertGroup(
+        clusterId,
+        { group: '', version: '', kind: 'Workload', namespace: null, name: '' },
+        {
+          reason: 'RightsizingSaving',
+          container: null,
+          condition: item.more ? 'more' : null,
+          message: item.more
+            ? `${total} more workloads could shrink their requests by half or more`
+            : `${total} workloads could shrink their requests by half or more`,
+        },
+        {
+          total,
+          names: item.workloads.slice(0, GROUP_NAME_LIMIT).map((w) => `${w.namespace}/${w.name}`),
+        },
+      );
+      continue;
+    }
+    const w = item.workload;
+    const { group, version } = workloadGvk(w.kind);
+    const share = Math.min(100, Math.max(0, (-w.monthly_delta / w.monthly_current) * 100));
+    raiseAlert(
+      clusterId,
+      { group, version, kind: w.kind, namespace: w.namespace, name: w.name },
+      {
+        reason: 'RightsizingSaving',
+        container: null,
+        condition: null,
+        message: `Requests could shrink by ${Math.round(share)}%`,
+      },
+    );
   }
 }
 
@@ -506,13 +612,7 @@ function latest(clusterId: string, runId: number | null): RecommendationLatest {
     if (!picked) throw new Error(`scan ${runId} is no longer stored`);
   }
   const shown = picked ?? (sourceChanged ? undefined : last);
-  const failure = [...list]
-    .reverse()
-    .find(
-      (r) =>
-        (r.run.status === 'failed' || r.run.status === 'interrupted') &&
-        r.run.id > (last?.run.id ?? 0),
-    );
+  const failure = lastFailure(list, last);
   return {
     scan: shown ? scanView(clusterId, shown) : null,
     source_changed: sourceChanged,
@@ -610,14 +710,28 @@ async function usageHistory(args: MockArgs): Promise<WorkloadUsageHistory> {
   };
 }
 
+/** The newest failed or interrupted run after the latest success (like `rec::latest`). */
+function lastFailure(list: readonly DemoRun[], after: DemoRun | undefined): DemoRun | undefined {
+  return [...list]
+    .reverse()
+    .find(
+      (r) =>
+        (r.run.status === 'failed' || r.run.status === 'interrupted') &&
+        r.run.id > (after?.run.id ?? 0),
+    );
+}
+
 function fleet(): ClusterRecommendationSummary[] {
   return clusters().map((c) => {
-    const last = [...runsOf(c.id)].reverse().find((r) => r.run.status === 'success' && r.inputs);
+    const list = runsOf(c.id);
+    const last = [...list].reverse().find((r) => r.run.status === 'success' && r.inputs);
+    const failure = lastFailure(list, last);
     return {
       cluster_id: c.id,
       scheduled: schedules.has(c.id),
       source_changed: !!last && last.sourceConfig !== sourceConfig(c),
       run: last ? runView(c.id, last) : null,
+      last_failure: failure ? structuredClone(failure.run) : null,
     };
   });
 }

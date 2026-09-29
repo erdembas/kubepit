@@ -221,13 +221,80 @@ impl AlertBook {
             self.by_object.insert(key, alert.id.clone());
             alert
         };
-        self.alerts.push_back(alert.clone());
+        self.push(alert.clone());
+        AlertEvent { alert, fresh: true }
+    }
+
+    /// Record one finding about several objects at once (a recommendation
+    /// scan's summary of its new savings) as a group alert: `object.name`
+    /// is emptied and `group` lists the objects (at most
+    /// [`GROUP_NAME_LIMIT`] names). A group of the same bucket seen within
+    /// [`COOLDOWN_MS`] takes the new message, adds the objects it did not
+    /// list yet (names deduplicated, the total grown by the new ones) and
+    /// counts the repeat instead of raising a new alert.
+    pub fn record_group(
+        &mut self,
+        cluster_id: &str,
+        object: AlertObjectRef,
+        finding: Finding,
+        mut group: AlertGroup,
+        now: i64,
+    ) -> AlertEvent {
+        let object = AlertObjectRef {
+            name: String::new(),
+            ..object
+        };
+        group.names.truncate(GROUP_NAME_LIMIT);
+        let bucket = BucketKey {
+            cluster: cluster_id.to_string(),
+            kind: object.kind.clone(),
+            namespace: object.namespace.clone(),
+            reason: finding.reason,
+            condition: finding.condition.clone(),
+        };
+        if let Some(id) = self.groups.get(&bucket).cloned() {
+            if let Some(alert) = self
+                .get_mut(&id)
+                .filter(|a| now - a.last_seen < COOLDOWN_MS)
+            {
+                alert.count += 1;
+                alert.last_seen = now;
+                alert.message = finding.message;
+                alert.group = Some(match alert.group.take() {
+                    Some(known) => merge_groups(known, group),
+                    None => group,
+                });
+                return AlertEvent {
+                    alert: alert.clone(),
+                    fresh: false,
+                };
+            }
+        }
+        let mut alert = new_alert(
+            cluster_id,
+            object,
+            Finding {
+                container: None,
+                ..finding
+            },
+            now,
+            Some(group),
+        );
+        // One occurrence, however many objects it names.
+        alert.count = 1;
+        self.groups.insert(bucket, alert.id.clone());
+        self.push(alert.clone());
+        AlertEvent { alert, fresh: true }
+    }
+
+    /// Append `alert`, dropping the oldest beyond the limit.
+    fn push(&mut self, alert: Alert) {
+        self.alerts.push_back(alert);
         while self.alerts.len() > self.limit {
             if let Some(old) = self.alerts.pop_front() {
                 self.unindex(&old);
             }
         }
-        AlertEvent { alert, fresh: true }
     }
 
     /// Forget the index entry pointing at `alert` (not a newer one).
@@ -288,6 +355,28 @@ impl AlertBook {
         }
         gone.len()
     }
+}
+
+/// `known` plus the objects of `new` it does not list yet: names in order
+/// without duplicates (at most [`GROUP_NAME_LIMIT`]), and the total grown
+/// by the new objects (those `known` lists count once).
+fn merge_groups(known: AlertGroup, new: AlertGroup) -> AlertGroup {
+    let seen = new.names.iter().filter(|n| known.names.contains(n)).count();
+    let overlap = u32::try_from(seen).unwrap_or(u32::MAX);
+    let total = known
+        .total
+        .saturating_add(new.total.saturating_sub(overlap))
+        .max(known.total);
+    let mut names = known.names;
+    for name in new.names {
+        if names.len() >= GROUP_NAME_LIMIT {
+            break;
+        }
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    AlertGroup { total, names }
 }
 
 fn new_alert(
@@ -553,5 +642,124 @@ mod tests {
         assert_eq!(book.clear(None), 1);
         assert!(book.is_empty());
         assert!(book.record("c1", pod("a", "x"), crash(""), T0 + 30).fresh);
+    }
+
+    #[test]
+    fn preset_groups_are_one_entry_and_merge_within_the_cooldown() {
+        let mut book = AlertBook::with_limit(3);
+        let object = AlertObjectRef {
+            group: String::new(),
+            version: String::new(),
+            kind: "Workload".into(),
+            namespace: None,
+            name: "ignored".into(),
+        };
+        let finding = |message: &str| Finding {
+            reason: AlertReason::RightsizingSaving,
+            container: Some("dropped".into()),
+            condition: None,
+            message: message.into(),
+        };
+        let group = |n: u32| AlertGroup {
+            total: n,
+            names: (0..n).map(|i| format!("shop/w{i}")).collect(),
+        };
+        let first = book.record_group("c1", object.clone(), finding("a"), group(80), T0);
+        assert!(first.fresh);
+        let alert = &first.alert;
+        assert_eq!((alert.object.name.as_str(), alert.count), ("", 1));
+        assert_eq!(alert.container, None);
+        let listed = alert.group.as_ref().unwrap();
+        assert_eq!((listed.total, listed.names.len()), (80, GROUP_NAME_LIMIT));
+
+        let again = book.record_group("c1", object.clone(), finding("b"), group(2), T0 + 1);
+        assert!(!again.fresh);
+        assert_eq!(again.alert.id, first.alert.id);
+        assert_eq!(again.alert.count, 2);
+        assert_eq!(again.alert.message, "b");
+        // Objects it already listed: the group stays as it was.
+        let kept = again.alert.group.as_ref().unwrap();
+        assert_eq!((kept.total, kept.names.len()), (80, GROUP_NAME_LIMIT));
+        assert_eq!(book.len(), 1);
+
+        // Another condition is another entry; the limit still applies.
+        let more = Finding {
+            condition: Some("more".into()),
+            ..finding("c")
+        };
+        assert!(
+            book.record_group("c1", object.clone(), more, group(3), T0 + 2)
+                .fresh
+        );
+        assert!(
+            book.record_group("c2", object.clone(), finding("d"), group(1), T0)
+                .fresh
+        );
+        assert!(book.record("c1", pod("a", "x"), crash(""), T0 + 3).fresh);
+        assert_eq!(book.len(), 3);
+        // The first group was dropped: a new one is fresh.
+        assert!(
+            book.record_group("c1", object, finding("e"), group(1), T0 + 4)
+                .fresh
+        );
+    }
+
+    #[test]
+    fn a_repeated_group_keeps_the_objects_it_listed() {
+        let mut book = AlertBook::default();
+        let object = AlertObjectRef {
+            group: String::new(),
+            version: String::new(),
+            kind: "Workload".into(),
+            namespace: None,
+            name: String::new(),
+        };
+        let more = Finding {
+            reason: AlertReason::RightsizingSaving,
+            container: None,
+            condition: Some("more".into()),
+            message: "more".into(),
+        };
+        let group = |names: &[&str]| AlertGroup {
+            total: names.len() as u32,
+            names: names.iter().map(|n| n.to_string()).collect(),
+        };
+        book.record_group(
+            "c1",
+            object.clone(),
+            more.clone(),
+            group(&["a/x", "a/y"]),
+            T0,
+        );
+        let again = book.record_group(
+            "c1",
+            object.clone(),
+            more.clone(),
+            group(&["a/y", "b/z"]),
+            T0 + 60_000,
+        );
+        assert!(!again.fresh);
+        assert_eq!(again.alert.group, Some(group(&["a/x", "a/y", "b/z"])));
+
+        // Totals beyond the listed names grow by the new objects only.
+        let big = AlertGroup {
+            total: 70,
+            names: (0..GROUP_NAME_LIMIT).map(|i| format!("n/{i}")).collect(),
+        };
+        let mut book = AlertBook::default();
+        book.record_group("c1", object.clone(), more.clone(), big, T0);
+        let grown = book.record_group(
+            "c1",
+            object,
+            more,
+            AlertGroup {
+                total: 3,
+                names: vec!["n/0".into(), "m/1".into(), "m/2".into()],
+            },
+            T0 + 1,
+        );
+        let merged = grown.alert.group.unwrap();
+        assert_eq!(merged.total, 72);
+        assert_eq!(merged.names.len(), GROUP_NAME_LIMIT);
     }
 }

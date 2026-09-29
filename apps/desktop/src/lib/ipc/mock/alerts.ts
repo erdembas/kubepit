@@ -2,6 +2,7 @@ import { alertSettingsOf, clusterMonitored, recordsAlert } from '@/lib/alerts/po
 import { windowLabel } from '@/lib/windowSeed';
 import type {
   Alert,
+  AlertGroup,
   AlertNotice,
   AlertObjectRef,
   AlertReason,
@@ -32,7 +33,7 @@ const HISTORY_LIMIT = 500;
 const FIRST_ALERT_MS: [number, number] = [6_000, 12_000];
 const NEXT_ALERT_MS: [number, number] = [50_000, 110_000];
 
-interface Finding {
+export interface Finding {
   reason: AlertReason;
   container: string | null;
   condition: string | null;
@@ -123,9 +124,85 @@ function statuses(): Record<string, ClusterStatus> {
   return (handlers.cluster_statuses?.({}) as Record<string, ClusterStatus> | undefined) ?? {};
 }
 
+/**
+ * Raise a finding no demo watch makes (a recommendation scan's
+ * `RightsizingSaving`), like `AlertCenter::raise`: the same filters, book
+ * and event.
+ */
+export function raiseAlert(clusterId: string, object: AlertObjectRef, finding: Finding) {
+  emit(clusterId, object, finding);
+}
+
+/**
+ * One finding about several objects (a scan's summary of its new
+ * savings), like `AlertCenter::raise_group` / `AlertBook::record_group`:
+ * one group alert per bucket; a repeat within the cooldown takes the new
+ * message and adds the objects it did not list yet.
+ */
+export function raiseAlertGroup(
+  clusterId: string,
+  object: AlertObjectRef,
+  finding: Finding,
+  group: AlertGroup,
+) {
+  if (!recordsAlert(settings(), clusterId, finding.reason, object.namespace)) return;
+  const now = Date.now();
+  const ref = { ...object, name: '' };
+  const listed = { total: group.total, names: group.names.slice(0, GROUP_NAME_LIMIT) };
+  const bucket = bucketKey(clusterId, ref, finding);
+  const active = alerts.find(
+    (a) =>
+      !!a.group &&
+      bucketKey(a.cluster_id, a.object, a) === bucket &&
+      now - a.last_seen < COOLDOWN_MS,
+  );
+  let alert: Alert;
+  let fresh = false;
+  if (active) {
+    // Like `book.rs::merge_groups`: the objects it did not list yet, once.
+    const known = active.group!;
+    const overlap = listed.names.filter((n) => known.names.includes(n)).length;
+    const merged: AlertGroup = {
+      total: Math.max(known.total, known.total + Math.max(0, listed.total - overlap)),
+      names: [...new Set([...known.names, ...listed.names])].slice(0, GROUP_NAME_LIMIT),
+    };
+    Object.assign(active, {
+      count: active.count + 1,
+      last_seen: now,
+      message: finding.message,
+      group: merged,
+    });
+    alert = { ...active, group: { ...merged, names: [...merged.names] } };
+  } else {
+    fresh = true;
+    alert = {
+      id: crypto.randomUUID(),
+      cluster_id: clusterId,
+      severity: severityOf(finding.reason),
+      reason: finding.reason,
+      object: ref,
+      container: null,
+      condition: finding.condition,
+      message: finding.message,
+      first_seen: now,
+      last_seen: now,
+      count: 1,
+      read: false,
+      group: listed,
+    };
+    alerts = [...alerts, alert].slice(-HISTORY_LIMIT);
+    alert = { ...alert, group: { ...listed } };
+  }
+  notify(alert, fresh);
+}
+
 function emit(clusterId: string, object: AlertObjectRef, finding: Finding) {
   if (!recordsAlert(settings(), clusterId, finding.reason, object.namespace)) return;
   const { alert, fresh } = record(clusterId, object, finding, Date.now());
+  notify(alert, fresh);
+}
+
+function notify(alert: Alert, fresh: boolean) {
   const notice: AlertNotice = {
     alert,
     fresh,

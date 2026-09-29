@@ -1358,7 +1358,11 @@ export interface ClusterProxyInfo {
 // Alerts (transition monitor + notification center)
 // ---------------------------------------------------------------------------
 
-/** Kubernetes vocabulary, shown verbatim (never translated). */
+/**
+ * Kubernetes vocabulary (and `RightsizingSaving`, a new high-confidence
+ * saving found by a recommendation scan; optional, `Settings.recommendations.alerts`),
+ * shown verbatim (never translated).
+ */
 export type AlertReason =
   | 'CrashLoopBackOff'
   | 'OOMKilled'
@@ -1367,7 +1371,8 @@ export type AlertReason =
   | 'JobFailed'
   | 'NodeNotReady'
   | 'NodePressure'
-  | 'ProgressDeadlineExceeded';
+  | 'ProgressDeadlineExceeded'
+  | 'RightsizingSaving';
 
 export type AlertSeverity = 'critical' | 'warning';
 
@@ -2649,6 +2654,8 @@ export interface ClusterRecommendationSummary {
   source_changed: boolean;
   /** The latest successful run (with its summary). */
   run: RecommendationRun | null;
+  /** The newest failed or interrupted run after it (or of a cluster that never succeeded). */
+  last_failure: RecommendationRun | null;
 }
 
 export type RecommendationExportFormat = 'json' | 'yaml';

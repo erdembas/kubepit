@@ -29,10 +29,14 @@ pub enum AlertReason {
     NodePressure,
     /// A Deployment's `Progressing` condition has `ProgressDeadlineExceeded`.
     ProgressDeadlineExceeded,
+    /// A recommendation scan found a new high-confidence saving on a
+    /// workload (optional, `Settings.recommendations.alerts`; raised by
+    /// `recommendations::scan`, not by a watch).
+    RightsizingSaving,
 }
 
 impl AlertReason {
-    pub const ALL: [AlertReason; 8] = [
+    pub const ALL: [AlertReason; 9] = [
         AlertReason::CrashLoopBackOff,
         AlertReason::OomKilled,
         AlertReason::ImagePullBackOff,
@@ -41,6 +45,7 @@ impl AlertReason {
         AlertReason::NodeNotReady,
         AlertReason::NodePressure,
         AlertReason::ProgressDeadlineExceeded,
+        AlertReason::RightsizingSaving,
     ];
 
     pub fn severity(self) -> AlertSeverity {
@@ -52,20 +57,22 @@ impl AlertReason {
             AlertReason::ImagePullBackOff
             | AlertReason::Evicted
             | AlertReason::NodePressure
-            | AlertReason::ProgressDeadlineExceeded => AlertSeverity::Warning,
+            | AlertReason::ProgressDeadlineExceeded
+            | AlertReason::RightsizingSaving => AlertSeverity::Warning,
         }
     }
 
-    /// The kind whose watch detects this reason.
-    pub fn kind(self) -> WatchedKind {
+    /// The kind whose watch detects this reason (`None`: no watch does).
+    pub fn kind(self) -> Option<WatchedKind> {
         match self {
             AlertReason::CrashLoopBackOff
             | AlertReason::OomKilled
             | AlertReason::ImagePullBackOff
-            | AlertReason::Evicted => WatchedKind::Pods,
-            AlertReason::JobFailed => WatchedKind::Jobs,
-            AlertReason::NodeNotReady | AlertReason::NodePressure => WatchedKind::Nodes,
-            AlertReason::ProgressDeadlineExceeded => WatchedKind::Deployments,
+            | AlertReason::Evicted => Some(WatchedKind::Pods),
+            AlertReason::JobFailed => Some(WatchedKind::Jobs),
+            AlertReason::NodeNotReady | AlertReason::NodePressure => Some(WatchedKind::Nodes),
+            AlertReason::ProgressDeadlineExceeded => Some(WatchedKind::Deployments),
+            AlertReason::RightsizingSaving => None,
         }
     }
 }
@@ -238,7 +245,7 @@ impl AlertSettings {
         let mut kinds: Vec<WatchedKind> = AlertReason::ALL
             .into_iter()
             .filter(|r| self.reason_enabled(*r))
-            .map(AlertReason::kind)
+            .filter_map(AlertReason::kind)
             .collect();
         kinds.sort();
         kinds.dedup();
@@ -279,6 +286,36 @@ mod tests {
         assert_eq!(
             serde_json::to_value(AlertSeverity::Critical).unwrap(),
             "critical"
+        );
+        assert_eq!(
+            serde_json::to_value(AlertReason::RightsizingSaving).unwrap(),
+            "RightsizingSaving"
+        );
+    }
+
+    #[test]
+    fn scan_reasons_start_no_watch() {
+        assert_eq!(AlertReason::RightsizingSaving.kind(), None);
+        assert_eq!(
+            AlertReason::RightsizingSaving.severity(),
+            AlertSeverity::Warning
+        );
+        let only_savings = AlertSettings {
+            disabled_reasons: AlertReason::ALL
+                .into_iter()
+                .filter(|r| *r != AlertReason::RightsizingSaving)
+                .collect(),
+            ..Default::default()
+        };
+        assert!(only_savings.watched_kinds().is_empty());
+        assert_eq!(
+            AlertSettings::default().watched_kinds(),
+            vec![
+                WatchedKind::Pods,
+                WatchedKind::Jobs,
+                WatchedKind::Nodes,
+                WatchedKind::Deployments
+            ]
         );
     }
 

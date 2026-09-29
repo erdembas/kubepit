@@ -29,6 +29,11 @@ function singleTitle(alert: Alert): string {
       });
     case 'ProgressDeadlineExceeded':
       return i18n.t('Deployment {name} exceeded its progress deadline', { name });
+    case 'RightsizingSaving':
+      return i18n.t('{kind} {name} requests far more than it uses', {
+        kind: alert.object.kind,
+        name,
+      });
   }
 }
 
@@ -87,6 +92,27 @@ function groupTitle(alert: Alert, count: number): string {
         count,
         values,
       );
+    case 'RightsizingSaving':
+      // A burst in one namespace, or a scan's own group across the cluster:
+      // its summary, or the savings beyond the per-scan cap (`more`).
+      if (alert.object.namespace)
+        return i18n.plural(
+          '{count} workload requests far more than it uses in {namespace}',
+          '{count} workloads request far more than they use in {namespace}',
+          count,
+          values,
+        );
+      return alert.condition === 'more'
+        ? i18n.plural(
+            '{count} more workload requests far more than it uses',
+            '{count} more workloads request far more than they use',
+            count,
+          )
+        : i18n.plural(
+            '{count} workload requests far more than it uses',
+            '{count} workloads request far more than they use',
+            count,
+          );
   }
 }
 
@@ -135,5 +161,9 @@ export function reasonDescription(reason: AlertReason): string {
       return i18n.t('A node reports memory, disk or PID pressure.');
     case 'ProgressDeadlineExceeded':
       return i18n.t('A Deployment rollout is stuck past its progress deadline.');
+    case 'RightsizingSaving':
+      return i18n.t(
+        'A recommendation scan found a new high-confidence saving of half the requests or more. Off unless turned on.',
+      );
   }
 }

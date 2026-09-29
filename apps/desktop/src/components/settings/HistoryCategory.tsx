@@ -1,24 +1,39 @@
 import * as i18n from '@/i18n';
+import { useLocaleMemo as useMemo } from '@/i18n';
 import { Database, History, Trash2 } from 'lucide-react';
+import {
+  RECOMMENDATIONS_FLEET_KEY,
+  RECOMMENDATIONS_FLEET_REFRESH_MS,
+} from '@/components/dashboard/recommendationsFleet';
 import { Button } from '@/components/ui/Button';
+import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
+import { Select, type SelectOption } from '@/components/ui/Select';
 import { Switch } from '@/components/ui/Switch';
 import { refreshPolled, usePolled } from '@/components/workbench/data/polled';
+import { useNow } from '@/components/workbench/util';
 import { clusterColor } from '@/lib/clusterMeta';
-import { formatBytes } from '@/lib/format';
+import { formatAge, formatBytes } from '@/lib/format';
+import { alertSettingsOf, savingAlertsOn, withSavingAlerts } from '@/lib/alerts/policy';
 import { historySettings } from '@/lib/history/audit';
+import { SCAN_INTERVALS, intervalLabel, runTime } from '@/lib/kube/recommendations/model';
 import { ipc, isTauri } from '@/lib/ipc';
 import { useAppStore } from '@/store/useAppStore';
-import type { HistoryKind, HistorySettings, HistoryStatus, HistoryTableStatus } from '@/types';
+import { useRecommendationsStore } from '@/store/useRecommendationsStore';
+import type {
+  ClusterId,
+  ClusterRecommendationSummary,
+  HistoryKind,
+  HistorySettings,
+  HistoryStatus,
+  HistoryTableStatus,
+  RecommendationSettings,
+} from '@/types';
 import { useSettingsDraft } from './categories';
+import { REC_RETENTION_DAYS, clampDays, withScanCluster } from './recommendationHistory';
 import { SettingsPageShell, SettingsSection } from './SettingsView';
 
 const STATUS_KEY = 'history|status';
-
-function clampDays(value: string, fallback: number) {
-  const n = Math.round(Number(value));
-  return Number.isFinite(n) && n > 0 ? Math.min(3650, n) : fallback;
-}
 
 function Rows({ label, table }: { label: string; table: HistoryTableStatus | undefined }) {
   i18n.useLocale();
@@ -39,7 +54,8 @@ function Rows({ label, table }: { label: string; table: HistoryTableStatus | und
 
 /**
  * Settings → History: the own-action audit log, persistent events and
- * changes per cluster, retention, the size cap and the database itself.
+ * changes per cluster, stored recommendation scans, retention, the size
+ * cap and the database itself.
  */
 export function HistoryCategory({ description }: { description: string }) {
   i18n.useLocale();
@@ -172,6 +188,20 @@ export function HistoryCategory({ description }: { description: string }) {
         </label>
       </SettingsSection>
 
+      <RecommendationHistory
+        settings={draft.recommendations}
+        onChange={(rec) => update('recommendations', rec)}
+        savingAlerts={savingAlertsOn(draft)}
+        alertsEnabled={alertSettingsOf(draft).enabled}
+        onSavingAlertsChange={(on) => {
+          const next = withSavingAlerts(draft, on);
+          update('recommendations', next.recommendations);
+          update('alerts', next.alerts);
+        }}
+        table={s?.recommendations}
+        onCleared={() => refreshPolled(STATUS_KEY)}
+      />
+
       <SettingsSection
         title={i18n.t('Storage')}
         description={i18n.t(
@@ -276,5 +306,202 @@ export function HistoryCategory({ description }: { description: string }) {
         </div>
       </SettingsSection>
     </SettingsPageShell>
+  );
+}
+
+/**
+ * The Recommendations block: stored scans (rows, oldest scan), how long
+ * they are kept, the background-scan interval and the opt-in per cluster
+ * and the alert on new high-confidence savings (part of the page's draft,
+ * saved with it), and clearing one cluster's or every cluster's scans
+ * right away. After a clear, open views read the cluster again (`forget`)
+ * and the dashboard's fleet card re-reads the fleet.
+ */
+function RecommendationHistory({
+  settings,
+  onChange,
+  savingAlerts,
+  alertsEnabled,
+  onSavingAlertsChange,
+  table,
+  onCleared,
+}: {
+  settings: RecommendationSettings;
+  onChange: (next: RecommendationSettings) => void;
+  savingAlerts: boolean;
+  /** Settings → Notifications' master switch. */
+  alertsEnabled: boolean;
+  onSavingAlertsChange: (on: boolean) => void;
+  table: HistoryTableStatus | undefined;
+  onCleared: () => void;
+}) {
+  i18n.useLocale();
+  const clusters = useAppStore((s) => s.clusters);
+  const fleet = usePolled<ClusterRecommendationSummary[]>(
+    RECOMMENDATIONS_FLEET_KEY,
+    () => ipc.recommendationsFleet(),
+    RECOMMENDATIONS_FLEET_REFRESH_MS,
+  );
+  const now = useNow(60_000, true);
+  const stored = useMemo(
+    () => new Map((fleet.data ?? []).map((f) => [f.cluster_id, f])),
+    [fleet.data],
+  );
+  const intervalOptions = useMemo<SelectOption[]>(
+    () =>
+      [...new Set([...SCAN_INTERVALS, settings.interval_minutes])]
+        .sort((a, b) => a - b)
+        .map((m) => ({ value: String(m), label: intervalLabel(m) })),
+    [settings.interval_minutes],
+  );
+
+  const clear = (clusterId: ClusterId | null, name: string | null) =>
+    useAppStore.getState().requestConfirm({
+      title:
+        name == null
+          ? i18n.t('Clear the recommendation history?')
+          : i18n.t('Clear the recommendation history of {name}?', { name }),
+      message:
+        name == null
+          ? i18n.t(
+              'Every stored recommendation scan of every cluster is deleted from this machine. Later scans store new ones.',
+            )
+          : i18n.t(
+              'Every stored recommendation scan of {name} is deleted from this machine. Later scans store new ones.',
+              { name },
+            ),
+      confirmLabel: i18n.t('Clear'),
+      tone: 'danger',
+      onConfirm: async () => {
+        try {
+          await ipc.historyClear('recommendations', clusterId);
+          const recs = useRecommendationsStore.getState();
+          for (const id of clusterId ? [clusterId] : clusters.map((c) => c.id)) recs.forget(id);
+          onCleared();
+          refreshPolled(RECOMMENDATIONS_FLEET_KEY);
+          useAppStore.getState().pushToast('success', i18n.t('History cleared'));
+        } catch (e) {
+          useAppStore.getState().pushToast('error', e instanceof Error ? e.message : String(e));
+        }
+      },
+    });
+
+  return (
+    <SettingsSection
+      title={i18n.t('Recommendations')}
+      description={i18n.t(
+        'Right-sizing scans are stored on this machine, so their results stay available while a cluster is disconnected. Background scans run only for the clusters turned on here, while they are connected.',
+      )}
+    >
+      <Rows label={i18n.t('Stored recommendations')} table={table} />
+      <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px]">
+        <label className="flex items-center gap-2">
+          <span className="text-fg-muted">{i18n.t('Keep scans for')}</span>
+          <Input
+            type="number"
+            min={REC_RETENTION_DAYS.min}
+            max={REC_RETENTION_DAYS.max}
+            value={settings.retention_days}
+            onChange={(e) =>
+              onChange({
+                ...settings,
+                retention_days: clampDays(
+                  e.target.value,
+                  settings.retention_days,
+                  REC_RETENTION_DAYS.min,
+                  REC_RETENTION_DAYS.max,
+                ),
+              })
+            }
+            className="w-20"
+            aria-label={i18n.t('Recommendation scan retention in days')}
+          />
+          <span className="text-fg-muted">{i18n.t('days')}</span>
+        </label>
+        <span
+          className="flex items-center gap-2"
+          title={i18n.t('The interval applies to every cluster.')}
+        >
+          <span className="text-fg-muted">{i18n.t('Background scans')}</span>
+          <Select
+            value={String(settings.interval_minutes)}
+            onChange={(v) => onChange({ ...settings, interval_minutes: Number(v) })}
+            options={intervalOptions}
+            ariaLabel={i18n.t('Scan interval')}
+          />
+        </span>
+      </div>
+      <div className="border-border/70 divide-border/60 @container mt-3 divide-y rounded-md border">
+        {clusters.length === 0 && (
+          <p className="text-fg-dim px-3 py-2 text-[12px]">{i18n.t('No clusters yet.')}</p>
+        )}
+        {clusters.map((c) => {
+          const entry = stored.get(c.id);
+          const run = entry?.run ?? null;
+          // Until the fleet is read, Clear stays available.
+          const hasScans = !fleet.data || !!run || !!entry?.last_failure;
+          return (
+            <div key={c.id} className="flex items-center gap-2.5 px-3 py-1.5">
+              <span
+                aria-hidden
+                className="h-2 w-2 shrink-0 rounded-full"
+                style={{ background: clusterColor(c) }}
+              />
+              <span className="text-fg min-w-0 flex-1 truncate text-[12px]">{c.name}</span>
+              <span className="text-fg-dim hidden shrink-0 text-[11px] tabular-nums @xs:inline">
+                {run
+                  ? i18n.t('Scanned {age} ago', { age: formatAge(runTime(run), now) })
+                  : fleet.data && !entry?.last_failure
+                    ? i18n.t('No scan yet')
+                    : null}
+              </span>
+              <Switch
+                checked={settings.scan_clusters.includes(c.id)}
+                onChange={(on) => onChange(withScanCluster(settings, c.id, on))}
+                className="shrink-0 items-center gap-0"
+                label={
+                  <span className="sr-only">
+                    {i18n.t('Scan {name} in the background', { name: c.name })}
+                  </span>
+                }
+              />
+              <IconButton
+                size="xs"
+                tone="danger"
+                disabled={!hasScans}
+                label={i18n.t('Clear the recommendation history of {name}', { name: c.name })}
+                icon={<Trash2 />}
+                onClick={() => clear(c.id, c.name)}
+              />
+            </div>
+          );
+        })}
+      </div>
+      <Switch
+        className="mt-4"
+        checked={savingAlerts}
+        disabled={!alertsEnabled}
+        onChange={onSavingAlertsChange}
+        label={i18n.t('Alert on new high-confidence savings')}
+        description={
+          alertsEnabled
+            ? i18n.t(
+                'When a scan finds a workload whose requests could shrink by half or more with high confidence, and the previous scan did not, an alert is raised. The filters and mutes of Settings → Notifications apply.',
+              )
+            : i18n.t('Alerts are turned off in Settings → Notifications.')
+        }
+      />
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          variant="danger"
+          leftIcon={<Trash2 className="h-3.5 w-3.5" />}
+          disabled={table?.oldest_ts == null}
+          onClick={() => clear(null, null)}
+        >
+          {i18n.t('Clear recommendation history')}
+        </Button>
+      </div>
+    </SettingsSection>
   );
 }
