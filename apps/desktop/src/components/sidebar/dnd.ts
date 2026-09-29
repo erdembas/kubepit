@@ -1,6 +1,6 @@
 import type { ClusterDef, SectionId } from '@/types';
 
-export const COLLAPSED_W = 52;
+export const COLLAPSED_W = 64;
 export const MIN_W = 250;
 export const MAX_W = 400;
 export const DEFAULT_W = 320;

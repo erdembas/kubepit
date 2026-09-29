@@ -11,7 +11,7 @@ interface CollapsedClusterListProps {
   onSelect: (id: string) => void;
 }
 
-/** Icon-only rail (sidebar collapsed): one avatar per cluster, Lens-hotbar style. */
+/** Compact rail (sidebar collapsed): each cluster as an avatar over a small name, Lens-hotbar style. */
 export function CollapsedClusterList({
   clusters,
   statuses,
@@ -20,10 +20,11 @@ export function CollapsedClusterList({
 }: CollapsedClusterListProps) {
   i18n.useLocale();
   return (
-    <div className="flex flex-col items-center gap-1 py-2">
+    <div className="flex flex-col items-stretch gap-0.5 px-1 py-2">
       {clusters.map((cluster) => {
         const state = connState(statuses[cluster.id]);
         const selected = selectedClusterId === cluster.id;
+        const live = isLive(state);
         return (
           <button
             key={cluster.id}
@@ -33,22 +34,27 @@ export function CollapsedClusterList({
             aria-pressed={selected}
             onClick={() => onSelect(cluster.id)}
             className={cn(
-              'hover:bg-fg/4 relative flex h-8 w-8 items-center justify-center rounded-md transition',
-              selected && 'bg-fg/7',
+              'relative flex flex-col items-center gap-1 rounded-md px-0.5 pt-1.5 pb-1 transition-colors',
+              selected ? 'bg-fg/7 text-fg' : 'text-fg-muted hover:bg-fg/4 hover:text-fg',
             )}
           >
             {selected && (
               <span
-                className="bg-accent absolute top-1.5 bottom-1.5 -left-[9px] w-[2px] rounded-full"
+                className="bg-accent absolute top-1.5 bottom-1.5 -left-1 w-[2px] rounded-full"
                 aria-hidden
               />
             )}
-            <ClusterGlyph
-              cluster={cluster}
-              state={state}
-              size="md"
-              dim={!isLive(state) && !selected}
-            />
+            <ClusterGlyph cluster={cluster} state={state} size="md" dim={!live && !selected} />
+            <span
+              aria-hidden
+              className={cn(
+                'line-clamp-2 w-full text-center text-[9px] leading-[11px] break-words',
+                selected && 'font-medium',
+                !live && !selected && 'text-fg-dim',
+              )}
+            >
+              {cluster.name}
+            </span>
           </button>
         );
       })}
