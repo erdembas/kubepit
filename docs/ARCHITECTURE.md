@@ -1257,6 +1257,15 @@ the `status` that stopping the watches flips), and returns its previous model
 while disabled. `TopologyMap` likewise keeps its derived view, and so its
 layout, while `active` is false (`pausedMemo`).
 
+Every batch a watch delivers bumps its `version`, so while a map of many
+kinds syncs its data key changes dozens of times a second. `CoalescedMemo`
+(`dataKey.ts`) rebuilds a data-only change during the initial sync at most
+every `SYNC_REBUILD_INTERVAL_MS` (250 ms) and re-renders when the next one
+may run; the change that completes the sync, a change of the scope, sources
+or extra object, and every live change after the sync rebuild at once. On
+the all-namespaces map of the `m` scale cluster this took the rebuilds from
+≈ 76 to 3.
+
 ## NetworkPolicy simulator
 
 "Can A talk to B?" runs entirely in the UI on the shared watches; there is

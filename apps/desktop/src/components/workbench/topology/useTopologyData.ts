@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useReducer, useState } from 'react';
 import { kindKey } from '@/lib/kube/catalog';
 import {
   buildTopology,
@@ -14,7 +14,7 @@ import { perfNow, recordSince } from '@/lib/perf/probe';
 import type { ApiResourceInfo, ClusterId, Gvk, KubeObject } from '@/types';
 import { hasListError, isListComplete } from '../data/listState';
 import { useWatch, type WatchSnapshot } from '../data/watchCache';
-import { pausedMemo, topologyDataKey, type PausedMemo } from './dataKey';
+import { CoalescedMemo, topologyDataKey } from './dataKey';
 
 export interface TopologyWatchError {
   kind: string;
@@ -42,7 +42,10 @@ export interface TopologyData {
 /**
  * Live data for the relationship map: one shared watch per kind (the same
  * ref-counted watches the tables use), rebuilt into a graph at most once per
- * delivered batch. `slotScopes` holds one watch scope per topology source
+ * delivered batch. While the watches still sync, rebuilds are coalesced to
+ * one every `SYNC_REBUILD_INTERVAL_MS` (`CoalescedMemo`); the batch that
+ * completes the sync and every live change after it rebuild at once.
+ * `slotScopes` holds one watch scope per topology source
  * (`[]` = cluster-wide, `null` = not watched); the graph is scoped to the
  * union of their namespace lists. `extra` adds objects whose kind is not
  * watched (the details panel's own object). `graphScope` (Map tabs of
@@ -80,58 +83,65 @@ export function useTopologyData(
   const extraKey = extra
     ? `${extra.obj.metadata.uid}@${extra.obj.metadata.resourceVersion ?? ''}`
     : '';
-  const key = `${scopeKey}#${extraKey}#${snaps
-    .map((s, i) => (watched(i) ? topologyDataKey([s]) : '-'))
-    .join(',')}`;
-
-  // `key` captures every snapshot's data, the scope and the extra object.
-  const memo = useRef<PausedMemo<Built> | null>(null);
-  memo.current = pausedMemo(memo.current, [key, sources, apiResources], enabled, () => {
-    const start = perfNow();
-    const lists: TopologyList[] = [];
-    const errors: TopologyWatchError[] = [];
-    const byId = new Map<string, KubeObject>();
-    snaps.forEach((snap, i) => {
-      const gvk = sources[i];
-      if (!gvk || slotScopes[i] == null) return;
-      lists.push({
-        gvk,
-        items: snap.items,
-        // A partial list (one namespace forbidden) is not synced: no "missing" guesses.
-        synced: isListComplete(snap),
-      });
-      if (hasListError(snap) && snap.error)
-        errors.push({ kind: gvk.kind, forbidden: snap.forbidden, message: snap.error });
-      const key = kindKey(gvk);
-      for (const obj of snap.items)
-        byId.set(
-          nodeId(key, gvk.namespaced ? obj.metadata.namespace : null, obj.metadata.name),
-          obj,
-        );
-    });
-    if (extra)
-      byId.set(
-        nodeId(
-          kindKey(extra.gvk),
-          extra.gvk.namespaced ? extra.obj.metadata.namespace : null,
-          extra.obj.metadata.name,
-        ),
-        extra.obj,
-      );
-    const graph = buildTopology({
-      lists,
-      namespaces: graphScope === undefined ? scopeNamespaces(slotScopes) : graphScope,
-      apiResources,
-      extra: extra ? [extra] : undefined,
-    });
-    recordSince('map:build', start);
-    return { graph, errors, byId };
-  });
-  const built = memo.current.value;
-
+  const dataKey = snaps.map((s, i) => (watched(i) ? topologyDataKey([s]) : '-')).join(',');
   const active = snaps.filter((_, i) => watched(i));
   const synced = active.every((s) => s.synced || s.status === 'error');
   const loading = active.some((s) => s.status === 'loading');
+
+  // A change of the structure (scope, extra object, sources) rebuilds at
+  // once; `dataKey` captures every snapshot's data and is coalesced while
+  // the watches sync.
+  const [, wake] = useReducer((n: number) => n + 1, 0);
+  const [memo] = useState(() => new CoalescedMemo<Built>(wake));
+  useEffect(() => () => memo.cancel(), [memo]);
+  const built = memo.get(
+    [scopeKey, extraKey, sources, apiResources],
+    [dataKey],
+    enabled,
+    !synced,
+    () => {
+      const start = perfNow();
+      const lists: TopologyList[] = [];
+      const errors: TopologyWatchError[] = [];
+      const byId = new Map<string, KubeObject>();
+      snaps.forEach((snap, i) => {
+        const gvk = sources[i];
+        if (!gvk || slotScopes[i] == null) return;
+        lists.push({
+          gvk,
+          items: snap.items,
+          // A partial list (one namespace forbidden) is not synced: no "missing" guesses.
+          synced: isListComplete(snap),
+        });
+        if (hasListError(snap) && snap.error)
+          errors.push({ kind: gvk.kind, forbidden: snap.forbidden, message: snap.error });
+        const key = kindKey(gvk);
+        for (const obj of snap.items)
+          byId.set(
+            nodeId(key, gvk.namespaced ? obj.metadata.namespace : null, obj.metadata.name),
+            obj,
+          );
+      });
+      if (extra)
+        byId.set(
+          nodeId(
+            kindKey(extra.gvk),
+            extra.gvk.namespaced ? extra.obj.metadata.namespace : null,
+            extra.obj.metadata.name,
+          ),
+          extra.obj,
+        );
+      const graph = buildTopology({
+        lists,
+        namespaces: graphScope === undefined ? scopeNamespaces(slotScopes) : graphScope,
+        apiResources,
+        extra: extra ? [extra] : undefined,
+      });
+      recordSince('map:build', start);
+      return { graph, errors, byId };
+    },
+  );
+
   const objectFor = useMemo(() => {
     const byId = built.byId;
     return (id: string) => byId.get(id) ?? null;

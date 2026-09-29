@@ -1142,6 +1142,35 @@ git commit -m "perf(ui): run health, netpol or topology engines in a worker"
 
 ---
 
+### Task 16a (MAP-sync): Coalesce graph rebuilds while the map syncs
+
+Added after the baseline, and done before Task 16: the baseline's `ui/map_all_m` miss is mostly rebuilds, not one slow build (spec, Results notes). No task above covered it.
+
+**Files:**
+- Modify: `apps/desktop/src/components/workbench/topology/dataKey.ts` (`CoalescedMemo`, `SYNC_REBUILD_INTERVAL_MS`), `components/workbench/topology/useTopologyData.ts`, `docs/ARCHITECTURE.md` (Resource map)
+- Test: `apps/desktop/src/components/workbench/topology/dataKey.test.ts`
+
+**Interfaces:**
+- Produces: `SYNC_REBUILD_INTERVAL_MS = 250` and `CoalescedMemo<T>` (`new CoalescedMemo(onDue, interval?, now?)`, `get(structure, data, active, syncing, compute): T`, `cancel()`).
+  - While `syncing`, a change of `data` alone rebuilds at most once every `interval`; the previous value is returned meanwhile and `onDue` (the hook's re-render) fires when the next rebuild may run.
+  - The first value, a change of `structure` (scope, sources, the extra object), the change that completes the sync and every change after it rebuild at once.
+  - Inactive: the previous value, nothing scheduled (the `pausedMemo` semantics).
+
+- [x] **Step 1: Check the gate.** `ui/map_all_m` misses its budget and the map rebuilds its graph more than 10 times while syncing. Baseline: 2.95 s with 72–76 rebuilds (fires).
+
+- [x] **Step 2: Write the failing tests** (fake timers): 100 batches over 2 s build at most `1 + 2000 / 250` times, the batch that completes the sync builds once more and the graph holds every pod, a due rebuild builds the latest data, live changes after the sync and structure changes rebuild at once, and nothing is built or scheduled while inactive.
+
+- [x] **Step 3: Implement, run the tests, then `pnpm perf:ui -- --preset m --scenarios map`.** Result: 3 rebuilds (was 76–79 on the same machine) and `ui/map_all_m` ≈ 0.55 s (was 3.3 s). The demo sync itself takes ≈ 0.4 s; the rebuilds were starving it.
+
+- [x] **Step 4: Commit**
+
+```bash
+git add apps/desktop/src docs
+git commit -m "perf(map): coalesce graph rebuilds while the map's watches sync"
+```
+
+---
+
 ### Task 17 (H6): Acknowledged watch batches
 
 **Files:**

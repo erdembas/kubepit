@@ -40,3 +40,68 @@ export function pausedMemo<T>(
 function sameDeps(a: readonly unknown[], b: readonly unknown[]) {
   return a.length === b.length && a.every((x, i) => Object.is(x, b[i]));
 }
+
+/** Minimum time between graph rebuilds while a map's watches still sync. */
+export const SYNC_REBUILD_INTERVAL_MS = 250;
+
+/**
+ * {@link pausedMemo} that coalesces rebuilds during the initial sync. Every
+ * batch a watch delivers changes the data, so a map of many kinds would
+ * otherwise rebuild its graph once per batch (70+ times at 10 000 pods).
+ *
+ * While `syncing`, a change of the data alone rebuilds at most once every
+ * `interval` ms: the previous value is returned meanwhile, and `onDue` is
+ * called once the next rebuild may run (the hook re-renders then). The
+ * first value, a change of the structure (scope, sources, the extra object),
+ * the change that completes the sync and every change after it rebuild at
+ * once. While inactive the previous value is kept and nothing is scheduled.
+ */
+export class CoalescedMemo<T> {
+  private memo: PausedMemo<T> | null = null;
+  private structure: readonly unknown[] = [];
+  private last = -Infinity;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(
+    private readonly onDue: () => void,
+    private readonly interval = SYNC_REBUILD_INTERVAL_MS,
+    private readonly now: () => number = () => performance.now(),
+  ) {}
+
+  get(
+    structure: readonly unknown[],
+    data: readonly unknown[],
+    active: boolean,
+    syncing: boolean,
+    compute: () => T,
+  ): T {
+    const prev = this.memo;
+    const deps = [...structure, ...data];
+    if (prev && (!active || sameDeps(prev.deps, deps))) {
+      if (!active) this.cancel();
+      return prev.value;
+    }
+    if (prev && syncing && sameDeps(this.structure, structure)) {
+      const wait = this.last + this.interval - this.now();
+      if (wait > 0) {
+        this.timer ??= setTimeout(() => {
+          this.timer = null;
+          this.onDue();
+        }, wait);
+        return prev.value;
+      }
+    }
+    this.cancel();
+    this.memo = { deps, value: compute() };
+    this.structure = structure;
+    this.last = this.now();
+    return this.memo.value;
+  }
+
+  /** Drops a scheduled wake-up (unmount); the value is kept. */
+  cancel(): void {
+    if (this.timer === null) return;
+    clearTimeout(this.timer);
+    this.timer = null;
+  }
+}
