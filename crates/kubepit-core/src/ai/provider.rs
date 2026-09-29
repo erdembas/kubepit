@@ -18,8 +18,15 @@
 //! - **Loopback traffic bypasses proxies** (`HTTP_PROXY` & co. cannot
 //!   capture a local model's traffic).
 //! - **Streams are bounded:** one SSE event / NDJSON line, the tool-input
-//!   JSON and the answer text have caps; overflow is a
-//!   [`ProviderErrorKind::Protocol`] error.
+//!   JSON, everything else a response accumulates (text, thinking,
+//!   signatures, block payloads), the number of content blocks and of tool
+//!   calls have caps; overflow is a [`ProviderErrorKind::Protocol`] error.
+//! - **The client is not the caller's:** every provider builds its own
+//!   [`http_client`] for its base URL in its constructor, so no caller can
+//!   hand it a client that follows redirects or uses a proxy for loopback.
+//! - **One deadline per call:** `AiTimeouts::total` bounds a whole `chat`,
+//!   retries included; a failure is re-sent automatically only when no
+//!   content had started streaming.
 
 use std::fmt;
 use std::future::Future;
@@ -31,15 +38,20 @@ use hyper::body::Bytes;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
-use super::settings::{egress_allowed, is_loopback};
+use super::settings::is_loopback;
 use super::types::{AiEffort, AiModelInfo, AiProviderKind, AiUsage};
 
 /// Longest [`ProviderError::message`], in bytes.
 pub const MAX_ERROR_MESSAGE_BYTES: usize = 2 * 1024;
 /// Largest accumulated tool-input JSON of one response, in bytes.
 pub const MAX_TOOL_INPUT_BYTES: usize = 256 * 1024;
-/// Largest accumulated answer (text and thinking) of one response, in bytes.
-pub const MAX_TURN_TEXT_BYTES: usize = 8 * 1024 * 1024;
+/// Largest total of everything else one response accumulates (answer text,
+/// thinking, signatures, content-block payloads, tool names), in bytes.
+pub const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+/// Most content blocks in one Anthropic response.
+pub const MAX_CONTENT_BLOCKS: usize = 512;
+/// Most tool calls in one response.
+pub const MAX_TOOL_CALLS: usize = 128;
 /// Largest JSON body read from a non-streaming endpoint (model lists).
 pub const MAX_JSON_BODY_BYTES: usize = 8 * 1024 * 1024;
 /// How much of an error response body is read before it is summarized.
@@ -206,15 +218,17 @@ impl ProviderErrorKind {
 }
 
 /// A failed provider call. `message` never contains request headers or a
-/// key and is at most [`MAX_ERROR_MESSAGE_BYTES`] long; `partial` holds
-/// what streamed before the failure (text only, never tool calls). The
-/// partial is boxed to keep `Result<_, ProviderError>` small.
+/// key and is at most [`MAX_ERROR_MESSAGE_BYTES`] long.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProviderError {
     pub kind: ProviderErrorKind,
     pub message: String,
     /// The provider's `retry-after`.
     pub retry_after: Option<Duration>,
+    /// What streamed before the failure: `Some` as soon as any content
+    /// (text, thinking, a tool call) had started, even if it has no text
+    /// yet; `None` when nothing had. Text only, never tool calls. Boxed to
+    /// keep `Result<_, ProviderError>` small.
     pub partial: Option<Box<AssistantTurn>>,
 }
 
@@ -351,12 +365,13 @@ impl Egress {
 
 /// Refuses a non-loopback `base_url` unless remote egress is allowed in
 /// this process and local-only mode is off. Nothing is sent when it fails.
+/// Loopback is decided by [`is_local_url`] (both URL parsers must agree).
 pub fn check_egress(
     base_url: &str,
     remote_allowed: bool,
     local_only: bool,
 ) -> Result<(), ProviderError> {
-    if egress_allowed(base_url, remote_allowed, local_only) {
+    if is_local_url(base_url) || (remote_allowed && !local_only) {
         return Ok(());
     }
     let host = url_host(base_url).unwrap_or_else(|| "this address".to_string());
@@ -371,6 +386,36 @@ pub fn check_egress(
         ProviderErrorKind::EgressRefused,
         message,
     ))
+}
+
+/// Whether `base_url` is a loopback address, as the settings rule
+/// ([`is_loopback`], `http::Uri`) **and** the `url` parser reqwest connects
+/// with both read it. Any disagreement (`http://127.1`, `http://0x7f000001`,
+/// …) counts as remote: the guard fails closed.
+pub fn is_local_url(base_url: &str) -> bool {
+    is_loopback(base_url) && url_is_loopback(base_url)
+}
+
+fn url_is_loopback(base_url: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(base_url.trim()) else {
+        return false;
+    };
+    if !matches!(url.scheme(), "http" | "https") {
+        return false;
+    }
+    // `host_str` is the parser's normalized host (`127.1` → `127.0.0.1`,
+    // IPv6 in brackets): exactly where reqwest will connect.
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let host = host
+        .strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(host);
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
 }
 
 /// `host[:port]` of a URL, without scheme, user info or path.
@@ -391,14 +436,16 @@ pub(crate) fn host_label(url: &reqwest::Url) -> String {
 // Retries
 // ---------------------------------------------------------------------------
 
-/// Runs `attempt` until it succeeds, fails for good, or `policy` runs out.
-/// Retried: `RateLimited`, `Overloaded`, `Server` and `Network` (connect
-/// errors, dropped connections), and only while nothing streamed (`partial`
-/// is `None`, or has no text and no tool calls). Each wait is announced
-/// with [`StreamEvent::Retrying`] and ends early (`Cancelled`) when
-/// `cancel` fires.
+/// Runs `attempt` until it succeeds, fails for good, `policy` runs out or
+/// the next wait would end after `deadline` (the call's total deadline,
+/// shared by every attempt). Retried: `RateLimited`, `Overloaded`, `Server`
+/// and `Network` (connect errors, dropped connections), and only when no
+/// content had started streaming (`partial` is `None`). Each wait is
+/// announced with [`StreamEvent::Retrying`] and ends early (`Cancelled`)
+/// when `cancel` fires.
 pub async fn with_retries<T, F, Fut>(
     policy: &RetryPolicy,
+    deadline: Instant,
     on_event: EventSink<'_>,
     cancel: &CancellationToken,
     mut attempt: F,
@@ -416,8 +463,11 @@ where
         if retries >= policy.max_retries || !auto_retryable(&error) || cancel.is_cancelled() {
             return Err(error);
         }
+        let delay = retry_delay(policy, retries + 1, error.retry_after);
+        if Instant::now() + delay >= deadline {
+            return Err(error);
+        }
         retries += 1;
-        let delay = retry_delay(policy, retries, error.retry_after);
         on_event(StreamEvent::Retrying {
             attempt: retries,
             delay_ms: u64::try_from(delay.as_millis()).unwrap_or(u64::MAX),
@@ -434,11 +484,9 @@ where
 fn auto_retryable(error: &ProviderError) -> bool {
     use ProviderErrorKind::*;
     let transient = matches!(error.kind, RateLimited | Overloaded | Server | Network);
-    let nothing_streamed = error
-        .partial
-        .as_ref()
-        .is_none_or(|p| p.text.is_empty() && p.tool_calls.is_empty());
-    transient && nothing_streamed
+    // Any started content (even thinking or a tool call without text) means
+    // the answer was under way: never re-send it silently.
+    transient && error.partial.is_none()
 }
 
 /// The wait before retry `attempt` (1-based): the provider's `retry-after`
@@ -463,6 +511,8 @@ pub fn retry_delay(policy: &RetryPolicy, attempt: u32, retry_after: Option<Durat
 /// provider and the platform's roots (the same stack as the rest of the
 /// app), `connect` timeout, no redirects (a key must only reach its own
 /// base URL), no hidden retries, and no proxy for loopback addresses.
+/// Every provider builds its own in its constructor ([`provider_client`]);
+/// none accepts a client from the caller.
 pub fn http_client(t: &AiTimeouts, base_url: &str) -> Result<reqwest::Client, ProviderError> {
     let mut builder = reqwest::Client::builder()
         .connect_timeout(t.connect)
@@ -471,7 +521,7 @@ pub fn http_client(t: &AiTimeouts, base_url: &str) -> Result<reqwest::Client, Pr
         .referer(false)
         .user_agent(concat!("kubepit/", env!("CARGO_PKG_VERSION")))
         .tls_backend_preconfigured(tls_config());
-    if is_loopback(base_url) {
+    if is_local_url(base_url) {
         builder = builder.no_proxy();
     }
     builder.build().map_err(|e| {
@@ -480,6 +530,18 @@ pub fn http_client(t: &AiTimeouts, base_url: &str) -> Result<reqwest::Client, Pr
             format!("could not set up the HTTP client: {}", error_chain(&e)),
         )
     })
+}
+
+/// A provider constructor's normalized base URL (trimmed, no trailing
+/// slash; a valid http(s) URL) and its own [`http_client`].
+pub(crate) fn provider_client(
+    t: &AiTimeouts,
+    base_url: &str,
+) -> Result<(String, reqwest::Client), ProviderError> {
+    let base_url = base_url.trim().trim_end_matches('/').to_string();
+    endpoint(&base_url, &[])?;
+    let client = http_client(t, &base_url)?;
+    Ok((base_url, client))
 }
 
 fn tls_config() -> rustls::ClientConfig {
@@ -621,7 +683,10 @@ pub(crate) struct Call<'a> {
     pub secrets: &'a [&'a str],
     pub timeouts: &'a AiTimeouts,
     pub cancel: &'a CancellationToken,
+    /// When this request started (the first-event timer).
     started: Instant,
+    /// The whole call's deadline, shared by its retries.
+    deadline: Instant,
 }
 
 impl<'a> Call<'a> {
@@ -630,6 +695,7 @@ impl<'a> Call<'a> {
         url: &reqwest::Url,
         secrets: &'a [&'a str],
         timeouts: &'a AiTimeouts,
+        deadline: Instant,
         cancel: &'a CancellationToken,
     ) -> Self {
         Self {
@@ -639,15 +705,25 @@ impl<'a> Call<'a> {
             timeouts,
             cancel,
             started: Instant::now(),
+            deadline,
         }
     }
 
     fn deadline(&self) -> Instant {
-        self.started + self.timeouts.total
+        self.deadline
     }
 
     fn first_event_deadline(&self) -> Instant {
         (self.started + self.timeouts.first_event).min(self.deadline())
+    }
+
+    /// `error` with the partial answer when content had started.
+    fn fail<D: Decoder>(&self, error: ProviderError, decoder: &D) -> ProviderError {
+        if decoder.started() {
+            error.with_partial(decoder.partial())
+        } else {
+            error
+        }
     }
 
     pub fn error(&self, kind: ProviderErrorKind, message: impl AsRef<str>) -> ProviderError {
@@ -746,7 +822,13 @@ impl<'a> Call<'a> {
                 }
             }
         };
-        let _ = tokio::time::timeout(self.timeouts.idle, read).await;
+        // Bounded by idle and the call's deadline; cancel wins.
+        let until = (Instant::now() + self.timeouts.idle).min(self.deadline());
+        tokio::select! {
+            biased;
+            _ = self.cancel.cancelled() => return ProviderError::cancelled(),
+            _ = tokio::time::timeout_at(tokio::time::Instant::from_std(until), read) => {}
+        }
         body.truncate(MAX_ERROR_BODY_BYTES);
         let detail = error_detail(&body);
         let message = if detail.is_empty() {
@@ -799,14 +881,39 @@ impl<'a> Call<'a> {
     }
 
     /// Feeds the streamed body to `decoder` until it reports completion.
-    /// Waits at most `first_event` for the first chunk, `idle` between
-    /// chunks and `total` overall; every error carries the partial answer.
+    /// A success whose content type the decoder does not accept (an HTML
+    /// or JSON page from a proxy) is a `Protocol` error. Waits at most
+    /// `first_event` for the first chunk, `idle` between chunks and the
+    /// call's deadline overall; errors carry the partial answer once
+    /// content had started.
     pub async fn read_stream<D: Decoder>(
         &self,
         mut response: reqwest::Response,
         decoder: &mut D,
         on_event: EventSink<'_>,
     ) -> Result<(), ProviderError> {
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if !decoder.accepts(&content_type) {
+            let shown = if content_type.is_empty() {
+                "no content type"
+            } else {
+                content_type.as_str()
+            };
+            return Err(self.error(
+                ProviderErrorKind::Protocol,
+                format!(
+                    "{} answered {} with {} instead of a stream; check the provider's base URL and any proxy in between",
+                    self.provider,
+                    response.status().as_u16(),
+                    truncate(shown.to_string(), 100)
+                ),
+            ));
+        }
         let mut first = true;
         loop {
             let wait_until = if first {
@@ -817,12 +924,12 @@ impl<'a> Call<'a> {
             let next = tokio::select! {
                 biased;
                 _ = self.cancel.cancelled() => {
-                    return Err(ProviderError::cancelled().with_partial(decoder.partial()));
+                    return Err(self.fail(ProviderError::cancelled(), decoder));
                 }
                 r = tokio::time::timeout_at(tokio::time::Instant::from_std(wait_until), response.chunk()) => r,
             };
             let chunk: Bytes = match next {
-                Err(_) => return Err(self.timeout_error(first).with_partial(decoder.partial())),
+                Err(_) => return Err(self.fail(self.timeout_error(first), decoder)),
                 Ok(Err(e)) => {
                     let error = if e.is_timeout() {
                         self.timeout_error(first)
@@ -836,21 +943,30 @@ impl<'a> Call<'a> {
                             ),
                         )
                     };
-                    return Err(error.with_partial(decoder.partial()));
+                    return Err(self.fail(error, decoder));
                 }
                 Ok(Ok(None)) => {
                     if decoder.complete_at_eof() {
                         return Ok(());
                     }
-                    return Err(self
-                        .error(
+                    let error = if decoder.saw_event() {
+                        self.error(
                             ProviderErrorKind::Network,
                             format!(
                                 "{} closed the stream before the answer was complete",
                                 self.provider
                             ),
                         )
-                        .with_partial(decoder.partial()));
+                    } else {
+                        self.error(
+                            ProviderErrorKind::Protocol,
+                            format!(
+                                "{} ended the stream without sending anything",
+                                self.provider
+                            ),
+                        )
+                    };
+                    return Err(self.fail(error, decoder));
                 }
                 Ok(Ok(Some(chunk))) => chunk,
             };
@@ -866,7 +982,7 @@ impl<'a> Call<'a> {
                         ),
                         ..error
                     };
-                    return Err(error.with_partial(decoder.partial()));
+                    return Err(self.fail(error, decoder));
                 }
             }
         }
@@ -876,8 +992,15 @@ impl<'a> Call<'a> {
 /// A provider's stream format: fed raw body bytes, it emits events and
 /// reports when the response is complete.
 pub(crate) trait Decoder {
+    /// Whether a `200` with this (lowercased, possibly empty) content type
+    /// is the provider's stream.
+    fn accepts(&self, content_type: &str) -> bool;
     /// Consumes `bytes`; `Ok(true)` once the response is complete.
     fn feed(&mut self, bytes: &[u8], on_event: EventSink<'_>) -> Result<bool, ProviderError>;
+    /// Any content (text, thinking, a tool call) has started.
+    fn started(&self) -> bool;
+    /// At least one event / line was parsed.
+    fn saw_event(&self) -> bool;
     /// What streamed so far: the text, never tool calls.
     fn partial(&self) -> AssistantTurn;
     /// Whether the end of the body without an end marker still counts as a
@@ -885,6 +1008,11 @@ pub(crate) trait Decoder {
     fn complete_at_eof(&self) -> bool {
         false
     }
+}
+
+/// `text/event-stream` (Anthropic, OpenAI-compatible).
+pub(crate) fn is_event_stream(content_type: &str) -> bool {
+    content_type.starts_with("text/event-stream")
 }
 
 /// Strict tool input: an empty string is `{}`, anything else must parse
@@ -975,7 +1103,8 @@ mod tests {
             ProviderErrorKind::Network,
         ] {
             assert!(auto_retryable(&error(kind)));
-            assert!(auto_retryable(&error(kind).with_partial(turn("", 0))));
+            // A partial exists only once content started (even thinking).
+            assert!(!auto_retryable(&error(kind).with_partial(turn("", 0))));
             assert!(!auto_retryable(&error(kind).with_partial(turn("Hi", 0))));
             assert!(!auto_retryable(&error(kind).with_partial(turn("", 1))));
         }

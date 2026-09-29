@@ -79,6 +79,11 @@ pub enum Reply {
     },
     /// A `200 text/event-stream` head, then silence for 30 s.
     Hang,
+    /// A `code` head announcing a 1 KiB JSON body that never arrives
+    /// (silence for 30 s).
+    Stall {
+        code: u16,
+    },
 }
 
 /// One server-sent event: an optional `event:` name and its `data:` (a
@@ -265,6 +270,15 @@ async fn handle(mut socket: TcpStream, router: Router, log: Log) -> std::io::Res
                     b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
                 )
                 .await?;
+            socket.flush().await?;
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        }
+        Reply::Stall { code } => {
+            let head = format!(
+                "HTTP/1.1 {code} {}\r\nContent-Type: application/json\r\nContent-Length: 1024\r\nConnection: close\r\n\r\n",
+                reason_phrase(code)
+            );
+            socket.write_all(head.as_bytes()).await?;
             socket.flush().await?;
             tokio::time::sleep(Duration::from_secs(30)).await;
         }

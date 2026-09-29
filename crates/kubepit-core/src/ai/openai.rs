@@ -10,25 +10,30 @@
 //!   (the context block, then the question) are joined with a blank line;
 //!   tool results become `role: tool` messages (`ERROR: ` prefix when they
 //!   failed); tools are sent sorted by name as `function` tools.
-//! - Tool-call deltas accumulate by `index`; arguments are parsed strictly.
-//!   `length` and `content_filter` finishes run no tools.
-//! - Models that only take `max_completion_tokens` answer a 400 naming it;
-//!   the provider then switches and sends the request once more.
+//! - Tool-call deltas accumulate by `index` (by `id` when a server sends no
+//!   index); arguments are parsed strictly. `length` and `content_filter`
+//!   finishes run no tools.
+//! - Usage is normalized to Anthropic's meaning: OpenAI's `prompt_tokens`
+//!   includes the cached tokens, so `input_tokens` is `prompt_tokens −
+//!   cached_tokens` and `cache_read_tokens` the cached ones.
+//! - Two one-shot compatibility switches, only for a request the server
+//!   rejected (a 400 before anything streamed): models that only take
+//!   `max_completion_tokens`, and servers that do not know `stream_options`.
 
-use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 use futures::future::BoxFuture;
 use serde_json::{json, Map, Value};
 use tokio_util::sync::CancellationToken;
 
 use super::provider::{
-    endpoint, parse_tool_input, secret_header, with_retries, AiTimeouts, AssistantTurn, Budget,
-    Call, ChatMessage, ChatRequest, Decoder, Egress, EventSink, Provider, ProviderError,
-    ProviderErrorKind, RetryPolicy, StopReason, StreamEvent, ToolCallReq, ToolSpec, UserBlock,
-    MAX_TOOL_INPUT_BYTES, MAX_TURN_TEXT_BYTES,
+    endpoint, is_event_stream, is_local_url, parse_tool_input, provider_client, secret_header,
+    with_retries, AiTimeouts, AssistantTurn, Budget, Call, ChatMessage, ChatRequest, Decoder,
+    Egress, EventSink, Provider, ProviderError, ProviderErrorKind, RetryPolicy, StopReason,
+    StreamEvent, ToolCallReq, ToolSpec, UserBlock, MAX_RESPONSE_BYTES, MAX_TOOL_CALLS,
+    MAX_TOOL_INPUT_BYTES,
 };
-use super::settings::is_loopback;
 use super::sse::SseParser;
 use super::types::{AiModelInfo, AiProviderKind, AiUsage};
 
@@ -43,22 +48,33 @@ pub struct OpenAiCompatProvider {
     egress: Egress,
     /// Send `max_completion_tokens` instead of `max_tokens`.
     completion_tokens: AtomicBool,
+    /// Send `stream_options.include_usage` (cleared when rejected).
+    stream_options: AtomicBool,
+}
+
+/// The request variant chosen by the compatibility switches.
+#[derive(Clone, Copy)]
+struct Shape {
+    completion_tokens: bool,
+    stream_options: bool,
 }
 
 impl OpenAiCompatProvider {
-    /// A provider at `base_url` (e.g. `https://api.openai.com/v1`; a
-    /// trailing slash is dropped). A blank key sends no `Authorization`.
-    /// Egress: loopback only until [`OpenAiCompatProvider::with_egress`].
+    /// A provider at `base_url` (e.g. `https://api.openai.com/v1`; trimmed,
+    /// a trailing slash dropped; must be an http(s) URL). It builds its own
+    /// HTTP client for that base URL (no redirects, no proxy for loopback).
+    /// A blank key sends no `Authorization`. Egress: loopback only until
+    /// [`OpenAiCompatProvider::with_egress`].
     pub fn new(
-        client: reqwest::Client,
         base_url: String,
         api_key: Option<String>,
         timeouts: AiTimeouts,
         retry: RetryPolicy,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, ProviderError> {
+        let (base_url, client) = provider_client(&timeouts, &base_url)?;
+        Ok(Self {
             client,
-            base_url: base_url.trim().trim_end_matches('/').to_string(),
+            base_url,
             api_key: api_key
                 .map(|k| k.trim().to_string())
                 .filter(|k| !k.is_empty()),
@@ -66,7 +82,8 @@ impl OpenAiCompatProvider {
             retry,
             egress: Egress::default(),
             completion_tokens: AtomicBool::new(false),
-        }
+            stream_options: AtomicBool::new(true),
+        })
     }
 
     /// The egress rule checked before every request.
@@ -77,15 +94,24 @@ impl OpenAiCompatProvider {
 
     /// The JSON body `chat` sends for `req`.
     pub fn request_body(&self, req: &ChatRequest) -> Value {
-        self.body(req, self.completion_tokens.load(Ordering::SeqCst))
+        self.body(req, self.shape())
     }
 
-    fn body(&self, req: &ChatRequest, completion_tokens: bool) -> Value {
+    fn shape(&self) -> Shape {
+        Shape {
+            completion_tokens: self.completion_tokens.load(Ordering::SeqCst),
+            stream_options: self.stream_options.load(Ordering::SeqCst),
+        }
+    }
+
+    fn body(&self, req: &ChatRequest, shape: Shape) -> Value {
         let mut body = Map::new();
         body.insert("model".into(), json!(req.model));
         body.insert("stream".into(), json!(true));
-        body.insert("stream_options".into(), json!({"include_usage": true}));
-        let cap = if completion_tokens {
+        if shape.stream_options {
+            body.insert("stream_options".into(), json!({"include_usage": true}));
+        }
+        let cap = if shape.completion_tokens {
             "max_completion_tokens"
         } else {
             "max_tokens"
@@ -118,60 +144,76 @@ impl OpenAiCompatProvider {
         })
     }
 
-    async fn attempt(
+    fn completion_request(
         &self,
+        url: &reqwest::Url,
         req: &ChatRequest,
-        on_event: EventSink<'_>,
-        cancel: &CancellationToken,
-    ) -> Result<AssistantTurn, ProviderError> {
-        let completion_tokens = self.completion_tokens.load(Ordering::SeqCst);
-        match self
-            .send_once(req, completion_tokens, on_event, cancel)
-            .await
-        {
-            Err(error)
-                if !completion_tokens
-                    && error.kind == ProviderErrorKind::BadRequest
-                    && error.message.contains("max_completion_tokens") =>
-            {
-                self.completion_tokens.store(true, Ordering::SeqCst);
-                self.send_once(req, true, on_event, cancel).await
-            }
-            result => result,
-        }
-    }
-
-    async fn send_once(
-        &self,
-        req: &ChatRequest,
-        completion_tokens: bool,
-        on_event: EventSink<'_>,
-        cancel: &CancellationToken,
-    ) -> Result<AssistantTurn, ProviderError> {
-        let url = endpoint(&self.base_url, &["chat", "completions"])?;
-        let body = serde_json::to_vec(&self.body(req, completion_tokens)).map_err(|e| {
+        shape: Shape,
+    ) -> Result<reqwest::RequestBuilder, ProviderError> {
+        let body = serde_json::to_vec(&self.body(req, shape)).map_err(|e| {
             ProviderError::new(
                 ProviderErrorKind::BadRequest,
                 format!("could not encode the request: {e}"),
             )
         })?;
-        let request = self
+        Ok(self
             .authorized(self.client.post(url.clone()))?
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .header(reqwest::header::ACCEPT, "text/event-stream")
-            .body(body);
+            .body(body))
+    }
+
+    /// Flips the compatibility switch a rejected request names; `false`
+    /// when it names none that is still on.
+    fn adapt_to(&self, error: &ProviderError) -> bool {
+        if error.kind != ProviderErrorKind::BadRequest {
+            return false;
+        }
+        if error.message.contains("max_completion_tokens")
+            && !self.completion_tokens.swap(true, Ordering::SeqCst)
+        {
+            return true;
+        }
+        error.message.contains("stream_options")
+            && self.stream_options.swap(false, Ordering::SeqCst)
+    }
+
+    /// One request; a request rejected for a compatibility switch (a status
+    /// error: nothing streamed) is sent again with the switch flipped.
+    async fn attempt(
+        &self,
+        req: &ChatRequest,
+        deadline: Instant,
+        on_event: EventSink<'_>,
+        cancel: &CancellationToken,
+    ) -> Result<AssistantTurn, ProviderError> {
+        let url = endpoint(&self.base_url, &["chat", "completions"])?;
         let secrets = self.secrets();
-        let call = Call::new(NAME, &url, &secrets, &self.timeouts, cancel);
-        let response = call.send(request).await?;
+        let mut switches = 0;
+        let (call, response) = loop {
+            let call = Call::new(NAME, &url, &secrets, &self.timeouts, deadline, cancel);
+            match call
+                .send(self.completion_request(&url, req, self.shape())?)
+                .await
+            {
+                Ok(response) => break (call, response),
+                Err(error) if switches < 2 && self.adapt_to(&error) => switches += 1,
+                Err(error) => return Err(error),
+            }
+        };
         let mut stream = CompletionStream::new(&req.model);
         call.read_stream(response, &mut stream, on_event).await?;
         Ok(stream.finish())
     }
 
-    async fn get_models(&self, cancel: &CancellationToken) -> Result<Value, ProviderError> {
+    async fn get_models(
+        &self,
+        deadline: Instant,
+        cancel: &CancellationToken,
+    ) -> Result<Value, ProviderError> {
         let url = endpoint(&self.base_url, &["models"])?;
         let secrets = self.secrets();
-        let call = Call::new(NAME, &url, &secrets, &self.timeouts, cancel);
+        let call = Call::new(NAME, &url, &secrets, &self.timeouts, deadline, cancel);
         call.json(self.authorized(self.client.get(url.clone()))?)
             .await
     }
@@ -183,7 +225,7 @@ impl Provider for OpenAiCompatProvider {
     }
 
     fn is_local(&self) -> bool {
-        is_loopback(&self.base_url)
+        is_local_url(&self.base_url)
     }
 
     /// `GET {base}/models` → ids, sorted.
@@ -191,8 +233,11 @@ impl Provider for OpenAiCompatProvider {
         Box::pin(async move {
             self.egress.check(&self.base_url)?;
             let cancel = CancellationToken::new();
-            let value =
-                with_retries(&self.retry, &|_| {}, &cancel, || self.get_models(&cancel)).await?;
+            let deadline = Instant::now() + self.timeouts.total;
+            let value = with_retries(&self.retry, deadline, &|_| {}, &cancel, || {
+                self.get_models(deadline, &cancel)
+            })
+            .await?;
             let data = value["data"].as_array().ok_or_else(|| {
                 ProviderError::new(
                     ProviderErrorKind::Protocol,
@@ -223,8 +268,9 @@ impl Provider for OpenAiCompatProvider {
     ) -> BoxFuture<'a, Result<AssistantTurn, ProviderError>> {
         Box::pin(async move {
             self.egress.check(&self.base_url)?;
-            with_retries(&self.retry, on_event, cancel, || {
-                self.attempt(req, on_event, cancel)
+            let deadline = Instant::now() + self.timeouts.total;
+            with_retries(&self.retry, deadline, on_event, cancel, || {
+                self.attempt(req, deadline, on_event, cancel)
             })
             .await
         })
@@ -344,6 +390,8 @@ fn messages(system: &str, messages: &[ChatMessage]) -> Vec<Value> {
 
 #[derive(Default)]
 struct PendingCall {
+    /// The delta `index`, when the server sends one.
+    index: Option<u64>,
     id: String,
     name: String,
     arguments: String,
@@ -352,13 +400,16 @@ struct PendingCall {
 struct CompletionStream {
     sse: SseParser,
     text: String,
-    text_budget: Budget,
+    /// Text, reasoning and tool names / ids.
+    budget: Budget,
     input_budget: Budget,
-    calls: BTreeMap<u64, PendingCall>,
+    /// In order of first appearance.
+    calls: Vec<PendingCall>,
     finish: Option<String>,
     usage: AiUsage,
     model: String,
     thinking_seen: bool,
+    saw_event: bool,
 }
 
 fn protocol(message: impl Into<String>) -> ProviderError {
@@ -370,18 +421,48 @@ impl CompletionStream {
         Self {
             sse: SseParser::new(),
             text: String::new(),
-            text_budget: Budget::default(),
+            budget: Budget::default(),
             input_budget: Budget::default(),
-            calls: BTreeMap::new(),
+            calls: Vec::new(),
             finish: None,
             usage: AiUsage::default(),
             model: model.to_string(),
             thinking_seen: false,
+            saw_event: false,
         }
+    }
+
+    /// The pending call a tool-call delta continues: by `index`, else by
+    /// `id`, else the latest one; a new one otherwise (capped).
+    fn call_for(&mut self, call: &Value) -> Result<&mut PendingCall, ProviderError> {
+        let index = call["index"].as_u64();
+        let id = call["id"].as_str().filter(|id| !id.is_empty());
+        let found = match (index, id) {
+            (Some(index), _) => self.calls.iter().position(|c| c.index == Some(index)),
+            (None, Some(id)) => self.calls.iter().position(|c| c.id == id),
+            (None, None) => self.calls.len().checked_sub(1),
+        };
+        let position = match found {
+            Some(position) => position,
+            None => {
+                if self.calls.len() >= MAX_TOOL_CALLS {
+                    return Err(protocol(format!(
+                        "{NAME} sent more than {MAX_TOOL_CALLS} tool calls"
+                    )));
+                }
+                self.calls.push(PendingCall {
+                    index,
+                    ..Default::default()
+                });
+                self.calls.len() - 1
+            }
+        };
+        Ok(&mut self.calls[position])
     }
 
     fn chunk(&mut self, data: &str, on_event: EventSink<'_>) -> Result<bool, ProviderError> {
         let data = data.trim();
+        self.saw_event = true;
         if data == "[DONE]" {
             return Ok(true);
         }
@@ -396,10 +477,15 @@ impl CompletionStream {
         let usage = &value["usage"];
         if usage.is_object() {
             let count = |v: &Value| v.as_u64().unwrap_or(0);
+            let prompt = count(&usage["prompt_tokens"]);
+            let cached = count(&usage["prompt_tokens_details"]["cached_tokens"]);
+            // `prompt_tokens` includes the cached tokens: keep only the
+            // uncached rest in `input_tokens` (Anthropic's meaning) so cost
+            // and usage never count the cached part twice.
             self.usage = AiUsage {
-                input_tokens: count(&usage["prompt_tokens"]),
+                input_tokens: prompt.saturating_sub(cached),
                 output_tokens: count(&usage["completion_tokens"]),
-                cache_read_tokens: count(&usage["prompt_tokens_details"]["cached_tokens"]),
+                cache_read_tokens: cached,
                 cache_write_tokens: 0,
             };
             on_event(StreamEvent::Usage(self.usage));
@@ -409,8 +495,7 @@ impl CompletionStream {
         };
         let delta = &choice["delta"];
         if let Some(text) = delta["content"].as_str().filter(|t| !t.is_empty()) {
-            self.text_budget
-                .add(text.len(), MAX_TURN_TEXT_BYTES, "text")?;
+            self.budget.add(text.len(), MAX_RESPONSE_BYTES, "content")?;
             self.text.push_str(text);
             on_event(StreamEvent::Text(text.to_string()));
         }
@@ -419,30 +504,35 @@ impl CompletionStream {
             .or_else(|| delta["reasoning"].as_str())
             .unwrap_or_default();
         if !reasoning.is_empty() {
-            self.text_budget
-                .add(reasoning.len(), MAX_TURN_TEXT_BYTES, "text")?;
+            self.budget
+                .add(reasoning.len(), MAX_RESPONSE_BYTES, "content")?;
             if !std::mem::replace(&mut self.thinking_seen, true) {
                 on_event(StreamEvent::Thinking);
             }
         }
         if let Some(calls) = delta["tool_calls"].as_array() {
-            for (position, call) in calls.iter().enumerate() {
-                let index = call["index"].as_u64().unwrap_or(position as u64);
-                let pending = self.calls.entry(index).or_default();
-                if let Some(id) = call["id"].as_str().filter(|id| !id.is_empty()) {
+            for call in calls {
+                let function = &call["function"];
+                let id = call["id"].as_str().filter(|id| !id.is_empty());
+                let name = function["name"].as_str().filter(|n| !n.is_empty());
+                let arguments = function["arguments"].as_str().unwrap_or_default();
+                self.budget.add(
+                    id.map_or(0, str::len) + name.map_or(0, str::len),
+                    MAX_RESPONSE_BYTES,
+                    "content",
+                )?;
+                self.input_budget
+                    .add(arguments.len(), MAX_TOOL_INPUT_BYTES, "tool input")?;
+                let pending = self.call_for(call)?;
+                if let Some(id) = id {
                     pending.id = id.to_string();
                 }
-                let function = &call["function"];
-                if let Some(name) = function["name"].as_str().filter(|n| !n.is_empty()) {
+                if let Some(name) = name {
                     if pending.name.is_empty() {
                         pending.name = name.to_string();
                     }
                 }
-                if let Some(arguments) = function["arguments"].as_str() {
-                    self.input_budget
-                        .add(arguments.len(), MAX_TOOL_INPUT_BYTES, "tool input")?;
-                    pending.arguments.push_str(arguments);
-                }
+                pending.arguments.push_str(arguments);
             }
         }
         if let Some(reason) = choice["finish_reason"].as_str() {
@@ -455,7 +545,7 @@ impl CompletionStream {
         let mut stop = stop_reason(self.finish.as_deref().unwrap_or("stop"));
         let mut calls: Vec<ToolCallReq> = self
             .calls
-            .into_values()
+            .into_iter()
             .enumerate()
             .map(|(n, call)| ToolCallReq {
                 id: if call.id.is_empty() {
@@ -485,6 +575,10 @@ impl CompletionStream {
 }
 
 impl Decoder for CompletionStream {
+    fn accepts(&self, content_type: &str) -> bool {
+        is_event_stream(content_type)
+    }
+
     fn feed(&mut self, bytes: &[u8], on_event: EventSink<'_>) -> Result<bool, ProviderError> {
         let events = self.sse.push(bytes).map_err(|e| protocol(e.to_string()))?;
         for (_name, data) in events {
@@ -493,6 +587,14 @@ impl Decoder for CompletionStream {
             }
         }
         Ok(false)
+    }
+
+    fn started(&self) -> bool {
+        !self.text.is_empty() || self.thinking_seen || !self.calls.is_empty()
+    }
+
+    fn saw_event(&self) -> bool {
+        self.saw_event
     }
 
     fn partial(&self) -> AssistantTurn {

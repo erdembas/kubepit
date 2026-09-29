@@ -11,6 +11,7 @@
 //!   `eval_count` are the usage. Lines are bounded like SSE events.
 
 use std::collections::HashMap;
+use std::time::Instant;
 
 use futures::future::BoxFuture;
 use serde_json::{json, Value};
@@ -18,12 +19,12 @@ use tokio_util::sync::CancellationToken;
 
 use super::openai::{function_tools, tool_result_text, user_text};
 use super::provider::{
-    endpoint, parse_tool_input, with_retries, AiTimeouts, AssistantTurn, Budget, Call, ChatMessage,
-    ChatRequest, Decoder, Egress, EventSink, Provider, ProviderError, ProviderErrorKind,
-    RetryPolicy, StopReason, StreamEvent, ToolCallReq, UserBlock, MAX_TOOL_INPUT_BYTES,
-    MAX_TURN_TEXT_BYTES,
+    endpoint, is_local_url, parse_tool_input, provider_client, with_retries, AiTimeouts,
+    AssistantTurn, Budget, Call, ChatMessage, ChatRequest, Decoder, Egress, EventSink, Provider,
+    ProviderError, ProviderErrorKind, RetryPolicy, StopReason, StreamEvent, ToolCallReq, UserBlock,
+    MAX_RESPONSE_BYTES, MAX_TOOL_CALLS, MAX_TOOL_INPUT_BYTES,
 };
-use super::settings::{is_loopback, DEFAULT_OLLAMA_CONTEXT_WINDOW};
+use super::settings::DEFAULT_OLLAMA_CONTEXT_WINDOW;
 use super::sse::LineSplitter;
 use super::types::{AiModelInfo, AiProviderKind, AiUsage};
 
@@ -39,19 +40,21 @@ pub struct OllamaProvider {
 }
 
 impl OllamaProvider {
-    /// A provider at `base_url` (e.g. `http://127.0.0.1:11434`) running
-    /// models with `context_window` tokens (`0` = the default 8192).
+    /// A provider at `base_url` (e.g. `http://127.0.0.1:11434`; trimmed, a
+    /// trailing slash dropped; must be an http(s) URL) running models with
+    /// `context_window` tokens (`0` = the default 8192). It builds its own
+    /// HTTP client for that base URL (no redirects, no proxy for loopback).
     /// Egress: loopback only until [`OllamaProvider::with_egress`].
     pub fn new(
-        client: reqwest::Client,
         base_url: String,
         context_window: u32,
         timeouts: AiTimeouts,
         retry: RetryPolicy,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, ProviderError> {
+        let (base_url, client) = provider_client(&timeouts, &base_url)?;
+        Ok(Self {
             client,
-            base_url: base_url.trim().trim_end_matches('/').to_string(),
+            base_url,
             context_window: if context_window == 0 {
                 DEFAULT_OLLAMA_CONTEXT_WINDOW
             } else {
@@ -60,7 +63,7 @@ impl OllamaProvider {
             timeouts,
             retry,
             egress: Egress::default(),
-        }
+        })
     }
 
     /// The egress rule checked before every request.
@@ -86,6 +89,7 @@ impl OllamaProvider {
     async fn send_once(
         &self,
         req: &ChatRequest,
+        deadline: Instant,
         on_event: EventSink<'_>,
         cancel: &CancellationToken,
     ) -> Result<AssistantTurn, ProviderError> {
@@ -101,16 +105,20 @@ impl OllamaProvider {
             .post(url.clone())
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(body);
-        let call = Call::new(NAME, &url, &[], &self.timeouts, cancel);
+        let call = Call::new(NAME, &url, &[], &self.timeouts, deadline, cancel);
         let response = call.send(request).await?;
         let mut stream = ChatLines::new(&req.model);
         call.read_stream(response, &mut stream, on_event).await?;
         Ok(stream.finish())
     }
 
-    async fn get_tags(&self, cancel: &CancellationToken) -> Result<Value, ProviderError> {
+    async fn get_tags(
+        &self,
+        deadline: Instant,
+        cancel: &CancellationToken,
+    ) -> Result<Value, ProviderError> {
         let url = endpoint(&self.base_url, &["api", "tags"])?;
-        let call = Call::new(NAME, &url, &[], &self.timeouts, cancel);
+        let call = Call::new(NAME, &url, &[], &self.timeouts, deadline, cancel);
         call.json(self.client.get(url.clone())).await
     }
 }
@@ -121,7 +129,7 @@ impl Provider for OllamaProvider {
     }
 
     fn is_local(&self) -> bool {
-        is_loopback(&self.base_url)
+        is_local_url(&self.base_url)
     }
 
     /// `GET {base}/api/tags` → the pulled models, sorted.
@@ -129,8 +137,11 @@ impl Provider for OllamaProvider {
         Box::pin(async move {
             self.egress.check(&self.base_url)?;
             let cancel = CancellationToken::new();
-            let value =
-                with_retries(&self.retry, &|_| {}, &cancel, || self.get_tags(&cancel)).await?;
+            let deadline = Instant::now() + self.timeouts.total;
+            let value = with_retries(&self.retry, deadline, &|_| {}, &cancel, || {
+                self.get_tags(deadline, &cancel)
+            })
+            .await?;
             let models = value["models"].as_array().ok_or_else(|| {
                 ProviderError::new(
                     ProviderErrorKind::Protocol,
@@ -162,8 +173,9 @@ impl Provider for OllamaProvider {
     ) -> BoxFuture<'a, Result<AssistantTurn, ProviderError>> {
         Box::pin(async move {
             self.egress.check(&self.base_url)?;
-            with_retries(&self.retry, on_event, cancel, || {
-                self.send_once(req, on_event, cancel)
+            let deadline = Instant::now() + self.timeouts.total;
+            with_retries(&self.retry, deadline, on_event, cancel, || {
+                self.send_once(req, deadline, on_event, cancel)
             })
             .await
         })
@@ -238,13 +250,15 @@ fn messages(system: &str, messages: &[ChatMessage]) -> Vec<Value> {
 struct ChatLines {
     lines: LineSplitter,
     text: String,
-    text_budget: Budget,
+    /// Text, thinking and tool names / ids.
+    budget: Budget,
     input_budget: Budget,
     calls: Vec<ToolCallReq>,
     done_reason: Option<String>,
     usage: AiUsage,
     model: String,
     thinking_seen: bool,
+    saw_event: bool,
 }
 
 fn protocol(message: impl Into<String>) -> ProviderError {
@@ -256,13 +270,14 @@ impl ChatLines {
         Self {
             lines: LineSplitter::default(),
             text: String::new(),
-            text_budget: Budget::default(),
+            budget: Budget::default(),
             input_budget: Budget::default(),
             calls: Vec::new(),
             done_reason: None,
             usage: AiUsage::default(),
             model: model.to_string(),
             thinking_seen: false,
+            saw_event: false,
         }
     }
 
@@ -274,6 +289,7 @@ impl ChatLines {
         }
         let value: Value = serde_json::from_str(line)
             .map_err(|e| protocol(format!("Ollama sent a malformed stream line: {e}")))?;
+        self.saw_event = true;
         if let Some(error) = value["error"].as_str() {
             return Err(ProviderError::new(
                 ProviderErrorKind::Server,
@@ -285,20 +301,30 @@ impl ChatLines {
         }
         let message = &value["message"];
         if let Some(text) = message["content"].as_str().filter(|t| !t.is_empty()) {
-            self.text_budget
-                .add(text.len(), MAX_TURN_TEXT_BYTES, "text")?;
+            self.budget.add(text.len(), MAX_RESPONSE_BYTES, "content")?;
             self.text.push_str(text);
             on_event(StreamEvent::Text(text.to_string()));
         }
         if let Some(thinking) = message["thinking"].as_str().filter(|t| !t.is_empty()) {
-            self.text_budget
-                .add(thinking.len(), MAX_TURN_TEXT_BYTES, "text")?;
+            self.budget
+                .add(thinking.len(), MAX_RESPONSE_BYTES, "content")?;
             if !std::mem::replace(&mut self.thinking_seen, true) {
                 on_event(StreamEvent::Thinking);
             }
         }
         for call in message["tool_calls"].as_array().into_iter().flatten() {
+            if self.calls.len() >= MAX_TOOL_CALLS {
+                return Err(protocol(format!(
+                    "Ollama sent more than {MAX_TOOL_CALLS} tool calls"
+                )));
+            }
             let function = &call["function"];
+            self.budget.add(
+                function["name"].as_str().map_or(0, str::len)
+                    + call["id"].as_str().map_or(0, str::len),
+                MAX_RESPONSE_BYTES,
+                "content",
+            )?;
             let arguments = &function["arguments"];
             let input = match arguments {
                 Value::Object(_) => Ok(arguments.clone()),
@@ -353,6 +379,22 @@ impl ChatLines {
 }
 
 impl Decoder for ChatLines {
+    /// NDJSON (`application/x-ndjson`), JSON, or no content type; never an
+    /// HTML or other page from something in between.
+    fn accepts(&self, content_type: &str) -> bool {
+        content_type.is_empty()
+            || content_type.starts_with("application/x-ndjson")
+            || content_type.starts_with("application/json")
+    }
+
+    fn started(&self) -> bool {
+        !self.text.is_empty() || self.thinking_seen || !self.calls.is_empty()
+    }
+
+    fn saw_event(&self) -> bool {
+        self.saw_event
+    }
+
     fn feed(&mut self, bytes: &[u8], on_event: EventSink<'_>) -> Result<bool, ProviderError> {
         let lines = self
             .lines

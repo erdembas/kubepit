@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use kubepit_core::ai::anthropic::AnthropicProvider;
 use kubepit_core::ai::provider::{
-    http_client, AiTimeouts, ChatMessage, ChatRequest, Provider, RetryPolicy, UserBlock,
+    AiTimeouts, ChatMessage, ChatRequest, Provider, RetryPolicy, UserBlock,
 };
 use serde_json::json;
 use support::{Reply, Request};
@@ -41,15 +41,16 @@ async fn loopback_providers_bypass_environment_proxies() {
         std::env::remove_var(name);
     }
 
-    let timeouts = AiTimeouts::default();
+    // The provider builds its own client: the caller cannot hand it one
+    // that uses a proxy (or follows redirects).
     let provider = AnthropicProvider::new(
-        http_client(&timeouts, &upstream.url).unwrap(),
         upstream.url.clone(),
         "sk-ant-test".into(),
-        timeouts,
+        AiTimeouts::default(),
         RetryPolicy::default(),
         None,
-    );
+    )
+    .unwrap();
     let req = ChatRequest {
         model: "claude-opus-5".into(),
         system: "system".into(),

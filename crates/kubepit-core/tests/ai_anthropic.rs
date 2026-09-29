@@ -12,9 +12,9 @@ use std::time::{Duration, Instant};
 use kubepit_core::ai::anthropic::AnthropicProvider;
 use kubepit_core::ai::is_loopback;
 use kubepit_core::ai::provider::{
-    check_egress, http_client, AiTimeouts, AssistantTurn, ChatMessage, ChatRequest, Egress,
+    check_egress, is_local_url, AiTimeouts, AssistantTurn, ChatMessage, ChatRequest, Egress,
     Provider, ProviderError, ProviderErrorKind, RetryPolicy, StopReason, StreamEvent, ToolCallReq,
-    ToolSpec, UserBlock, MAX_ERROR_MESSAGE_BYTES,
+    ToolSpec, UserBlock, MAX_CONTENT_BLOCKS, MAX_ERROR_MESSAGE_BYTES,
 };
 use kubepit_core::ai::{AiEffort, AiModelInfo, AiUsage};
 use parking_lot::Mutex;
@@ -32,15 +32,17 @@ fn fast_retry() -> RetryPolicy {
     }
 }
 
+/// The provider builds its own client (no redirects, no proxy for
+/// loopback), so key safety never depends on the caller.
 fn anthropic_with(url: &str, timeouts: AiTimeouts, info: Option<AiModelInfo>) -> AnthropicProvider {
     AnthropicProvider::new(
-        http_client(&timeouts, url).unwrap(),
         url.to_string(),
         KEY.to_string(),
         timeouts,
         fast_retry(),
         info,
     )
+    .unwrap()
 }
 
 fn anthropic(url: &str) -> AnthropicProvider {
@@ -251,6 +253,40 @@ fn thinking_and_effort_follow_model_capabilities() {
 }
 
 #[test]
+fn effort_is_clamped_to_the_levels_the_model_supports() {
+    let with_levels = |levels: Vec<AiEffort>, requested: AiEffort| {
+        anthropic_with(
+            "http://127.0.0.1:9",
+            AiTimeouts::default(),
+            Some(AiModelInfo {
+                effort: Some(true),
+                effort_levels: Some(levels),
+                ..model("claude-opus-5")
+            }),
+        )
+        .request_body(&req_with_effort(requested))
+    };
+    use AiEffort::*;
+    let all = vec![Low, Medium, High, Xhigh, Max];
+    assert_eq!(with_levels(all, Xhigh)["output_config"]["effort"], "xhigh");
+    // Unsupported level → the highest supported level below it.
+    let no_xhigh = vec![Low, Medium, High, Max];
+    assert_eq!(
+        with_levels(no_xhigh, Xhigh)["output_config"]["effort"],
+        "high"
+    );
+    assert_eq!(
+        with_levels(vec![Low], Max)["output_config"]["effort"],
+        "low"
+    );
+    // Nothing supported at or below the request → omitted.
+    let body = with_levels(vec![High, Max], Low);
+    assert!(body.get("output_config").is_none());
+    let body = with_levels(vec![], Medium);
+    assert!(body.get("output_config").is_none());
+}
+
+#[test]
 fn eager_input_streaming_is_sent_only_to_the_default_base_url() {
     let req = request(
         vec![ChatMessage::User(vec![text("hi", false)])],
@@ -431,6 +467,32 @@ async fn tool_input_is_parsed_strictly() {
     let server = serve(|| anthropic_tool_use("", "toolu_3", "list_namespaces", &[])).await;
     let (result, _) = chat(&anthropic(&server.url), &ask("hi")).await;
     assert_eq!(result.unwrap().tool_calls[0].input, Ok(json!({})));
+
+    // The whole input in `content_block_start`, no deltas.
+    let server = serve(|| {
+        anthropic_stream(&[
+            message_start(json!({"input_tokens": 10})),
+            block_start(
+                0,
+                json!({"type": "tool_use", "id": "toolu_4", "name": "get_pod",
+                       "input": {"namespace": "shop", "pod": "web-1"}}),
+            ),
+            block_stop(0),
+            message_delta("tool_use", 5),
+            message_stop(),
+        ])
+    })
+    .await;
+    let (result, _) = chat(&anthropic(&server.url), &ask("hi")).await;
+    let turn = result.unwrap();
+    assert_eq!(
+        turn.tool_calls[0].input,
+        Ok(json!({"namespace": "shop", "pod": "web-1"}))
+    );
+    assert_eq!(
+        turn.raw[0]["input"],
+        json!({"namespace": "shop", "pod": "web-1"})
+    );
 }
 
 #[tokio::test]
@@ -652,6 +714,55 @@ async fn retries_without_fallbacks_when_the_parameter_is_rejected() {
 }
 
 #[tokio::test]
+async fn a_rejected_beta_header_or_fallback_field_also_turns_fallbacks_off() {
+    for message in [
+        "anthropic-beta: Unexpected value(s) `server-side-fallback-2026-07-01` for the `anthropic-beta` header",
+        "Unknown field: fallback is not available for this organization",
+    ] {
+        let server = support::start(Arc::new(move |_req: &Request, log: &support::Log| {
+            if log.lock().is_empty() {
+                anthropic_error(400, "invalid_request_error", message, None)
+            } else {
+                anthropic_text("OK", json!({"input_tokens": 10}))
+            }
+        }))
+        .await;
+        let (result, _) = chat(&anthropic(&server.url), &ask("hi")).await;
+        assert_eq!(result.unwrap().text, "OK", "{message}");
+        let log = server.log.lock().clone();
+        assert_eq!(log.len(), 2, "{message}");
+        let second: Value = serde_json::from_str(&log[1].body).unwrap();
+        assert!(second.get("fallbacks").is_none());
+        assert_eq!(header_opt(&log[1], "anthropic-beta"), None);
+    }
+
+    // Other 400s are not retried.
+    let server =
+        serve(|| anthropic_error(400, "invalid_request_error", "max_tokens: too large", None))
+            .await;
+    let (result, _) = chat(&anthropic(&server.url), &ask("hi")).await;
+    assert_eq!(result.unwrap_err().kind, ProviderErrorKind::BadRequest);
+    assert_eq!(server.log.lock().len(), 1);
+}
+
+#[tokio::test]
+async fn a_mid_stream_error_naming_fallbacks_is_never_re_sent() {
+    let server = serve(|| {
+        anthropic_stream(&[
+            message_start(json!({"input_tokens": 10})),
+            error_event(
+                "invalid_request_error",
+                "fallbacks: not supported for this model",
+            ),
+        ])
+    })
+    .await;
+    let (result, _) = chat(&anthropic(&server.url), &ask("hi")).await;
+    assert_eq!(result.unwrap_err().kind, ProviderErrorKind::BadRequest);
+    assert_eq!(server.log.lock().len(), 1, "nothing is sent twice");
+}
+
+#[tokio::test]
 async fn honours_retry_after_and_gives_up_after_three_retries() {
     let server =
         serve(|| anthropic_error(429, "rate_limit_error", "Too many requests", Some(0))).await;
@@ -714,6 +825,64 @@ async fn errors_after_streamed_text_keep_the_partial_and_are_not_retried() {
     assert!(err.retryable());
     assert_eq!(err.partial.unwrap().text, "Partial");
     assert_eq!(server.log.lock().len(), 1);
+}
+
+#[tokio::test]
+async fn any_started_content_block_prevents_an_automatic_re_send() {
+    let starts = [
+        json!({"type": "thinking", "thinking": "", "signature": ""}),
+        json!({"type": "redacted_thinking", "data": "opaque"}),
+        json!({"type": "tool_use", "id": "toolu_1", "name": "get_pod", "input": {}}),
+    ];
+    for start in starts {
+        let block = start.clone();
+        let server = serve(move || {
+            anthropic_stream(&[
+                message_start(json!({"input_tokens": 10})),
+                block_start(0, block.clone()),
+                error_event("overloaded_error", "Overloaded"),
+            ])
+        })
+        .await;
+        let (result, events) = chat(&anthropic(&server.url), &ask("hi")).await;
+        let err = result.unwrap_err();
+        assert_eq!(err.kind, ProviderErrorKind::Overloaded, "{start}");
+        assert!(err.retryable());
+        let partial = err.partial.expect("content had started");
+        assert!(partial.text.is_empty() && partial.tool_calls.is_empty());
+        assert_eq!(server.log.lock().len(), 1, "{start}");
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, StreamEvent::Retrying { .. })));
+    }
+}
+
+#[tokio::test]
+async fn retries_share_one_total_deadline() {
+    // Every attempt stalls 250 ms before failing with nothing streamed.
+    let server = serve(|| Reply::Sse {
+        events: anthropic_sse(&[
+            message_start(json!({"input_tokens": 10})),
+            error_event("overloaded_error", "Overloaded"),
+        ]),
+        gap_ms: 250,
+        cut_after: None,
+    })
+    .await;
+    let timeouts = AiTimeouts {
+        total: Duration::from_millis(400),
+        ..Default::default()
+    };
+    let started = Instant::now();
+    let (result, _) = chat(&anthropic_with(&server.url, timeouts, None), &ask("hi")).await;
+    let err = result.unwrap_err();
+    assert!(
+        started.elapsed() < Duration::from_millis(900),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(err.kind, ProviderErrorKind::Timeout, "{}", err.message);
+    assert!(server.log.lock().len() <= 2);
 }
 
 #[tokio::test]
@@ -967,6 +1136,17 @@ async fn lists_models_with_capabilities_across_pages() {
     assert_eq!(models[0].max_output_tokens, Some(128_000));
     assert_eq!(models[0].adaptive_thinking, Some(true));
     assert_eq!(models[0].effort, Some(true));
+    // The fixture reports low/medium/high/max (no xhigh).
+    assert_eq!(
+        models[0].effort_levels,
+        Some(vec![
+            AiEffort::Low,
+            AiEffort::Medium,
+            AiEffort::High,
+            AiEffort::Max
+        ])
+    );
+    assert_eq!(models[1].effort_levels, None);
     assert_eq!(models[1].context_window, None);
     assert_eq!(models[1].adaptive_thinking, None);
     let log = server.log.lock();
@@ -1062,4 +1242,170 @@ async fn every_provider_entry_point_checks_egress_before_connecting() {
     assert!(server.log.lock().is_empty());
     assert!(!anthropic(&url).is_local());
     assert!(anthropic(&server.url).is_local());
+}
+
+#[test]
+fn loopback_needs_both_url_parsers_to_agree() {
+    // `url` (what reqwest connects to) reads these as 127.0.0.1, `http`
+    // does not: the guard fails closed and treats them as remote.
+    for url in [
+        "http://127.1:4000",
+        "http://0x7f000001:4000",
+        "http://2130706433:4000",
+    ] {
+        assert!(!is_local_url(url), "{url}");
+        assert_eq!(
+            check_egress(url, false, false).unwrap_err().kind,
+            ProviderErrorKind::EgressRefused,
+            "{url}"
+        );
+        assert!(!anthropic(url).is_local(), "{url}");
+    }
+    for url in [
+        "http://127.0.0.1:4000",
+        "http://localhost:11434",
+        "http://[::1]:8080",
+    ] {
+        assert!(is_local_url(url), "{url}");
+        assert!(check_egress(url, false, false).is_ok(), "{url}");
+    }
+    assert!(AnthropicProvider::new(
+        "not a url".into(),
+        KEY.into(),
+        AiTimeouts::default(),
+        RetryPolicy::default(),
+        None
+    )
+    .is_err());
+}
+
+#[tokio::test]
+async fn the_key_is_trimmed() {
+    let server = serve(|| anthropic_text("OK", json!({}))).await;
+    let provider = AnthropicProvider::new(
+        server.url.clone(),
+        format!("  {KEY}\n"),
+        AiTimeouts::default(),
+        fast_retry(),
+        None,
+    )
+    .unwrap();
+    let (result, _) = chat(&provider, &ask("hi")).await;
+    result.unwrap();
+    assert_eq!(header(&server.log.lock()[0], "x-api-key"), KEY);
+}
+
+#[tokio::test]
+async fn a_success_that_is_not_an_event_stream_is_a_protocol_error() {
+    let server = serve(|| Reply::Raw {
+        code: 200,
+        headers: vec![("content-type".into(), "text/html".into())],
+        body: "<html>Sign in to the proxy</html>".into(),
+    })
+    .await;
+    let (result, _) = chat(&anthropic(&server.url), &ask("hi")).await;
+    let err = result.unwrap_err();
+    assert_eq!(err.kind, ProviderErrorKind::Protocol, "{}", err.message);
+    assert!(err.partial.is_none());
+    assert_eq!(server.log.lock().len(), 1, "not retried");
+
+    // An event stream that ends cleanly without a single event.
+    let server = serve(|| Reply::Sse {
+        events: vec![],
+        gap_ms: 0,
+        cut_after: None,
+    })
+    .await;
+    let (result, _) = chat(&anthropic(&server.url), &ask("hi")).await;
+    let err = result.unwrap_err();
+    assert_eq!(err.kind, ProviderErrorKind::Protocol, "{}", err.message);
+    assert_eq!(server.log.lock().len(), 1);
+}
+
+#[tokio::test]
+async fn reading_an_error_body_honours_cancel_and_the_deadline() {
+    let server = serve(|| Reply::Stall { code: 400 }).await;
+    let provider = anthropic(&server.url);
+    let cancel = CancellationToken::new();
+    let trigger = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        trigger.cancel();
+    });
+    let started = Instant::now();
+    let err = provider
+        .chat(&ask("hi"), &|_| {}, &cancel)
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind, ProviderErrorKind::Cancelled);
+    assert!(started.elapsed() < Duration::from_secs(2));
+
+    let timeouts = AiTimeouts {
+        total: Duration::from_millis(300),
+        ..Default::default()
+    };
+    let started = Instant::now();
+    let (result, _) = chat(&anthropic_with(&server.url, timeouts, None), &ask("hi")).await;
+    let err = result.unwrap_err();
+    assert_eq!(err.kind, ProviderErrorKind::BadRequest, "{}", err.message);
+    assert!(started.elapsed() < Duration::from_secs(2));
+}
+
+#[tokio::test]
+async fn every_streamed_payload_counts_against_the_response_budget() {
+    // Signatures: many 900 KiB signature deltas.
+    let chunk = "s".repeat(900 * 1024);
+    let server = serve(move || {
+        let mut events = vec![
+            message_start(json!({"input_tokens": 10})),
+            block_start(
+                0,
+                json!({"type": "thinking", "thinking": "", "signature": ""}),
+            ),
+        ];
+        for _ in 0..12 {
+            events.push(block_delta(
+                0,
+                json!({"type": "signature_delta", "signature": chunk}),
+            ));
+        }
+        anthropic_stream(&events)
+    })
+    .await;
+    let (result, _) = chat(&anthropic(&server.url), &ask("hi")).await;
+    let err = result.unwrap_err();
+    assert_eq!(err.kind, ProviderErrorKind::Protocol, "{}", err.message);
+
+    // Block starts: many large redacted_thinking payloads.
+    let data = "d".repeat(900 * 1024);
+    let server = serve(move || {
+        let mut events = vec![message_start(json!({"input_tokens": 10}))];
+        for i in 0..12 {
+            events.push(block_start(
+                i,
+                json!({"type": "redacted_thinking", "data": data}),
+            ));
+            events.push(block_stop(i));
+        }
+        anthropic_stream(&events)
+    })
+    .await;
+    let (result, _) = chat(&anthropic(&server.url), &ask("hi")).await;
+    assert_eq!(result.unwrap_err().kind, ProviderErrorKind::Protocol);
+
+    // Block count.
+    let server = serve(|| {
+        let mut events = vec![message_start(json!({"input_tokens": 10}))];
+        for i in 0..=MAX_CONTENT_BLOCKS {
+            events.push(block_start(i, json!({"type": "text", "text": ""})));
+            events.push(block_stop(i));
+        }
+        events.push(message_delta("end_turn", 1));
+        events.push(message_stop());
+        anthropic_stream(&events)
+    })
+    .await;
+    let (result, _) = chat(&anthropic(&server.url), &ask("hi")).await;
+    let err = result.unwrap_err();
+    assert_eq!(err.kind, ProviderErrorKind::Protocol, "{}", err.message);
 }

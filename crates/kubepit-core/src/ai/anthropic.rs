@@ -4,15 +4,18 @@
 //! - `POST {base}/v1/messages` with `x-api-key`, `anthropic-version:
 //!   2023-06-01` and, while the server accepts it, the server-side refusal
 //!   fallback (`fallbacks: "default"` + `anthropic-beta:
-//!   server-side-fallback-2026-07-01`); a 400 that names `fallbacks` turns
-//!   it off for this provider and the request is sent again once without.
+//!   server-side-fallback-2026-07-01`). A request rejected with a 400 that
+//!   names the fallback parameter or the beta header (nothing streamed yet)
+//!   turns it off for this provider and is sent again once without; a
+//!   mid-stream error is never re-sent.
 //! - Prompt caching: tools sorted by name → the frozen system prompt with a
 //!   breakpoint → the session's first context block (at most two message
 //!   breakpoints) → top-level automatic `cache_control`. Bodies are built
 //!   deterministically.
 //! - `thinking: {type: "adaptive"}` and `output_config.effort` only when the
-//!   Models API reported support for the requested model; never
-//!   `budget_tokens`, sampling parameters or an assistant prefill.
+//!   Models API reported support for the requested model; the effort is
+//!   clamped to the levels it reports. Never `budget_tokens`, sampling
+//!   parameters or an assistant prefill.
 //! - `eager_input_streaming` only for the default base URL; every tool
 //!   input is parsed strictly at block stop.
 //! - Assistant content (thinking blocks and signatures included) is kept in
@@ -24,20 +27,22 @@
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 use futures::future::BoxFuture;
 use serde_json::{json, Map, Value};
 use tokio_util::sync::CancellationToken;
 
 use super::provider::{
-    endpoint, parse_tool_input, secret_header, with_retries, AiTimeouts, AssistantTurn, Budget,
-    Call, ChatMessage, ChatRequest, Decoder, Egress, EventSink, Provider, ProviderError,
-    ProviderErrorKind, RetryPolicy, StopReason, StreamEvent, ToolCallReq, UserBlock,
-    MAX_TOOL_INPUT_BYTES, MAX_TURN_TEXT_BYTES,
+    endpoint, is_event_stream, is_local_url, parse_tool_input, provider_client, secret_header,
+    with_retries, AiTimeouts, AssistantTurn, Budget, Call, ChatMessage, ChatRequest, Decoder,
+    Egress, EventSink, Provider, ProviderError, ProviderErrorKind, RetryPolicy, StopReason,
+    StreamEvent, ToolCallReq, UserBlock, MAX_CONTENT_BLOCKS, MAX_RESPONSE_BYTES,
+    MAX_TOOL_INPUT_BYTES,
 };
-use super::settings::{is_loopback, ANTHROPIC_BASE_URL};
+use super::settings::ANTHROPIC_BASE_URL;
 use super::sse::SseParser;
-use super::types::{AiModelInfo, AiProviderKind, AiUsage};
+use super::types::{AiEffort, AiModelInfo, AiProviderKind, AiUsage};
 
 /// The `anthropic-version` header.
 pub const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -50,6 +55,14 @@ const NAME: &str = "Anthropic";
 const MAX_MESSAGE_BREAKPOINTS: usize = 2;
 const MODELS_PAGE_LIMIT: &str = "100";
 const MAX_MODEL_PAGES: usize = 20;
+/// Effort levels in increasing order, with their Models API keys.
+const EFFORT_LEVELS: [(AiEffort, &str); 5] = [
+    (AiEffort::Low, "low"),
+    (AiEffort::Medium, "medium"),
+    (AiEffort::High, "high"),
+    (AiEffort::Xhigh, "xhigh"),
+    (AiEffort::Max, "max"),
+];
 
 pub struct AnthropicProvider {
     client: reqwest::Client,
@@ -64,28 +77,31 @@ pub struct AnthropicProvider {
 }
 
 impl AnthropicProvider {
-    /// A provider at `base_url` (a trailing slash is dropped). `model_info`
-    /// (from [`AnthropicProvider::model_info`]) enables adaptive thinking
-    /// and effort for that model. Egress: loopback only until
-    /// [`AnthropicProvider::with_egress`].
+    /// A provider at `base_url` (trimmed, a trailing slash dropped; must be
+    /// an http(s) URL). It builds its own HTTP client for that base URL
+    /// ([`super::provider::http_client`]: no redirects, no proxy for
+    /// loopback), so the key's safety never depends on the caller. The key
+    /// is trimmed. `model_info` (from [`AnthropicProvider::model_info`])
+    /// enables adaptive thinking and effort for that model. Egress: loopback
+    /// only until [`AnthropicProvider::with_egress`].
     pub fn new(
-        client: reqwest::Client,
         base_url: String,
         api_key: String,
         timeouts: AiTimeouts,
         retry: RetryPolicy,
         model_info: Option<AiModelInfo>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, ProviderError> {
+        let (base_url, client) = provider_client(&timeouts, &base_url)?;
+        Ok(Self {
             client,
-            base_url: base_url.trim().trim_end_matches('/').to_string(),
-            api_key,
+            base_url,
+            api_key: api_key.trim().to_string(),
             timeouts,
             retry,
             model_info,
             egress: Egress::default(),
             fallbacks: AtomicBool::new(true),
-        }
+        })
     }
 
     /// The egress rule checked before every request.
@@ -114,8 +130,9 @@ impl AnthropicProvider {
             }
             let url = endpoint(&self.base_url, &["v1", "models", &id])?;
             let cancel = CancellationToken::new();
-            let value = with_retries(&self.retry, &|_| {}, &cancel, || {
-                self.get_json(url.clone(), &cancel)
+            let deadline = Instant::now() + self.timeouts.total;
+            let value = with_retries(&self.retry, deadline, &|_| {}, &cancel, || {
+                self.get_json(url.clone(), deadline, &cancel)
             })
             .await?;
             model_from_json(&value).ok_or_else(|| {
@@ -128,7 +145,7 @@ impl AnthropicProvider {
     }
 
     fn require_key(&self) -> Result<(), ProviderError> {
-        if self.api_key.trim().is_empty() {
+        if self.api_key.is_empty() {
             return Err(ProviderError::new(
                 ProviderErrorKind::Auth,
                 "no Anthropic API key is stored",
@@ -178,7 +195,7 @@ impl AnthropicProvider {
         if info.and_then(|m| m.adaptive_thinking) == Some(true) {
             body.insert("thinking".into(), json!({"type": "adaptive"}));
         }
-        if let (Some(effort), Some(true)) = (req.effort, info.and_then(|m| m.effort)) {
+        if let Some(effort) = supported_effort(info, req.effort) {
             body.insert("output_config".into(), json!({"effort": effort}));
         }
         if fallbacks {
@@ -199,44 +216,22 @@ impl AnthropicProvider {
     async fn get_json(
         &self,
         url: reqwest::Url,
+        deadline: Instant,
         cancel: &CancellationToken,
     ) -> Result<Value, ProviderError> {
         let secrets = [self.api_key.as_str()];
-        let call = Call::new(NAME, &url, &secrets, &self.timeouts, cancel);
+        let call = Call::new(NAME, &url, &secrets, &self.timeouts, deadline, cancel);
         call.json(self.authorized(self.client.get(url.clone()))?)
             .await
     }
 
-    /// One request; on a 400 that names `fallbacks`, once more without them.
-    async fn attempt(
+    /// The `POST /v1/messages` request for `req`.
+    fn message_request(
         &self,
-        req: &ChatRequest,
-        on_event: EventSink<'_>,
-        cancel: &CancellationToken,
-    ) -> Result<AssistantTurn, ProviderError> {
-        let fallbacks = self.fallbacks.load(Ordering::SeqCst);
-        match self.send_once(req, fallbacks, on_event, cancel).await {
-            Err(error)
-                if fallbacks
-                    && error.kind == ProviderErrorKind::BadRequest
-                    && error.message.contains("fallbacks") =>
-            {
-                self.fallbacks.store(false, Ordering::SeqCst);
-                tracing::info!("Anthropic rejected server-side fallbacks; sending without them");
-                self.send_once(req, false, on_event, cancel).await
-            }
-            result => result,
-        }
-    }
-
-    async fn send_once(
-        &self,
+        url: &reqwest::Url,
         req: &ChatRequest,
         fallbacks: bool,
-        on_event: EventSink<'_>,
-        cancel: &CancellationToken,
-    ) -> Result<AssistantTurn, ProviderError> {
-        let url = endpoint(&self.base_url, &["v1", "messages"])?;
+    ) -> Result<reqwest::RequestBuilder, ProviderError> {
         let body = serde_json::to_vec(&self.body(req, fallbacks)).map_err(|e| {
             ProviderError::new(
                 ProviderErrorKind::BadRequest,
@@ -251,13 +246,65 @@ impl AnthropicProvider {
         if fallbacks {
             request = request.header("anthropic-beta", FALLBACK_BETA);
         }
+        Ok(request)
+    }
+
+    /// One request. Only a request the server rejected (a status error:
+    /// nothing streamed) because of the fallback parameter or its beta
+    /// header is sent once more, without them.
+    async fn attempt(
+        &self,
+        req: &ChatRequest,
+        deadline: Instant,
+        on_event: EventSink<'_>,
+        cancel: &CancellationToken,
+    ) -> Result<AssistantTurn, ProviderError> {
+        let url = endpoint(&self.base_url, &["v1", "messages"])?;
         let secrets = [self.api_key.as_str()];
-        let call = Call::new(NAME, &url, &secrets, &self.timeouts, cancel);
-        let response = call.send(request).await?;
+        let fallbacks = self.fallbacks.load(Ordering::SeqCst);
+        let call = Call::new(NAME, &url, &secrets, &self.timeouts, deadline, cancel);
+        let sent = call.send(self.message_request(&url, req, fallbacks)?).await;
+        let (call, response) = match sent {
+            Err(error) if fallbacks && rejects_fallbacks(&error) => {
+                self.fallbacks.store(false, Ordering::SeqCst);
+                tracing::info!("Anthropic rejected server-side fallbacks; sending without them");
+                let call = Call::new(NAME, &url, &secrets, &self.timeouts, deadline, cancel);
+                let response = call.send(self.message_request(&url, req, false)?).await?;
+                (call, response)
+            }
+            sent => (call, sent?),
+        };
         let mut stream = MessageStream::new(&req.model);
         call.read_stream(response, &mut stream, on_event).await?;
         Ok(stream.finish())
     }
+}
+
+/// A 400 that names the fallback parameter or the beta header.
+fn rejects_fallbacks(error: &ProviderError) -> bool {
+    let message = error.message.to_ascii_lowercase();
+    error.kind == ProviderErrorKind::BadRequest
+        && (message.contains("fallback") || message.contains("anthropic-beta"))
+}
+
+/// The effort to send: none without effort support; the requested level
+/// when the Models API did not list levels; else the highest listed level
+/// not above the requested one (none if there is no such level).
+fn supported_effort(info: Option<&AiModelInfo>, requested: Option<AiEffort>) -> Option<AiEffort> {
+    let (info, requested) = (info?, requested?);
+    if info.effort != Some(true) {
+        return None;
+    }
+    let Some(levels) = &info.effort_levels else {
+        return Some(requested);
+    };
+    let rank = |effort: AiEffort| EFFORT_LEVELS.iter().position(|(e, _)| *e == effort);
+    let ceiling = rank(requested)?;
+    levels
+        .iter()
+        .copied()
+        .filter(|level| rank(*level).is_some_and(|r| r <= ceiling))
+        .max_by_key(|level| rank(*level))
 }
 
 impl Provider for AnthropicProvider {
@@ -266,7 +313,7 @@ impl Provider for AnthropicProvider {
     }
 
     fn is_local(&self) -> bool {
-        is_loopback(&self.base_url)
+        is_local_url(&self.base_url)
     }
 
     /// `GET {base}/v1/models`, following `has_more` / `last_id`.
@@ -275,6 +322,7 @@ impl Provider for AnthropicProvider {
             self.egress.check(&self.base_url)?;
             self.require_key()?;
             let cancel = CancellationToken::new();
+            let deadline = Instant::now() + self.timeouts.total;
             let mut models: Vec<AiModelInfo> = Vec::new();
             let mut after: Option<String> = None;
             for _ in 0..MAX_MODEL_PAGES {
@@ -286,8 +334,8 @@ impl Provider for AnthropicProvider {
                         query.append_pair("after_id", after);
                     }
                 }
-                let page = with_retries(&self.retry, &|_| {}, &cancel, || {
-                    self.get_json(url.clone(), &cancel)
+                let page = with_retries(&self.retry, deadline, &|_| {}, &cancel, || {
+                    self.get_json(url.clone(), deadline, &cancel)
                 })
                 .await?;
                 let data = page["data"].as_array().ok_or_else(|| {
@@ -319,8 +367,9 @@ impl Provider for AnthropicProvider {
         Box::pin(async move {
             self.egress.check(&self.base_url)?;
             self.require_key()?;
-            with_retries(&self.retry, on_event, cancel, || {
-                self.attempt(req, on_event, cancel)
+            let deadline = Instant::now() + self.timeouts.total;
+            with_retries(&self.retry, deadline, on_event, cancel, || {
+                self.attempt(req, deadline, on_event, cancel)
             })
             .await
         })
@@ -330,6 +379,15 @@ impl Provider for AnthropicProvider {
 /// A Models API entry → [`AiModelInfo`].
 fn model_from_json(value: &Value) -> Option<AiModelInfo> {
     let tokens = |v: &Value| v.as_u64().map(|n| u32::try_from(n).unwrap_or(u32::MAX));
+    let effort = &value["capabilities"]["effort"];
+    let reported = EFFORT_LEVELS
+        .iter()
+        .any(|(_, key)| effort[*key].is_object());
+    let levels: Vec<AiEffort> = EFFORT_LEVELS
+        .iter()
+        .filter(|(_, key)| effort[*key]["supported"].as_bool() == Some(true))
+        .map(|(level, _)| *level)
+        .collect();
     Some(AiModelInfo {
         id: value["id"].as_str()?.to_string(),
         display_name: value["display_name"].as_str().map(str::to_string),
@@ -337,7 +395,8 @@ fn model_from_json(value: &Value) -> Option<AiModelInfo> {
         max_output_tokens: tokens(&value["max_tokens"]),
         adaptive_thinking: value["capabilities"]["thinking"]["types"]["adaptive"]["supported"]
             .as_bool(),
-        effort: value["capabilities"]["effort"]["supported"].as_bool(),
+        effort: effort["supported"].as_bool(),
+        effort_levels: reported.then_some(levels),
     })
 }
 
@@ -446,13 +505,17 @@ struct Block {
 struct MessageStream {
     sse: SseParser,
     blocks: BTreeMap<u64, Block>,
+    /// `content_block_start` events so far (capped).
+    starts: usize,
     text: String,
-    text_budget: Budget,
+    /// Text, thinking, signatures and block payloads.
+    budget: Budget,
     input_budget: Budget,
     usage: AiUsage,
     model: String,
     stop_reason: Option<String>,
     refusal_category: Option<String>,
+    saw_event: bool,
 }
 
 fn protocol(message: impl Into<String>) -> ProviderError {
@@ -464,13 +527,15 @@ impl MessageStream {
         Self {
             sse: SseParser::new(),
             blocks: BTreeMap::new(),
+            starts: 0,
             text: String::new(),
-            text_budget: Budget::default(),
+            budget: Budget::default(),
             input_budget: Budget::default(),
             usage: AiUsage::default(),
             model: model.to_string(),
             stop_reason: None,
             refusal_category: None,
+            saw_event: false,
         }
     }
 
@@ -493,6 +558,7 @@ impl MessageStream {
     fn event(&mut self, data: &str, on_event: EventSink<'_>) -> Result<bool, ProviderError> {
         let value: Value = serde_json::from_str(data)
             .map_err(|e| protocol(format!("Anthropic sent a malformed stream event: {e}")))?;
+        self.saw_event = true;
         let index = || {
             value["index"]
                 .as_u64()
@@ -509,6 +575,14 @@ impl MessageStream {
             }
             "content_block_start" => {
                 let index = index()?;
+                self.starts += 1;
+                if self.starts > MAX_CONTENT_BLOCKS {
+                    return Err(protocol(format!(
+                        "Anthropic sent more than {MAX_CONTENT_BLOCKS} content blocks"
+                    )));
+                }
+                // The whole payload (redacted data, ids, names, initial text).
+                self.budget.add(data.len(), MAX_RESPONSE_BYTES, "content")?;
                 let start = value["content_block"].clone();
                 let kind = match start["type"].as_str().unwrap_or_default() {
                     "text" => Kind::Text,
@@ -520,10 +594,20 @@ impl MessageStream {
                         on_event(StreamEvent::Thinking);
                         Kind::Opaque
                     }
-                    "tool_use" => Kind::ToolUse {
-                        id: start["id"].as_str().unwrap_or_default().to_string(),
-                        name: start["name"].as_str().unwrap_or_default().to_string(),
-                    },
+                    "tool_use" => {
+                        let input = &start["input"];
+                        if input.as_object().is_some_and(|o| !o.is_empty()) {
+                            self.input_budget.add(
+                                input.to_string().len(),
+                                MAX_TOOL_INPUT_BYTES,
+                                "tool input",
+                            )?;
+                        }
+                        Kind::ToolUse {
+                            id: start["id"].as_str().unwrap_or_default().to_string(),
+                            name: start["name"].as_str().unwrap_or_default().to_string(),
+                        }
+                    }
                     "fallback" => {
                         on_event(StreamEvent::Fallback {
                             from: start["from"]["model"]
@@ -548,8 +632,6 @@ impl MessageStream {
                 };
                 if let Kind::Text = block.kind {
                     if let Some(initial) = block.start["text"].as_str().filter(|t| !t.is_empty()) {
-                        self.text_budget
-                            .add(initial.len(), MAX_TURN_TEXT_BYTES, "text")?;
                         block.buf.push_str(initial);
                         self.text.push_str(initial);
                         on_event(StreamEvent::Text(initial.to_string()));
@@ -568,8 +650,7 @@ impl MessageStream {
                 match delta["type"].as_str().unwrap_or_default() {
                     "text_delta" => {
                         let text = piece("text");
-                        self.text_budget
-                            .add(text.len(), MAX_TURN_TEXT_BYTES, "text")?;
+                        self.budget.add(text.len(), MAX_RESPONSE_BYTES, "content")?;
                         block.buf.push_str(text);
                         self.text.push_str(text);
                         if !text.is_empty() {
@@ -578,11 +659,16 @@ impl MessageStream {
                     }
                     "thinking_delta" => {
                         let thinking = piece("thinking");
-                        self.text_budget
-                            .add(thinking.len(), MAX_TURN_TEXT_BYTES, "text")?;
+                        self.budget
+                            .add(thinking.len(), MAX_RESPONSE_BYTES, "content")?;
                         block.buf.push_str(thinking);
                     }
-                    "signature_delta" => block.signature.push_str(piece("signature")),
+                    "signature_delta" => {
+                        let signature = piece("signature");
+                        self.budget
+                            .add(signature.len(), MAX_RESPONSE_BYTES, "content")?;
+                        block.signature.push_str(signature);
+                    }
                     "input_json_delta" => {
                         let json = piece("partial_json");
                         self.input_budget
@@ -668,7 +754,13 @@ impl MessageStream {
                 }
                 Kind::Opaque if !declined => content.push(block.start),
                 Kind::ToolUse { id, name } if !declined && runs_tools => {
-                    let input = parse_tool_input(&block.buf);
+                    // The whole input may come in `content_block_start`.
+                    let input = match &block.start["input"] {
+                        Value::Object(start) if block.buf.trim().is_empty() => {
+                            Ok(Value::Object(start.clone()))
+                        }
+                        _ => parse_tool_input(&block.buf),
+                    };
                     content.push(json!({
                         "type": "tool_use",
                         "id": id,
@@ -692,6 +784,10 @@ impl MessageStream {
 }
 
 impl Decoder for MessageStream {
+    fn accepts(&self, content_type: &str) -> bool {
+        is_event_stream(content_type)
+    }
+
     fn feed(&mut self, bytes: &[u8], on_event: EventSink<'_>) -> Result<bool, ProviderError> {
         let events = self.sse.push(bytes).map_err(|e| protocol(e.to_string()))?;
         for (_name, data) in events {
@@ -700,6 +796,14 @@ impl Decoder for MessageStream {
             }
         }
         Ok(false)
+    }
+
+    fn started(&self) -> bool {
+        !self.blocks.is_empty()
+    }
+
+    fn saw_event(&self) -> bool {
+        self.saw_event
     }
 
     fn partial(&self) -> AssistantTurn {

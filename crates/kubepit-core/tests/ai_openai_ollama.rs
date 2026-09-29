@@ -12,8 +12,9 @@ use kubepit_core::ai::is_loopback;
 use kubepit_core::ai::ollama::OllamaProvider;
 use kubepit_core::ai::openai::{stop_reason, OpenAiCompatProvider};
 use kubepit_core::ai::provider::{
-    http_client, AiTimeouts, AssistantTurn, ChatMessage, ChatRequest, Provider, ProviderError,
+    AiTimeouts, AssistantTurn, ChatMessage, ChatRequest, Provider, ProviderError,
     ProviderErrorKind, RetryPolicy, StopReason, StreamEvent, ToolCallReq, ToolSpec, UserBlock,
+    MAX_TOOL_CALLS,
 };
 use kubepit_core::ai::{AiProviderKind, AiUsage};
 use parking_lot::Mutex;
@@ -31,26 +32,19 @@ fn fast_retry() -> RetryPolicy {
     }
 }
 
+/// Providers build their own client (no redirects, no proxy for loopback).
 fn openai(url: &str, key: Option<&str>) -> OpenAiCompatProvider {
-    let timeouts = AiTimeouts::default();
     OpenAiCompatProvider::new(
-        http_client(&timeouts, url).unwrap(),
         url.to_string(),
         key.map(str::to_string),
-        timeouts,
+        AiTimeouts::default(),
         fast_retry(),
     )
+    .unwrap()
 }
 
 fn ollama(url: &str) -> OllamaProvider {
-    let timeouts = AiTimeouts::default();
-    OllamaProvider::new(
-        http_client(&timeouts, url).unwrap(),
-        url.to_string(),
-        8192,
-        timeouts,
-        fast_retry(),
-    )
+    OllamaProvider::new(url.to_string(), 8192, AiTimeouts::default(), fast_retry()).unwrap()
 }
 
 fn tool(name: &'static str) -> ToolSpec {
@@ -197,10 +191,12 @@ async fn openai_streams_text_tool_calls_and_usage() {
         turn.tool_calls[0].input.as_ref().unwrap()["namespace"],
         "shop"
     );
+    // `prompt_tokens` (900) includes the 512 cached ones; `input_tokens`
+    // is the uncached rest, as with Anthropic, so nothing is counted twice.
     assert_eq!(
         turn.usage,
         AiUsage {
-            input_tokens: 900,
+            input_tokens: 388,
             output_tokens: 40,
             cache_read_tokens: 512,
             cache_write_tokens: 0
@@ -214,7 +210,7 @@ async fn openai_streams_text_tool_calls_and_usage() {
     );
     assert!(events
         .iter()
-        .any(|e| matches!(e, StreamEvent::Usage(u) if u.input_tokens == 900)));
+        .any(|e| matches!(e, StreamEvent::Usage(u) if u.input_tokens == 388)));
 }
 
 #[tokio::test]
@@ -371,6 +367,120 @@ async fn openai_switches_to_max_completion_tokens_when_asked() {
     let second = body_of(&log[1]);
     assert!(second.get("max_tokens").is_none());
     assert_eq!(second["max_completion_tokens"], 1024);
+}
+
+#[tokio::test]
+async fn openai_drops_stream_options_when_the_server_rejects_them() {
+    let server = support::start(Arc::new(|_req: &Request, log: &support::Log| {
+        if log.lock().is_empty() {
+            Reply::Json(
+                400,
+                json!({"error": {"message": "Unrecognized request argument supplied: stream_options",
+                                 "type": "invalid_request_error"}}),
+            )
+        } else {
+            openai_stream(&[openai_chunk(json!({"content": "OK"}), Some("stop"))])
+        }
+    }))
+    .await;
+    let provider = openai(&server.url, None);
+    let (result, _) = chat(&provider, &ask("gpt-test")).await;
+    assert_eq!(result.unwrap().text, "OK");
+    let log = server.log.lock().clone();
+    assert_eq!(log.len(), 2);
+    assert_eq!(body_of(&log[0])["stream_options"]["include_usage"], true);
+    assert!(body_of(&log[1]).get("stream_options").is_none());
+    // Remembered for later requests.
+    let (again, _) = chat(&provider, &ask("gpt-test")).await;
+    again.unwrap();
+    assert!(body_of(&server.log.lock()[2])
+        .get("stream_options")
+        .is_none());
+
+    // Any other 400 is returned as is.
+    let server = serve(|| {
+        Reply::Json(
+            400,
+            json!({"error": {"message": "messages: too long", "type": "invalid_request_error"}}),
+        )
+    })
+    .await;
+    let (result, _) = chat(&openai(&server.url, None), &ask("gpt-test")).await;
+    assert_eq!(result.unwrap_err().kind, ProviderErrorKind::BadRequest);
+    assert_eq!(server.log.lock().len(), 1);
+}
+
+#[tokio::test]
+async fn openai_tool_calls_without_an_index_are_keyed_by_id() {
+    let server = serve(|| {
+        openai_stream(&[
+            openai_chunk(
+                json!({"tool_calls": [{"id": "a", "type": "function",
+                        "function": {"name": "get_pod", "arguments": "{\"pod\":"}}]}),
+                None,
+            ),
+            openai_chunk(
+                json!({"tool_calls": [{"id": "b", "type": "function",
+                        "function": {"name": "get_events", "arguments": "{}"}}]}),
+                None,
+            ),
+            openai_chunk(
+                json!({"tool_calls": [{"id": "a", "function": {"arguments": "\"web-1\"}"}}]}),
+                None,
+            ),
+            openai_chunk(json!({}), Some("tool_calls")),
+        ])
+    })
+    .await;
+    let (result, _) = chat(&openai(&server.url, None), &ask("gpt-test")).await;
+    let turn = result.unwrap();
+    let calls: Vec<_> = turn
+        .tool_calls
+        .iter()
+        .map(|c| (c.id.as_str(), c.name.as_str(), c.input.clone()))
+        .collect();
+    assert_eq!(
+        calls,
+        vec![
+            ("a", "get_pod", Ok(json!({"pod": "web-1"}))),
+            ("b", "get_events", Ok(json!({}))),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn openai_and_ollama_cap_the_number_of_tool_calls() {
+    let server = serve(|| {
+        let mut chunks: Vec<Value> = (0..=MAX_TOOL_CALLS)
+            .map(|i| {
+                openai_chunk(
+                    json!({"tool_calls": [{"index": i, "id": format!("c{i}"), "type": "function",
+                            "function": {"name": "get_pod", "arguments": "{}"}}]}),
+                    None,
+                )
+            })
+            .collect();
+        chunks.push(openai_chunk(json!({}), Some("tool_calls")));
+        openai_stream(&chunks)
+    })
+    .await;
+    let (result, _) = chat(&openai(&server.url, None), &ask("gpt-test")).await;
+    let err = result.unwrap_err();
+    assert_eq!(err.kind, ProviderErrorKind::Protocol, "{}", err.message);
+
+    let server = serve(|| {
+        let calls: Vec<Value> = (0..=MAX_TOOL_CALLS)
+            .map(|_| json!({"function": {"name": "get_pod", "arguments": {}}}))
+            .collect();
+        ollama_stream(&[
+            json!({"model": "llama3.1:8b", "done": false,
+                   "message": {"role": "assistant", "content": "", "tool_calls": calls}}),
+            ollama_done("stop", 1, 1),
+        ])
+    })
+    .await;
+    let (result, _) = chat(&ollama(&server.url), &ask("llama3.1:8b")).await;
+    assert_eq!(result.unwrap_err().kind, ProviderErrorKind::Protocol);
 }
 
 #[tokio::test]
