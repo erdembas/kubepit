@@ -26,7 +26,10 @@
 //! | [`keys`]     | `ai/<provider-id>` credential store entries           |
 //! | [`provider`] | the `Provider` trait and chat types (`ToolSpec`)      |
 
+pub mod budget;
+pub mod context;
 pub mod keys;
+pub mod prompts;
 pub mod provider;
 pub mod redact;
 pub mod settings;
