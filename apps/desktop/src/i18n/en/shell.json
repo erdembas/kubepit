@@ -331,6 +331,7 @@
   "Delete section \"{value1}\"?\n\nClusters inside will move to \"Unassigned\" — they are not removed.": "Delete section \"{value1}\"?\n\nClusters inside will move to \"Unassigned\" — they are not removed.",
   "Delete, scale to zero, drain and Helm uninstall always ask first. Production clusters additionally require typing the resource name.": "Delete, scale to zero, drain and Helm uninstall always ask first. Production clusters additionally require typing the resource name.",
   "Deleted": "Deleted",
+  "Demo credential store (this browser tab)": "Demo credential store (this browser tab)",
   "Deployment {name} exceeded its progress deadline": "Deployment {name} exceeded its progress deadline",
   "Deployments of one namespace": "Deployments of one namespace",
   "Deprecated and removed APIs each cluster uses for its next version": "Deprecated and removed APIs each cluster uses for its next version",

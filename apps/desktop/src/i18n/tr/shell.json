@@ -331,6 +331,7 @@
   "Delete section \"{value1}\"?\n\nClusters inside will move to \"Unassigned\" — they are not removed.": "\"{value1}\" bölümü silinsin mi?\n\nİçindeki cluster'lar \"Atanmamış\" altına taşınır — kaldırılmazlar.",
   "Delete, scale to zero, drain and Helm uninstall always ask first. Production clusters additionally require typing the resource name.": "Silme, sıfıra ölçekleme, drain ve Helm kaldırma her zaman önce onay ister. Production cluster'larda ayrıca kaynak adının yazılması gerekir.",
   "Deleted": "Silindi",
+  "Demo credential store (this browser tab)": "Demo kimlik bilgisi deposu (bu tarayıcı sekmesi)",
   "Deployment {name} exceeded its progress deadline": "Deployment {name} ilerleme süresini aştı",
   "Deployments of one namespace": "Tek bir namespace'teki Deployment'lar",
   "Deprecated and removed APIs each cluster uses for its next version": "Her cluster'ın sonraki sürümünde kullanımdan kalkan veya kaldırılan API kullanımı",
