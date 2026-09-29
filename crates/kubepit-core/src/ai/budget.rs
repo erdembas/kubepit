@@ -502,8 +502,12 @@ mod tests {
             .iter()
             .position(|l| l.ends_with("lines omitted …"))
             .unwrap();
-        // 20 % head, 80 % tail.
-        assert!(marker * 3 < kept.len() - marker);
+        // 20 % head, 80 % tail (every line has the same size; whole lines
+        // cost at most one line on each side).
+        let (head, tail) = (marker, kept.len() - marker - 1);
+        assert!(head > 0 && tail > 0);
+        let share = head as f64 / (head + tail) as f64;
+        assert!((0.18..=0.22).contains(&share), "head {head}, tail {tail}");
         let omitted: usize = kept[marker]
             .trim_start_matches("… ")
             .split(' ')
