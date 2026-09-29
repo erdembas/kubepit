@@ -28,7 +28,10 @@
 //!    that first resolution is kept (the second collection cannot change
 //!    the strategy, so window and settings agree). Both collections share
 //!    one budget of [`MAX_BATCHES`], a batch kept back for the second while
-//!    one is possible.
+//!    one is possible. When the second collection gets no batch through (a
+//!    cluster the first pass had to split down uses the whole budget), the
+//!    first window is kept with the strategy it was collected for
+//!    (`recollection-failed`), so such a cluster does not fail every scan.
 //!
 //! `progress` reports answered queries against `16 × planned batches` (the
 //! total grows when a batch splits). Everything goes through the one
@@ -380,7 +383,12 @@ impl Kubepit {
         let mut succeeded = false;
         let mut partial: HashSet<String> = HashSet::new();
         let (mut failed, mut left_over) = (Vec::new(), Vec::new());
-        let mut first_error: Option<String> = None;
+        // Why nothing succeeded: the first error of a batch that was not
+        // split further, else "nothing could be verified", else the first
+        // error of a batch that was split.
+        let mut leaf_error: Option<String> = None;
+        let mut split_error: Option<String> = None;
+        let mut unverified = false;
         while let Some(scope_namespaces) = queue.pop_front() {
             let scope = StatScope {
                 namespaces: scope_namespaces.clone(),
@@ -407,32 +415,38 @@ impl Kubepit {
                     | BatchFailure::Tunnel(_)
                     | BatchFailure::LabelMismatch),
                 ) => return Err(SourceAbort::of(e)),
-                Err(e @ BatchFailure::Unverified) => {
+                Err(BatchFailure::Unverified) => {
                     // Not this cluster's for sure: unused, and smaller
                     // scopes would not prove more.
-                    first_error.get_or_insert_with(|| e.to_string());
+                    unverified = true;
                     failed.extend(scope_namespaces);
                 }
                 Err(e @ BatchFailure::Splittable { .. }) => {
-                    first_error.get_or_insert_with(|| e.to_string());
                     if scope_namespaces.len() <= 1 {
+                        leaf_error.get_or_insert_with(|| e.to_string());
                         failed.extend(scope_namespaces);
                         continue;
                     }
                     let parts = split_down(&scope_namespaces);
                     if !budget.take(parts.len()) {
+                        leaf_error.get_or_insert_with(|| e.to_string());
                         left_over.extend(scope_namespaces);
                         continue;
                     }
+                    split_error.get_or_insert_with(|| e.to_string());
                     progress.plan(parts.len());
                     queue.extend(parts);
                 }
             }
         }
         if !succeeded {
+            let detail = leaf_error
+                .or_else(|| unverified.then(|| BatchFailure::Unverified.to_string()))
+                .or(split_error)
+                .unwrap_or_else(|| "no usage batch succeeded".into());
             return Err(SourceAbort {
                 kind: SourceAbortKind::AllBatchesFailed,
-                detail: first_error.unwrap_or_else(|| "no usage batch succeeded".into()),
+                detail,
             });
         }
 
@@ -571,6 +585,8 @@ impl Kubepit {
         let mut pinned: Option<(&'static dyn RecommendationStrategy, bool)> = None;
         if prometheus {
             let mut days = settings_of(likely).days;
+            // The first collection while a second one runs at another window.
+            let mut first: Option<(Collected, u32)> = None;
             loop {
                 match self
                     .collect_usage(cluster_id, &plan, days, &progress, &mut budget)
@@ -583,11 +599,25 @@ impl Kubepit {
                             // Collected again at the resolved strategy's
                             // window, which that strategy then keeps.
                             pinned = Some(resolved);
+                            first = Some((c, days));
                             days = wanted;
                             budget.reserve = 0;
                             continue;
                         }
                         collected = Some((c, days));
+                    }
+                    Err(abort)
+                        if abort.kind == SourceAbortKind::AllBatchesFailed && first.is_some() =>
+                    {
+                        // The second window got nothing through: keep the
+                        // first, with the strategy it was collected for (its
+                        // window by construction).
+                        notes.push(note(
+                            RightsizingNoteKind::RecollectionFailed,
+                            Some(abort.detail),
+                        ));
+                        pinned = Some(strategy::resolve(requested, true)?);
+                        collected = first.take();
                     }
                     Err(abort) => {
                         notes.push(note(

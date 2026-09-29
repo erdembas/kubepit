@@ -1618,7 +1618,7 @@ report holds a metrics-server fallback. Never parse the report's notes for it.
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1657,21 +1657,21 @@ async fn source_change_hides_results_and_scans_need_a_connection() {
 `history_rec_latest_for_tests` is a `#[doc(hidden)] pub fn` on `Kubepit`. Task 18
 replaces its uses with `recommendations_latest`.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core --test recommendations scan`
 
 Expected: FAIL to compile.
 
-- [ ] **Step 3: Implement the state, the runner, the sink method and the recorder**
+- [x] **Step 3: Implement the state, the runner, the sink method and the recorder**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core
@@ -1720,7 +1720,7 @@ git commit -m "feat(recommendations): manual scans persisted with keep-last-good
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test] fn next_due_follows_the_rules() {
@@ -1751,22 +1751,22 @@ async fn disconnect_or_removal_interrupts_a_running_scan() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core recommendations::schedule && cargo test -p kubepit-core --test recommendations schedul`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement the scheduler and the lifecycle hooks**
+- [x] **Step 3: Implement the scheduler and the lifecycle hooks**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p kubepit-core`
 
 Expected: PASS. The existing tests stay deterministic because no test enables scans
 except these.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core
@@ -1815,7 +1815,7 @@ git commit -m "feat(recommendations): hourly background scans while connected"
 
 Steps:
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1834,21 +1834,21 @@ async fn fleet_trend_and_export_read_the_store() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p kubepit-core --test recommendations -- latest fleet`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement the commands, the Tauri wiring, the TS contract and the docs section**
+- [x] **Step 3: Implement the commands, the Tauri wiring, the TS contract and the docs section**
 
-- [ ] **Step 4: Run the tests and checks**
+- [x] **Step 4: Run the tests and checks**
 
 Run: `cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && pnpm typecheck`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/kubepit-core apps/desktop/src-tauri apps/desktop/src/types/index.ts apps/desktop/src/lib/ipc.ts docs/ARCHITECTURE.md
@@ -1888,15 +1888,15 @@ git commit -m "feat(recommendations): read commands, scan event and Tauri wiring
 
 Steps:
 
-- [ ] **Step 1: Implement the handlers and fixtures listed under Interfaces**
+- [x] **Step 1: Implement the handlers and fixtures listed under Interfaces**
 
-- [ ] **Step 2: Typecheck**
+- [x] **Step 2: Typecheck**
 
 Run: `pnpm typecheck`
 
 Expected: PASS.
 
-- [ ] **Step 3: Verify in the browser console**
+- [x] **Step 3: Verify in the browser console**
 
 Run: `pnpm dev:ui`, then in the console
 `await window.__kubepitMock?.('recommendations_latest', {clusterId: 'prod-eu-west-1', runId: null})`,
@@ -1904,7 +1904,7 @@ or through a temporary call in a component, which you remove afterwards.
 
 Expected: a scan with at least 20 workloads, flags and a summary.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/desktop/src/lib/ipc/mock

@@ -54,6 +54,8 @@ mod custom_actions;
 mod security;
 // Cost insight and right-sizing.
 mod cost;
+// Recommendations: stored, scheduled right-sizing scans.
+mod recommendations;
 // Guard: every mutating command goes through the audit log.
 #[cfg(test)]
 mod audit_coverage;
@@ -81,6 +83,7 @@ pub use metrics::*;
 pub use openapi::*;
 pub use portforward::*;
 pub use prometheus::*;
+pub use recommendations::*;
 pub use resources::*;
 pub use security::*;
 pub use updater::*;

@@ -13,6 +13,7 @@ import type {
   AuditFilter,
   AuditPage,
   ClientCertificate,
+  ClusterRecommendationSummary,
   ChangeDetail,
   ChangeFilter,
   ChangePage,
@@ -95,6 +96,11 @@ import type {
   PrometheusStatus,
   PrometheusTarget,
   PromQueryResult,
+  RecommendationExportFormat,
+  RecommendationLatest,
+  RecommendationRun,
+  RecommendationScanStatus,
+  RecommendationTrendPoint,
   ResolvedCustomAction,
   PssLevel,
   ResourceList,
@@ -114,7 +120,9 @@ import type {
   WhoAmI,
   WorkloadLogBatch,
   WorkloadLogOptions,
+  WorkloadRecommendation,
   WorkloadRef,
+  WorkloadUsageHistory,
   WorkspaceChanged,
   WorkspaceSnapshot,
 } from '@/types';
@@ -568,6 +576,53 @@ export const ipc = {
     changes: ContainerResourceChange[],
     dryRun: boolean,
   ) => call<DryRunResult>('rightsizing_apply', { clusterId, target, changes, dryRun }),
+  // -- Recommendations (stored, scheduled scans; read-only for the cluster) --
+  /** Scan state, schedule and "Scan now" availability of one cluster. */
+  recommendationsStatus: (clusterId: ClusterId) =>
+    call<RecommendationScanStatus>('recommendations_status', { clusterId }),
+  /**
+   * "Scan now": refused while disconnected and within a minute of the last
+   * manual scan; returns the running status while a scan runs. Progress
+   * arrives on `events.onRecommendationScan`.
+   */
+  recommendationsScan: (clusterId: ClusterId) =>
+    call<RecommendationScanStatus>('recommendations_scan', { clusterId }),
+  /** The latest successful scan (or run `runId`), re-evaluated with the current strategy and settings. */
+  recommendationsLatest: (clusterId: ClusterId, runId: number | null = null) =>
+    call<RecommendationLatest>('recommendations_latest', { clusterId, runId }),
+  /** Stored runs, newest first (at most 500). */
+  recommendationsRuns: (clusterId: ClusterId, limit = 500) =>
+    call<RecommendationRun[]>('recommendations_runs', { clusterId, limit }),
+  /** One workload across the runs whose rows are kept, oldest first. */
+  recommendationsTrend: (clusterId: ClusterId, workload: WorkloadRef) =>
+    call<RecommendationTrendPoint[]>('recommendations_trend', { clusterId, workload }),
+  /**
+   * CPU and memory history of one container of a recommended workload
+   * (Prometheus range queries; `days` null = 7). A row whose pod list was
+   * truncated sends no pod names, so the workload's name pattern is used.
+   */
+  recommendationsUsageHistory: (
+    clusterId: ClusterId,
+    rec: Pick<WorkloadRecommendation, 'kind' | 'namespace' | 'name' | 'pods' | 'pods_truncated'>,
+    container: string,
+    days: number | null = null,
+  ) =>
+    call<WorkloadUsageHistory>('recommendations_usage_history', {
+      clusterId,
+      workload: { kind: rec.kind, namespace: rec.namespace, name: rec.name },
+      container,
+      pods: rec.pods_truncated ? [] : rec.pods,
+      days,
+    }),
+  /** Every registered cluster with its latest successful run (stored data only). */
+  recommendationsFleet: () => call<ClusterRecommendationSummary[]>('recommendations_fleet'),
+  /** JSON or YAML of the selected workloads (empty = all), re-evaluated; no connection metadata. */
+  recommendationsExport: (
+    clusterId: ClusterId,
+    runId: number | null,
+    workloads: WorkloadRef[],
+    format: RecommendationExportFormat,
+  ) => call<string>('recommendations_export', { clusterId, runId, workloads, format }),
   // -- Helm charts (repositories and catalog are local helm commands) -------
   helmRepoList: () => call<HelmRepo[]>('helm_repo_list'),
   helmRepoAdd: (name: string, url: string, options: HelmRepoAddOptions) =>
@@ -681,6 +736,9 @@ export const events = {
     listenEvent<AlertNotice>('alerts://new', handler),
   /** Alerts were marked read or cleared: refetch `alertsList`. */
   onAlertsChanged: (handler: () => void) => listenEvent<null>('alerts://changed', () => handler()),
+  /** A cluster's recommendation scan changed state or progressed (at most every 250 ms). */
+  onRecommendationScan: (handler: (status: RecommendationScanStatus) => void) =>
+    listenEvent<RecommendationScanStatus>('recommendations://scan', handler),
   /** The saved custom actions after any save (every window hears it). */
   onCustomActionsChanged: (handler: (actions: CustomAction[]) => void) =>
     listenEvent<CustomAction[]>('customactions://changed', handler),

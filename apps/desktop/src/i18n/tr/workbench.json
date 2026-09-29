@@ -2397,6 +2397,7 @@
   "The Service sends traffic to ready pods with all of these labels.": "Service, bu etiketlerin hepsine sahip hazır pod'lara trafik gönderir.",
   "The source has no running pods to evaluate.": "Kaynakta değerlendirilecek çalışan pod yok.",
   "The source is outside the cluster: no egress policy applies.": "Kaynak küme dışında: hiçbir giden trafik politikası uygulanmaz.",
+  "The strategy's own usage window could not be collected ({detail}); the recommendations use the window collected first and the strategy it fits.": "Stratejinin kendi kullanım penceresi toplanamadı ({detail}); öneriler ilk toplanan pencereyi ve ona uyan stratejiyi kullanıyor.",
   "The table no longer matches this view": "Tablo artık bu görünümle eşleşmiyor",
   "The trend could not be loaded: {detail}": "Eğilim yüklenemedi: {detail}",
   "The upgrade renders exactly the same manifest.": "Güncelleme tamamen aynı manifesti üretiyor.",

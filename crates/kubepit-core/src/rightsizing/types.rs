@@ -368,6 +368,10 @@ pub enum RightsizingNoteKind {
     QueryBudgetExceeded,
     /// HorizontalPodAutoscalers could not be listed.
     HpaUnavailable,
+    /// The resolved strategy's own window could not be collected (the
+    /// shared budget ran out, or every batch failed): the first window is
+    /// used with the strategy it fits (detail: the error).
+    RecollectionFailed,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

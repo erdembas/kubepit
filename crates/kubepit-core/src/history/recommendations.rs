@@ -467,6 +467,34 @@ pub fn last_attempt(conn: &Connection, cluster_id: &str) -> Result<Option<Recomm
     Ok(runs(conn, cluster_id, 1)?.into_iter().next())
 }
 
+/// When the newest run of `cluster_id` (any status) ended — else started —
+/// and the source configuration it used (the scheduler's last attempt).
+pub fn last_attempt_source(conn: &Connection, cluster_id: &str) -> Result<Option<(i64, String)>> {
+    Ok(conn
+        .query_row(
+            "SELECT COALESCE(finished, started), source_config FROM rec_runs
+             WHERE cluster_id = ?1 ORDER BY started DESC, id DESC LIMIT 1",
+            [cluster_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?)
+}
+
+/// The run the latest pointer of `cluster_id` names, whatever source
+/// configuration it used (the scan status' last success).
+pub fn latest_run(conn: &Connection, cluster_id: &str) -> Result<Option<RecommendationRun>> {
+    Ok(conn
+        .query_row(
+            &format!(
+                "SELECT {RUN_COLUMNS} FROM rec_latest l JOIN rec_runs r ON r.id = l.run_id
+                 WHERE l.cluster_id = ?1"
+            ),
+            [cluster_id],
+            run_row,
+        )
+        .optional()?)
+}
+
 fn trend_containers(row: &str) -> Vec<RecommendationTrendContainer> {
     let Ok(w) = serde_json::from_str::<WorkloadRecommendation>(row) else {
         return Vec::new();
@@ -858,6 +886,15 @@ mod tests {
         assert_eq!(failure.status, RunStatus::Failed);
         assert_eq!(failure.error.as_deref(), Some("boom"));
         assert!(failure.summary.is_none() && failure.source.is_none());
+        // The pointer's run, whatever the source configuration.
+        assert_eq!(latest_run(&conn, "c1").unwrap().unwrap().id, a);
+        assert_eq!(
+            last_attempt_source(&conn, "c1").unwrap(),
+            Some((20, CONFIG.to_string()))
+        );
+        assert!(last_attempt_source(&conn, "c2").unwrap().is_none());
+        assert_eq!(last_attempt(&conn, "c1").unwrap().unwrap().id, b);
+        assert!(latest_run(&conn, "c2").unwrap().is_none());
 
         // A later success clears the failure; other clusters see nothing.
         let c = begin(&conn, &scan_begin("c1")).unwrap();

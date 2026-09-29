@@ -3,12 +3,14 @@ import { cpuMillicores, memoryBytes } from '@/lib/kube/quantity';
 import type {
   ContainerRecommendation,
   CostAggregate,
+  HpaInfo,
   CostItem,
   CostPlatform,
   CostPricing,
   CostTotals,
   CostTrendPoint,
   KubeObject,
+  RecommendationLens,
   RecommendationWarning,
   ResourceChange,
   ResourceValues,
@@ -631,14 +633,140 @@ function finalize(
   };
 }
 
+/** The backend's `workload-history` strategy (whole millicores / MiB, OOM floor, 72 h tiers). */
+function workloadHistory(
+  current: ResourceValues,
+  usage: UsageStats | null,
+  source: RightsizingSource,
+  s: RightsizingSettings,
+  evidence: UsageEvidence | null,
+): StrategyOutput {
+  if (!usage)
+    return {
+      recommended: { cpu_request: null, cpu_limit: null, memory_request: null, memory_limit: null },
+      confidence: 'low',
+      warnings: [warn('no-usage')],
+    };
+  const whole = (v: number) => Math.max(0, Math.ceil(v - 1e-9));
+  const wholeMib = (b: number) => Math.max(0, Math.ceil(b / MiB - 1e-9)) * MiB;
+  const oom = !!evidence?.oom_killed;
+  const memoryBase =
+    oom && current.memory_limit != null
+      ? Math.max(usage.memory_max, current.memory_limit)
+      : usage.memory_max;
+  const cpu = settle(
+    current.cpu_request,
+    whole(Math.max(s.min_cpu_millicores, usage.cpu_p95 * (1 + s.cpu_headroom_percent / 100))),
+    10,
+    usage.cpu_p95,
+  );
+  const memory = settle(
+    current.memory_request,
+    wholeMib(Math.max(s.min_memory_bytes, memoryBase * (1 + s.memory_headroom_percent / 100))),
+    16 * MiB,
+    memoryBase,
+  );
+  const memoryLimit =
+    current.memory_limit == null
+      ? Math.max(memory, wholeMib(memoryBase * (1 + s.memory_limit_headroom_percent / 100)))
+      : null;
+  const confidence: RightsizingConfidence =
+    source === 'prometheus' ? (usage.hours >= 72 ? 'high' : 'medium') : 'low';
+  const warnings: RecommendationWarning[] = [];
+  if (source !== 'prometheus') warnings.push(warn('metrics-server-only'));
+  else if (confidence !== 'high') warnings.push(warn('short-history'));
+  if (memoryLimit != null) warnings.push(warn('memory-limit-added'));
+  return {
+    recommended: {
+      cpu_request: cpu,
+      cpu_limit: null,
+      memory_request: memory,
+      memory_limit: memoryLimit,
+    },
+    confidence,
+    warnings,
+  };
+}
+
+const CONFIDENCE_RANK: Record<RightsizingConfidence, number> = { low: 0, medium: 1, high: 2 };
+const cap = (c: RightsizingConfidence, limit: RightsizingConfidence) =>
+  CONFIDENCE_RANK[c] <= CONFIDENCE_RANK[limit] ? c : limit;
+
+/** The backend's shared evidence step (`strategy::apply_evidence`): flags and caps, never values. */
+function applyEvidence(
+  out: StrategyOutput,
+  current: ResourceValues,
+  e: UsageEvidence | null,
+  hpa: HpaInfo | null,
+  s: RightsizingSettings,
+): StrategyOutput {
+  let confidence = out.confidence;
+  const warnings = [...out.warnings];
+  const flag = (code: string, limit: RightsizingConfidence, detail: string | null = null) => {
+    warnings.push({ code, detail });
+    confidence = cap(confidence, limit);
+  };
+  if (e) {
+    if (e.identity === 'ambiguous') flag('identity-unclear', 'low');
+    if (e.observed_hours < s.min_hours)
+      flag('insufficient-history', 'low', String(Math.floor(Math.max(0, e.observed_hours))));
+    const low = [e.cpu_coverage, e.memory_coverage].filter(
+      (c): c is number => c != null && c < s.min_coverage,
+    );
+    if (low.length)
+      flag('low-coverage', 'low', `${Math.floor(Math.max(0, Math.min(...low)) * 100)}%`);
+    if (e.partial) flag('partial-data', 'medium');
+  }
+  if (hpa) {
+    flag('hpa-target', 'medium', hpa.name);
+    const targets = hpa.metrics.flatMap((m) => {
+      if (m.target_utilization == null || m.resource === 'other') return [];
+      const [before, after] =
+        m.resource === 'cpu'
+          ? [current.cpu_request, out.recommended.cpu_request]
+          : [current.memory_request, out.recommended.memory_request];
+      return changeOf(before, after) !== 'unchanged'
+        ? [`${m.resource} ${m.target_utilization}%`]
+        : [];
+    });
+    if (targets.length) flag('hpa-utilization', 'medium', targets.join(', '));
+  }
+  if (e) {
+    if (e.oom_killed) flag('oom-killed', 'medium');
+    if (e.throttle_ratio != null && e.throttle_ratio >= s.throttle_threshold_percent / 100)
+      flag('cpu-throttled', 'medium', `${(e.throttle_ratio * 100).toFixed(1)}%`);
+    if (e.identity === 'name-match') flag('identity-by-name', 'medium');
+  }
+  return { recommended: out.recommended, confidence, warnings };
+}
+
+/** What `recommendContainer` needs besides the usage (defaults: percentile-headroom, no evidence). */
+export interface ContainerContext {
+  strategy?: string;
+  evidence?: UsageEvidence | null;
+  hpa?: HpaInfo | null;
+}
+
 export function recommendContainer(
   name: string,
   current: ResourceValues,
   usage: UsageStats | null,
   source: RightsizingSource,
   s: RightsizingSettings,
+  ctx: ContainerContext = {},
 ): ContainerRecommendation {
-  return finalize(name, current, usage, percentileHeadroom(current, usage, source, s));
+  const evidence = ctx.evidence ?? null;
+  const out =
+    ctx.strategy === 'workload-history'
+      ? workloadHistory(current, usage, source, s, evidence)
+      : percentileHeadroom(current, usage, source, s);
+  const rec = finalize(
+    name,
+    current,
+    usage,
+    applyEvidence(out, current, evidence, ctx.hpa ?? null, s),
+  );
+  return { ...rec, evidence };
 }
 
 /** Settings every backend strategy reads (the last three feed the shared evidence step). */
@@ -653,8 +781,9 @@ const SETTINGS_KEYS = [
 ];
 
 /**
- * The backend's strategies. The demo computes both with the percentile math;
- * only their defaults (15 % vs. 20 % CPU headroom) differ.
+ * The backend's strategies: `percentile-headroom` (the default, its
+ * percentile math) and `workload-history` (whole-unit rounding, the OOM
+ * floor, 72-hour confidence tiers).
  */
 export const STRATEGIES: RightsizingStrategyInfo[] = [
   {
@@ -671,14 +800,40 @@ export const STRATEGIES: RightsizingStrategyInfo[] = [
   },
 ];
 
+/** Like the backend's `strategy::resolve`: a named strategy as it is, else automatic. */
+export function resolveStrategy(
+  requested: string | null | undefined,
+  ownerMetrics: boolean,
+): { id: string; auto: boolean } {
+  const id = requested?.trim();
+  if (id) return { id, auto: false };
+  return { id: ownerMetrics ? 'workload-history' : 'percentile-headroom', auto: true };
+}
+
 const changed = (c: ContainerRecommendation) =>
   [c.cpu, c.memory, c.memory_limit, c.cpu_limit].some((x) => x !== 'unchanged');
+
+/**
+ * Usage drifting slowly over the days (±12 %, per workload), so stored
+ * scans of different times recommend a little differently.
+ */
+export function driftFactor(seed: string, at: number): number {
+  const phase = unit(`${seed}#phase`) * 2 * Math.PI;
+  const slow = Math.sin((at / (5 * DAY)) * 2 * Math.PI + phase) * 0.1;
+  const daily = (unit(`${seed}#${Math.floor(at / DAY)}`) - 0.5) * 0.04;
+  return 1 + slow + daily;
+}
 
 /**
  * Synthetic usage of one container: most templates are over-provisioned,
  * some run hot, the rest are about right.
  */
-function syntheticUsage(seed: string, current: ResourceValues, hours: number): UsageStats | null {
+function syntheticUsage(
+  seed: string,
+  current: ResourceValues,
+  hours: number,
+  factor = 1,
+): UsageStats | null {
   const r = unit(seed);
   const r2 = unit(`${seed}#`);
   const cpuReq = current.cpu_request;
@@ -696,14 +851,17 @@ function syntheticUsage(seed: string, current: ResourceValues, hours: number): U
     cpu = (cpuReq ?? 60) * (0.8 + r2 * 0.1);
     mem = (memReq ?? 192 * MiB) * (0.78 + r2 * 0.06);
   }
+  cpu *= factor;
+  mem *= factor;
+  if (current.memory_limit) mem = Math.min(mem, current.memory_limit * 0.99);
   if (!Number.isFinite(cpu) || !Number.isFinite(mem)) return null;
   return {
     cpu_p95: cpu,
     cpu_max: cpu * (1.3 + r2 * 0.8),
     memory_max: mem,
     hours,
-    cpu_avg: null,
-    memory_avg: null,
+    cpu_avg: cpu * (0.55 + r2 * 0.2),
+    memory_avg: mem * (0.8 + r2 * 0.1),
   };
 }
 
@@ -715,31 +873,48 @@ function costReplicas(kind: string, replicas: number, list: ContainerRecommendat
 }
 
 /**
- * A CronJob's usage evidence: the demo's jobs run 15–45 % of the time
- * (average running pods), so a week of observed hours stays above `min_hours`.
+ * A CronJob's duty cycle: the demo's jobs run 15–45 % of the time (average
+ * running pods), so a week of observed hours stays above `min_hours`.
  */
-function cronEvidence(
+function cronDuty(seed: string): number {
+  return Math.round((0.15 + unit(`${seed}#duty`) * 0.3) * 100) / 100;
+}
+
+/**
+ * The folded evidence of one container: mostly clean, with a few gaps,
+ * throttled and OOM-killed containers (deterministic per container).
+ */
+function demoEvidence(
   seed: string,
-  windowHours: number,
+  hours: number,
   pods: number,
-): { duty: number; evidence: (hours: number) => UsageEvidence } {
-  const duty = Math.round((0.15 + unit(`${seed}#duty`) * 0.3) * 100) / 100;
-  const samples = Math.round(windowHours * duty * 12);
+  duty: number | null,
+  identity: UsageEvidence['identity'],
+  partial: boolean,
+): UsageEvidence {
+  const gap = unit(`${seed}#gap`) < 0.05;
+  const coverage = gap
+    ? 0.55 + unit(`${seed}#cov`) * 0.3
+    : Math.min(1, 0.95 + unit(`${seed}#cov`) * 0.06);
+  const samples = Math.round(hours * 12 * coverage);
+  const t = unit(`${seed}#thr`);
   return {
+    observed_hours: hours,
+    cpu_coverage: Math.round(coverage * 1000) / 1000,
+    memory_coverage: Math.min(1, Math.round((coverage + 0.02) * 1000) / 1000),
+    cpu_samples: samples,
+    memory_samples: samples,
+    pods,
     duty,
-    evidence: (hours) => ({
-      observed_hours: hours,
-      cpu_coverage: 1,
-      memory_coverage: 1,
-      cpu_samples: samples,
-      memory_samples: samples,
-      pods,
-      duty,
-      throttle_ratio: null,
-      oom_killed: false,
-      partial: false,
-      identity: 'owner-metrics',
-    }),
+    throttle_ratio:
+      t < 0.07
+        ? Math.round((0.06 + unit(`${seed}#thr2`) * 0.12) * 1000) / 1000
+        : t < 0.5
+          ? Math.round(unit(`${seed}#thr2`) * 0.02 * 1000) / 1000
+          : null,
+    oom_killed: unit(`${seed}#oom`) < 0.035,
+    partial,
+    identity,
   };
 }
 
@@ -766,6 +941,8 @@ function verdictOf(
   current: number,
   next: number,
 ): RightsizingVerdict {
+  // Like the backend: an OOM kill in the window makes it under-provisioned.
+  if (list.some((c) => c.warnings.some((w) => w.code === 'oom-killed'))) return 'under';
   if (list.every((c) => !c.usage)) return 'no-data';
   const under = list.some((c) => {
     const u = c.usage;
@@ -783,7 +960,24 @@ function verdictOf(
   return 'balanced';
 }
 
-const RANK: Record<RightsizingConfidence, number> = { low: 0, medium: 1, high: 2 };
+/** The backend's `summary::lenses_of`, in declaration order. */
+export function lensesOf(rec: WorkloadRecommendation): RecommendationLens[] {
+  const any = (f: (c: ContainerRecommendation) => boolean) => rec.containers.some(f);
+  const up = (c: ResourceChange) => c === 'increase' || c === 'set';
+  const rules: Array<[RecommendationLens, boolean]> = [
+    ['cpu-reduction', any((c) => c.cpu === 'decrease')],
+    ['memory-reduction', any((c) => c.memory === 'decrease')],
+    ['increase', any((c) => up(c.cpu) || up(c.memory))],
+    [
+      'request-unset',
+      any((c) => c.current.cpu_request == null || c.current.memory_request == null),
+    ],
+    ['missing-data', rec.verdict === 'no-data' || any((c) => !c.usage)],
+    ['needs-review', rec.changed && rec.confidence !== 'high'],
+    ['limit-raised', any((c) => c.cpu_limit_raised || c.memory_limit_raised)],
+  ];
+  return rules.filter(([, on]) => on).map(([lens]) => lens);
+}
 
 const WORKLOAD_KEYS: Array<[string, string]> = [
   ['Deployment', 'deployments.apps'],
@@ -791,6 +985,74 @@ const WORKLOAD_KEYS: Array<[string, string]> = [
   ['DaemonSet', 'daemonsets.apps'],
   ['CronJob', 'cronjobs.batch'],
 ];
+
+/** Pod names stored per workload (like the backend's `MAX_POD_NAMES`). */
+const MAX_POD_NAMES = 50;
+
+/** How a demo collection went (the backend's pipeline facts); every field optional. */
+export interface DemoPipeline {
+  /** Strategy id (default percentile-headroom). */
+  strategy: string;
+  /** kube-state-metrics owner series resolved the pods (else matched by name). */
+  ownerMetrics: boolean;
+  /** Days of the collected window (default `settings.days`; re-evaluation keeps the stored one). */
+  windowDays: number;
+  /** Namespaces whose usage could not be queried: their workloads have no data. */
+  failedNamespaces: string[];
+  /** Namespaces whose batch was partial (`partial-data` flags). */
+  partialNamespaces: string[];
+  /** When the usage was collected (drift; default now). */
+  at: number;
+  /** HorizontalPodAutoscalers could be listed (default true). */
+  hpas: boolean;
+}
+
+/** The HPA of a workload, like the backend's `hpa_target` (no metrics = 80 % CPU). */
+function hpaIndex(db: ClusterDb): Map<string, HpaInfo> {
+  const out = new Map<string, HpaInfo>();
+  for (const h of list(db, 'horizontalpodautoscalers.autoscaling')) {
+    const spec = asObject(h.spec);
+    const target = asObject(spec.scaleTargetRef);
+    const metrics = asArray(spec.metrics)
+      .filter(isObject)
+      .map((m) => {
+        const resource = asObject(m.resource);
+        const t = asObject(resource.target);
+        const name = String(resource.name ?? '');
+        return {
+          resource: (m.type === 'Resource' && (name === 'cpu' || name === 'memory')
+            ? name
+            : 'other') as HpaInfo['metrics'][number]['resource'],
+          target_utilization:
+            m.type === 'Resource' && t.type === 'Utilization' && t.averageUtilization != null
+              ? Number(t.averageUtilization)
+              : null,
+        };
+      });
+    out.set(`${h.metadata.namespace}/${String(target.kind)}/${String(target.name)}`, {
+      name: h.metadata.name,
+      min_replicas: spec.minReplicas != null ? Number(spec.minReplicas) : null,
+      max_replicas: Number(spec.maxReplicas ?? 0),
+      metrics: metrics.length ? metrics : [{ resource: 'cpu', target_utilization: 80 }],
+    });
+  }
+  return out;
+}
+
+/** Pod names per `namespace/kind/name` (sorted). */
+function podIndex(db: ClusterDb): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const pod of list(db, 'pods')) {
+    const w = workloadOf(pod);
+    if (!w) continue;
+    const key = `${pod.metadata.namespace}/${w[0]}/${w[1]}`;
+    const names = out.get(key) ?? [];
+    names.push(pod.metadata.name);
+    out.set(key, names);
+  }
+  for (const names of out.values()) names.sort();
+  return out;
+}
 
 export function workloadRecommendations(
   db: ClusterDb,
@@ -802,7 +1064,15 @@ export function workloadRecommendations(
     workload: { kind: string; namespace: string; name: string } | null;
   },
   now = Date.now(),
+  pipeline: Partial<DemoPipeline> = {},
 ): WorkloadRecommendation[] {
+  const strategy = pipeline.strategy ?? 'percentile-headroom';
+  const ownerMetrics = pipeline.ownerMetrics ?? true;
+  const failed = new Set(pipeline.failedNamespaces ?? []);
+  const partial = new Set(pipeline.partialNamespaces ?? []);
+  const at = pipeline.at ?? now;
+  const hpas = pipeline.hpas === false ? new Map<string, HpaInfo>() : hpaIndex(db);
+  const pods = podIndex(db);
   const out: WorkloadRecommendation[] = [];
   for (const [kind, key] of WORKLOAD_KEYS) {
     for (const w of list(db, key)) {
@@ -822,33 +1092,67 @@ export function workloadRecommendations(
           : kind === 'CronJob'
             ? 1
             : Number(spec.replicas ?? 1);
-      const age = (now - Date.parse(w.metadata.creationTimestamp ?? '')) / 3_600_000;
-      const window = source === 'prometheus' ? settings.days * 24 : 1;
+      const age = (at - Date.parse(w.metadata.creationTimestamp ?? '')) / 3_600_000;
+      const windowDays = pipeline.windowDays ?? settings.days;
+      const window = source === 'prometheus' ? windowDays * 24 : 1;
       const seed = `${db.id}/${ns}/${w.metadata.name}`;
+      const prometheus = source === 'prometheus';
       // With Prometheus a CronJob's pods resolve through their Job (owner
-      // metrics): evidence with its duty cycle, observed hours only while
-      // they ran.
-      const cron =
-        kind === 'CronJob' && source === 'prometheus'
-          ? cronEvidence(seed, window, Math.max(1, ownedBy(db, 'jobs.batch', w).length))
-          : null;
+      // metrics): observed hours only while they ran, its duty cycle.
+      const duty = kind === 'CronJob' && prometheus ? cronDuty(seed) : null;
+      const jobs = kind === 'CronJob' ? ownedBy(db, 'jobs.batch', w).length : 0;
+      // A few workloads were created (or rolled out) within the window.
+      const young = prometheus && unit(`${seed}#young`) < 0.02 ? 6 + unit(`${seed}#h`) * 14 : null;
       const hours =
-        source === 'none'
+        source === 'none' || failed.has(ns)
           ? 0
-          : Math.max(0.25, Math.min(window, Number.isFinite(age) ? age : window)) *
-            (cron?.duty ?? 1);
+          : (young ??
+            Math.max(0.25, Math.min(window, Number.isFinite(age) ? age : window)) * (duty ?? 1));
+      const podNames = pods.get(`${ns}/${kind}/${w.metadata.name}`) ?? [];
+      const identity: UsageEvidence['identity'] = !ownerMetrics
+        ? 'name-match'
+        : unit(`${seed}#ambiguous`) < 0.015
+          ? 'ambiguous'
+          : 'owner-metrics';
+      const hpa = hpas.get(`${ns}/${kind}/${w.metadata.name}`) ?? null;
+      const factor = driftFactor(seed, at);
       const recs = containers(podSpecOf(w)).map((c) => {
         const name = String(c.name ?? '');
         const current = resourcesOf(c);
-        const usage = source === 'none' ? null : syntheticUsage(`${seed}/${name}`, current, hours);
-        const rec = recommendContainer(name, current, usage, source, settings);
-        return cron && usage ? { ...rec, evidence: cron.evidence(hours) } : rec;
+        const usage =
+          source === 'none' || failed.has(ns)
+            ? null
+            : syntheticUsage(`${seed}/${name}`, current, hours, factor);
+        const evidence =
+          prometheus && usage
+            ? demoEvidence(
+                `${seed}/${name}`,
+                hours,
+                Math.max(1, podNames.length || jobs || replicas),
+                duty,
+                identity,
+                partial.has(ns),
+              )
+            : null;
+        return recommendContainer(name, current, usage, source, settings, {
+          strategy,
+          evidence,
+          hpa,
+        });
       });
+      // Like the backend: an ambiguous identity flags every container.
+      if (identity === 'ambiguous' && prometheus) {
+        for (const c of recs) {
+          if (!c.warnings.some((x) => x.code === 'identity-unclear'))
+            c.warnings.push(warn('identity-unclear'));
+          c.confidence = 'low';
+        }
+      }
       const costReplicasOf = costReplicas(kind, replicas, recs);
       const current = monthlyRequests(recs, costReplicasOf, pricing, false);
       const next = monthlyRequests(recs, costReplicasOf, pricing, true);
       const coverage = recs.reduce((m, c) => Math.max(m, c.usage?.hours ?? 0), 0);
-      out.push({
+      const rec: WorkloadRecommendation = {
         kind,
         namespace: ns,
         name: w.metadata.name,
@@ -859,7 +1163,9 @@ export function workloadRecommendations(
             .filter((c) => c.usage)
             .reduce<RightsizingConfidence | null>(
               (worst, c) =>
-                worst == null || RANK[c.confidence] < RANK[worst] ? c.confidence : worst,
+                worst == null || CONFIDENCE_RANK[c.confidence] < CONFIDENCE_RANK[worst]
+                  ? c.confidence
+                  : worst,
               null,
             ) ?? 'low',
         verdict: verdictOf(recs, current, next),
@@ -868,12 +1174,14 @@ export function workloadRecommendations(
         monthly_delta: next - current,
         monthly_current: current,
         changed: recs.some(changed),
-        pods: [],
-        pods_truncated: false,
-        hpa: null,
+        pods: prometheus ? podNames.slice(0, MAX_POD_NAMES) : [],
+        pods_truncated: prometheus && podNames.length > MAX_POD_NAMES,
+        hpa,
         lenses: [],
         cost_replicas: costReplicasOf,
-      });
+      };
+      rec.lenses = lensesOf(rec);
+      out.push(rec);
     }
   }
   out.sort(

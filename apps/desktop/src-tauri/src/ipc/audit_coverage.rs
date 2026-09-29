@@ -157,6 +157,16 @@ const NOT_MUTATING: &[&str] = &[
     "cost_report",
     "cost_summary",
     "rightsizing_report",
+    // Recommendations: scans list and query (read-only for the cluster);
+    // stored runs, trends, the fleet and exports are local state.
+    "recommendations_status",
+    "recommendations_scan",
+    "recommendations_latest",
+    "recommendations_runs",
+    "recommendations_trend",
+    "recommendations_usage_history",
+    "recommendations_fleet",
+    "recommendations_export",
     "pod_fs_list",
     "pod_fs_read",
     "pod_fs_download",

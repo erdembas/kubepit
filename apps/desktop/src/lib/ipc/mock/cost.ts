@@ -6,12 +6,14 @@ import type {
   CostReport,
   CostService,
   CostStatus,
+  CostPricing,
   CostSummary,
   DryRunResult,
   KubeObject,
   PrometheusStatus,
   RightsizingReport,
   RightsizingRequest,
+  RightsizingSettings,
   RightsizingSource,
   Settings,
   WorkloadRef,
@@ -28,10 +30,21 @@ import {
   formatMemory,
   platformOf,
   podSpecOf,
+  resolveStrategy,
   workloadRecommendations,
   type UsageMap,
 } from './fixtures/cost';
 import { getDb, list } from './fixtures/db';
+import { profileFor } from './fixtures/profiles';
+import {
+  alignedWindowEnd,
+  assembleReport,
+  collectionNotes,
+  demoCollection,
+  noDataNamespaces,
+  normalizedSettings,
+  strategyDefaults,
+} from './fixtures/recommendations';
 import { podMetrics } from './fixtures/discovery';
 import { handlers, register, type MockArgs } from './registry';
 
@@ -192,51 +205,94 @@ async function report(clusterId: string, query: CostQuery): Promise<CostReport> 
   return result;
 }
 
-async function rightsizing(clusterId: string, request: RightsizingRequest) {
-  const cluster = clusterDef(clusterId);
-  const conn = connection(clusterId);
-  // Like the backend: the request's strategy, else the saved one, else automatic;
-  // the request's settings, else the saved override, else the strategy's defaults.
-  // An unknown saved strategy is ignored (automatic), an unknown requested one fails.
+/** The saved strategy when the demo offers it (an unknown one is automatic). */
+export function savedStrategy(): string | null {
   const saved = (handlers.settings_get?.({}) as Settings | undefined)?.recommendations;
-  const savedId = saved?.strategy?.trim();
-  const savedKnown = STRATEGIES.some((s) => s.id === savedId) ? savedId : null;
-  const requested = request.strategy?.trim() || savedKnown || null;
-  const strategy = requested ?? STRATEGIES[0]!.id;
-  const info = STRATEGIES.find((s) => s.id === strategy);
-  if (!info) throw new Error(`unknown right-sizing strategy "${strategy}"`);
-  const settings = {
+  const id = saved?.strategy?.trim();
+  return STRATEGIES.some((s) => s.id === id) ? id! : null;
+}
+
+/** The effective settings of `strategy`: its saved override, else its defaults. */
+export function effectiveSettings(strategy: string): RightsizingSettings {
+  const saved = (handlers.settings_get?.({}) as Settings | undefined)?.recommendations;
+  return normalizedSettings({
     ...DEFAULT_SETTINGS,
-    ...(request.settings ?? saved?.overrides[strategy] ?? info.defaults),
-  };
-  settings.days = Math.min(30, Math.max(1, Math.round(settings.days)));
-  const pricing = cluster.cost?.pricing ?? defaultPricing(platformOf(conn.platform));
-  const prometheus = await prometheusAvailable(clusterId);
+    ...(saved?.overrides[strategy] ?? strategyDefaults(strategy)),
+  });
+}
+
+/** Where a demo cluster's usage comes from right now (Prometheus, else metrics-server). */
+export async function usageSource(clusterId: string): Promise<RightsizingSource> {
+  if (await prometheusAvailable(clusterId)) return 'prometheus';
+  return getDb(clusterId).profile.metrics ? 'metrics-server' : 'none';
+}
+
+/** The demo pricing of a cluster (its own, else its platform's list prices). */
+export function pricingOf(cluster: ClusterDef): CostPricing {
+  return cluster.cost?.pricing ?? defaultPricing(platformOf(profileFor(cluster.id).platform));
+}
+
+/**
+ * One demo collection, like `compute_rightsizing`: the request's strategy,
+ * else the saved one, else automatic (`workload-history` when owner
+ * metrics resolved the pods); the request's settings, else the strategy's
+ * effective ones; the cluster's collection profile (notes and flags).
+ */
+export function collect(
+  clusterId: string,
+  source: RightsizingSource,
+  request: RightsizingRequest,
+  at = Date.now(),
+): RightsizingReport {
+  const cluster = clusterDef(clusterId);
   const db = getDb(clusterId);
-  const source: RightsizingSource = prometheus
-    ? 'prometheus'
-    : db.profile.metrics
-      ? 'metrics-server'
-      : 'none';
-  await sleep(prometheus ? 500 + Math.random() * 400 : 200);
-  const result: RightsizingReport = {
+  const collection = demoCollection(db);
+  const prometheus = source === 'prometheus';
+  const resolved = resolveStrategy(
+    request.strategy?.trim() || savedStrategy(),
+    prometheus && collection.ownerMetrics,
+  );
+  if (!STRATEGIES.some((s) => s.id === resolved.id))
+    throw new Error(`unknown right-sizing strategy "${resolved.id}"`);
+  const settings = request.settings
+    ? normalizedSettings({ ...DEFAULT_SETTINGS, ...request.settings })
+    : effectiveSettings(resolved.id);
+  const pricing = pricingOf(cluster);
+  const workloads = workloadRecommendations(
+    db,
     source,
-    window_secs: source === 'prometheus' ? settings.days * 86_400 : source === 'none' ? 0 : 3600,
     settings,
-    currency: pricing.currency,
     pricing,
-    workloads: workloadRecommendations(db, source, settings, pricing, {
-      namespaces: request.namespaces ?? [],
-      workload: request.workload ?? null,
-    }),
-    notes: source === 'none' ? [{ kind: 'no-usage', detail: null }] : [],
-    strategy,
-    strategies: STRATEGIES,
-    computed_at: Date.now(),
-    strategy_auto: requested == null,
-    window_end: Date.now(),
-  };
-  return result;
+    { namespaces: request.namespaces ?? [], workload: request.workload ?? null },
+    at,
+    {
+      strategy: resolved.id,
+      ownerMetrics: collection.ownerMetrics,
+      failedNamespaces: prometheus ? noDataNamespaces(collection) : [],
+      partialNamespaces: prometheus ? collection.partialNamespaces : [],
+      hpas: collection.hpas,
+      at,
+    },
+  );
+  return assembleReport({
+    source,
+    windowDays: settings.days,
+    settings,
+    pricing,
+    workloads,
+    notes: collectionNotes(collection, source, new Set(workloads.map((w) => w.namespace))),
+    strategy: resolved.id,
+    strategyAuto: resolved.auto,
+    computedAt: at,
+    windowEnd: prometheus ? alignedWindowEnd(at) : at,
+  });
+}
+
+async function rightsizing(clusterId: string, request: RightsizingRequest) {
+  connection(clusterId);
+  const source = await usageSource(clusterId);
+  await sleep(source === 'prometheus' ? 500 + Math.random() * 400 : 200);
+  return collect(clusterId, source, request);
 }
 
 /**

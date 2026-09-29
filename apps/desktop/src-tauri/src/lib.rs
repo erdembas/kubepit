@@ -178,6 +178,15 @@ pub fn run() {
             ipc::cost_summary,
             ipc::rightsizing_report,
             ipc::rightsizing_apply,
+            // Recommendations (stored, scheduled right-sizing scans)
+            ipc::recommendations_status,
+            ipc::recommendations_scan,
+            ipc::recommendations_latest,
+            ipc::recommendations_runs,
+            ipc::recommendations_trend,
+            ipc::recommendations_usage_history,
+            ipc::recommendations_fleet,
+            ipc::recommendations_export,
             // Logs & debug
             ipc::workload_logs_stream,
             ipc::workload_logs_stop,
