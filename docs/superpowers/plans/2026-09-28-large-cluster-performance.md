@@ -1427,13 +1427,32 @@ git commit -m "docs(perf): R1 backend hot paths and their results"
 **Files:**
 - Modify: `docs/superpowers/specs/2026-09-28-large-cluster-performance-design.md` (Results complete; budgets tightened where the After values allow, with a note)
 - Modify: `docs/ARCHITECTURE.md` ("Performance" section: gates fired and fixes applied)
+- _As built, also: `perf/budgets.json` (the tightened budgets, each with a `note`) and a comment in `.github/workflows/perf-guard.yml`. The commit adds `docs perf .github`._
 
-- [ ] **Step 1: Run every check and the perf guard**
+- [x] **Step 1: Run every check and the perf guard**
 
 Run: `pnpm typecheck && pnpm i18n:check && cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && pnpm --filter @kubepit/desktop build && pnpm --filter @kubepit/desktop test && node --test scripts/perf/ && pnpm perf:rust && pnpm perf:bench && pnpm perf:compare -- --slack 1 --only rust,e2e,engines,structural`
 Expected: every command exits 0.
 
-- [ ] **Step 2: Commit**
+_As built (2026-09-29, at `cff503d`, same M5 Max, 1-minute load 3.5–7.3, up to 18–42 around the first bench build, and 2.5–15 during the soaks):_
+- _Every command exits 0. `pnpm perf:rust` and `pnpm perf:bench` ran 3 times each._
+- _`pnpm perf:ui` ran in 3 interleaved rounds on port 4611: `--preset l --churn 50`, then `s` and `m` with `ttfr,map,health`. The 30-minute soak ran twice on its own (`--scenarios= --soak 30`): ratios 1.125 and 1.037, no DOM drift. Both runs show a ≈ 40 MiB step at minute 28 (spec, Final-run note)._
+- _The spec's Results table now has a Final column (medians of 3) and the Gates table a Final check. Every budget is met, and no gate that stayed shut fires now._
+- _Budgets tightened: only the five R1 ids, each to ≥ 3× headroom and below its pre-R1 value:_
+  - _`watch/aggregator_initial_20k` 120 → 90 ms;_
+  - _`watch/reset_batch_20k` 60 → 5 ms;_
+  - _`watch/steady_500` 3 → 1 ms;_
+  - _`fleet_search/matcher_substring_50k` 5 → 2.5 ms;_
+  - _`fleet_search/matcher_glob_50k` 15 → 4 ms._
+
+  _The rest, the UI ids and `ci_slack` stay until CI is calibrated (spec, Results, "Budgets tightened"). `perf-guard.yml`'s comment on `continue-on-error` now gives the current headroom._
+- _Still open, all manual (spec, Results, "Open manual checks"):_
+  - _H6's window close in `tauri dev`;_
+  - _the 800-node pan in WKWebView;_
+  - _calibrating the CI guard on a GitHub runner, then dropping `continue-on-error`._
+- _Open follow-up (not manual): whether the soak's step at minute 28 keeps growing in a longer soak._
+
+- [x] **Step 2: Commit**
 
 ```bash
 git add docs
