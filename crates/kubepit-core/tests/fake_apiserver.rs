@@ -586,12 +586,14 @@ async fn unacked_watch_coalesces_and_stops_after_timeout() {
     app.cluster_connect(&id).await.unwrap();
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(Instant, WatchBatch)>();
-    app.resource_watch(&id, &support::perf::pods(), vec![], move |batch| {
-        let _ = tx.send((Instant::now(), batch));
-        true
-    })
-    .await
-    .unwrap();
+    let watch = app
+        .resource_watch(&id, &support::perf::pods(), vec![], move |batch| {
+            let _ = tx.send((Instant::now(), batch));
+            true
+        })
+        .await
+        .unwrap();
+    assert!(app.resource_watch_running(&watch));
     // The watch task has not run yet (current-thread runtime).
     tokio::time::pause();
 
@@ -634,4 +636,8 @@ async fn unacked_watch_coalesces_and_stops_after_timeout() {
         "{waited:?}"
     );
     assert!(rx.recv().await.is_none(), "the watch task ended");
+    assert!(
+        !app.resource_watch_running(&watch),
+        "an ended watch leaves the registry (the UI prunes window_watches by it)"
+    );
 }

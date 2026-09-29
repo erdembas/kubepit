@@ -660,6 +660,13 @@ impl Kubepit {
         self.watches.stop(watch_id);
     }
 
+    /// Whether watch `watch_id` still runs. A watch also ends on its own:
+    /// its sink refused a batch, it went [`ACK_TIMEOUT`] without an ack, or
+    /// its cluster disconnected.
+    pub fn resource_watch_running(&self, watch_id: &str) -> bool {
+        self.watches.contains(watch_id)
+    }
+
     /// `resource_watch_ack`: the webview applied every batch of `watch_id`
     /// up to `seq`. At most [`MAX_UNACKED`] batches are ever in flight; a
     /// watch that gets no ack for [`ACK_TIMEOUT`] stops. Unknown ids (an

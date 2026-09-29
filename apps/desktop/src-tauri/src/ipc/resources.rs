@@ -51,6 +51,12 @@ pub async fn resource_watch(
         })
         .await
         .map_err(ipc_err)?;
+    // Watches that ended on their own (ack timeout, refused sink,
+    // disconnect, a reloaded window) are never unwatched: forget them here,
+    // so the registry only holds live watches and the new one.
+    state
+        .window_watches
+        .retain_live(|id| core.resource_watch_running(id));
     if !state.window_watches.register(window.label(), &watch_id) {
         // The window closed while the watch was starting.
         core.resource_unwatch(&watch_id);

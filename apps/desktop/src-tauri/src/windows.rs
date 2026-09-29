@@ -48,6 +48,25 @@ impl WindowOwned {
         self.inner.lock().owners.remove(id);
     }
 
+    /// Forgets every id for which `is_live` is false (ids that ended
+    /// without being forgotten). `is_live` runs outside the lock.
+    pub fn retain_live(&self, is_live: impl Fn(&str) -> bool) {
+        let ids: Vec<String> = self.inner.lock().owners.keys().cloned().collect();
+        let dead: Vec<String> = ids.into_iter().filter(|id| !is_live(id)).collect();
+        if dead.is_empty() {
+            return;
+        }
+        let mut inner = self.inner.lock();
+        for id in &dead {
+            inner.owners.remove(id);
+        }
+    }
+
+    #[cfg(test)]
+    fn owned(&self) -> usize {
+        self.inner.lock().owners.len()
+    }
+
     pub fn is_closed(&self, window: &str) -> bool {
         self.inner.lock().closed.contains(window)
     }
@@ -176,6 +195,18 @@ mod tests {
             "a watch that starts after its window closed is stopped at once"
         );
         assert!(registry.close_window("win-a").is_empty());
+        assert_eq!(registry.close_window("main"), ["w1"]);
+    }
+
+    #[test]
+    fn watches_that_ended_on_their_own_are_pruned() {
+        let registry = WindowOwned::default();
+        for id in ["w1", "w2", "w3"] {
+            assert!(registry.register("main", id));
+        }
+        // w2 timed out without acks, w3's cluster disconnected.
+        registry.retain_live(|id| id == "w1");
+        assert_eq!(registry.owned(), 1);
         assert_eq!(registry.close_window("main"), ["w1"]);
     }
 

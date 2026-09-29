@@ -125,7 +125,10 @@ localStorage (`kubepit.workbench.v1`, `kubepit.views.v1`,
   unsubscribes; the last snapshot stays), so there is nothing to keep
   alive for it. Closing a window stops its watches at once: the Tauri
   command records the calling window per watch (`window_watches`), and
-  `on_window_destroyed` unwatches them. The ack timeout covers the rest,
+  `on_window_destroyed` unwatches them. Watches that end on their own (ack
+  timeout, refused sink, disconnect, a reloaded window) are pruned from
+  that record whenever a watch starts (`resource_watch_running`). The ack
+  timeout covers the rest,
   since Tauri reports a send of 8 KB or more to a dead webview as
   delivered.
 - `read_only` clusters reject every mutating command in the backend (dry runs
