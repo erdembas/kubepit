@@ -35,11 +35,15 @@
 //! | [`logs`]     | plain-text log condensation for tool results          |
 
 pub mod anthropic;
+pub mod budget;
+pub mod context;
 pub mod keys;
 pub mod logs;
 pub mod ollama;
 pub mod openai;
+pub mod prompts;
 pub mod provider;
+pub mod redact;
 pub mod settings;
 pub mod sse;
 pub mod tools;
