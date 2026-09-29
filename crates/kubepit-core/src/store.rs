@@ -76,6 +76,18 @@ impl Store {
         Ok(guard.clone())
     }
 
+    /// Mutate the settings and persist them before releasing the lock, so
+    /// backend-owned fields (the assistant's enabled clusters) are never
+    /// lost to a concurrent save. When the write fails nothing changes.
+    pub fn update_settings(&self, f: impl FnOnce(&mut Settings)) -> Result<Settings> {
+        let mut guard = self.settings.write();
+        let mut next = guard.clone();
+        f(&mut next);
+        write_json(&self.paths.settings_file(), &next, false)?;
+        *guard = next;
+        Ok(guard.clone())
+    }
+
     /// The frontend-owned workspace snapshot, `None` when never saved.
     pub fn load_workspace(&self) -> Result<Option<Value>> {
         let path = self.paths.workspace_file();

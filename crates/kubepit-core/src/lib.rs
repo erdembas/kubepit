@@ -56,6 +56,7 @@
 //! | [`cost`]        | cost insight: OpenCost / Kubecost / estimates           |
 //! | [`rightsizing`] | request recommendations and their patches              |
 //! | [`recommendations`] | recommendation settings, stored and scheduled scans |
+//! | [`ai`]          | assistant: providers, redaction, tools, sessions        |
 //!
 //! Push notifications to the UI go through [`EventSink`]; streams take plain
 //! `Fn(T) -> bool` callbacks (return `false` to stop) that the desktop shell
@@ -139,6 +140,8 @@ pub mod cost;
 pub mod rightsizing;
 // Stored, scheduled right-sizing scans (recommendations).
 pub mod recommendations;
+// AI assistant (opt-in): providers, redaction, read-only tools, sessions.
+pub mod ai;
 
 pub use app::Kubepit;
 pub use events::{EventSink, NullSink};

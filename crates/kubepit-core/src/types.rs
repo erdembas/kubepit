@@ -1111,6 +1111,9 @@ pub struct Settings {
     /// Recommendations: background scans, strategy and per-strategy
     /// settings (`recommendations.rs`).
     pub recommendations: crate::recommendations::RecommendationSettings,
+    /// AI assistant: off by default; providers, privacy, budget, prices and
+    /// the enabled clusters (`ai.rs`).
+    pub ai: crate::ai::AiSettings,
 }
 
 impl Default for Settings {
@@ -1133,6 +1136,7 @@ impl Default for Settings {
             history: crate::history::HistorySettings::default(),
             keyboard_mode: false,
             recommendations: crate::recommendations::RecommendationSettings::default(),
+            ai: crate::ai::AiSettings::default(),
         }
     }
 }

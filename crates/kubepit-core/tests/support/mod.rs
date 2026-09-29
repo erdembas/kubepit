@@ -11,10 +11,12 @@ pub mod perf;
 pub mod scale;
 pub mod stats;
 
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use kubepit_core::recommendations::RecommendationScanStatus;
+use kubepit_core::secrets::MemorySecretStore;
 use kubepit_core::types::{ClusterInput, ClusterStatus, PortForward, Settings};
 use kubepit_core::{EventSink, Kubepit, Paths};
 use parking_lot::Mutex;
@@ -302,6 +304,33 @@ pub fn setup(
     let recorder = Arc::new(Recorder::default());
     let app =
         Arc::new(Kubepit::open(Paths::new(dir.path().join("home")), recorder.clone()).unwrap());
+    let id = add_fake_cluster(&app, server, read_only);
+    (dir, app, recorder, id)
+}
+
+/// [`setup`] with `secrets` as the OS credential store (keychain mode,
+/// assistant API keys). Tests never reach the real store.
+pub fn setup_with_secrets(
+    server: &str,
+    read_only: bool,
+    secrets: Arc<MemorySecretStore>,
+) -> (tempfile::TempDir, Arc<Kubepit>, Arc<Recorder>, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let recorder = Arc::new(Recorder::default());
+    let app = Arc::new(
+        Kubepit::open_with_secrets(
+            Paths::new(dir.path().join("home")),
+            recorder.clone(),
+            secrets,
+        )
+        .unwrap(),
+    );
+    let id = add_fake_cluster(&app, server, read_only);
+    (dir, app, recorder, id)
+}
+
+/// Registers the "Fake" cluster (context `fake` at `server`) and returns its id.
+fn add_fake_cluster(app: &Kubepit, server: &str, read_only: bool) -> String {
     // The change journal watches cluster-wide in the background; it stays
     // off unless a test turns it on, so request logs remain deterministic.
     app.set_settings(Settings {
@@ -309,16 +338,36 @@ pub fn setup(
         ..app.settings()
     })
     .unwrap();
-    let cluster = app
-        .cluster_add(vec![ClusterInput {
-            name: "Fake".into(),
-            context: "fake".into(),
-            kubeconfig_text: Some(kubeconfig_for(server)),
-            accessible_namespaces: vec!["team-a".into(), "team-b".into()],
-            read_only,
-            ..Default::default()
-        }])
-        .unwrap()
-        .remove(0);
-    (dir, app, recorder, cluster.id)
+    app.cluster_add(vec![ClusterInput {
+        name: "Fake".into(),
+        context: "fake".into(),
+        kubeconfig_text: Some(kubeconfig_for(server)),
+        accessible_namespaces: vec!["team-a".into(), "team-b".into()],
+        read_only,
+        ..Default::default()
+    }])
+    .unwrap()
+    .remove(0)
+    .id
+}
+
+/// Whether any file under `root` (recursively, symlinks not followed)
+/// contains `needle`: proves a value never reached the data folder.
+pub fn home_contains(root: &Path, needle: &str) -> bool {
+    fn walk(dir: &Path, needle: &[u8]) -> bool {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return false;
+        };
+        entries.flatten().any(|entry| {
+            let path = entry.path();
+            match entry.file_type() {
+                Ok(t) if t.is_dir() => walk(&path, needle),
+                Ok(t) if t.is_file() => std::fs::read(&path)
+                    .map(|bytes| bytes.windows(needle.len()).any(|w| w == needle))
+                    .unwrap_or(false),
+                _ => false,
+            }
+        })
+    }
+    !needle.is_empty() && walk(root, needle.as_bytes())
 }
