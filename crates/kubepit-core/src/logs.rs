@@ -12,14 +12,14 @@
 
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use futures::AsyncReadExt;
 use k8s_openapi::api::core::v1::Pod;
 use kube::api::{Api, LogParams};
 use tokio::time::Instant;
 
 use crate::app::Kubepit;
-use crate::error::describe_kube_error;
+use crate::error::{describe_kube_error, kube_error};
 use crate::types::{LogChunk, LogOptions};
 
 /// Flush pending log text this long after its first byte arrived.
@@ -27,6 +27,8 @@ pub const LOG_FLUSH_INTERVAL: Duration = Duration::from_millis(50);
 /// Flush as soon as this much text is pending.
 pub const LOG_FLUSH_BYTES: usize = 64 * 1024;
 const READ_BUF: usize = 16 * 1024;
+/// Bytes [`Kubepit::pod_logs_tail`] reads at most.
+pub const MAX_TAIL_BYTES: i64 = 1024 * 1024;
 
 /// Byte buffer that only ever releases complete UTF-8 characters (invalid
 /// sequences are replaced lossily; an incomplete trailing sequence waits for
@@ -194,6 +196,45 @@ impl Kubepit {
     /// `pod_logs_stop`. Unknown ids are ignored.
     pub fn pod_logs_stop(&self, stream_id: &str) {
         self.log_streams.stop(stream_id);
+    }
+
+    /// The last `tail_lines` lines of a container's log, once (no follow),
+    /// with timestamps, at most [`MAX_TAIL_BYTES`] (the assistant's
+    /// `get_pod_logs` tool). A character cut by the byte limit is dropped.
+    pub async fn pod_logs_tail(
+        &self,
+        cluster_id: &str,
+        namespace: &str,
+        pod: &str,
+        container: Option<&str>,
+        tail_lines: i64,
+        previous: bool,
+    ) -> Result<String> {
+        let client = self.client(cluster_id).await?;
+        let api: Api<Pod> = Api::namespaced(client, namespace);
+        let options = LogOptions {
+            follow: false,
+            tail_lines: Some(tail_lines),
+            since_seconds: None,
+            timestamps: true,
+            previous,
+        };
+        let mut params = log_params(container.map(str::to_string), &options);
+        params.limit_bytes = Some(MAX_TAIL_BYTES);
+        let reader = api
+            .log_stream(pod, &params)
+            .await
+            .map_err(kube_error)
+            .with_context(|| format!("failed to read the logs of pod {namespace}/{pod}"))?;
+        let mut bytes = Vec::new();
+        Box::pin(reader)
+            .take(MAX_TAIL_BYTES as u64)
+            .read_to_end(&mut bytes)
+            .await
+            .with_context(|| format!("failed to read the logs of pod {namespace}/{pod}"))?;
+        let mut acc = Utf8Accumulator::default();
+        acc.push(&bytes);
+        Ok(acc.take_complete())
     }
 }
 

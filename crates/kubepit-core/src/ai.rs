@@ -25,10 +25,14 @@
 //! | [`settings`] | defaults, normalization, loopback / egress rule       |
 //! | [`keys`]     | `ai/<provider-id>` credential store entries           |
 //! | [`provider`] | the `Provider` trait and chat types (`ToolSpec`)      |
+//! | [`tools`]    | read-only tool catalog, input parsing, executor       |
+//! | [`logs`]     | plain-text log condensation for tool results          |
 
 pub mod keys;
+pub mod logs;
 pub mod provider;
 pub mod settings;
+pub mod tools;
 pub mod types;
 
 use std::sync::atomic::{AtomicBool, Ordering};
