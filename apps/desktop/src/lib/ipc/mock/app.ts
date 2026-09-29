@@ -11,6 +11,7 @@ import type {
   TerminalOutput,
   WorkspaceSnapshot,
 } from '@/types';
+import { DEFAULT_AI_SETTINGS } from '@/lib/ai/defaults';
 import { DEFAULT_ALERT_SETTINGS } from '@/lib/alerts/policy';
 import { DEFAULT_HISTORY_SETTINGS } from '@/lib/history/audit';
 import { windowLabel } from '@/lib/windowSeed';
@@ -206,6 +207,8 @@ const defaultSettings: Settings = {
     overrides: {},
     alerts: false,
   },
+  // The Rust defaults: the assistant stays off until the user turns it on.
+  ai: DEFAULT_AI_SETTINGS,
 };
 
 // Saved like the demo workspace, so a demo window opened later starts from

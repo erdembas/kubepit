@@ -1308,6 +1308,8 @@ export interface Settings {
   keyboard_mode: boolean;
   /** Recommendations: background scans, strategy and per-strategy settings. */
   recommendations: RecommendationSettings;
+  /** AI assistant (off by default); see the Assistant section at the end of this file. */
+  ai: AiSettings;
 }
 
 /** `Settings.recommendations` (normalized by `settings_set`). */
@@ -2667,4 +2669,342 @@ export interface ContainerResourceChange {
   cpu_limit: number | null;
   memory_request: number | null;
   memory_limit: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// Assistant (opt-in AI). The Rust backend holds the keys, redacts, budgets
+// and is the only egress point; mirrors `kubepit-core/src/ai/types.rs` and
+// the `ai_log` types of `history/types.rs`.
+// ---------------------------------------------------------------------------
+
+/** Wire protocol of a provider. */
+export type AiProviderKind = 'anthropic' | 'openai-compatible' | 'ollama';
+
+/** One configured provider. Its API key lives in the OS credential store, never here. */
+export interface AiProviderConfig {
+  /** Stable id (`anthropic`, `openai`, `ollama`); also names the key entry `ai/<id>`. */
+  id: string;
+  kind: AiProviderKind;
+  /** Display name. */
+  name: string;
+  /** Without a trailing slash (normalized by `settings_set`). */
+  base_url: string;
+  /** Model id; empty = not chosen yet (OpenAI-compatible, Ollama). */
+  model: string;
+  /** Tokens; null = from the Models API (Anthropic) or 32 768 (OpenAI-compatible). */
+  context_window: number | null;
+  /** Output token cap per response. */
+  max_output_tokens: number;
+}
+
+/** Optional redaction layers; Secret values are always redacted. */
+export interface AiRedactionSettings {
+  /** JWTs, bearer tokens, cloud keys, URL credentials → `__TOKEN__` (default on). */
+  tokens: boolean;
+  /** IP addresses → `__IP_n__`, restorable locally (default off). */
+  ips: boolean;
+  /** Hostnames → `__HOST_n__`, restorable locally (default off). */
+  hostnames: boolean;
+}
+
+/** `off`: no tools; `ask`: every tool result waits for "Send"; `session`: sent without asking. */
+export type AiToolPolicy = 'off' | 'ask' | 'session';
+
+export type AiEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+/** The user's price for one model per million tokens (prices are never built in). */
+export interface AiPrice {
+  model: string;
+  input_per_mtok: number;
+  output_per_mtok: number;
+  /** null = the input price. */
+  cache_write_per_mtok: number | null;
+  /** null = the input price. */
+  cache_read_per_mtok: number | null;
+}
+
+/** `Settings.ai` (normalized by `settings_set`). */
+export interface AiSettings {
+  /** Master switch; off by default. */
+  enabled: boolean;
+  /** Refuse every non-loopback provider in the backend. */
+  local_only: boolean;
+  /** Id of the provider requests go to. */
+  active_provider: string | null;
+  providers: AiProviderConfig[];
+  /**
+   * Clusters the assistant may be used with. Read-only in `settingsSet`:
+   * change it with `aiClusterSet` (production needs a typed confirmation).
+   */
+  clusters: ClusterId[];
+  redaction: AiRedactionSettings;
+  tool_policy: AiToolPolicy;
+  /** Keep every request in the local `ai_log` of `history.db`. */
+  log_requests: boolean;
+  /** Context budget in tokens: 60 000 (2 000–900 000). */
+  max_context_tokens: number;
+  /** null = per intent (explain/fix/yaml high, chat medium, the others low). */
+  effort: AiEffort | null;
+  prices: AiPrice[];
+}
+
+/** Token usage of one response or a whole run. */
+export interface AiUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+}
+
+/** One provider in `aiStatus`. */
+export interface AiProviderStatus {
+  id: string;
+  kind: AiProviderKind;
+  /** The base URL is a loopback address. */
+  local: boolean;
+  /** An API key is stored for it. */
+  has_key: boolean;
+  /** The credential store could not be read (locked, missing). */
+  key_error: string | null;
+  /** Requests may go to it (loopback, or remote egress allowed and not local-only). */
+  allowed: boolean;
+}
+
+export interface AiStatus {
+  enabled: boolean;
+  local_only: boolean;
+  /** This process may reach remote providers (the desktop app does). */
+  remote_allowed: boolean;
+  /** Name of the credential store ("macOS Keychain"). */
+  keychain: string;
+  providers: AiProviderStatus[];
+}
+
+/** One model of a provider (`aiModels`); null = unknown. */
+export interface AiModelInfo {
+  id: string;
+  display_name: string | null;
+  /** Input context window in tokens. */
+  context_window: number | null;
+  /** Output cap in tokens. */
+  max_output_tokens: number | null;
+  adaptive_thinking: boolean | null;
+  effort: boolean | null;
+}
+
+export type AiIntent =
+  'explain' | 'fix' | 'chat' | 'kubectl' | 'promql' | 'logql' | 'explain-query' | 'yaml';
+
+/** Answer language (the UI locale). */
+export type AiLocale = 'en' | 'tr';
+
+export type AiSectionKind =
+  | 'scope'
+  | 'object'
+  | 'containers'
+  | 'events'
+  | 'logs'
+  | 'health'
+  | 'changes'
+  | 'alerts'
+  | 'metrics'
+  | 'schema'
+  | 'query'
+  | 'editor';
+
+/** `yaml` / `json` are redacted as manifests; `log` is trimmed in the middle. */
+export type AiSectionFormat = 'yaml' | 'json' | 'text' | 'log';
+
+/** One piece of context gathered by the UI (redacted and budgeted by the backend). */
+export interface AiContextSection {
+  /** Unique within the request (`events`, `logs:web-1/app`). */
+  id: string;
+  kind: AiSectionKind;
+  /** Identifier only (`pod/web-1`, `web-1/app@previous`); never translated. */
+  label: string;
+  /** 0 = kept longest; higher numbers are trimmed first. */
+  priority: number;
+  format: AiSectionFormat;
+  content: string;
+}
+
+export interface AiObjectRef {
+  api_version: string;
+  kind: string;
+  namespace: string | null;
+  name: string;
+}
+
+export interface AiScope {
+  cluster_id: ClusterId | null;
+  namespace: string | null;
+  object: AiObjectRef | null;
+}
+
+/** `aiPreview` input. */
+export interface AiRequest {
+  /** null starts a new session. */
+  session_id: string | null;
+  intent: AiIntent;
+  /** What the user typed. */
+  message: string;
+  scope: AiScope;
+  sections: AiContextSection[];
+  /** Section ids the user excluded in the preview. */
+  excluded: string[];
+  locale: AiLocale;
+}
+
+/** How many values each redaction layer replaced. */
+export interface RedactionCounts {
+  secrets: number;
+  tokens: number;
+  ips: number;
+  hostnames: number;
+}
+
+/** One section exactly as it will be sent. */
+export interface AiPreviewSection {
+  id: string;
+  kind: AiSectionKind;
+  label: string;
+  /** The exact (redacted, trimmed) text. */
+  text: string;
+  /** Estimated tokens of `text` (≈). */
+  tokens: number;
+  /** Estimated tokens before trimming. */
+  original_tokens: number;
+  trimmed: boolean;
+  /** Excluded by the user: listed, not sent. */
+  excluded: boolean;
+  redactions: RedactionCounts;
+}
+
+/** `aiPreview`: the stored payload `aiSend` sends (single use, until `expires_at`). */
+export interface AiPreview {
+  preview_id: string;
+  session_id: string;
+  provider_id: string;
+  provider_kind: AiProviderKind;
+  model: string;
+  /** The provider is on a loopback address. */
+  local: boolean;
+  /** The scoped cluster is a production cluster. */
+  production: boolean;
+  cluster_name: string | null;
+  /** The redacted typed message. */
+  message: string;
+  sections: AiPreviewSection[];
+  /** Messages of this session already sent. */
+  earlier_messages: number;
+  system_tokens: number;
+  /** Tool names offered to the model (empty under policy `off`). */
+  tools: string[];
+  estimated_input_tokens: number;
+  context_window: number;
+  budget: number;
+  /** From the user's price table; null without a price. */
+  estimated_cost: number | null;
+  /** `__IP_n__` / `__HOST_n__` → original, for local restore only. */
+  placeholders: Record<string, string>;
+  /** Epoch ms. */
+  expires_at: number;
+}
+
+export type AiToolStatus = 'running' | 'pending-approval' | 'done' | 'denied' | 'error';
+
+/** Answer to a pending tool result; `send-session` also sends later ones of the session. */
+export type AiToolDecision = 'send' | 'send-session' | 'deny';
+
+/** A read-only tool call as shown in its card. */
+export interface AiToolCall {
+  id: string;
+  name: string;
+  /** The model's arguments (JSON). */
+  input: unknown;
+  status: AiToolStatus;
+  /** The redacted result (shown before it is sent under `ask`). */
+  result_preview: string | null;
+}
+
+/** Why a run ended. */
+export type AiStop = 'end' | 'max-tokens' | 'refusal' | 'cancelled' | 'tool-limit' | 'error';
+
+/** Streamed by `aiSend`; `done` is always the last event of a run. */
+export type AiEvent =
+  | { type: 'started'; run_id: string; model: string }
+  | { type: 'text'; delta: string }
+  | { type: 'thinking' }
+  | { type: 'tool-call'; call: AiToolCall }
+  | {
+      type: 'tool-result';
+      call_id: string;
+      status: AiToolStatus;
+      tokens: number;
+      redactions: RedactionCounts;
+    }
+  | { type: 'retrying'; attempt: number; delay_ms: number; reason: string }
+  | { type: 'fallback'; from_model: string; to_model: string }
+  | { type: 'usage'; usage: AiUsage }
+  | {
+      type: 'done';
+      stop: AiStop;
+      usage: AiUsage;
+      cost: number | null;
+      placeholders: Record<string, string>;
+    }
+  | { type: 'error'; message: string; retryable: boolean };
+
+/** How a logged run ended. */
+export type AiLogOutcome = 'ok' | 'error' | 'cancelled' | 'refused';
+
+/** One `ai_log` row without bodies (`aiLogList`). */
+export interface AiLogEntry {
+  id: number;
+  /** Epoch ms when the run started. */
+  ts: number;
+  cluster_id: ClusterId | null;
+  cluster_name: string | null;
+  provider_id: string;
+  model: string;
+  intent: AiIntent;
+  outcome: AiLogOutcome;
+  error: string | null;
+  duration_ms: number;
+  usage: AiUsage;
+  cost: number | null;
+  tool_calls: number;
+}
+
+/** `aiLogGet`: one row with the exact redacted request and the response. */
+export interface AiLogDetail {
+  entry: AiLogEntry;
+  request: string;
+  response: string;
+  /** Tool calls with their inputs and statuses (JSON). */
+  tools: unknown;
+}
+
+/** `aiLogList` / `aiLogExport` filter; empty lists match all. */
+export interface AiLogFilter {
+  cluster_ids: ClusterId[];
+  /** Case-insensitive substring over cluster, model, intent and response. */
+  text: string | null;
+  /** Epoch ms, inclusive. */
+  since: number | null;
+  /** `next_cursor` of the previous page (`"<ts>:<id>"`). */
+  cursor: string | null;
+  /** 100 by default. */
+  limit: number;
+}
+
+/** A page of the request log, newest first, with totals over every matching row. */
+export interface AiLogPage {
+  entries: AiLogEntry[];
+  next_cursor: string | null;
+  /** Rows matching the filter (all pages). */
+  total: number;
+  usage: AiUsage;
+  /** Summed cost of the rows that have one; null when none has. */
+  cost: number | null;
 }

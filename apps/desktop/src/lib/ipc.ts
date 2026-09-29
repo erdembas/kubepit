@@ -4,6 +4,15 @@ import type {
   AccessCheck,
   AccessDecision,
   AccessRules,
+  AiEvent,
+  AiLogDetail,
+  AiLogFilter,
+  AiLogPage,
+  AiModelInfo,
+  AiPreview,
+  AiRequest,
+  AiStatus,
+  AiToolDecision,
   Alert,
   AlertNotice,
   ApiResourceInfo,
@@ -708,6 +717,36 @@ export const ipc = {
   // -- Resource wizards -----------------------------------------------------
   /** Bytes of a file picked in the open dialog, base64 (at most 1 MiB; never logged). */
   localFileRead: (path: string) => call<LocalFile>('local_file_read', { path }),
+
+  // -- Assistant (opt-in; the backend holds keys, redacts and is the only egress) --
+  /** Switches, credential store and per-provider key / egress status (no network). */
+  aiStatus: () => call<AiStatus>('ai_status'),
+  /** Stores the key in the OS credential store; it is never returned. */
+  aiKeySet: (providerId: string, key: string) => call<AiStatus>('ai_key_set', { providerId, key }),
+  aiKeyDelete: (providerId: string) => call<AiStatus>('ai_key_delete', { providerId }),
+  /** The provider's model list (a network call, only on request; no cluster data). */
+  aiModels: (providerId: string) => call<AiModelInfo[]>('ai_models', { providerId }),
+  /** Production clusters need `acknowledgeProduction` (typed confirmation). */
+  aiClusterSet: (clusterId: ClusterId, enabled: boolean, acknowledgeProduction: boolean) =>
+    call<Settings>('ai_cluster_set', { clusterId, enabled, acknowledgeProduction }),
+  /** Redacts, budgets and stores the exact payload; nothing leaves the machine yet. */
+  aiPreview: (request: AiRequest) => call<AiPreview>('ai_preview', { request }),
+  /** Sends a stored preview (single use); resolves to the run id, events stream on `onEvent`. */
+  aiSend: (previewId: string, onEvent: (event: AiEvent) => void) =>
+    callWithChannel<string, AiEvent>('ai_send', { previewId }, 'onEvent', onEvent),
+  /** Answers a `pending-approval` tool call of a run. */
+  aiToolDecision: (runId: string, callId: string, decision: AiToolDecision) =>
+    call<void>('ai_tool_decision', { runId, callId, decision }),
+  /** False when the run already ended. */
+  aiCancel: (runId: string) => call<boolean>('ai_cancel', { runId }),
+  /** Drops the session's in-memory history. */
+  aiSessionEnd: (sessionId: string) => call<void>('ai_session_end', { sessionId }),
+  /** The local request log (history.db), newest first, with totals. */
+  aiLogList: (filter: AiLogFilter) => call<AiLogPage>('ai_log_list', { filter }),
+  /** One logged run with the exact redacted request and the response. */
+  aiLogGet: (id: number) => call<AiLogDetail>('ai_log_get', { id }),
+  /** The filtered runs as JSON lines, bodies included. */
+  aiLogExport: (filter: AiLogFilter) => call<string>('ai_log_export', { filter }),
 
   // -- Terminal -------------------------------------------------------------
   ...terminalIpc,
