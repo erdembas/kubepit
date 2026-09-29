@@ -1,7 +1,7 @@
 # Large-cluster performance: design
 
 - **Date:** 2026-09-28
-- **Status:** proposed
+- **Status:** implemented (plan Tasks 1–23, 2026-09-29). Manual checks still open: see Results, "Open manual checks".
 - **Plan:** `docs/superpowers/plans/2026-09-28-large-cluster-performance.md`
 - **Base:** `main` at `c8d7ff2`
 - **Depends on:**
@@ -149,15 +149,15 @@ Pagination note: watch lists already page. H4 is about the non-watch lists above
 
 ## Budgets (initial; ratified by the baseline)
 
-Numbers are medians on the reference machine unless stated otherwise.
+Numbers are medians on the reference machine unless stated otherwise. Plan Task 23 tightened five backend budgets after plan R1. Each shows its first value struck out; the reason is under Results, "Budgets tightened".
 
 **Backend (Criterion)**
 
 | Id | Budget |
 |----|-------:|
-| `watch/aggregator_initial_20k` (fold 20 000 init events, drain batches) | 120 ms |
-| `watch/reset_batch_20k` | 60 ms |
-| `watch/steady_500` (500 upserts + batch) | 3 ms |
+| `watch/aggregator_initial_20k` (fold 20 000 init events, drain batches) | 90 ms (~~120 ms~~) |
+| `watch/reset_batch_20k` | 5 ms (~~60 ms~~) |
+| `watch/steady_500` (500 upserts + batch) | 1 ms (~~3 ms~~) |
 | `metrics_history/record_5k_pods_1k_nodes` | 4 ms |
 | `metrics_history/series_cluster` | 50 µs |
 | `metrics_history/series_100_pods` | 1 ms |
@@ -168,8 +168,8 @@ Numbers are medians on the reference machine unless stated otherwise.
 | `journal/apply_update` | 60 µs |
 | `journal/details_after_500` | 50 ms |
 | `history/writer_events_10k` (submit + flush) | 1.0 s, 0 dropped |
-| `fleet_search/matcher_substring_50k` | 5 ms |
-| `fleet_search/matcher_glob_50k` | 15 ms |
+| `fleet_search/matcher_substring_50k` | 2.5 ms (~~5 ms~~) |
+| `fleet_search/matcher_glob_50k` | 4 ms (~~15 ms~~) |
 | `fleet_search/matcher_regex_50k` | 15 ms |
 | `prometheus/parse_200x240` | 8 ms |
 | `loki/parse_5000_lines_50_streams` | 10 ms |
@@ -261,11 +261,11 @@ Each such change touches `types/index.ts`, `lib/ipc.ts`, the Tauri command and t
 1. Harness and baseline (Tasks 1–10).
 2. CI guard (Task 11, after the CI plan).
 3. Gated optimizations (Tasks 12–22: H1–H10, then the map cap), in order of measured impact.
-4. Update the Results table and the budgets (Task 23).
+4. Update the Results table and the budgets (Task 23). _Done._
 
 ## Results
 
-Filled in by plan Task 10 and each gated task.
+Filled in by plan Task 10, each gated task and plan Task 23 (the Final column).
 
 **Baseline run (plan Task 10), 2026-09-29.**
 - Machine: Apple M5 Max (18 cores, 128 GB), macOS (Darwin 27.0), on AC power; Node 22.21.1, headless Chromium 153 (Playwright 1.63).
@@ -273,63 +273,75 @@ Filled in by plan Task 10 and each gated task.
 - Every value is a median: Criterion's median per run, then the median of runs 1–3 (1–5 for the `watch`, `fleet_search`, `prometheus` and `loki` ids). Vitest bench: the median Vitest adds per bench, then the median of 3 runs. UI: median of 3 runs. The soak ran once.
 - Commands: `pnpm perf:rust`, `pnpm perf:bench`, `pnpm perf:ui -- --preset l --churn 50`, `pnpm perf:ui -- --preset s|m --scenarios ttfr,map,health --out perf-results/ui-<p>.json`, and the soak on its own: `--preset l --churn 50 --soak 30`. `pnpm perf:compare -- --slack 1` then reports 4 budgets over and none missing.
 
-| Id | Budget | Baseline | After | Gate fired? |
-|----|-------:|---------:|------:|-------------|
-| `watch/aggregator_initial_20k` | 120 ms | **170 ms** (155–218) ✗ | 28.2 ms (28.0–28.5) ✓ | no gate covers it; fixed by plan R1 |
-| `watch/reset_batch_20k` | 60 ms | **64.4 ms** (60.0–74.3) ✗ | 1.14 ms (1.12–1.19) ✓ | no gate covers it; fixed by plan R1 |
-| `watch/steady_500` | 3 ms | 2.04 ms ✓ | 0.15 ms (0.14–0.39) ✓ | R1 |
-| `metrics_history/record_5k_pods_1k_nodes` | 4 ms | 0.61 ms ✓ | | |
-| `metrics_history/series_cluster` | 50 µs | 1.6 µs ✓ | | |
-| `metrics_history/series_100_pods` | 1 ms | 59 µs ✓ | | |
-| `alerts/tracker_initial_20k` | 150 ms | 3.5 ms ✓ | | |
-| `alerts/tracker_pod_update` | 5 µs | 0.23 µs ✓ | | |
-| `alerts/book_record` | 10 µs | 1.7 µs ✓ | | |
-| `journal/prepare_configmap_4k` | 40 µs | 5.8 µs ✓ | | |
-| `journal/apply_update` | 60 µs | 5.4 µs ✓ | | H9: no |
-| `journal/details_after_500` | 50 ms | 5.2 ms ✓ | | H9: no |
-| `history/writer_events_10k` | 1.0 s, 0 dropped | 56 ms, 0 dropped ✓ | | |
-| `fleet_search/matcher_substring_50k` | 5 ms | **6.0 ms** (5.5–6.9) ✗ | 0.76 ms (0.75–0.80) ✓ | no gate covers it; fixed by plan R1 |
-| `fleet_search/matcher_glob_50k` | 15 ms | 6.5 ms ✓ | 1.28 ms (1.27–1.30) ✓ | R1 |
-| `fleet_search/matcher_regex_50k` | 15 ms | 0.44 ms ✓ | | |
-| `prometheus/parse_200x240` | 8 ms | 3.5 ms ✓ | | |
-| `loki/parse_5000_lines_50_streams` | 10 ms | 0.85 ms ✓ | | |
-| `e2e/watch_pods_synced_l` | 3.0 s | 0.60 s ✓ | 0.45 s ✓ (R1 and H6; 0.45 s with R1 alone) | H1: no |
-| `e2e/fleet_search_l` | 6.0 s | 0.15 s ✓ | | H10: no |
-| `e2e/prometheus_query` | 50 ms | 4.3 ms ✓ | | |
-| `e2e/max_rss_l_all_watchers` | 700 MB | 444 MB ✓ | 421–425 MB ✓ (R1 and H6) | H1, H4: no |
-| `structural/list_requests_without_limit` | 2 (see note) | 2 ✓ | | H4: no |
-| `structural/fanout` (`tests/perf_probe.rs`) | Task 2 snapshot | pods, nodes, deployments 2 streams; the other 17 paths 1 ✓ | | H1: no |
-| `topology/namespace_l` | 30 ms | 1.1 ms ✓ | | |
-| `topology/all_m` | 1 500 ms | 103 ms ✓ | 125 ms ✓ (cap 800, Task 22) | |
-| `topology/layout_800` | 250 ms | 2.4 ms ✓ | 2.4 ms ✓ | MAP: yes → 800 |
-| `topology/layout_1200` (informational) | — | 3.6 ms | 3.9 ms | MAP: yes → 800 |
-| `health/scan_m` | 1 500 ms | 22 ms ✓ | | |
-| `health/scan_l` | 3 000 ms | 55 ms ✓ | | |
-| `netpol/build_l` | 800 ms | 19 ms ✓ | | |
-| `netpol/matrix_namespace_l` | 300 ms | 46 ms ✓ | | |
-| `logs/parse_json` | 4 µs/line | 1.43 µs ✓ | | |
-| `logs/parse_logfmt` | 4 µs/line | 1.15 µs ✓ | | |
-| `logs/parse_text` | 3 µs/line | 0.58 µs ✓ | | |
-| `logs/detect_level` | 0.8 µs/line | 0.11 µs ✓ | | |
-| `logs/record_index_50k` | 250 ms | 12 ms ✓ | | |
-| `table/filter_sort_20k` | 60 ms | 15 ms ✓ | | |
-| `ui/ttfr_pods_s` | 400 ms | 69 ms ✓ | | |
-| `ui/ttfr_pods_m` | 900 ms | 146 ms ✓ | | |
-| `ui/ttfr_pods_l` (churn 50) | 1 500 ms | 146 ms ✓ | 114 ms ✓ (H6) | |
-| `ui/synced_pods_l` (churn 50) | 4 s | 0.46 s ✓ | 0.46 s ✓ (H6) | |
-| `ui/scroll_fps_l` | median ≥ 55 | 59.9 fps ✓ | | |
-| `ui/scroll_p95_frame_l` | 25 ms | 16.8 ms ✓ | | |
-| `ui/scroll_long_task_max_l` | 100 ms | 0 ms ✓ | | |
-| `ui/apply_p95_l_churn50` | 16 ms | 8.6 ms ✓ | 8.5 ms (8.3–8.6) ✓ (H6) | H7: no |
-| Watch lag at `l`, churn 50 (`watch:apply` `latencyMs` p95; H6 gate, no budget id) | 1 s | 13–25 ms | 15.7 ms (11.3–19.2) (H6) | **H6: yes**, from the code (a closed window's watches outlive it); done in Task 17 |
-| `ui/map_namespace_l` | 500 ms | 247 ms ✓ | 201 ms ✓ | H3: no |
-| `ui/map_all_m` | 2.5 s | **2.95 s** (2.66–3.49) ✗ | 0.59 s ✓ (0.51–0.59) | MAP-sync, H5: yes (map) |
-| Long tasks > 50 ms, all-namespaces map at `m` (no budget id) | — | 19–20, max 321 ms | 1, 81–87 ms (the first render of the 800-node canvas) | H5 |
-| `ui/health_scan_m` | 3 s | 79 ms ✓ | | H5: no (health) |
-| `ui/health_long_task_max_m` | 200 ms | 0 ms ✓ | | |
-| `ui/map_leave` (from the synced `l` map) | 200 ms | 33 ms ✓ | | |
-| `ui/soak_heap_ratio` | ≤ 1.15 | 1.027 ✓ (see note) | | H8: no |
-| `ui/soak_dom_nodes` | ± 10% | 0% ✓ | | |
+**Final run (plan Task 23), 2026-09-29.**
+- Same machine and versions, at `cff503d` (Tasks 1–22 and R1 merged). Still shared with other agents, but quieter than at the baseline. 1-minute load averages: checks 5.2–7.3; Rust run 1 at 5–18, right after its own bench build (which pushed it to 42), and runs 2–3 at 3.7–4.8; engine benches 3.5–5.2; UI rounds 3.5–5.4; the two soaks 2.8–9.2 and 2.5–15.
+- Same method: 3 runs of each suite, and the Final column holds their median, with the range where the runs spread. The suites were `pnpm perf:rust` (full Criterion, not quick mode), `pnpm perf:bench`, and 3 interleaved UI rounds on port 4611: `pnpm perf:ui -- --preset l --churn 50`, then `--preset m` and `--preset s` with `--scenarios ttfr,map,health`. The soak ran on its own, twice: `--preset l --churn 50 --soak 30 --scenarios=`.
+- Every check exits 0:
+  - `pnpm typecheck`, `pnpm i18n:check`, `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`;
+  - `cargo test --workspace`: 765 passed, 1 ignored (the `m`/`l` structural probe);
+  - `pnpm --filter @kubepit/desktop build`, `pnpm --filter @kubepit/desktop test` (193 passed), `node --test scripts/perf/` (23 passed);
+  - `pnpm perf:rust` and `pnpm perf:bench` (3 times each);
+  - `pnpm perf:compare -- --slack 1 --only rust,e2e,engines,structural`: 36 ok, 0 over budget, 0 missing. That holds for the first budgets and again for the tightened ones.
+  - The UI medians and the soak also pass every `ui` budget (`perf:compare -- --slack 1 --only ui --results <medians>,<soak>`: 15 ok, 0 over budget, 0 missing, with either soak).
+- Result: every budget is met. No gate that stayed shut at the baseline fires now (Gates, Final column).
+
+| Id | Budget | Baseline | After | Final (Task 23) | Gate fired? |
+|----|-------:|---------:|------:|----------------:|-------------|
+| `watch/aggregator_initial_20k` | 90 ms (~~120 ms~~) | **170 ms** (155–218) ✗ | 28.2 ms (28.0–28.5) ✓ | 27.9 ms (27.6–28.9) ✓ | no gate covers it; fixed by plan R1 |
+| `watch/reset_batch_20k` | 5 ms (~~60 ms~~) | **64.4 ms** (60.0–74.3) ✗ | 1.14 ms (1.12–1.19) ✓ | 1.10 ms (1.09–1.29) ✓ | no gate covers it; fixed by plan R1 |
+| `watch/steady_500` | 1 ms (~~3 ms~~) | 2.04 ms ✓ | 0.15 ms (0.14–0.39) ✓ | 0.12 ms (0.12–0.14) ✓ | R1 |
+| `metrics_history/record_5k_pods_1k_nodes` | 4 ms | 0.61 ms ✓ | | 0.43 ms (0.40–0.47) ✓ | |
+| `metrics_history/series_cluster` | 50 µs | 1.6 µs ✓ | | 1.4 µs ✓ | |
+| `metrics_history/series_100_pods` | 1 ms | 59 µs ✓ | | 50 µs ✓ | |
+| `alerts/tracker_initial_20k` | 150 ms | 3.5 ms ✓ | | 2.6 ms ✓ | |
+| `alerts/tracker_pod_update` | 5 µs | 0.23 µs ✓ | | 0.19 µs ✓ | |
+| `alerts/book_record` | 10 µs | 1.7 µs ✓ | | 1.6 µs ✓ | |
+| `journal/prepare_configmap_4k` | 40 µs | 5.8 µs ✓ | | 4.2 µs ✓ | |
+| `journal/apply_update` | 60 µs | 5.4 µs ✓ | | 4.3 µs ✓ | H9: no |
+| `journal/details_after_500` | 50 ms | 5.2 ms ✓ | | 4.9 ms ✓ | H9: no |
+| `history/writer_events_10k` | 1.0 s, 0 dropped | 56 ms, 0 dropped ✓ | | 55 ms, 0 dropped ✓ | |
+| `fleet_search/matcher_substring_50k` | 2.5 ms (~~5 ms~~) | **6.0 ms** (5.5–6.9) ✗ | 0.76 ms (0.75–0.80) ✓ | 0.76 ms (0.75–0.78) ✓ | no gate covers it; fixed by plan R1 |
+| `fleet_search/matcher_glob_50k` | 4 ms (~~15 ms~~) | 6.5 ms ✓ | 1.28 ms (1.27–1.30) ✓ | 1.29 ms (1.27–1.29) ✓ | R1 |
+| `fleet_search/matcher_regex_50k` | 15 ms | 0.44 ms ✓ | | 0.42 ms ✓ | |
+| `prometheus/parse_200x240` | 8 ms | 3.5 ms ✓ | | 3.4 ms (3.3–3.6) ✓ | |
+| `loki/parse_5000_lines_50_streams` | 10 ms | 0.85 ms ✓ | | 0.84 ms ✓ | |
+| `e2e/watch_pods_synced_l` | 3.0 s | 0.60 s ✓ | 0.45 s ✓ (R1 and H6; 0.45 s with R1 alone) | 0.45 s ✓ | H1: no |
+| `e2e/fleet_search_l` | 6.0 s | 0.15 s ✓ | | 0.12 s (0.11–0.12) ✓ | H10: no |
+| `e2e/prometheus_query` | 50 ms | 4.3 ms ✓ | | 3.7 ms ✓ | |
+| `e2e/max_rss_l_all_watchers` | 700 MB | 444 MB ✓ | 421–425 MB ✓ (R1 and H6) | 425 MB (425–430) ✓ | H1, H4: no |
+| `structural/list_requests_without_limit` | 2 (see note) | 2 ✓ | | 2 ✓ | H4: no |
+| `structural/fanout` (`tests/perf_probe.rs`) | Task 2 snapshot | pods, nodes, deployments 2 streams; the other 17 paths 1 ✓ | | unchanged ✓ (the probe passes in `cargo test`) | H1: no |
+| `topology/namespace_l` | 30 ms | 1.1 ms ✓ | | 0.93 ms ✓ | |
+| `topology/all_m` | 1 500 ms | 103 ms ✓ | 125 ms ✓ (cap 800, Task 22) | 102 ms ✓ (cap 800; see note) | |
+| `topology/layout_800` | 250 ms | 2.4 ms ✓ | 2.4 ms ✓ | 2.3 ms ✓ | MAP: yes → 800 |
+| `topology/layout_1200` (informational) | — | 3.6 ms | 3.9 ms | 3.4 ms | MAP: yes → 800 |
+| `health/scan_m` | 1 500 ms | 22 ms ✓ | | 21 ms ✓ | |
+| `health/scan_l` | 3 000 ms | 55 ms ✓ | | 48 ms ✓ | |
+| `netpol/build_l` | 800 ms | 19 ms ✓ | | 16 ms ✓ | |
+| `netpol/matrix_namespace_l` | 300 ms | 46 ms ✓ | | 45 ms ✓ | |
+| `logs/parse_json` | 4 µs/line | 1.43 µs ✓ | | 1.40 µs ✓ | |
+| `logs/parse_logfmt` | 4 µs/line | 1.15 µs ✓ | | 1.17 µs ✓ | |
+| `logs/parse_text` | 3 µs/line | 0.58 µs ✓ | | 0.57 µs ✓ | |
+| `logs/detect_level` | 0.8 µs/line | 0.11 µs ✓ | | 0.11 µs ✓ | |
+| `logs/record_index_50k` | 250 ms | 12 ms ✓ | | 12 ms ✓ | |
+| `table/filter_sort_20k` | 60 ms | 15 ms ✓ | | 13 ms ✓ | |
+| `ui/ttfr_pods_s` | 400 ms | 69 ms ✓ | | 87 ms (63–96) ✓ | |
+| `ui/ttfr_pods_m` | 900 ms | 146 ms ✓ | | 62 ms (36–88) ✓ | |
+| `ui/ttfr_pods_l` (churn 50) | 1 500 ms | 146 ms ✓ | 114 ms ✓ (H6) | 99 ms (41–135) ✓ | |
+| `ui/synced_pods_l` (churn 50) | 4 s | 0.46 s ✓ | 0.46 s ✓ (H6) | 0.46 s ✓ | |
+| `ui/scroll_fps_l` | median ≥ 55 | 59.9 fps ✓ | | 59.9 fps ✓ | |
+| `ui/scroll_p95_frame_l` | 25 ms | 16.8 ms ✓ | | 16.8 ms ✓ | |
+| `ui/scroll_long_task_max_l` | 100 ms | 0 ms ✓ | | 0 ms ✓ | |
+| `ui/apply_p95_l_churn50` | 16 ms | 8.6 ms ✓ | 8.5 ms (8.3–8.6) ✓ (H6) | 8.4 ms (7.2–8.7) ✓ | H7: no |
+| Watch lag at `l`, churn 50 (`watch:apply` `latencyMs` p95; H6 gate, no budget id) | 1 s | 13–25 ms | 15.7 ms (11.3–19.2) (H6) | 14.7 ms (12.2–17.3) | **H6: yes**, from the code (a closed window's watches outlive it); done in Task 17 |
+| `ui/map_namespace_l` | 500 ms | 247 ms ✓ | 201 ms ✓ | 200 ms (197–201) ✓ | H3: no |
+| `ui/map_all_m` | 2.5 s | **2.95 s** (2.66–3.49) ✗ | 0.59 s ✓ (0.51–0.59) | 0.59 s (0.59–0.75) ✓ | MAP-sync, H5: yes (map) |
+| Long tasks > 50 ms, all-namespaces map at `m` (no budget id) | — | 19–20, max 321 ms | 1, 81–87 ms (the first render of the 800-node canvas) | 1 per run, 82–91 ms (the same render) | H5 |
+| `ui/health_scan_m` | 3 s | 79 ms ✓ | | 82 ms (82–89) ✓ | H5: no (health) |
+| `ui/health_long_task_max_m` | 200 ms | 0 ms ✓ | | 0 ms ✓ | |
+| `ui/map_leave` (from the synced `l` map) | 200 ms | 33 ms ✓ | | 35 ms (33–35) ✓ | |
+| `ui/soak_heap_ratio` | ≤ 1.15 | 1.027 ✓ (see note) | | 1.125 and 1.037 (two runs; see note) ✓ | H8: no |
+| `ui/soak_dom_nodes` | ± 10% | 0% ✓ | | 0% (both runs) ✓ | |
 
 Notes:
 - **`structural/list_requests_without_limit` = 2.** The Budgets section asks for `limit=` on every list of the watch, fleet-search and metrics paths, which is 0. The metrics sampler's two lists (`metrics.k8s.io` nodes and pods) have no `limit=`, so the budget is the snapshot pinned in plan Task 2, like the watch-stream budget. H4 lowers it to 0.
@@ -338,7 +350,7 @@ Notes:
   - `watch/aggregator_initial_20k`, `watch/reset_batch_20k`: no gate reads these ids. H1 reads only the e2e ids, which pass.
   - `fleet_search/matcher_substring_50k`: H10 reads only `e2e/fleet_search_l` (0.15 s). `NameMatcher::matches` allocates per name.
   - These budgets stay unchanged until a task is decided for them.
-  - **Decided: plan R1** (2026-09-29). Watch objects are converted by value and shared (`Arc`) between the aggregator's store and its batches; ASCII names are matched without allocating. The After column holds the medians of 5 short Criterion runs (`--warm-up-time 1 --measurement-time 3`) on the same M5 Max, 1-minute load 6–19 (other agents building). The budgets stay as they are; every R1 id now has ≥ 75% headroom.
+  - **Decided: plan R1** (2026-09-29). Watch objects are converted by value and shared (`Arc`) between the aggregator's store and its batches; ASCII names are matched without allocating. The After column holds the medians of 5 short Criterion runs (`--warm-up-time 1 --measurement-time 3`) on the same M5 Max, 1-minute load 6–19 (other agents building). The budgets stay as they are; every R1 id now has ≥ 75% headroom. (Plan Task 23 then tightened all five: see "Budgets tightened".)
 - **After H6 (Task 17), 2026-09-29.** Same machine, 1-minute load 4–12.
   - `e2e/watch_pods_synced_l`: median of 3 Criterion runs: 452.3, 452.5 and 460.0 ms. A run of R1 alone gave 452.7 ms, so the acks cost nothing measurable.
   - UI: 3 runs of `pnpm perf:ui -- --preset l --churn 50 --scenarios apply,ttfr --port 4467`; a run just before gave 8.6 ms apply p95 and 12.1 ms latency p95.
@@ -350,23 +362,53 @@ Notes:
   - Task 16 (engine worker, cap still 400): 0.57 s, 2 builds (in the worker), no long task.
   - Task 22 (cap 800): 0.59 s (0.51–0.59), 2 builds, one long task of 81–87 ms per run. It is not the engine (`map:build` 42–44 ms and `map:view` 31–35 ms run in the worker): at cap 400 the same code has none, so it is the main thread's first render of twice as many nodes. No budget covers it.
   - `ui/map_namespace_l`: 201 ms (2 builds, was 28 rebuilds).
+- **Final run (plan Task 23).**
+  - `topology/all_m` is 102 ms against Task 22's 125 ms, with the same code and cap. Task 22 measured it at load 12–20; this run was at 3.5–5.2.
+  - `ui/map_all_m`: two runs built the graph twice (0.59 s); one built it 3 times (0.75 s). Each run had one long task of 82–91 ms, the first render of the capped canvas. `ui/map_all_s` has the same one (0.30 s).
+  - `ui/ttfr_pods_*` spread widely between runs (36–135 ms), far below every budget.
+  - **Soak, run twice.** `ui/soak_heap_ratio` was 1.125 in the first run and 1.037 in the second, and DOM nodes did not drift in either.
+    - Both runs end at the same heap (health 456–457 MiB at minute 30). The ratio differs because the health view's heap after GC alternates between about 410 and 450 MiB. The base sample (minute 6) fell low in the first run and high in the second.
+    - Both runs show the same step. The pods and map views grow only 2–4% from minute 5 to minutes 25–26, then rise about 40 MiB (≈ 9%) by minutes 28–29: pods 428 → 465–467 MiB, the map 455–457 → 498–499 MiB. The health view reaches 456–457 MiB at minute 30, its high mode.
+    - The baseline soak ended at similar heaps (map 504, pods 442, health 428 MiB), but it started higher (map 491 MiB at minute 5), so it showed no such step.
+    - H8 fires in neither run, but its margin is thin when the base sample falls low. Whether the heap keeps growing after 30 minutes is still open (see "Open follow-up").
+- **Budgets tightened (plan Task 23).** Only the five ids that R1 fixed were tightened. Each new budget keeps at least 3× headroom over its final median and lies below its value before R1. So a revert of R1 fails the local compare. In CI (× 2.5), it fails on any runner at least 1.6× slower than this machine, and `watch/reset_batch_20k` fails on any runner.
 
-**Gates (plan Tasks 12–22)**, from the numbers above:
+  | Id | Budget | Final | Headroom | Before R1 |
+  |----|-------:|------:|---------:|----------:|
+  | `watch/aggregator_initial_20k` | ~~120 ms~~ → 90 ms | 27.9 ms | 3.2× | 170 ms |
+  | `watch/reset_batch_20k` | ~~60 ms~~ → 5 ms | 1.10 ms | 4.5× | 64.4 ms |
+  | `watch/steady_500` | ~~3 ms~~ → 1 ms | 0.12 ms | 8.5× (2.6× over the slowest quick run, 0.39 ms) | 2.04 ms |
+  | `fleet_search/matcher_substring_50k` | ~~5 ms~~ → 2.5 ms | 0.76 ms | 3.3× | 6.0 ms |
+  | `fleet_search/matcher_glob_50k` | ~~15 ms~~ → 4 ms | 1.29 ms | 3.1× | 6.5 ms |
 
-| Gate | Task | Fires? | Why |
-|------|-----:|--------|-----|
-| H1 | 12 | no | ≥ 2 streams for pods, nodes and deployments, but `e2e/max_rss_l_all_watchers` (444 MB) and `e2e/watch_pods_synced_l` (0.60 s) are within budget. |
-| H2 | 13 | no | The standard scenario on `m` (pods table `ns-0001`, then health, the map and netpol) never had one (cluster, kind) live with two scopes: every snapshot showed one scope per kind. Across the sequence, pods, services, namespaces, NetworkPolicies and DaemonSets ran `["ns-0001"]` in the table, health and map, and `[]` in netpol, one after another. The fix derives from a *live* cluster-wide entry, so it would not apply here. It only would with both views open at once (split panes), which the scenario does not do. |
-| H3 | 14 | no | `ui/map_namespace_l` 247 ms ≤ 500 ms, so the byte share was not needed. |
-| H4 | 15 | no | The metrics.k8s.io pods list at `l` (20 000) is unpaged. But RSS is 444 MB ≤ 700 MB, and the spec has no overview-latency budget. |
-| H5 | 16 | **yes: map only** (done: no long task left from the engine; see the After notes) | All-namespaces map on `m`: 19–20 long tasks > 50 ms (max 321 ms). From 2.5 s on, each long task of 55–89 ms holds one `map:build` (28–41 ms) and one `map:view` (20–26 ms), measured by polling the probe's sample counts between long tasks. Health (`m`): no long task > 50 ms. Netpol (`m`): none. Only the topology engine moves. |
-| MAP-sync | 16a | **yes** (added after the baseline) | `ui/map_all_m` misses its budget and the map rebuilds its graph more than 10 times while syncing: 72–76. Done: rebuilds of data-only changes are coalesced to one per 250 ms during the initial sync (3 rebuilds, 0.55 s). |
-| H6 | 17 | **yes, from the code** (manual `tauri dev` check pending) | The lag half does not fire: churn 50 at `l`, arrival → commit (`latencyMs`) p95 13–25 ms ≪ 1 s. The window half fires from the code. The Chromium demo backend dies with its page, so it cannot be measured there. `apps/desktop/src-tauri/src/windows.rs:123-137` (`on_window_destroyed`) stops only the window's terminals. A `resource_watch` stops only when its sink returns `false` (`crates/kubepit-core/src/watch.rs:321-351`), that is, when `on_event.send(batch)` fails (`apps/desktop/src-tauri/src/ipc/resources.rs:45-46`). A quiet resource sends nothing, so its watch outlives the window until the next event. And Tauri 2.12 returns `Ok` for a send of ≥ 8 KB to a dead webview (`tauri/src/ipc/channel.rs:307-316`), so a busy watch with large batches may never stop. Task 17 will be implemented; confirm the window half in `pnpm tauri:dev` with the backend log. **Done (Task 17):** at most 4 unacknowledged batches per watch, latest-wins folding while blocked, a stop after 60 s without an ack (with a final `stopped` batch), and `on_window_destroyed` unwatches the window's watches at once. The `tauri dev` confirmation is still manual. |
-| H7 | 18 | no | `ui/apply_p95_l_churn50` 8.6 ms ≤ 16 ms. |
-| H8 | 19 | no | `ui/soak_heap_ratio` 1.027 (health, minute 6 → 30; map 1.026, pods 1.023) ≤ 1.15. |
-| H9 | 20 | no | `journal/apply_update` 5.4 µs ≤ 60 µs, `journal/details_after_500` 5.2 ms ≤ 50 ms. |
-| H10 | 21 | no | `e2e/fleet_search_l` 0.15 s ≤ 6 s. |
-| MAP | 22 | **yes**: 1 200 at the baseline (provisional until a WKWebView check); **800** after Tasks 16a and 16 | The criterion, amended here (D8): build + view + layout ≤ 250 ms, and no dropped frame at 60 Hz while panning, p95 frame ≤ one frame (16.7 ms). Read literally, "≤ 16 ms" fails at every cap, the current 400 included, since one 60 Hz frame is 16.7 ms. Build + view + layout: `topology/all_m` 103 ms (build and view at 400) + `topology/layout_1200` 3.6 ms ≈ 107 ms. Pan on the all-namespaces map of `m`, headless Chromium, 3 × 5 s drags per cap, with the cap swapped at build time: median 59.9 fps at every cap; p95 frame 16.7 ms at 400, 16.8 ms at 800 and 1 200 (within display-timer jitter of one frame); no long frame or long task. Pointer moves delivered in 5 s fell with size: ≈ 280 at 400, ≈ 190 at 800, ≈ 160 at 1 200. So input handling slows even though no frame drops. Task 22 must check panning in WKWebView before it settles on 1 200. **Task 22 (after 16a and 16) chose 800**: re-measured with 4 interleaved rounds × 3 drags per cap, the pointer moves were median 300 at 400, 298 at 800 and 202 at 1 200 (≈ 300 is one per frame), and long frames and long tasks appeared in 5 of 12 drags at 1 200, one long task in 12 at 800 and none at 400; p95 frame 16.7–16.8 ms everywhere. 1 200 takes a third fewer moves than 800 (> 25%), so 800, which needs no WKWebView proviso. Build + view + layout at 800: `topology/all_m` 125 ms. |
+  Left as they are, on purpose:
+  - **The other backend and engine ids.** They have 2.3–110× headroom, but no fix changed them. Their budgets are this spec's targets (D6). Tightening them before the guard's first runner run shows how much slower a runner is would only make it flaky. The least headroom in the guard's groups is still `prometheus/parse_200x240` (2.35×), so at `ci_slack` 2.5 a runner up to ≈ 5.8× slower than this machine still passes, as before.
+  - **`e2e/watch_pods_synced_l`** (6.6×). R1 moved it only from 0.60 s to 0.45 s, which no 3× budget can guard. It is also the most runner-sensitive id: a multi-threaded fake server over loopback.
+  - **`e2e/max_rss_l_all_watchers`** (1.65×) and the structural count: too little margin, or exact.
+  - **Every `ui` id.** The nightly compares them without `continue-on-error`, and it has never run on a runner (headless Chromium without a GPU). `ui/map_all_m` (4.2×) is the only fixed UI id with the margin, and Task 16a's rebuild-count tests (`dataKey.test.ts`) guard it better than a time would.
+  - **`ci_slack` stays 2.5** until the runner calibration.
+- **Open manual checks.** These cannot be done in this environment: there is no `tauri dev` window, no WKWebView automation and no GitHub remote.
+  1. **H6, window close.** In `pnpm tauri:dev`, open a secondary window on a watched view (the pods table, say) and close it. The backend log must show its watches stop at once (`on_window_destroyed` unwatches them), not after the 60 s ack timeout.
+  2. **MAP, WKWebView pan.** In `pnpm tauri:dev` with `?scale=m&perf=1`, pan the 800-node all-namespaces map for 5 s between `__kubepitPerf.startFps()` and `stopFps()` in devtools. Expect a p95 frame ≤ 16.7 ms and about one pointer move per frame. If it drops frames, go back to 400; if it keeps up, 1 200 may be tried again.
+  3. **CI calibration.** The first `perf-guard.yml` run on a GitHub runner, once the remote exists, calibrates the guard. If its compare passes at `ci_slack` 2.5, drop that step's `continue-on-error`; otherwise recalibrate `ci_slack` or the budgets, with a note here. The first `perf-nightly.yml` run checks the `ui` budgets on a runner in the same way.
+- **Open follow-up (not manual).** The soak's ≈ 40 MiB step at minute 28 (Final-run note). A longer soak, or heap snapshots from before and after minute 28, would show whether it is a leak or a one-off allocation. The 30-minute soak itself ran here after the changes, twice.
+
+**Gates (plan Tasks 12–22)**, from the numbers above. The Final column checks each gate again against the Task 23 run:
+
+| Gate | Task | Fires? | Final (Task 23) | Why |
+|------|-----:|--------|-----|-----|
+| H1 | 12 | no | still no: 425 MB RSS, synced in 0.45 s, fan-out snapshot unchanged | ≥ 2 streams for pods, nodes and deployments, but `e2e/max_rss_l_all_watchers` (444 MB) and `e2e/watch_pods_synced_l` (0.60 s) are within budget. |
+| H2 | 13 | no | not re-measured: no change touched the watch scopes | The standard scenario on `m` (pods table `ns-0001`, then health, the map and netpol) never had one (cluster, kind) live with two scopes: every snapshot showed one scope per kind. Across the sequence, pods, services, namespaces, NetworkPolicies and DaemonSets ran `["ns-0001"]` in the table, health and map, and `[]` in netpol, one after another. The fix derives from a *live* cluster-wide entry, so it would not apply here. It only would with both views open at once (split panes), which the scenario does not do. |
+| H3 | 14 | no | still no: `ui/map_namespace_l` 200 ms | `ui/map_namespace_l` 247 ms ≤ 500 ms, so the byte share was not needed. |
+| H4 | 15 | no | still no: 425 MB RSS; the two metrics.k8s.io lists stay unpaged (count 2) | The metrics.k8s.io pods list at `l` (20 000) is unpaged. But RSS is 444 MB ≤ 700 MB, and the spec has no overview-latency budget. |
+| H5 | 16 | **yes: map only** (done: no long task left from the engine; see the After notes) | done: 1 long task per all-namespaces map at `m` (82–91 ms, the canvas render, not the engine); health 0 | All-namespaces map on `m`: 19–20 long tasks > 50 ms (max 321 ms). From 2.5 s on, each long task of 55–89 ms holds one `map:build` (28–41 ms) and one `map:view` (20–26 ms), measured by polling the probe's sample counts between long tasks. Health (`m`): no long task > 50 ms. Netpol (`m`): none. Only the topology engine moves. |
+| MAP-sync | 16a | **yes** (added after the baseline) | done: 2–3 builds, `ui/map_all_m` 0.59 s | `ui/map_all_m` misses its budget and the map rebuilds its graph more than 10 times while syncing: 72–76. Done: rebuilds of data-only changes are coalesced to one per 250 ms during the initial sync (3 rebuilds, 0.55 s). |
+| H6 | 17 | **yes, from the code** (manual `tauri dev` check pending) | done; lag p95 14.7 ms. The window half awaits the manual `tauri dev` check | The lag half does not fire: churn 50 at `l`, arrival → commit (`latencyMs`) p95 13–25 ms ≪ 1 s. The window half fires from the code. The Chromium demo backend dies with its page, so it cannot be measured there. `apps/desktop/src-tauri/src/windows.rs:123-137` (`on_window_destroyed`) stops only the window's terminals. A `resource_watch` stops only when its sink returns `false` (`crates/kubepit-core/src/watch.rs:321-351`), that is, when `on_event.send(batch)` fails (`apps/desktop/src-tauri/src/ipc/resources.rs:45-46`). A quiet resource sends nothing, so its watch outlives the window until the next event. And Tauri 2.12 returns `Ok` for a send of ≥ 8 KB to a dead webview (`tauri/src/ipc/channel.rs:307-316`), so a busy watch with large batches may never stop. Task 17 will be implemented; confirm the window half in `pnpm tauri:dev` with the backend log. **Done (Task 17):** at most 4 unacknowledged batches per watch, latest-wins folding while blocked, a stop after 60 s without an ack (with a final `stopped` batch), and `on_window_destroyed` unwatches the window's watches at once. The `tauri dev` confirmation is still manual. |
+| H7 | 18 | no | still no: 8.4 ms | `ui/apply_p95_l_churn50` 8.6 ms ≤ 16 ms. |
+| H8 | 19 | no | still no: 1.125 and 1.037 ≤ 1.15 (two soaks; see the Final-run note) | `ui/soak_heap_ratio` 1.027 (health, minute 6 → 30; map 1.026, pods 1.023) ≤ 1.15. |
+| H9 | 20 | no | still no: 4.3 µs, 4.9 ms | `journal/apply_update` 5.4 µs ≤ 60 µs, `journal/details_after_500` 5.2 ms ≤ 50 ms. |
+| H10 | 21 | no | still no: 0.12 s | `e2e/fleet_search_l` 0.15 s ≤ 6 s. |
+| MAP | 22 | **yes**: 1 200 at the baseline (provisional until a WKWebView check); **800** after Tasks 16a and 16 | 800: build + view + layout 102 ms; the WKWebView pan check is still manual | The criterion, amended here (D8): build + view + layout ≤ 250 ms, and no dropped frame at 60 Hz while panning, p95 frame ≤ one frame (16.7 ms). Read literally, "≤ 16 ms" fails at every cap, the current 400 included, since one 60 Hz frame is 16.7 ms. Build + view + layout: `topology/all_m` 103 ms (build and view at 400) + `topology/layout_1200` 3.6 ms ≈ 107 ms. Pan on the all-namespaces map of `m`, headless Chromium, 3 × 5 s drags per cap, with the cap swapped at build time: median 59.9 fps at every cap; p95 frame 16.7 ms at 400, 16.8 ms at 800 and 1 200 (within display-timer jitter of one frame); no long frame or long task. Pointer moves delivered in 5 s fell with size: ≈ 280 at 400, ≈ 190 at 800, ≈ 160 at 1 200. So input handling slows even though no frame drops. Task 22 must check panning in WKWebView before it settles on 1 200. **Task 22 (after 16a and 16) chose 800**: re-measured with 4 interleaved rounds × 3 drags per cap, the pointer moves were median 300 at 400, 298 at 800 and 202 at 1 200 (≈ 300 is one per frame), and long frames and long tasks appeared in 5 of 12 drags at 1 200, one long task in 12 at 800 and none at 400; p95 frame 16.7–16.8 ms everywhere. 1 200 takes a third fewer moves than 800 (> 25%), so 800, which needs no WKWebView proviso. Build + view + layout at 800: `topology/all_m` 125 ms. |
 
 ## Open questions
 

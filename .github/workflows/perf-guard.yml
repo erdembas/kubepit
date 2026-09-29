@@ -96,10 +96,11 @@ jobs:
         run: pnpm perf:bench
 
       # Until calibrated on a runner (first run after the remote exists): the
-      # budgets are set on an Apple M-series machine, where three Rust ids
-      # already miss, so a runner more than ~1.8x slower fails them even with
-      # the slack. The table still shows every miss; drop continue-on-error
-      # once ci_slack (or the budgets) fit GitHub's runners.
+      # budgets are set on an Apple M-series machine, where every timing here
+      # has at least 2.3x headroom (the least: prometheus/parse_200x240; spec,
+      # Results, plan Task 23), so with the slack a runner up to ~5.8x slower
+      # passes. The table still shows every miss; drop continue-on-error once
+      # a runner passes (or ci_slack or the budgets are recalibrated for it).
       - name: Compare with the budgets
         continue-on-error: true
         run: node scripts/perf/compare.mjs --slack ci --only rust,e2e,engines,structural
