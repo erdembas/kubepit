@@ -529,19 +529,30 @@ pub fn used_bytes(conn: &Connection) -> Result<u64> {
 
 /// Share of a table one size-cap round deletes.
 const CAP_FRACTION: f64 = 0.1;
-/// Rows one size-cap round deletes at least (while the table has them), so
-/// a table of any size empties in about a hundred rounds instead of
-/// crawling one row at a time through its tail.
+/// Events and changes one size-cap round deletes at least (while the table
+/// has them), so a table of any size empties in about a hundred rounds
+/// instead of crawling one row at a time through its tail.
 const CAP_MIN_ROWS: i64 = 100;
+/// Audit entries one size-cap round deletes at least: the audit log goes
+/// last and only as far as needed, so no 100-row minimum takes more of it.
+const AUDIT_CAP_MIN_ROWS: i64 = 1;
 /// Safety net only: every round deletes something or ends the loop.
 const CAP_MAX_ROUNDS: u32 = 10_000;
 
-fn delete_oldest(conn: &Connection, table: &str, ts: &str, fraction: f64) -> Result<u64> {
+/// Delete the oldest `fraction` of `table` (by `ts`), at least `min_rows`
+/// of them while it has rows. Returns how many went.
+fn delete_oldest(
+    conn: &Connection,
+    table: &str,
+    ts: &str,
+    fraction: f64,
+    min_rows: i64,
+) -> Result<u64> {
     let rows: i64 = conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))?;
     if rows == 0 {
         return Ok(0);
     }
-    let n = ((rows as f64 * fraction).ceil() as i64).max(CAP_MIN_ROWS);
+    let n = ((rows as f64 * fraction).ceil() as i64).max(min_rows);
     let deleted = conn.execute(
         &format!(
             "DELETE FROM {table} WHERE id IN (SELECT id FROM {table} ORDER BY {ts} ASC, id ASC LIMIT ?1)"
@@ -571,8 +582,8 @@ pub fn prune(conn: &Connection, policy: &PrunePolicy) -> Result<PruneReport> {
     let mut rounds = 0;
     while used_bytes(conn)? > policy.max_bytes && rounds < CAP_MAX_ROUNDS {
         rounds += 1;
-        let events = delete_oldest(conn, "events", "last_ts", CAP_FRACTION)?;
-        let changes = delete_oldest(conn, "changes", "ts", CAP_FRACTION)?;
+        let events = delete_oldest(conn, "events", "last_ts", CAP_FRACTION, CAP_MIN_ROWS)?;
+        let changes = delete_oldest(conn, "changes", "ts", CAP_FRACTION, CAP_MIN_ROWS)?;
         report.events += events;
         report.changes += changes;
         if events + changes > 0 {
@@ -583,7 +594,7 @@ pub fn prune(conn: &Connection, policy: &PrunePolicy) -> Result<PruneReport> {
         if scans > 0 {
             continue;
         }
-        let audit = delete_oldest(conn, "audit", "ts", CAP_FRACTION)?;
+        let audit = delete_oldest(conn, "audit", "ts", CAP_FRACTION, AUDIT_CAP_MIN_ROWS)?;
         if audit == 0 {
             break;
         }
@@ -1476,5 +1487,39 @@ mod tests {
             "audit kept"
         );
         assert!(table_status(&conn, "events", "last_ts").unwrap().rows < 400);
+    }
+
+    #[test]
+    fn the_size_cap_takes_only_as_much_of_the_audit_log_as_needed() {
+        let (_dir, mut conn) = temp_db();
+        // Fifty bulky entries (overflow pages, freed as they go) and nothing
+        // else to delete: the cap reaches the audit log.
+        let big = "x".repeat(8 * 1024);
+        let records: Vec<AuditRecord> = (0..50)
+            .map(|i| AuditRecord {
+                request: Some(json!({ "body": big, "i": i })),
+                ..audit_record(1_000 + i, "c1", AuditAction::Scale)
+            })
+            .collect();
+        insert(&mut conn, &records);
+        let before = used_bytes(&conn).unwrap();
+        prune(
+            &conn,
+            &PrunePolicy {
+                audit_before: 0,
+                data_before: 0,
+                // About five entries too many.
+                max_bytes: before - 40 * 1024,
+                rec_before: 0,
+                rec_rows_before: 0,
+            },
+        )
+        .unwrap();
+        let left = table_status(&conn, "audit", "ts").unwrap();
+        // 10 % a round (5, then 5 …) instead of at least 100 rows: most of
+        // the log stays, and the oldest entries went first.
+        assert!((30..50).contains(&left.rows), "{left:?}");
+        assert!(left.oldest_ts.unwrap() > 1_000);
+        assert!(used_bytes(&conn).unwrap() <= before - 40 * 1024);
     }
 }

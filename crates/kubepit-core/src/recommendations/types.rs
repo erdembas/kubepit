@@ -4,9 +4,12 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::rightsizing::collect::ScanProgress;
 use crate::rightsizing::strategy::{RecommendationStrategy, STRATEGIES};
 use crate::rightsizing::summary::RecommendationSummary;
-use crate::rightsizing::{Confidence, RightsizingSettings, RightsizingSource, Verdict};
+use crate::rightsizing::{
+    Confidence, RightsizingReport, RightsizingSettings, RightsizingSource, Verdict,
+};
 
 /// Default minutes between background scans.
 pub const DEFAULT_INTERVAL_MINUTES: u32 = 60;
@@ -167,6 +170,75 @@ impl ScanTrigger {
     }
 }
 
+/// Where a cluster's scan stands (spec §12): `idle` until a scan is due or
+/// "Scan now" is pressed, `queued` while it waits for one of the
+/// [`MAX_CONCURRENT_SCANS`](super::scan::MAX_CONCURRENT_SCANS) slots,
+/// `running` while it collects, then how the last scan ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScanState {
+    Idle,
+    Queued,
+    Running,
+    Success,
+    Failed,
+    /// Stopped (disconnect, removal, opt-out, shutdown) before it finished.
+    Interrupted,
+}
+
+/// `recommendations_status` and the `recommendations://scan` event.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecommendationScanStatus {
+    pub cluster_id: String,
+    /// A background scheduler runs for the cluster (opted in and connected).
+    pub scheduled: bool,
+    /// Minutes between background scans.
+    pub interval_minutes: u32,
+    pub state: ScanState,
+    /// The stored run of the current or last scan (none while queued).
+    pub run_id: Option<i64>,
+    pub trigger: Option<ScanTrigger>,
+    /// While running: answered queries against planned ones (the total
+    /// grows when a batch splits or the window is collected again); `None`
+    /// once the scan ended.
+    pub progress: Option<ScanProgress>,
+    /// Epoch ms.
+    pub started_at: Option<i64>,
+    pub finished_at: Option<i64>,
+    /// Why the last scan failed or stopped: a message or a code
+    /// (`stopped`, `app-restarted`, `no-usage-source`, `timed-out`,
+    /// `cluster-label-mismatch`, `cluster-label-unverified`).
+    pub error: Option<String>,
+    /// When the latest successful scan finished.
+    pub last_success_at: Option<i64>,
+    /// When the scheduler runs the next scan.
+    pub next_at: Option<i64>,
+    /// "Scan now" is refused before this (epoch ms; `None` before the first
+    /// manual scan).
+    pub manual_available_at: Option<i64>,
+}
+
+impl RecommendationScanStatus {
+    /// A cluster nothing is known about yet.
+    pub fn idle(cluster_id: &str, interval_minutes: u32) -> Self {
+        Self {
+            cluster_id: cluster_id.to_string(),
+            scheduled: false,
+            interval_minutes,
+            state: ScanState::Idle,
+            run_id: None,
+            trigger: None,
+            progress: None,
+            started_at: None,
+            finished_at: None,
+            error: None,
+            last_success_at: None,
+            next_at: None,
+            manual_available_at: None,
+        }
+    }
+}
+
 /// One stored scan run (successful or not), without its rows.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecommendationRun {
@@ -188,6 +260,53 @@ pub struct RecommendationRun {
     pub rows_kept: bool,
     /// Successful runs only (`None` for runs of older builds too).
     pub summary: Option<RecommendationSummary>,
+}
+
+/// A stored successful scan as `recommendations_latest` shows it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecommendationScanView {
+    pub run: RecommendationRun,
+    /// Re-evaluated with the current strategy and settings when they
+    /// differ from the stored ones (`reevaluated`); the window, the notes
+    /// and `computed_at` are the scan's.
+    pub report: RightsizingReport,
+    /// The current strategy or settings differ from the stored ones.
+    pub reevaluated: bool,
+    /// The current `days` differ from the window the scan collected (the
+    /// next scan collects the new one).
+    pub days_changed: bool,
+}
+
+/// `recommendations_latest`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecommendationLatest {
+    /// The latest successful scan (or the requested run), unless the
+    /// latest used another Prometheus configuration.
+    pub scan: Option<RecommendationScanView>,
+    /// The latest scan used another Prometheus configuration (hidden).
+    pub source_changed: bool,
+    /// The newest failed or interrupted run after the latest success.
+    pub last_failure: Option<RecommendationRun>,
+}
+
+/// One registered cluster in `recommendations_fleet` (no cluster access).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ClusterRecommendationSummary {
+    pub cluster_id: String,
+    /// A background scheduler runs for it.
+    pub scheduled: bool,
+    /// Its latest scan used another Prometheus configuration.
+    pub source_changed: bool,
+    /// Its latest successful run (with the summary), if any.
+    pub run: Option<RecommendationRun>,
+}
+
+/// `recommendations_export` formats.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RecommendationExportFormat {
+    Json,
+    Yaml,
 }
 
 /// One container of a [`RecommendationTrendPoint`].

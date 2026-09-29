@@ -51,8 +51,9 @@ one backend (connections, port forwards, the PTY manager) and one origin.
 A new window starts as a copy of its opener (`lib/windowSeed.ts`); only
 `main` persists the workbench session, while layout prefs are shared and
 synced live (`store/windowStorage.ts`). Streams are per window (their
-channels belong to the webview); terminals are destroyed with the window
-that created them (`src-tauri/src/windows.rs`).
+channels belong to the webview); terminals are destroyed and resource
+watches stopped with the window that created them
+(`src-tauri/src/windows.rs`, `WindowOwned`).
 
 ## Persistence (`~/.kubepit`, override with `KUBEPIT_HOME`)
 
@@ -106,6 +107,35 @@ localStorage (`kubepit.workbench.v1`, `kubepit.views.v1`,
   or Retry. Error-only batches change no rows and do not bump the snapshot
   `version`. Views that read several lists use `data/listState.ts`: a list
   with an error is incomplete.
+- Watch batches are acknowledged (`watch.rs` `AckWindow`). Each carries a
+  `seq`; the watch cache acks it with `resource_watch_ack` right after
+  applying it (`watchBatch.ts` `routeBatch`), not after the next frame, so
+  a background window whose frames are paused keeps its watches. At most 4
+  batches go unacknowledged: meanwhile the backend keeps folding events
+  (pending upserts are latest-wins) and sends nothing, so a slow webview
+  gets fewer, larger batches instead of a growing IPC queue. Every batch is
+  acked, including a superseded watch's (a restart or unsubscribe raced
+  it). `routeBatch` never throws: a Tauri channel whose `onmessage` throws
+  delivers nothing after that message, so a batch that fails to apply is
+  logged and acked, and the watch stops (its rows may be half-applied) and
+  restarts after a backoff (1 s, doubling, at most 30 s; `ApplyRetry`). A
+  clean apply resets the count; after 3 consecutive failures the list turns
+  `error` and its Retry starts over. The backend skips (and logs) an object
+  that does not serialise to a JSON object, so one bad object cannot fail
+  every batch.
+  A watch whose batches get no ack for 60 s
+  stops; its last batch has `stopped` set, and a view that still
+  subscribes restarts the watch when it runs again (a frozen webview). A
+  hidden tab never holds a backend watch (`useWatch(..., enabled: false)`
+  unsubscribes; the last snapshot stays), so there is nothing to keep
+  alive for it. Closing a window stops its watches at once: the Tauri
+  command records the calling window per watch (`window_watches`), and
+  `on_window_destroyed` unwatches them. Watches that end on their own (ack
+  timeout, refused sink, disconnect, a reloaded window) are pruned from
+  that record whenever a watch starts (`resource_watch_running`). The ack
+  timeout covers the rest,
+  since Tauri reports a send of 8 KB or more to a dead webview as
+  delivered.
 - `read_only` clusters reject every mutating command in the backend (dry runs
   and RBAC self-reviews only read, so they stay available).
 
@@ -900,7 +930,7 @@ that never leaves the machine.
   (default 512, applied until it is reached: the oldest events and
   changes go first, 10 % but at least 100 rows a round, then the rows of
   the oldest recommendation runs, the audit log only when nothing else is
-  left), then incremental vacuum (full `VACUUM` after a clear or when most of the file
+  left, 10 % a round with no such minimum), then incremental vacuum (full `VACUUM` after a clear or when most of the file
   is free) and a WAL checkpoint.
 - **Opt-in per process** (`Kubepit::set_history_recording`, enabled in
   `src-tauri/src/setup.rs`): tests and headless tools record nothing, send
@@ -1008,7 +1038,14 @@ applying a recommendation only reads, so read-only clusters get it all.
   collected again at the resolved strategy's window when a per-strategy
   override differs; that first resolution is then kept (window, settings
   and strategy agree), and both collections share the 32-batch budget,
-  one batch kept back for the second while it is possible. `progress`
+  one batch kept back for the second while it is possible. When the
+  second collection gets no batch through (a cluster the first pass had
+  to split down leaves it one batch), the first window is kept with the
+  strategy it was collected for and a `recollection-failed` note, so such
+  a cluster does not fail every scan. When no batch succeeded, the detail
+  is the first error of a batch that was not split further, else
+  `cluster-label-unverified` (a shared Prometheus proved no namespace to
+  be this cluster's), else the first error of a split batch. `progress`
   counts answered queries against 16 × planned batches. A CronJob is read at its job template and counts one
   replica; its `cost_replicas` (and so its monthly amounts) is the largest
   duty cycle of its containers' evidence (average running pods), one
@@ -1173,8 +1210,112 @@ applying a recommendation only reads, so read-only clusters get it all.
 - **Demo**: OpenCost on prod-eu-west-1 (`mock/fixtures/cost.ts` derives
   allocations with usage, network and idle plus a daily trend), estimates
   elsewhere (Prometheus usage and a requests trend where the demo runs
-  Prometheus, the metrics-server snapshot on kind), and synthetic usage
-  histories that make some workloads over- and others under-provisioned.
+  Prometheus, the metrics-server snapshot on kind and staging-gke), and
+  synthetic usage histories that make some workloads over- and others
+  under-provisioned, with the pipeline's evidence, flags and notes per
+  cluster (see "Recommendations").
+
+## Recommendations
+
+Stored, scheduled right-sizing scans (`crates/kubepit-core/src/recommendations.rs`
++ `recommendations/`), kept in `history.db` (migration 2, see "Persistent
+history") and re-evaluated for the UI with the current settings.
+
+- **Scans** (`recommendations/scan.rs`): one strategy-free collection of
+  every workload the user can read — `compute_rightsizing` with the saved
+  strategy (else automatic) and its effective settings, under a 20-minute
+  timeout — stored as a run: `rec_begin` inserts it `running`,
+  `rec_finish` records how it ended. Only a success writes rows and moves
+  the latest pointer, so a failed scan keeps the last good result. Any
+  typed `source_abort` fails the run (never parsed from notes; the
+  metrics-server fallback in its report is never stored): a label mismatch
+  as `cluster-label-mismatch`, else the abort's detail (e.g.
+  `cluster-label-unverified`, or Prometheus' own message); a report
+  without a usage source as `no-usage-source`, a timeout as `timed-out`.
+  One scan per cluster (a claim held until its history writes are done)
+  and two overall (a semaphore; the rest `queued`). Scans only read, so
+  read-only clusters are scanned; they never connect on their own.
+- **Stopping**: a scan is cancelled only by dropping its future (abort on
+  disconnect, removal, shutdown), which is safe because a collection has
+  no side effects. Its drop guard finishes the run as interrupted
+  (`stopped`) without blocking, unless the real outcome was already handed
+  to the writer (the guard is disarmed then, before `rec_finish` returns
+  and whatever it returns: the writer applies a run's first finish, so a
+  detached stop must never overtake a success); from then on the store and
+  the terminal status run in a task of their own, so a disconnect cannot
+  show `interrupted` next to a stored success. A run begun after its scan
+  was dropped is stopped by the begin itself; a scan that outlives its
+  removed cluster stores nothing; runs still `running` at the next start
+  become `app-restarted`.
+- **Scheduling** (`recommendations/schedule.rs`): opt-in per process
+  (`Kubepit::set_recommendation_scans`, enabled only in
+  `src-tauri/src/setup.rs`, so tests and other binaries start no
+  scheduler; manual scans work either way) and per cluster
+  (`Settings.recommendations.scan_clusters`). A scheduler runs per
+  connected, opted-in cluster: due = max(connected_at + 120 s + 0–60 s
+  jitter, end of the newest run of any status + interval (60 min,
+  15–1440)), so failures wait a full interval. It sleeps in slices of at
+  most 60 s against the wall clock (missed ticks after sleep collapse into
+  one scan) and is woken by settings changes, the end of any scan and
+  Prometheus configuration changes (which make the next scan due in
+  120 s; a scan of the old source, still running at the change or before
+  a reconnect, neither clears that nor counts as the last attempt). Starts
+  are serialized under one lock and each gets its own task id, so a
+  cluster always has exactly one tracked, stoppable loop. Started on connect, stopped with the cluster's work
+  (disconnect, removal: running scans are aborted, manual ones too),
+  synced after `settings_set` (opting out stops the scheduler and its
+  scan), stopped at shutdown. Removing a cluster waits (bounded) until no
+  scan of it will write, then clears its stored scans.
+- **Status and event**: `recommendations://scan` carries a
+  `RecommendationScanStatus` (state idle / queued / running / success /
+  failed / interrupted, run id, trigger, progress while running — queries
+  answered against 16 × planned batches, growing with splits and a
+  re-collection — error code or message, last success, `scheduled`,
+  `next_at`, `manual_available_at`) at every state change and at most
+  every 250 ms while progressing; every scan ends with one terminal status
+  without progress, after its last progress. "Scan now" is refused while
+  disconnected and within 60 s of the last manual scan; during a scan it
+  returns the running status.
+- **Reads** (on the blocking pool; no cluster access):
+  `recommendations_latest` (the latest successful scan, or a past run,
+  re-evaluated with `rightsizing::reevaluate` when the current strategy or
+  settings differ — `reevaluated`, `days_changed` when the window no
+  longer matches; the scan's pricing, window, notes and time stay; a
+  latest scan of another Prometheus configuration is hidden,
+  `source_changed`, by comparing `recommendations::scan::source_config`,
+  the one serializer of `ClusterDef.prometheus` plus `prometheus_access`
+  (tenant, labels, auth Secret reference, TLS); `last_failure` is the
+  newest failed or interrupted run after it), `recommendations_runs`
+  (newest first, ≤ 500), `recommendations_trend` (one workload across the
+  runs whose rows are kept), `recommendations_fleet` (every registered
+  cluster with its latest run), `recommendations_export` (JSON / YAML of
+  the re-evaluated scan, no connection metadata, never the stored source
+  configuration) and `recommendations_usage_history` (the chart range
+  queries; the UI sends no pod names for a row whose list was truncated,
+  so the name pattern is used). All are classified read-only in
+  `ipc/audit_coverage.rs`; applying stays the audited `rightsizing_apply`.
+- **Demo** (`mock/recommendations.ts`, `mock/fixtures/recommendations.ts`,
+  registered after `./cost` and before `./history`): every command, with a
+  seeded history per cluster — prod-eu-west-1 30 days of scans (hourly
+  for 48 hours, then daily, one failed and one interrupted), staging-gke
+  metrics-server only (its demo Prometheus is turned off), dev-shared a
+  failed last scan after good ones, prod-us-east-1 three daily scans, kind
+  never scanned. A run keeps how it was collected, not its rows: its
+  report is rebuilt from the fixtures at the run's time (usage drifts over
+  the days), so re-evaluation rebuilds it with the current strategy and
+  settings on the stored window. Each cluster's collection follows a
+  profile that yields the pipeline's notes and flags (`partial-data` and
+  most evidence flags on prod-eu-west-1; `namespace-failed` on
+  dev-shared; no kube-state-metrics, unlistable HPAs and
+  `query-budget-exceeded` on prod-us-east-1). "Scan now" emits queued →
+  running with a total that grows when a batch splits (16, then 48) →
+  success over about three seconds; opted-in connected clusters scan in
+  the background when due; disconnecting stops a scan (interrupted,
+  `stopped`); exports mirror `export.rs`; usage history is a deterministic
+  daily rhythm with gaps; `history_clear` reaches the stored scans through
+  `provideRecommendationHistory`. The live `rightsizing_report` uses the
+  same profiles (automatic strategy, aligned `window_end`, lenses,
+  evidence and flags).
 
 ## Access (RBAC)
 
@@ -1841,6 +1982,11 @@ in-memory demo backend.
     `window.__kubepitPerf`), blocks every request outside the preview
     server and refuses a Tauri page → `perf-results/ui.json`. WKWebView is
     measured by hand with the same probe in `pnpm tauri:dev`.
+- **Optimizations applied.** R1 (no gate): watch objects are converted by
+  value and shared between the aggregator's store and its batches, and
+  fleet search matches ASCII names in place. H6: acknowledged watch
+  batches and window-owned watches (see Kubernetes access). The spec's
+  Results table has every gate and its numbers.
 - **Budgets.** `perf/budgets.json` holds one budget per result id (group,
   value, unit, `max`/`min`, whether it is a timing, `per` for per-line
   budgets, `abs` for drifts), set for the reference machine (Apple
@@ -1862,8 +2008,9 @@ in-memory demo backend.
   `compare.mjs --slack ci --only rust,e2e,engines,structural`, and uploads
   the results. The compare step is `continue-on-error` until calibrated on
   a runner (the first run after the remote exists): the budgets are set on
-  an Apple M-series machine, where three Rust ids already miss, so a runner
-  more than ~1.8× slower fails them even at slack 2.5. It moves into
+  an Apple M-series machine and a runner's speed is unknown (the three
+  Rust ids that missed at the baseline now have ≥ 75% headroom, plan R1).
+  It moves into
   `ci.yml` as its `perf-guard` job when the CI plan lands.
   `.github/workflows/perf-nightly.yml` (03:00 UTC and manual) builds the UI,
   installs Chromium, runs `perf:ui` at `l` with churn 50 and the 30-minute

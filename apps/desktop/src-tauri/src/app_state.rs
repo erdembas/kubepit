@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use kubepit_core::alerts::AlertEvent;
+use kubepit_core::recommendations::RecommendationScanStatus;
 use kubepit_core::types::{
     ClusterDef, ClusterStatus, KubeconfigChanged, PortForward, SavedPortForward, Settings,
 };
@@ -9,7 +10,7 @@ use serde::Serialize;
 use tauri::Emitter;
 
 use crate::terminal::TerminalManager;
-use crate::windows::WindowTerminals;
+use crate::windows::WindowOwned;
 
 /// `cluster://status`
 pub const EVENT_CLUSTER_STATUS: &str = "cluster://status";
@@ -27,6 +28,8 @@ pub const EVENT_TERMINAL_EXIT: &str = "terminal://exit";
 pub const EVENT_WORKSPACE_CHANGED: &str = "workspace://changed";
 /// `settings://changed`
 pub const EVENT_SETTINGS_CHANGED: &str = "settings://changed";
+/// `recommendations://scan`
+pub const EVENT_RECOMMENDATION_SCAN: &str = "recommendations://scan";
 
 /// Payload of `terminal://exit`.
 #[derive(Debug, Clone, Serialize)]
@@ -74,6 +77,10 @@ impl EventSink for TauriEventSink {
     fn kubeconfig_changed(&self, change: &KubeconfigChanged) {
         let _ = self.app.emit(EVENT_KUBECONFIG_CHANGED, change);
     }
+
+    fn recommendation_scan(&self, status: &RecommendationScanStatus) {
+        let _ = self.app.emit(EVENT_RECOMMENDATION_SCAN, status);
+    }
 }
 
 /// Payload of `workspace://changed`: a window saved the workspace snapshot.
@@ -106,7 +113,9 @@ pub fn emit_settings_changed(app: &tauri::AppHandle, source: &str, settings: &Se
 pub struct AppState {
     pub core: Arc<Kubepit>,
     pub terminals: TerminalManager,
-    pub window_terminals: WindowTerminals,
+    pub window_terminals: WindowOwned,
+    /// Resource watches by window: closing a window stops them.
+    pub window_watches: WindowOwned,
 }
 
 #[cfg(test)]

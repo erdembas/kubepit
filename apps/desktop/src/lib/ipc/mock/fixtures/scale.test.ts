@@ -31,8 +31,11 @@ describe('scale demo', () => {
         synced: true,
         error: null,
         recovered: false,
+        seq: 1,
+        stopped: false,
       },
     ]);
+    expect(batches.map((b) => b.seq)).toEqual([1, 2]);
   });
   it('parses and validates the URL switches', () => {
     expect(scaleParams('?scale=l&churn=50')).toEqual({ scale: 'l', churn: 50 });

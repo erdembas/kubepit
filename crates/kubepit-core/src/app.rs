@@ -40,6 +40,7 @@ pub struct Kubepit {
     pub(crate) sink: Arc<dyn EventSink>,
     pub(crate) pool: ClientPool,
     pub(crate) watches: TaskRegistry,
+    pub(crate) watch_acks: crate::watch::WatchAcks,
     pub(crate) log_streams: TaskRegistry,
     pub(crate) forwards: PortForwards,
     pub(crate) node_shells: NodeShells,
@@ -73,6 +74,8 @@ pub struct Kubepit {
     pub(crate) custom_actions: crate::custom_actions::CustomActionsStore,
     // Cost insight: detection and reports per connection.
     pub(crate) cost: crate::cost::CostState,
+    // Recommendations: scan statuses, running scans (`recommendations/scan.rs`).
+    pub(crate) recommendations: crate::recommendations::Recommendations,
 }
 
 impl Kubepit {
@@ -101,6 +104,7 @@ impl Kubepit {
             sink,
             pool: ClientPool::default(),
             watches: TaskRegistry::default(),
+            watch_acks: Default::default(),
             log_streams: TaskRegistry::default(),
             forwards: PortForwards::default(),
             node_shells: NodeShells::default(),
@@ -121,6 +125,7 @@ impl Kubepit {
             history,
             custom_actions,
             cost: crate::cost::CostState::default(),
+            recommendations: crate::recommendations::Recommendations::default(),
         };
         // Left behind by a crash while in keychain mode.
         app.remove_transient_run_kubeconfigs();
@@ -208,6 +213,7 @@ impl Kubepit {
         self.apply_alert_settings(&saved.alerts);
         self.sync_change_journals();
         self.sync_history();
+        self.sync_recommendation_scans();
         Ok(saved)
     }
 
@@ -231,6 +237,7 @@ impl Kubepit {
         self.manifest_watches.stop_all();
         self.alerts.stop_all();
         self.change_journals.stop_all();
+        self.stop_all_recommendation_scans();
         self.history.shutdown();
         self.forwards.stop_all(self.sink.as_ref());
         let cleanup = self.cleanup_all_node_shells();

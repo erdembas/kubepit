@@ -254,6 +254,7 @@ impl Kubepit {
                 self.start_metrics_sampler(id, sampler_client);
                 self.start_change_journal(id, journal_client);
                 self.start_history_persistence(id, history_client);
+                self.start_recommendation_scans(id);
                 tracing::info!(cluster = %cluster.name, "connected");
                 Ok(status)
             }
@@ -391,6 +392,7 @@ impl Kubepit {
         self.cost.forget(id);
         self.change_journals.stop_cluster(id);
         self.history.stop_cluster(id);
+        self.stop_recommendation_scans(id);
         self.forwards.stop_cluster(id, self.sink.as_ref());
         self.openapi.forget(id);
     }

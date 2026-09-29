@@ -159,7 +159,7 @@ impl History {
         }
     }
 
-    fn require_writer(&self) -> Result<Arc<Writer>> {
+    pub(crate) fn require_writer(&self) -> Result<Arc<Writer>> {
         self.writer().ok_or_else(|| {
             anyhow!(
                 "the history database is unavailable: {}",
@@ -188,19 +188,11 @@ impl History {
     /// Insert a `running` recommendation run (a blocking control operation
     /// on the writer, never dropped; call from the blocking pool). Works
     /// whether or not this process records history.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the scan runner is not wired yet")
-    )]
     pub(crate) fn rec_begin(&self, scan: ScanBegin) -> Result<i64> {
         self.require_writer()?.scan_begin(scan)
     }
 
     /// Record how run `run_id` ended, now (blocking, like [`Self::rec_begin`]).
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the scan runner is not wired yet")
-    )]
     pub(crate) fn rec_finish(&self, run_id: i64, outcome: ScanOutcome) -> Result<()> {
         self.require_writer()?
             .scan_finish(run_id, now_millis(), outcome)
@@ -209,10 +201,6 @@ impl History {
     /// [`Self::rec_finish`] without waiting (drop guards of aborted scans):
     /// queued, or handed to a thread that waits for room; false only when
     /// the database is unavailable.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the scan runner is not wired yet")
-    )]
     pub(crate) fn rec_finish_detached(&self, run_id: i64, outcome: ScanOutcome) -> bool {
         match self.writer() {
             Some(writer) => writer.send_detached(WriteOp::ScanFinish(
@@ -226,10 +214,6 @@ impl History {
     }
 
     /// Run `f` on the read connection (stored recommendation scans).
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the scan runner is not wired yet")
-    )]
     pub(crate) fn rec_read<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
         self.read(f)
     }

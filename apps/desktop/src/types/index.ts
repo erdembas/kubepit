@@ -338,6 +338,17 @@ export interface WatchBatch {
    * error shown for this watch. Never set together with `error`.
    */
   recovered: boolean;
+  /**
+   * Sequence number, from 1. Acknowledge every batch once applied
+   * (`ipc.resourceWatchAck`): at most 4 go unacknowledged, and a watch
+   * whose batches get no ack for 60 s stops.
+   */
+  seq: number;
+  /**
+   * The watch stopped for want of acks (its webview was frozen or gone):
+   * the last batch, with no objects. Start a new watch to keep the list live.
+   */
+  stopped: boolean;
 }
 
 export type ApplyMode = 'apply' | 'replace' | 'create';
@@ -2430,7 +2441,9 @@ export type RightsizingNoteKind =
   | 'partial-data'
   | 'namespace-failed'
   | 'query-budget-exceeded'
-  | 'hpa-unavailable';
+  | 'hpa-unavailable'
+  /** The resolved strategy's own window could not be collected; the first window is used. */
+  | 'recollection-failed';
 
 export interface RightsizingNote {
   kind: RightsizingNoteKind;
@@ -2506,6 +2519,139 @@ export interface RecommendationSummary {
   /** Under-provisioned by risk (≤ 5), then high-confidence savings (≤ 5). */
   top: SummaryEntry[];
 }
+
+// ---------------------------------------------------------------------------
+// Recommendations: stored, scheduled right-sizing scans (history.db)
+// ---------------------------------------------------------------------------
+
+/** Answered queries against planned ones; the total grows when a batch splits or the window is collected again. */
+export interface ScanProgress {
+  completed: number;
+  total: number;
+  /** Live workloads in scope. */
+  workloads: number;
+}
+
+/** idle → queued (waiting for one of two scan slots) → running → success | failed | interrupted. */
+export type ScanState = 'idle' | 'queued' | 'running' | 'success' | 'failed' | 'interrupted';
+export type ScanTrigger = 'manual' | 'schedule';
+export type RecommendationRunStatus = 'running' | 'success' | 'failed' | 'interrupted';
+
+/** `recommendations_status` and the `recommendations://scan` event. */
+export interface RecommendationScanStatus {
+  cluster_id: ClusterId;
+  /** A background scheduler runs (opted in and connected). */
+  scheduled: boolean;
+  interval_minutes: number;
+  state: ScanState;
+  /** The stored run of the current or last scan (null while queued). */
+  run_id: number | null;
+  trigger: ScanTrigger | null;
+  /** While running only; null once the scan ended. */
+  progress: ScanProgress | null;
+  started_at: number | null;
+  finished_at: number | null;
+  /**
+   * A message, or a code: `stopped`, `app-restarted`, `no-usage-source`,
+   * `timed-out`, `cluster-label-mismatch`, `cluster-label-unverified`.
+   */
+  error: string | null;
+  last_success_at: number | null;
+  /** When the scheduler runs the next scan. */
+  next_at: number | null;
+  /** "Scan now" is refused before this (epoch ms). */
+  manual_available_at: number | null;
+}
+
+/** One stored scan run, without its rows. */
+export interface RecommendationRun {
+  id: number;
+  cluster_id: ClusterId;
+  started_at: number;
+  finished_at: number | null;
+  status: RecommendationRunStatus;
+  trigger: ScanTrigger;
+  /** A message or one of the codes of `RecommendationScanStatus.error`. */
+  error: string | null;
+  /** Successful runs only. */
+  source: RightsizingSource | null;
+  strategy: string | null;
+  window_secs: number | null;
+  workloads: number;
+  /** The rows are still stored (older runs keep only their summary). */
+  rows_kept: boolean;
+  /** Successful runs only (null for runs of older builds too). */
+  summary: RecommendationSummary | null;
+}
+
+export interface RecommendationTrendContainer {
+  name: string;
+  cpu_request: number | null;
+  cpu_recommended: number | null;
+  memory_request: number | null;
+  memory_recommended: number | null;
+  cpu_p95: number | null;
+  memory_max: number | null;
+}
+
+/** A workload in one stored run whose rows are kept. */
+export interface RecommendationTrendPoint {
+  run_id: number;
+  /** When the run started (ms). */
+  at: number;
+  verdict: RightsizingVerdict;
+  confidence: RightsizingConfidence;
+  monthly_delta: number;
+  containers: RecommendationTrendContainer[];
+}
+
+/** A stored successful scan as `recommendations_latest` shows it. */
+export interface RecommendationScanView {
+  run: RecommendationRun;
+  /** Re-evaluated with the current strategy and settings when they differ; window, notes and `computed_at` are the scan's. */
+  report: RightsizingReport;
+  /** The current strategy or settings differ from the stored ones. */
+  reevaluated: boolean;
+  /** The current `days` differ from the collected window (the next scan collects it). */
+  days_changed: boolean;
+}
+
+export interface RecommendationLatest {
+  /** The latest successful scan (or the requested run); null when none or `source_changed`. */
+  scan: RecommendationScanView | null;
+  /** The latest scan used another Prometheus configuration (hidden). */
+  source_changed: boolean;
+  /** The newest failed or interrupted run after the latest success. */
+  last_failure: RecommendationRun | null;
+}
+
+/** How the usage history queries selected the workload's pods. */
+export type PodFilter = 'names' | 'pattern';
+
+/** `recommendations_usage_history`: CPU in millicores, memory in bytes. */
+export interface WorkloadUsageHistory {
+  start: number;
+  end: number;
+  step_secs: number;
+  pod_filter: PodFilter;
+  cpu_avg: PromPoint[];
+  cpu_peak: PromPoint[];
+  memory_avg: PromPoint[];
+  memory_peak: PromPoint[];
+  /** Prometheus warnings, and series that could not be read. */
+  warnings: string[];
+}
+
+/** One registered cluster in `recommendations_fleet`. */
+export interface ClusterRecommendationSummary {
+  cluster_id: ClusterId;
+  scheduled: boolean;
+  source_changed: boolean;
+  /** The latest successful run (with its summary). */
+  run: RecommendationRun | null;
+}
+
+export type RecommendationExportFormat = 'json' | 'yaml';
 
 /** New values of one container (`null` = unchanged). */
 export interface ContainerResourceChange {

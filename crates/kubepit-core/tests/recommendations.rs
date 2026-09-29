@@ -5,23 +5,30 @@
 
 mod support;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use kubepit_core::prometheus::access::PrometheusAccess;
 use kubepit_core::prometheus::usage_history::PodFilter;
-use kubepit_core::recommendations::RecommendationSettings;
+use kubepit_core::recommendations::{
+    RecommendationExportFormat, RecommendationScanStatus, RecommendationSettings, RunStatus,
+    ScanState, ScanTrigger,
+};
 use kubepit_core::rightsizing::collect::{ScanProgress, SourceAbortKind};
+use kubepit_core::rightsizing::workload_history::WorkloadHistory;
 use kubepit_core::rightsizing::{
     Confidence, EvidenceIdentity, RightsizingNoteKind, RightsizingReport, RightsizingRequest,
     RightsizingSettings, RightsizingSource, WorkloadRef,
 };
 use kubepit_core::types::{PromScheme, PrometheusConfig};
+use kubepit_core::Kubepit;
 use parking_lot::Mutex;
 use serde_json::{json, Value};
 use support::stats::{
     duplicated, named_namespaces, param, prom_error, scalar_one, stat_query, vector,
 };
-use support::{setup, start, status, Log, Reply, Request, Router};
+use support::{setup, start, status, FakeServer, Log, Recorder, Reply, Request, Router};
 
 const OPERATED: &str = "/api/v1/namespaces/monitoring/services/http:prometheus-operated:9090/proxy";
 const MIB: f64 = 1024.0 * 1024.0;
@@ -67,6 +74,17 @@ struct Fixture {
     ksm_window: Option<&'static str>,
     /// Cluster-wide lists are forbidden.
     restricted: bool,
+    /// While set, Q1 fails for every batch (single namespaces too).
+    fail_q1_now: Arc<AtomicBool>,
+    /// The cluster runs kube-prometheus-stack's Prometheus.
+    prometheus: bool,
+    /// A shared Prometheus: every series carries `cluster` with this value.
+    cluster_label: Option<&'static str>,
+    /// The memory max (Q5) and pod owners (Q11) hold no series for this
+    /// namespace, so a shared source cannot prove it is this cluster's.
+    unverified_for: Option<&'static str>,
+    /// Q1 answers this late (the router blocks, like a slow Prometheus).
+    q1_delay: Option<Duration>,
 }
 
 fn base() -> Fixture {
@@ -87,6 +105,11 @@ fn base() -> Fixture {
         fail_q1_multi: false,
         ksm_window: None,
         restricted: false,
+        fail_q1_now: Arc::default(),
+        prometheus: true,
+        cluster_label: None,
+        unverified_for: None,
+        q1_delay: None,
     }
 }
 
@@ -239,15 +262,29 @@ fn prometheus(f: &Fixture, req: &Request) -> Reply {
     if n == 1 && f.fail_q1_multi && scope.as_ref().is_none_or(|s| s.len() > 1) {
         return prom_error("query processing would load too many samples into memory");
     }
+    if let (1, Some(delay)) = (n, f.q1_delay) {
+        std::thread::sleep(delay);
+    }
+    if n == 1 && f.fail_q1_now.load(Ordering::SeqCst) {
+        return prom_error("query processing would load too many samples into memory");
+    }
     let ksm = f.ksm && f.ksm_window.is_none_or(|w| q.contains(w));
     let end: i64 = param(&req.path, "time")
         .and_then(|t| t.parse().ok())
         .unwrap_or(0);
     let mut series = Vec::new();
     for ns in f.namespaces.iter().filter(|ns| named(ns)) {
+        if matches!(n, 5 | 11) && f.unverified_for == Some(*ns) {
+            continue;
+        }
         match answer(n, ns, f, ksm, end) {
             Some(list) => series.extend(list),
             None => return prom_error("query timed out"),
+        }
+    }
+    if let Some(cluster) = f.cluster_label {
+        for (labels, _) in &mut series {
+            labels["cluster"] = json!(cluster);
         }
     }
     vector(duplicated(series))
@@ -303,7 +340,8 @@ fn kubefit_router(f: Fixture) -> Router {
                 );
             }
             let items: Vec<Value> = match resource {
-                "services" => vec![prometheus_service()],
+                "services" if f.prometheus => vec![prometheus_service()],
+                "services" => Vec::new(),
                 _ => f
                     .namespaces
                     .iter()
@@ -905,8 +943,879 @@ async fn both_collections_share_one_budget() {
     assert_eq!(p95, 32, "at most 32 batches for the whole report");
     let last = *scan.progress.last().unwrap();
     assert_eq!((last.total, last.completed), (32 * 16, 32 * 16));
-    // The second collection had nothing left: abandoned, typed, and the
-    // strategy is still the first pass's.
-    assert_eq!(scan.abort, Some(SourceAbortKind::AllBatchesFailed));
-    assert_eq!(scan.report.strategy, "percentile-headroom");
+    // The second collection had nothing left. Such a cluster would fail
+    // every scan, so the first pass is kept: its 7-day window with the
+    // strategy that window was collected for, and a note why.
+    let report = scan.report;
+    assert_eq!(scan.abort, None, "{:?}", report.notes);
+    assert_eq!(report.source, RightsizingSource::Prometheus);
+    assert_eq!(
+        (report.strategy.as_str(), report.strategy_auto),
+        ("workload-history", true)
+    );
+    assert_eq!((report.settings.days, report.window_secs), (7, 7 * 86_400));
+    let note = report
+        .notes
+        .iter()
+        .find(|n| n.kind == RightsizingNoteKind::RecollectionFailed)
+        .expect("a recollection-failed note");
+    assert!(
+        note.detail.as_deref().unwrap().contains("too many samples"),
+        "{note:?}"
+    );
+    assert!(!report
+        .notes
+        .iter()
+        .any(|n| n.kind == RightsizingNoteKind::PrometheusFailed));
+    assert_eq!(report.workloads.len(), 16);
+    for w in &report.workloads {
+        let c = &w.containers[0];
+        assert_eq!(c.usage.unwrap().cpu_p95, 100.0, "{}", w.namespace);
+        // Pods matched by name (no owner metrics) cap the confidence.
+        assert!(c.warnings.iter().any(|x| x.code == "identity-by-name"));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Scans: stored runs, keep-last-good, one at a time, rate limit
+// ---------------------------------------------------------------------------
+
+struct ScanApp {
+    server: FakeServer,
+    _dir: tempfile::TempDir,
+    app: Arc<Kubepit>,
+    recorder: Arc<Recorder>,
+    id: String,
+}
+
+/// A connected, read-only cluster (scans only read) behind `f`.
+async fn scan_app(f: Fixture) -> ScanApp {
+    let server = start(kubefit_router(f)).await;
+    let (dir, app, recorder, id) = setup(&server.url, true);
+    app.cluster_connect(&id).await.unwrap();
+    ScanApp {
+        server,
+        _dir: dir,
+        app,
+        recorder,
+        id,
+    }
+}
+
+/// The first `recommendations://scan` status in `state` from index `from` on.
+async fn wait_for_state_from(
+    recorder: &Recorder,
+    state: ScanState,
+    from: usize,
+) -> RecommendationScanStatus {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let found = recorder
+            .scans
+            .lock()
+            .iter()
+            .skip(from)
+            .find(|s| s.state == state)
+            .cloned();
+        if let Some(status) = found {
+            return status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no {state:?} status: {:#?}",
+            recorder.scans.lock()
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+async fn wait_for_state(recorder: &Recorder, state: ScanState) -> RecommendationScanStatus {
+    wait_for_state_from(recorder, state, 0).await
+}
+
+fn terminal(state: ScanState) -> bool {
+    matches!(
+        state,
+        ScanState::Success | ScanState::Failed | ScanState::Interrupted
+    )
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn manual_scan_stores_a_run_and_its_rows() {
+    let ScanApp {
+        app,
+        recorder,
+        id,
+        _dir,
+        ..
+    } = scan_app(base()).await;
+    assert_eq!(app.recommendations_status(&id).state, ScanState::Idle);
+    let queued = app.recommendations_scan(&id).await.unwrap();
+    assert_eq!(
+        (queued.state, queued.trigger, queued.run_id),
+        (ScanState::Queued, Some(ScanTrigger::Manual), None)
+    );
+    assert!(queued.manual_available_at.is_some());
+    let done = wait_for_state(&recorder, ScanState::Success).await;
+
+    let read = app.recommendations_latest(&id, None).unwrap();
+    let scan = read.scan.unwrap();
+    assert_eq!(scan.report.workloads[0].name, "api");
+    assert_eq!(scan.run.id, done.run_id.unwrap());
+    assert_eq!(
+        (scan.run.status, scan.run.trigger),
+        (RunStatus::Success, ScanTrigger::Manual)
+    );
+    assert_eq!(scan.run.summary.as_ref().unwrap().workloads, 1);
+    assert!(scan.run.rows_kept && read.last_failure.is_none());
+    // Strategy-free: automatic, with the strategy's effective settings.
+    assert_eq!(
+        (scan.report.strategy.as_str(), scan.report.strategy_auto),
+        ("workload-history", true)
+    );
+    assert_eq!(scan.report.window_secs, 7 * 86_400);
+
+    let scans = recorder.scans.lock().clone();
+    assert!(scans
+        .iter()
+        .any(|s| s.state == ScanState::Running && s.progress.is_some()));
+    assert!(done.last_success_at.is_some());
+    // The scan ends cleanly: queued, running, then one terminal status
+    // without progress, and nothing after it.
+    assert_eq!(scans[0].state, ScanState::Queued);
+    assert_eq!(scans.last().unwrap(), &done);
+    assert_eq!(scans.iter().filter(|s| terminal(s.state)).count(), 1);
+    assert!(done.progress.is_none() && done.error.is_none());
+    assert_eq!(app.recommendations_status(&id), done);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn failing_scan_keeps_the_last_good_result() {
+    let f = base();
+    let fail = f.fail_q1_now.clone();
+    let ScanApp { app, id, _dir, .. } = scan_app(f).await;
+    let first = app.recommendations_run_for_tests(&id).await.unwrap();
+    let good = app.recommendations_status(&id);
+    assert_eq!(good.state, ScanState::Success, "{good:?}");
+
+    // Q1 now fails for every batch, single namespaces included: the live
+    // report would fall back; the scan fails and keeps the first result.
+    fail.store(true, Ordering::SeqCst);
+    let second = app.recommendations_run_for_tests(&id).await.unwrap();
+    let read = app.recommendations_latest(&id, None).unwrap();
+    assert_eq!(read.scan.unwrap().run.id, first);
+    let failure = read.last_failure.unwrap();
+    assert_eq!((failure.id, failure.status), (second, RunStatus::Failed));
+    let error = failure.error.unwrap();
+    assert!(error.contains("too many samples"), "{error}");
+    assert!(failure.summary.is_none() && failure.source.is_none());
+
+    let status = app.recommendations_status(&id);
+    assert_eq!(
+        (status.state, status.run_id, status.trigger),
+        (ScanState::Failed, Some(second), Some(ScanTrigger::Schedule))
+    );
+    assert_eq!(status.error.as_deref(), Some(error.as_str()));
+    assert_eq!(status.last_success_at, good.last_success_at);
+    assert!(status.progress.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn scans_fail_on_label_mismatch_and_without_a_usage_source() {
+    // A shared Prometheus that answers without the cluster's label.
+    let ScanApp { app, id, _dir, .. } = scan_app(base()).await;
+    let first = app.recommendations_run_for_tests(&id).await.unwrap();
+    let mut def = app.cluster_def(&id).unwrap();
+    def.prometheus_access = PrometheusAccess {
+        cluster_labels: [("cluster".to_string(), "production".to_string())].into(),
+        ..Default::default()
+    };
+    app.cluster_update(def.clone()).unwrap();
+    app.recommendations_run_for_tests(&id).await.unwrap();
+    let status = app.recommendations_status(&id);
+    assert_eq!(status.state, ScanState::Failed);
+    assert_eq!(status.error.as_deref(), Some("cluster-label-mismatch"));
+    // Back to the first configuration: its result is still the latest.
+    def.prometheus_access = PrometheusAccess::default();
+    app.cluster_update(def).unwrap();
+    let read = app.recommendations_latest(&id, None).unwrap();
+    assert_eq!(read.scan.unwrap().run.id, first);
+    assert_eq!(
+        read.last_failure.unwrap().error.as_deref(),
+        Some("cluster-label-mismatch")
+    );
+
+    // Neither Prometheus nor metrics-server history.
+    let ScanApp { app, id, _dir, .. } = scan_app(Fixture {
+        prometheus: false,
+        ..base()
+    })
+    .await;
+    let run = app.recommendations_run_for_tests(&id).await.unwrap();
+    let status = app.recommendations_status(&id);
+    assert_eq!(
+        (status.state, status.run_id, status.error.as_deref()),
+        (ScanState::Failed, Some(run), Some("no-usage-source"))
+    );
+    assert!(app
+        .recommendations_latest(&id, None)
+        .unwrap()
+        .scan
+        .is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn one_scan_per_cluster_and_manual_scans_are_rate_limited() {
+    let ScanApp {
+        app,
+        recorder,
+        id,
+        _dir,
+        ..
+    } = scan_app(base()).await;
+    let a = app.recommendations_scan(&id).await.unwrap();
+    let b = app.recommendations_scan(&id).await.unwrap();
+    assert_eq!(a.run_id.or(b.run_id), b.run_id, "same run reported");
+    assert_ne!(b.state, ScanState::Idle);
+    let done = wait_for_state(&recorder, ScanState::Success).await;
+    let err = app.recommendations_scan(&id).await.unwrap_err().to_string();
+    assert!(err.contains("wait"), "{err}");
+    // One run only.
+    let read = app.recommendations_latest(&id, None).unwrap();
+    assert_eq!(read.scan.unwrap().run.id, done.run_id.unwrap());
+    assert_eq!(
+        recorder
+            .scans
+            .lock()
+            .iter()
+            .filter(|s| s.state == ScanState::Queued)
+            .count(),
+        1
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn source_change_hides_results_and_scans_need_a_connection() {
+    let ScanApp {
+        app,
+        id,
+        server,
+        _dir,
+        ..
+    } = scan_app(base()).await;
+    app.recommendations_run_for_tests(&id).await.unwrap();
+    assert!(app
+        .recommendations_latest(&id, None)
+        .unwrap()
+        .scan
+        .is_some());
+    let mut def = app.cluster_def(&id).unwrap();
+    def.prometheus = PrometheusConfig::Service {
+        namespace: "monitoring".into(),
+        service: "prometheus-operated".into(),
+        port: 9090,
+        scheme: PromScheme::Http,
+        path_prefix: String::new(),
+    };
+    app.cluster_update(def).unwrap();
+    let read = app.recommendations_latest(&id, None).unwrap();
+    assert!(read.scan.is_none() && read.source_changed);
+
+    app.cluster_disconnect(&id);
+    let sent = server.log.lock().len();
+    let err = app.recommendations_scan(&id).await.unwrap_err().to_string();
+    assert!(err.contains("connect"), "{err}");
+    assert_eq!(server.log.lock().len(), sent, "never connects on its own");
+}
+
+/// A cluster in a shared Prometheus (`cluster="production"`).
+fn shared(app: &Kubepit, id: &str) {
+    let mut def = app.cluster_def(id).unwrap();
+    def.prometheus_access = PrometheusAccess {
+        cluster_labels: [("cluster".to_string(), "production".to_string())].into(),
+        ..Default::default()
+    };
+    app.cluster_update(def).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unverified_namespaces_are_left_out_and_nothing_verified_fails() {
+    // "a|b" is too large and splits; "a" proves itself, "b" answers no
+    // memory or owner series: b is listed as failed, the scan succeeds.
+    let ScanApp { app, id, _dir, .. } = scan_app(Fixture {
+        namespaces: vec!["a", "b"],
+        fail_q1_multi: true,
+        cluster_label: Some("production"),
+        unverified_for: Some("b"),
+        ..base()
+    })
+    .await;
+    shared(&app, &id);
+    let run = app.recommendations_run_for_tests(&id).await.unwrap();
+    let status = app.recommendations_status(&id);
+    assert_eq!(status.state, ScanState::Success, "{status:?}");
+    let scan = app.recommendations_latest(&id, None).unwrap().scan.unwrap();
+    assert_eq!(scan.run.id, run);
+    let report = scan.report;
+    assert!(
+        report.notes.iter().any(|n| {
+            n.kind == RightsizingNoteKind::NamespaceFailed && n.detail.as_deref() == Some("b")
+        }),
+        "{:?}",
+        report.notes
+    );
+    let row = |ns: &str| report.workloads.iter().find(|w| w.namespace == ns).unwrap();
+    assert!(row("a").containers[0].usage.is_some());
+    assert!(row("b").containers[0].usage.is_none());
+
+    // Nothing verified at all: abandoned, and the scan fails with the code.
+    let ScanApp { app, id, _dir, .. } = scan_app(Fixture {
+        cluster_label: Some("production"),
+        unverified_for: Some("apps"),
+        ..base()
+    })
+    .await;
+    shared(&app, &id);
+    let run = app.recommendations_run_for_tests(&id).await.unwrap();
+    let status = app.recommendations_status(&id);
+    assert_eq!(
+        (status.state, status.run_id, status.error.as_deref()),
+        (
+            ScanState::Failed,
+            Some(run),
+            Some("cluster-label-unverified")
+        )
+    );
+    assert!(app
+        .recommendations_latest(&id, None)
+        .unwrap()
+        .scan
+        .is_none());
+}
+
+// ---------------------------------------------------------------------------
+// Scheduler: opted-in connected clusters only; stopping and removal
+// ---------------------------------------------------------------------------
+
+fn opt_in(app: &Kubepit, id: &str, on: bool) {
+    let mut settings = app.settings();
+    settings.recommendations.scan_clusters = if on { vec![id.to_string()] } else { vec![] };
+    app.set_settings(settings).unwrap();
+}
+
+/// Poll the status of `id` until `done` holds (bounded).
+async fn wait_for_status(
+    app: &Kubepit,
+    id: &str,
+    done: impl Fn(&RecommendationScanStatus) -> bool,
+) -> RecommendationScanStatus {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let status = app.recommendations_status(id);
+        if done(&status) {
+            return status;
+        }
+        assert!(Instant::now() < deadline, "{status:#?}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// The stored runs of `id`, newest first, after every queued write.
+fn runs_of(app: &Kubepit, id: &str) -> Vec<kubepit_core::recommendations::RecommendationRun> {
+    assert!(app.history_flush());
+    app.recommendations_runs(id, 500).unwrap()
+}
+
+/// The newest run of `id` once no run is `running` any more (a stopped
+/// scan's run is finished by its drop guard, asynchronously).
+async fn last_run(app: &Kubepit, id: &str) -> kubepit_core::recommendations::RecommendationRun {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let runs = runs_of(app, id);
+        if let Some(run) = runs.first().filter(|r| r.status != RunStatus::Running) {
+            return run.clone();
+        }
+        assert!(Instant::now() < deadline, "{runs:#?}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn schedulers_run_only_for_opted_in_connected_clusters() {
+    let server = start(kubefit_router(base())).await;
+    let (_dir, app, _recorder, id) = setup(&server.url, true);
+    // Off for the process (tests, other binaries): nothing is scheduled.
+    opt_in(&app, &id, true);
+    app.cluster_connect(&id).await.unwrap();
+    assert!(!app.recommendations_status(&id).scheduled);
+    app.cluster_disconnect(&id);
+
+    app.set_recommendation_scans(true);
+    assert!(
+        !app.recommendations_status(&id).scheduled,
+        "not while disconnected"
+    );
+    app.cluster_connect(&id).await.unwrap();
+    let connected = app.cluster_status(&id).connected_at.unwrap();
+    let s = app.recommendations_status(&id);
+    let next = s.next_at.unwrap();
+    assert!(s.scheduled, "{s:?}");
+    assert!(
+        (connected + 120_000..=connected + 180_000).contains(&next),
+        "{next} vs {connected}"
+    );
+    assert_eq!(s.interval_minutes, 60);
+
+    opt_in(&app, &id, false);
+    let s = app.recommendations_status(&id);
+    assert!(!s.scheduled && s.next_at.is_none(), "{s:?}");
+    // Opting in again while connected starts it at once.
+    opt_in(&app, &id, true);
+    assert!(app.recommendations_status(&id).scheduled);
+    app.cluster_disconnect(&id);
+    assert!(!app.recommendations_status(&id).scheduled);
+    // Turned off for the process: stopped.
+    app.cluster_connect(&id).await.unwrap();
+    assert!(app.recommendations_status(&id).scheduled);
+    app.set_recommendation_scans(false);
+    assert!(!app.recommendations_status(&id).scheduled);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_due_scheduler_scans_and_waits_an_interval() {
+    let server = start(kubefit_router(base())).await;
+    let (_dir, app, recorder, id) = setup(&server.url, true);
+    app.set_recommendation_scans(true);
+    opt_in(&app, &id, true);
+    app.cluster_connect(&id).await.unwrap();
+    app.recommendations_due_now_for_tests(&id);
+    let done = wait_for_state(&recorder, ScanState::Success).await;
+    assert_eq!(done.trigger, Some(ScanTrigger::Schedule));
+    let run = last_run(&app, &id).await;
+    assert_eq!(
+        (run.status, run.trigger),
+        (RunStatus::Success, ScanTrigger::Schedule)
+    );
+    // The next one is a full interval after this attempt.
+    let end = run.finished_at.unwrap();
+    let s = wait_for_status(&app, &id, |s| {
+        s.next_at.is_some_and(|t| t >= end + 3_600_000)
+    })
+    .await;
+    assert!(s.scheduled && s.next_at.unwrap() <= done.finished_at.unwrap() + 3_600_000 + 1_000);
+
+    // A shorter interval moves it at once (the scheduler is woken).
+    let mut settings = app.settings();
+    settings.recommendations.interval_minutes = 15;
+    app.set_settings(settings).unwrap();
+    let s = wait_for_status(&app, &id, |s| {
+        s.interval_minutes == 15 && s.next_at.is_some_and(|t| t < end + 3_600_000)
+    })
+    .await;
+    // From the end of the last attempt (the stored or the in-memory one).
+    let next = s.next_at.unwrap();
+    assert!(
+        (end + 15 * 60_000..=end + 15 * 60_000 + 1_000).contains(&next),
+        "{next} vs {end}"
+    );
+
+    // A source change makes the next scan due in two minutes.
+    let before = kubepit_core::objects::now_millis();
+    let mut def = app.cluster_def(&id).unwrap();
+    def.prometheus = PrometheusConfig::Service {
+        namespace: "monitoring".into(),
+        service: "prometheus-operated".into(),
+        port: 9090,
+        scheme: PromScheme::Http,
+        path_prefix: String::new(),
+    };
+    app.cluster_update(def).unwrap();
+    let s = wait_for_status(&app, &id, |s| {
+        s.next_at
+            .is_some_and(|t| t >= before + 120_000 && t < end + 15 * 60_000)
+    })
+    .await;
+    assert!(s.next_at.unwrap() <= kubepit_core::objects::now_millis() + 120_000);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn disconnect_or_removal_interrupts_a_running_scan() {
+    let ScanApp {
+        app,
+        recorder,
+        id,
+        _dir,
+        ..
+    } = scan_app(Fixture {
+        q1_delay: Some(Duration::from_secs(2)),
+        ..base()
+    })
+    .await;
+    // A good result first, so the latest pointer exists.
+    let good = app.recommendations_run_for_tests(&id).await.unwrap();
+    let from = recorder.scans.lock().len();
+    app.recommendations_scan(&id).await.unwrap();
+    let running = wait_for_state_from(&recorder, ScanState::Running, from).await;
+    app.cluster_disconnect(&id);
+    let run = last_run(&app, &id).await;
+    assert_eq!(Some(run.id), running.run_id);
+    assert_eq!(run.status, RunStatus::Interrupted);
+    assert_eq!(run.error.as_deref(), Some("stopped"));
+    // The status ends as interrupted; the latest pointer is untouched.
+    let stopped = wait_for_state_from(&recorder, ScanState::Interrupted, from).await;
+    assert_eq!(stopped.error.as_deref(), Some("stopped"));
+    assert!(stopped.progress.is_none());
+    assert_eq!(
+        recorder.scans.lock().last().unwrap().state,
+        ScanState::Interrupted
+    );
+    assert_eq!(
+        app.recommendations_latest(&id, None)
+            .unwrap()
+            .scan
+            .unwrap()
+            .run
+            .id,
+        good
+    );
+
+    // Removed during a scheduled scan: no rows stay behind, nothing panics.
+    app.set_recommendation_scans(true);
+    opt_in(&app, &id, true);
+    app.cluster_connect(&id).await.unwrap();
+    let from = recorder.scans.lock().len();
+    app.recommendations_due_now_for_tests(&id);
+    let running = wait_for_state_from(&recorder, ScanState::Running, from).await;
+    assert_eq!(running.trigger, Some(ScanTrigger::Schedule));
+    app.cluster_remove(&id).await.unwrap();
+    assert!(!app.recommendations_status(&id).scheduled);
+    assert!(runs_of(&app, &id).is_empty(), "removal clears the history");
+    assert!(app.cluster_def(&id).is_err());
+    assert_eq!(app.recommendations_scheduler_tasks_for_tests(), 0);
+    // After the slow query would have answered: still nothing stored.
+    tokio::time::sleep(Duration::from_millis(2_500)).await;
+    assert!(runs_of(&app, &id).is_empty());
+    assert!(app.recommendations_fleet().unwrap().is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Read commands: re-evaluation, runs, trend, fleet, export
+// ---------------------------------------------------------------------------
+
+fn set_override(app: &Kubepit, strategy: &str, settings: RightsizingSettings) {
+    let mut all = app.settings();
+    all.recommendations
+        .overrides
+        .insert(strategy.to_string(), settings);
+    app.set_settings(all).unwrap();
+}
+
+fn api_ref() -> WorkloadRef {
+    WorkloadRef {
+        kind: "Deployment".into(),
+        namespace: "apps".into(),
+        name: "api".into(),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn latest_is_reevaluated_after_a_settings_change() {
+    let ScanApp { app, id, _dir, .. } = scan_app(base()).await;
+    let run = app.recommendations_run_for_tests(&id).await.unwrap();
+    let stored = app.recommendations_latest(&id, None).unwrap().scan.unwrap();
+    assert!(!stored.reevaluated && !stored.days_changed);
+    assert_eq!(
+        stored.report.workloads[0].containers[0]
+            .recommended
+            .cpu_request,
+        Some(120.0)
+    );
+
+    set_override(
+        &app,
+        "workload-history",
+        RightsizingSettings {
+            cpu_headroom_percent: 50.0,
+            ..WorkloadHistory::defaults()
+        },
+    );
+    let l = app.recommendations_latest(&id, None).unwrap();
+    let scan = l.scan.unwrap();
+    assert!(scan.reevaluated && !scan.days_changed);
+    assert_eq!(scan.run.id, run);
+    assert_eq!(
+        scan.report.workloads[0].containers[0]
+            .recommended
+            .cpu_request,
+        Some(150.0)
+    );
+    // What was observed stays: the window and the scan time.
+    assert_eq!(
+        (scan.report.window_end, scan.report.computed_at),
+        (stored.report.window_end, stored.report.computed_at)
+    );
+    assert_eq!(scan.report.settings.cpu_headroom_percent, 50.0);
+
+    // Another window: the numbers are re-evaluated on the stored one.
+    set_override(
+        &app,
+        "workload-history",
+        RightsizingSettings {
+            days: 14,
+            ..WorkloadHistory::defaults()
+        },
+    );
+    let scan = app.recommendations_latest(&id, None).unwrap().scan.unwrap();
+    assert!(scan.reevaluated && scan.days_changed);
+    assert_eq!(scan.report.window_secs, 7 * 86_400);
+
+    // A saved strategy is used as it is (not automatic).
+    let mut all = app.settings();
+    all.recommendations.strategy = Some("percentile-headroom".into());
+    app.set_settings(all).unwrap();
+    let scan = app.recommendations_latest(&id, None).unwrap().scan.unwrap();
+    assert_eq!(
+        (scan.report.strategy.as_str(), scan.report.strategy_auto),
+        ("percentile-headroom", false)
+    );
+    assert!(scan.reevaluated);
+
+    // A run that is not a stored successful scan of this cluster.
+    let err = app
+        .recommendations_latest(&id, Some(run + 100))
+        .unwrap_err();
+    assert!(err.to_string().contains("no longer stored"), "{err}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fleet_trend_and_export_read_the_store() {
+    let ScanApp {
+        app,
+        id,
+        server,
+        _dir,
+        ..
+    } = scan_app(base()).await;
+    // A second cluster that never scanned.
+    let other = app
+        .cluster_add(vec![kubepit_core::types::ClusterInput {
+            name: "Other".into(),
+            context: "fake".into(),
+            kubeconfig_text: Some(support::kubeconfig_for(&server.url)),
+            ..Default::default()
+        }])
+        .unwrap()
+        .remove(0);
+    let first = app.recommendations_run_for_tests(&id).await.unwrap();
+    let second = app.recommendations_run_for_tests(&id).await.unwrap();
+
+    let fleet = app.recommendations_fleet().unwrap();
+    assert_eq!(fleet.len(), 2);
+    assert_eq!(fleet.iter().filter(|c| c.run.is_some()).count(), 1);
+    let mine = fleet.iter().find(|c| c.cluster_id == id).unwrap();
+    assert_eq!(mine.run.as_ref().unwrap().id, second);
+    assert!(!mine.scheduled && !mine.source_changed);
+    assert!(mine.run.as_ref().unwrap().summary.is_some());
+    let theirs = fleet.iter().find(|c| c.cluster_id == other.id).unwrap();
+    assert!(theirs.run.is_none() && !theirs.source_changed);
+
+    let trend = app.recommendations_trend(&id, &api_ref()).unwrap();
+    assert_eq!(trend.len(), 2);
+    assert_eq!((trend[0].run_id, trend[1].run_id), (first, second));
+    assert_eq!(trend[0].containers[0].cpu_recommended, Some(120.0));
+
+    let runs = app.recommendations_runs(&id, 10).unwrap();
+    assert_eq!(
+        runs.iter().map(|r| r.id).collect::<Vec<_>>(),
+        vec![second, first]
+    );
+    assert_eq!(app.recommendations_runs(&id, 1).unwrap().len(), 1);
+
+    let yaml = app
+        .recommendations_export(&id, None, &[], RecommendationExportFormat::Yaml)
+        .unwrap();
+    assert!(yaml.contains("resources:"), "{yaml}");
+    assert!(yaml.starts_with("# Deployment apps/api · container api"));
+    let json = app
+        .recommendations_export(
+            &id,
+            Some(first),
+            &[api_ref()],
+            RecommendationExportFormat::Json,
+        )
+        .unwrap();
+    let doc: Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(doc["format"], "kubepit.recommendations/v1");
+    assert_eq!(doc["cluster"], "Fake");
+    assert_eq!(doc["workloads"].as_array().unwrap().len(), 1);
+    // No connection metadata, and never the stored source configuration.
+    for leak in [
+        &server.url,
+        "prometheus-operated",
+        "source_config",
+        "monitoring",
+    ] {
+        assert!(!json.contains(leak), "{leak} in {json}");
+    }
+
+    // A source change hides the scan from the fleet's point of view too.
+    let mut def = app.cluster_def(&id).unwrap();
+    def.prometheus = PrometheusConfig::Off;
+    app.cluster_update(def).unwrap();
+    let fleet = app.recommendations_fleet().unwrap();
+    assert!(
+        fleet
+            .iter()
+            .find(|c| c.cluster_id == id)
+            .unwrap()
+            .source_changed
+    );
+    let err = app
+        .recommendations_export(&id, None, &[], RecommendationExportFormat::Json)
+        .unwrap_err();
+    assert!(err.to_string().contains("another Prometheus"), "{err}");
+}
+
+/// Scheduler loops tracked by the app once aborted ones have ended.
+async fn scheduler_tasks(app: &Kubepit) -> usize {
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    app.recommendations_scheduler_tasks_for_tests()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn restarted_and_concurrently_started_schedulers_stay_tracked() {
+    let ScanApp { app, id, _dir, .. } = scan_app(base()).await;
+    app.set_recommendation_scans(true);
+    opt_in(&app, &id, true);
+    assert_eq!(scheduler_tasks(&app).await, 1);
+
+    // Stop and start again right away: the aborted loop's end must not
+    // untrack the new one.
+    for _ in 0..5 {
+        app.recommendations_restart_scheduler_for_tests(&id);
+    }
+    assert_eq!(scheduler_tasks(&app).await, 1);
+    assert!(app.recommendations_status(&id).scheduled);
+    app.cluster_disconnect(&id);
+    assert_eq!(scheduler_tasks(&app).await, 0, "a disconnect stops it");
+
+    // Concurrent settings syncs (and a connect) start exactly one.
+    opt_in(&app, &id, false);
+    app.cluster_connect(&id).await.unwrap();
+    let mut settings = app.settings();
+    settings.recommendations.scan_clusters = vec![id.clone()];
+    let saves: Vec<_> = (0..8)
+        .map(|_| {
+            let (app, settings) = (app.clone(), settings.clone());
+            tokio::task::spawn_blocking(move || app.set_settings(settings).map(|_| ()))
+        })
+        .collect();
+    for save in saves {
+        save.await.unwrap().unwrap();
+    }
+    assert_eq!(scheduler_tasks(&app).await, 1);
+    app.cluster_remove(&id).await.unwrap();
+    assert_eq!(scheduler_tasks(&app).await, 0, "a removal stops it");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_scan_that_outlives_its_cluster_stores_nothing() {
+    // Not stopped by the removal (not a scheduled or manual task), and
+    // slower than the removal waits for it.
+    let ScanApp {
+        app,
+        recorder,
+        id,
+        _dir,
+        ..
+    } = scan_app(Fixture {
+        q1_delay: Some(Duration::from_secs(6)),
+        ..base()
+    })
+    .await;
+    let (scan_app_ref, scan_id) = (app.clone(), id.clone());
+    let scan =
+        tokio::spawn(async move { scan_app_ref.recommendations_run_for_tests(&scan_id).await });
+    wait_for_state(&recorder, ScanState::Running).await;
+    app.cluster_remove(&id).await.unwrap();
+    let _ = scan.await.unwrap();
+    assert!(runs_of(&app, &id).is_empty(), "{:?}", runs_of(&app, &id));
+    assert!(app.recommendations_fleet().unwrap().is_empty());
+}
+
+/// Change the tenant of `id` (a source change without a reconnect).
+fn change_tenant(app: &Kubepit, id: &str, tenant: &str) {
+    let mut def = app.cluster_def(id).unwrap();
+    def.prometheus_access = PrometheusAccess {
+        tenant: tenant.into(),
+        ..Default::default()
+    };
+    app.cluster_update(def).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_source_change_during_a_scan_keeps_the_next_one_due_soon() {
+    let ScanApp {
+        app,
+        recorder,
+        id,
+        _dir,
+        ..
+    } = scan_app(Fixture {
+        q1_delay: Some(Duration::from_secs(2)),
+        ..base()
+    })
+    .await;
+    app.set_recommendation_scans(true);
+    opt_in(&app, &id, true);
+    let from = recorder.scans.lock().len();
+    app.recommendations_scan(&id).await.unwrap();
+    wait_for_state_from(&recorder, ScanState::Running, from).await;
+    let changed = kubepit_core::objects::now_millis();
+    change_tenant(&app, &id, "team-a");
+    let done = wait_for_state_from(&recorder, ScanState::Success, from).await;
+    // That scan used the old source: the new one is still due two minutes
+    // after the change, not an interval after the scan.
+    let s = wait_for_status(&app, &id, |s| {
+        s.next_at
+            .is_some_and(|t| t < done.finished_at.unwrap() + 3_000_000)
+    })
+    .await;
+    let next = s.next_at.unwrap();
+    assert!(
+        (changed + 120_000..=kubepit_core::objects::now_millis() + 120_000).contains(&next),
+        "{next} vs {changed}"
+    );
+    assert!(
+        app.recommendations_latest(&id, None)
+            .unwrap()
+            .source_changed
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn scans_of_another_source_do_not_delay_the_first_of_the_new_one() {
+    let ScanApp { app, id, _dir, .. } = scan_app(base()).await;
+    app.recommendations_run_for_tests(&id).await.unwrap();
+    app.set_recommendation_scans(true);
+    opt_in(&app, &id, true);
+    // An interval after that scan, once the scheduler read it.
+    let soon = kubepit_core::objects::now_millis() + 3_000_000;
+    wait_for_status(&app, &id, |s| s.next_at.is_some_and(|t| t > soon)).await;
+
+    // The source changes and the cluster reconnects (the pending due time
+    // goes with the old scheduler): the recent scan used the old source.
+    change_tenant(&app, &id, "team-b");
+    app.cluster_disconnect(&id);
+    app.cluster_connect(&id).await.unwrap();
+    let connected = app.cluster_status(&id).connected_at.unwrap();
+    // Once the scheduler read the last attempt (the first `next_at` of a
+    // start is provisional).
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let s = app.recommendations_status(&id);
+    let next = s.next_at.unwrap();
+    assert!(
+        (connected + 120_000..=connected + 180_000).contains(&next),
+        "{s:?}"
+    );
 }

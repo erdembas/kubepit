@@ -237,7 +237,7 @@ The harness adds no user-visible UI, so it adds no i18n strings. The probe is a 
 The harness changes no contract. Gated tasks may:
 
 - H3: add `options: { metadataOnly?: boolean }` to `resource_watch`;
-- H6: add `resource_watch_ack(watchId, seq)` and `WatchBatch.seq`;
+- H6: add `resource_watch_ack(watchId, seq)` and `WatchBatch.seq` (as built, also `WatchBatch.stopped`, the last batch of a watch that timed out);
 - H4: change `resource_list` paging.
 
 Each such change touches `types/index.ts`, `lib/ipc.ts`, the Tauri command and the demo backend together.
@@ -275,9 +275,9 @@ Filled in by plan Task 10 and each gated task.
 
 | Id | Budget | Baseline | After | Gate fired? |
 |----|-------:|---------:|------:|-------------|
-| `watch/aggregator_initial_20k` | 120 ms | **170 ms** (155–218) ✗ | | no gate covers it |
-| `watch/reset_batch_20k` | 60 ms | **64.4 ms** (60.0–74.3) ✗ | | no gate covers it |
-| `watch/steady_500` | 3 ms | 2.04 ms ✓ | | |
+| `watch/aggregator_initial_20k` | 120 ms | **170 ms** (155–218) ✗ | 28.2 ms (28.0–28.5) ✓ | no gate covers it; fixed by plan R1 |
+| `watch/reset_batch_20k` | 60 ms | **64.4 ms** (60.0–74.3) ✗ | 1.14 ms (1.12–1.19) ✓ | no gate covers it; fixed by plan R1 |
+| `watch/steady_500` | 3 ms | 2.04 ms ✓ | 0.15 ms (0.14–0.39) ✓ | R1 |
 | `metrics_history/record_5k_pods_1k_nodes` | 4 ms | 0.61 ms ✓ | | |
 | `metrics_history/series_cluster` | 50 µs | 1.6 µs ✓ | | |
 | `metrics_history/series_100_pods` | 1 ms | 59 µs ✓ | | |
@@ -288,15 +288,15 @@ Filled in by plan Task 10 and each gated task.
 | `journal/apply_update` | 60 µs | 5.4 µs ✓ | | H9: no |
 | `journal/details_after_500` | 50 ms | 5.2 ms ✓ | | H9: no |
 | `history/writer_events_10k` | 1.0 s, 0 dropped | 56 ms, 0 dropped ✓ | | |
-| `fleet_search/matcher_substring_50k` | 5 ms | **6.0 ms** (5.5–6.9) ✗ | | no gate covers it |
-| `fleet_search/matcher_glob_50k` | 15 ms | 6.5 ms ✓ | | |
+| `fleet_search/matcher_substring_50k` | 5 ms | **6.0 ms** (5.5–6.9) ✗ | 0.76 ms (0.75–0.80) ✓ | no gate covers it; fixed by plan R1 |
+| `fleet_search/matcher_glob_50k` | 15 ms | 6.5 ms ✓ | 1.28 ms (1.27–1.30) ✓ | R1 |
 | `fleet_search/matcher_regex_50k` | 15 ms | 0.44 ms ✓ | | |
 | `prometheus/parse_200x240` | 8 ms | 3.5 ms ✓ | | |
 | `loki/parse_5000_lines_50_streams` | 10 ms | 0.85 ms ✓ | | |
-| `e2e/watch_pods_synced_l` | 3.0 s | 0.60 s ✓ | | H1: no |
+| `e2e/watch_pods_synced_l` | 3.0 s | 0.60 s ✓ | 0.45 s ✓ (R1 and H6; 0.45 s with R1 alone) | H1: no |
 | `e2e/fleet_search_l` | 6.0 s | 0.15 s ✓ | | H10: no |
 | `e2e/prometheus_query` | 50 ms | 4.3 ms ✓ | | |
-| `e2e/max_rss_l_all_watchers` | 700 MB | 444 MB ✓ | | H1, H4: no |
+| `e2e/max_rss_l_all_watchers` | 700 MB | 444 MB ✓ | 421–425 MB ✓ (R1 and H6) | H1, H4: no |
 | `structural/list_requests_without_limit` | 2 (see note) | 2 ✓ | | H4: no |
 | `structural/fanout` (`tests/perf_probe.rs`) | Task 2 snapshot | pods, nodes, deployments 2 streams; the other 17 paths 1 ✓ | | H1: no |
 | `topology/namespace_l` | 30 ms | 1.1 ms ✓ | | |
@@ -315,13 +315,13 @@ Filled in by plan Task 10 and each gated task.
 | `table/filter_sort_20k` | 60 ms | 15 ms ✓ | | |
 | `ui/ttfr_pods_s` | 400 ms | 69 ms ✓ | | |
 | `ui/ttfr_pods_m` | 900 ms | 146 ms ✓ | | |
-| `ui/ttfr_pods_l` (churn 50) | 1 500 ms | 146 ms ✓ | | |
-| `ui/synced_pods_l` (churn 50) | 4 s | 0.46 s ✓ | | |
+| `ui/ttfr_pods_l` (churn 50) | 1 500 ms | 146 ms ✓ | 114 ms ✓ (H6) | |
+| `ui/synced_pods_l` (churn 50) | 4 s | 0.46 s ✓ | 0.46 s ✓ (H6) | |
 | `ui/scroll_fps_l` | median ≥ 55 | 59.9 fps ✓ | | |
 | `ui/scroll_p95_frame_l` | 25 ms | 16.8 ms ✓ | | |
 | `ui/scroll_long_task_max_l` | 100 ms | 0 ms ✓ | | |
-| `ui/apply_p95_l_churn50` | 16 ms | 8.6 ms ✓ | | H7: no |
-| Watch lag at `l`, churn 50 (`watch:apply` `latencyMs` p95; H6 gate, no budget id) | 1 s | 13–25 ms | | **H6: yes**, from the code (a closed window's watches outlive it) |
+| `ui/apply_p95_l_churn50` | 16 ms | 8.6 ms ✓ | 8.5 ms (8.3–8.6) ✓ (H6) | H7: no |
+| Watch lag at `l`, churn 50 (`watch:apply` `latencyMs` p95; H6 gate, no budget id) | 1 s | 13–25 ms | 15.7 ms (11.3–19.2) (H6) | **H6: yes**, from the code (a closed window's watches outlive it); done in Task 17 |
 | `ui/map_namespace_l` | 500 ms | 247 ms ✓ | 201 ms ✓ | H3: no |
 | `ui/map_all_m` | 2.5 s | **2.95 s** (2.66–3.49) ✗ | 0.59 s ✓ (0.51–0.59) | MAP-sync, H5: yes (map) |
 | Long tasks > 50 ms, all-namespaces map at `m` (no budget id) | — | 19–20, max 321 ms | 1, 81–87 ms (the first render of the 800-node canvas) | H5 |
@@ -338,6 +338,11 @@ Notes:
   - `watch/aggregator_initial_20k`, `watch/reset_batch_20k`: no gate reads these ids. H1 reads only the e2e ids, which pass.
   - `fleet_search/matcher_substring_50k`: H10 reads only `e2e/fleet_search_l` (0.15 s). `NameMatcher::matches` allocates per name.
   - These budgets stay unchanged until a task is decided for them.
+  - **Decided: plan R1** (2026-09-29). Watch objects are converted by value and shared (`Arc`) between the aggregator's store and its batches; ASCII names are matched without allocating. The After column holds the medians of 5 short Criterion runs (`--warm-up-time 1 --measurement-time 3`) on the same M5 Max, 1-minute load 6–19 (other agents building). The budgets stay as they are; every R1 id now has ≥ 75% headroom.
+- **After H6 (Task 17), 2026-09-29.** Same machine, 1-minute load 4–12.
+  - `e2e/watch_pods_synced_l`: median of 3 Criterion runs: 452.3, 452.5 and 460.0 ms. A run of R1 alone gave 452.7 ms, so the acks cost nothing measurable.
+  - UI: 3 runs of `pnpm perf:ui -- --preset l --churn 50 --scenarios apply,ttfr --port 4467`; a run just before gave 8.6 ms apply p95 and 12.1 ms latency p95.
+  - The demo backend acks as a no-op, so the UI runs show only what acking costs the frontend (one IPC call per batch). The backend's flow control is covered by paused-time tests.
 - **`ui/map_all_m`.** Each run rebuilt the graph 72–76 times while the watches synced (about 1.0–1.5 s of `map:build` in total), so the time is mostly rebuilds, not one slow build. H5 only moves that work off the main thread.
 - **After: the map (plan Tasks 16a, 16, 22), 2026-09-29.** Same machine, shared with other agents; the median of 3 `pnpm perf:ui -- --preset m --scenarios map --port 4517` runs (1-minute load 8.4–8.8) and one `--preset l --scenarios map` run (load 8.1).
   - Same-machine "before", at `be4e3a1` with the load at 7.5–13: `ui/map_all_m` 3.31 s (2.96–3.50), 76–79 rebuilds, 18–20 long tasks (max 223–286 ms); `ui/map_namespace_l` 260 ms.
@@ -356,7 +361,7 @@ Notes:
 | H4 | 15 | no | The metrics.k8s.io pods list at `l` (20 000) is unpaged. But RSS is 444 MB ≤ 700 MB, and the spec has no overview-latency budget. |
 | H5 | 16 | **yes: map only** (done: no long task left from the engine; see the After notes) | All-namespaces map on `m`: 19–20 long tasks > 50 ms (max 321 ms). From 2.5 s on, each long task of 55–89 ms holds one `map:build` (28–41 ms) and one `map:view` (20–26 ms), measured by polling the probe's sample counts between long tasks. Health (`m`): no long task > 50 ms. Netpol (`m`): none. Only the topology engine moves. |
 | MAP-sync | 16a | **yes** (added after the baseline) | `ui/map_all_m` misses its budget and the map rebuilds its graph more than 10 times while syncing: 72–76. Done: rebuilds of data-only changes are coalesced to one per 250 ms during the initial sync (3 rebuilds, 0.55 s). |
-| H6 | 17 | **yes, from the code** (manual `tauri dev` check pending) | The lag half does not fire: churn 50 at `l`, arrival → commit (`latencyMs`) p95 13–25 ms ≪ 1 s. The window half fires from the code. The Chromium demo backend dies with its page, so it cannot be measured there. `apps/desktop/src-tauri/src/windows.rs:123-137` (`on_window_destroyed`) stops only the window's terminals. A `resource_watch` stops only when its sink returns `false` (`crates/kubepit-core/src/watch.rs:321-351`), that is, when `on_event.send(batch)` fails (`apps/desktop/src-tauri/src/ipc/resources.rs:45-46`). A quiet resource sends nothing, so its watch outlives the window until the next event. And Tauri 2.12 returns `Ok` for a send of ≥ 8 KB to a dead webview (`tauri/src/ipc/channel.rs:307-316`), so a busy watch with large batches may never stop. Task 17 will be implemented; confirm the window half in `pnpm tauri:dev` with the backend log. |
+| H6 | 17 | **yes, from the code** (manual `tauri dev` check pending) | The lag half does not fire: churn 50 at `l`, arrival → commit (`latencyMs`) p95 13–25 ms ≪ 1 s. The window half fires from the code. The Chromium demo backend dies with its page, so it cannot be measured there. `apps/desktop/src-tauri/src/windows.rs:123-137` (`on_window_destroyed`) stops only the window's terminals. A `resource_watch` stops only when its sink returns `false` (`crates/kubepit-core/src/watch.rs:321-351`), that is, when `on_event.send(batch)` fails (`apps/desktop/src-tauri/src/ipc/resources.rs:45-46`). A quiet resource sends nothing, so its watch outlives the window until the next event. And Tauri 2.12 returns `Ok` for a send of ≥ 8 KB to a dead webview (`tauri/src/ipc/channel.rs:307-316`), so a busy watch with large batches may never stop. Task 17 will be implemented; confirm the window half in `pnpm tauri:dev` with the backend log. **Done (Task 17):** at most 4 unacknowledged batches per watch, latest-wins folding while blocked, a stop after 60 s without an ack (with a final `stopped` batch), and `on_window_destroyed` unwatches the window's watches at once. The `tauri dev` confirmation is still manual. |
 | H7 | 18 | no | `ui/apply_p95_l_churn50` 8.6 ms ≤ 16 ms. |
 | H8 | 19 | no | `ui/soak_heap_ratio` 1.027 (health, minute 6 → 30; map 1.026, pods 1.023) ≤ 1.15. |
 | H9 | 20 | no | `journal/apply_update` 5.4 µs ≤ 60 µs, `journal/details_after_500` 5.2 ms ≤ 50 ms. |

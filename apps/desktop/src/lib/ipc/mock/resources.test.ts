@@ -103,6 +103,8 @@ describe('demo resource_watch', () => {
         synced: true,
         error: null,
         recovered: false,
+        seq: 1,
+        stopped: false,
       },
     ]);
     await vi.advanceTimersByTimeAsync(1000);
@@ -136,8 +138,11 @@ describe('demo resource_watch', () => {
         synced: true,
         error: null,
         recovered: false,
+        seq: 5,
+        stopped: false,
       },
     ]);
+    expect(batches.map((b) => b.seq)).toEqual([1, 2, 3, 4, 5]);
     expect(replay(batches).size).toBe(2000);
     await vi.advanceTimersByTimeAsync(1000);
     expect(batches).toHaveLength(5);
