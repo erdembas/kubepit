@@ -127,7 +127,7 @@ export function PodSections({ obj, ctx, readOnly, isActive }: SectionProps) {
       <Section title={i18n.t('Conditions')}>
         <ConditionsTable obj={obj} now={ctx.now} />
       </Section>
-      <Section title={i18n.t('Containers')}>
+      <Section title={<span lang="en">{i18n.t('Containers')}</span>}>
         <div className="space-y-2.5">
           {containers.map((c) => (
             <ContainerCard
