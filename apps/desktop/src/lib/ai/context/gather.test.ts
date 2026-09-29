@@ -565,4 +565,101 @@ describe('gatherExplainContext', () => {
     expect(await outcome).toBe('AbortError');
     expect(ipcMock.podLogsStop).toHaveBeenCalled();
   });
+
+  it('bounds the whole gather: reads that never answer are dropped at the deadline', async () => {
+    ipcMock.podLogsStream.mockImplementation(streamOf(() => ['ERROR boom']));
+    ipcMock.resourceEvents.mockReturnValue(new Promise(() => {}));
+    ipcMock.changesList.mockReturnValue(new Promise(() => {}));
+    ipcMock.metricsPods.mockResolvedValue({ available: false, items: [] });
+    let sections: import('@/types').AiContextSection[] | null = null;
+    void gatherExplainContext('c-dev', POD_GVK, pod('web-1', 1, false)).then((s) => (sections = s));
+    await vi.advanceTimersByTimeAsync(14_900);
+    expect(sections).toBeNull();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(sections).not.toBeNull();
+    const kinds = sections!.map((s) => s.kind);
+    expect(kinds).toEqual(expect.arrayContaining(['scope', 'object', 'containers', 'logs']));
+    expect(kinds).not.toContain('events');
+    expect(kinds).not.toContain('changes');
+  });
+
+  it('bounds a workload whose pod list never answers', async () => {
+    ipcMock.resourceList.mockReturnValue(new Promise(() => {}));
+    ipcMock.resourceEvents.mockResolvedValue([]);
+    ipcMock.changesList.mockResolvedValue({ entries: [], next_cursor: null, status: {} });
+    let sections: import('@/types').AiContextSection[] | null = null;
+    void gatherExplainContext('c-dev', DEPLOY_GVK, deployment).then((s) => (sections = s));
+    await vi.advanceTimersByTimeAsync(15_100);
+    expect(sections!.map((s) => s.id)).toEqual(['scope', 'object']);
+  });
+
+  it('walks at most five Jobs of a CronJob, active and failed ones first', async () => {
+    const cron: KubeObject = {
+      apiVersion: 'batch/v1',
+      kind: 'CronJob',
+      metadata: { name: 'nightly', namespace: 'shop', uid: 'uid-cron' },
+      spec: { schedule: '0 2 * * *', jobTemplate: { spec: {} } },
+    };
+    const job = (name: string, day: number, status: Record<string, number>): KubeObject => ({
+      apiVersion: 'batch/v1',
+      kind: 'Job',
+      metadata: {
+        name,
+        namespace: 'shop',
+        uid: `uid-${name}`,
+        creationTimestamp: `2026-09-${String(day).padStart(2, '0')}T02:00:00Z`,
+        ownerReferences: [
+          { apiVersion: 'batch/v1', kind: 'CronJob', name: 'nightly', uid: 'c', controller: true },
+        ],
+      },
+      spec: { selector: { matchLabels: { 'batch.kubernetes.io/controller-uid': `uid-${name}` } } },
+      status,
+    });
+    const jobs = [
+      job('old-failed', 1, { failed: 1 }),
+      job('running', 2, { active: 1 }),
+      ...[20, 21, 22, 23, 24, 25].map((d) => job(`ok-${d}`, d, { succeeded: 1 })),
+    ];
+    ipcMock.resourceList.mockImplementation(async (_c: string, gvk: Gvk) =>
+      gvk.kind === 'Job'
+        ? { items: jobs, resource_version: '1' }
+        : { items: [], resource_version: '1' },
+    );
+    ipcMock.resourceEvents.mockResolvedValue([]);
+    ipcMock.changesList.mockResolvedValue({ entries: [], next_cursor: null, status: {} });
+    const gathered = gatherExplainContext(
+      'c-dev',
+      { group: 'batch', version: 'v1', kind: 'CronJob', plural: 'cronjobs', namespaced: true },
+      cron,
+    );
+    await vi.advanceTimersByTimeAsync(100);
+    await gathered;
+    const selectors = ipcMock.resourceList.mock.calls
+      .filter((c) => (c[1] as Gvk).kind === 'Pod')
+      .map((c) => String(c[3]).split('=uid-')[1]);
+    // Running first, then failed, then the newest.
+    expect(selectors).toEqual(['running', 'old-failed', 'ok-25', 'ok-24', 'ok-23']);
+  });
+
+  it('reads logs when the node cannot be read or reports no Ready condition', async () => {
+    const a = pod('web-a', 1, false);
+    a.spec.nodeName = 'node-forbidden';
+    const b = pod('web-b', 1, false);
+    b.spec.nodeName = 'node-bare';
+    ipcMock.resourceList.mockResolvedValue({ items: [a, b], resource_version: '1' });
+    ipcMock.resourceGet.mockImplementation(async (_c: string, _g: Gvk, _n: null, name: string) => {
+      if (name === 'node-forbidden') throw new Error('nodes "node-forbidden" is forbidden');
+      return { apiVersion: 'v1', kind: 'Node', metadata: { name, uid: 'n' }, status: {} };
+    });
+    ipcMock.podLogsStream.mockImplementation(streamOf(() => ['INFO ok']));
+    ipcMock.resourceEvents.mockResolvedValue([]);
+    ipcMock.changesList.mockResolvedValue({ entries: [], next_cursor: null, status: {} });
+    ipcMock.metricsPods.mockResolvedValue({ available: false, items: [] });
+    const gathered = gatherExplainContext('c-dev', DEPLOY_GVK, deployment);
+    await vi.advanceTimersByTimeAsync(100);
+    const sections = await gathered;
+    const logs = sections.filter((s) => s.kind === 'logs').map((s) => s.label);
+    expect(logs).toEqual(expect.arrayContaining(['web-a/app', 'web-b/app']));
+    expect(sections.find((s) => s.id === 'containers')!.content).not.toContain('logs not read');
+  });
 });

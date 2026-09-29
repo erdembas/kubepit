@@ -1,5 +1,5 @@
 import { ipc } from '@/lib/ipc';
-import { asString, condition, controllerOf } from '@/lib/kube/accessors';
+import { asString, condition, controllerOf, createdAt } from '@/lib/kube/accessors';
 import { BUILTIN, type KindDef } from '@/lib/kube/kinds';
 import { podContainers, podStatus } from '@/lib/kube/pods';
 import { labelSelectorString } from '@/lib/kube/selectorString';
@@ -33,19 +33,23 @@ import {
  * from the backend (pods, events, logs, the change timeline, metrics) and
  * from the stores (clusters, health scans, alerts). Every read is
  * best-effort: a failing one drops its section, never the whole request.
- * All log reads share one deadline (12 s from the start), pods on a node
- * that is not Ready (or in phase Unknown) are not asked for logs, and an
- * `AbortSignal` stops everything at once. Nothing leaves the machine here;
- * the backend redacts and budgets the sections when the request is
- * previewed.
+ * The whole gather ends within 15 s (reads still pending then are
+ * dropped), log reads within 12 s; pods on a node that is not Ready (or in
+ * phase Unknown) are not asked for logs, and the caller's `AbortSignal`
+ * stops everything at once. Nothing leaves the machine here; the backend
+ * redacts and budgets the sections when the request is previewed.
  */
 
 const LOG_TAIL_LINES = 500;
 const LOG_TIMEOUT_MS = 10_000;
 /** Every log read of one gather ends by then. */
 const LOG_BUDGET_MS = 12_000;
+/** Every read of one gather ends by then. */
+const GATHER_BUDGET_MS = 15_000;
 const MAX_CONTAINERS = 3;
 const MAX_LOG_STREAMS = 4;
+/** Jobs of a CronJob whose pods are looked at. */
+const MAX_JOBS = 5;
 const CHANGES_WINDOW_MS = 24 * 3_600_000;
 
 const gvkOf = ({ group, version, kind, plural, namespaced }: KindDef): Gvk => ({
@@ -83,12 +87,20 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal | undefined): Pro
   });
 }
 
-/** `fallback` when the read fails; an abort still rejects. */
-function soft<T>(promise: Promise<T>, fallback: T, signal?: AbortSignal): Promise<T> {
-  return abortable(promise, signal).catch((error: unknown) => {
-    if (signal?.aborted) throw error;
-    return fallback;
-  });
+/** A best-effort read: `fallback` when it fails or the gather's deadline passes. */
+type Read = <T>(promise: Promise<T>, fallback: T) => Promise<T>;
+
+/**
+ * Reads bounded by `deadline` (the gather's internal signal, also aborted
+ * by the caller): they fall back when it fires, and reject only when the
+ * caller's own `signal` aborted.
+ */
+function reader(deadline: AbortSignal, signal: AbortSignal | undefined): Read {
+  return (promise, fallback) =>
+    abortable(promise, deadline).catch(() => {
+      if (signal?.aborted) throw abortError(signal);
+      return fallback;
+    });
 }
 
 /**
@@ -188,52 +200,67 @@ function ownedBy(pod: KubeObject, owner: KubeObject): boolean {
 async function ownedPods(
   clusterId: ClusterId,
   owner: KubeObject,
-  signal?: AbortSignal,
+  read: Read,
 ): Promise<KubeObject[]> {
   const selector = labelSelectorString(owner.spec?.selector);
   if (!selector) return [];
-  const list = await abortable(
+  const list = await read(
     ipc.resourceList(clusterId, POD_GVK, owner.metadata.namespace ?? null, selector),
-    signal,
+    null,
   );
-  return list.items.filter((pod) => ownedBy(pod, owner));
+  return (list?.items ?? []).filter((pod) => ownedBy(pod, owner));
 }
 
-/** Pods of a workload; a CronJob's through the Jobs it owns. */
+/** 0 = running, 1 = failed, 2 = the rest (the Jobs worth looking at first). */
+function jobRank(job: KubeObject): number {
+  if (Number(job.status?.active) > 0) return 0;
+  if (Number(job.status?.failed) > 0 || condition(job, 'Failed')?.status === 'True') return 1;
+  return 2;
+}
+
+/** Pods of a workload; a CronJob's through its five most telling Jobs. */
 async function workloadPods(
   clusterId: ClusterId,
   obj: KubeObject,
-  signal?: AbortSignal,
+  read: Read,
 ): Promise<KubeObject[]> {
-  if (obj.kind !== 'CronJob') return ownedPods(clusterId, obj, signal);
-  const jobs = await abortable(
+  if (obj.kind !== 'CronJob') return ownedPods(clusterId, obj, read);
+  const jobs = await read(
     ipc.resourceList(clusterId, JOB_GVK, obj.metadata.namespace ?? null),
-    signal,
+    null,
   );
-  const owned = jobs.items.filter((job) => {
-    const ref = controllerOf(job);
-    return ref?.kind === 'CronJob' && ref.name === obj.metadata.name;
-  });
-  const lists = await Promise.all(owned.map((job) => ownedPods(clusterId, job, signal)));
+  const owned = (jobs?.items ?? [])
+    .filter((job) => {
+      const ref = controllerOf(job);
+      return ref?.kind === 'CronJob' && ref.name === obj.metadata.name;
+    })
+    .sort((a, b) => jobRank(a) - jobRank(b) || createdAt(b) - createdAt(a))
+    .slice(0, MAX_JOBS);
+  const lists = await limited(
+    owned.map((job) => () => ownedPods(clusterId, job, read)),
+    MAX_LOG_STREAMS,
+  );
   return lists.flat();
 }
 
 /**
  * Why a pod's logs are not read: the kubelet of a node that is not Ready
  * (or a pod in phase Unknown) cannot serve them, and asking would only
- * wait for the timeout. Nodes that cannot be read (RBAC) count as fine.
+ * wait for the timeout. Nodes that cannot be read (RBAC) or report no
+ * Ready condition count as Ready.
  */
 async function logSkips(
   clusterId: ClusterId,
   pods: KubeObject[],
-  signal?: AbortSignal,
+  read: Read,
 ): Promise<Map<string, string>> {
   const nodes = [...new Set(pods.map((p) => asString(p.spec?.nodeName)).filter(Boolean))];
   const ready = new Map<string, boolean>();
   await Promise.all(
     nodes.map(async (name) => {
-      const node = await soft(ipc.resourceGet(clusterId, NODE_GVK, null, name), null, signal);
-      if (node?.metadata) ready.set(name, condition(node, 'Ready')?.status === 'True');
+      const node = await read(ipc.resourceGet(clusterId, NODE_GVK, null, name), null);
+      const readyCondition = node?.metadata ? condition(node, 'Ready') : undefined;
+      ready.set(name, readyCondition ? readyCondition.status === 'True' : true);
     }),
   );
   const notes = new Map<string, string>();
@@ -311,9 +338,10 @@ async function eventsOf(
   clusterId: ClusterId,
   namespace: string | null,
   uids: string[],
+  read: Read,
 ): Promise<KubeObject[]> {
   const lists = await Promise.all(
-    uids.map((uid) => soft(ipc.resourceEvents(clusterId, namespace, uid), [])),
+    uids.map((uid) => read(ipc.resourceEvents(clusterId, namespace, uid), [] as KubeObject[])),
   );
   return [...new Map(lists.flat().map((e) => [e.metadata.uid, e])).values()];
 }
@@ -331,7 +359,11 @@ function changeTargets(obj: KubeObject): { kind: string; name: string }[] {
   return targets;
 }
 
-async function changesOf(clusterId: ClusterId, obj: KubeObject): Promise<ChangeSummary[]> {
+async function changesOf(
+  clusterId: ClusterId,
+  obj: KubeObject,
+  read: Read,
+): Promise<ChangeSummary[]> {
   const since = Date.now() - CHANGES_WINDOW_MS;
   const namespace = obj.metadata.namespace;
   const pages = await Promise.all(
@@ -346,7 +378,7 @@ async function changesOf(clusterId: ClusterId, obj: KubeObject): Promise<ChangeS
         limit: 50,
         cursor: null,
       };
-      return soft(
+      return read(
         ipc.changesList(clusterId, filter).then((page) => page.entries),
         [] as ChangeSummary[],
       );
@@ -372,8 +404,8 @@ function alertsOf(clusterId: ClusterId, objects: KubeObject[]): Alert[] {
  * Every section of an "explain" request for a pod or a workload (spec §11):
  * scope, object, containers, events, logs, health, changes, alerts and
  * metrics. Workloads are explained through their three worst pods; a
- * CronJob through the pods of its Jobs. Rejects with an `AbortError` when
- * `signal` aborts.
+ * CronJob through the pods of its Jobs. Resolves within 15 s with what
+ * arrived; rejects with an `AbortError` when `signal` aborts.
  */
 export async function gatherExplainContext(
   clusterId: ClusterId,
@@ -382,52 +414,63 @@ export async function gatherExplainContext(
   signal?: AbortSignal,
 ): Promise<AiContextSection[]> {
   if (signal?.aborted) throw abortError(signal);
-  const deadline = Date.now() + LOG_BUDGET_MS;
-  const logsAbort = new AbortController();
-  const stopLogs = () => logsAbort.abort();
-  const timer = setTimeout(stopLogs, LOG_BUDGET_MS);
-  signal?.addEventListener('abort', stopLogs, { once: true });
+  const logDeadline = Date.now() + LOG_BUDGET_MS;
+  const everything = new AbortController();
+  const logs = new AbortController();
+  const stopAll = () => {
+    everything.abort();
+    logs.abort();
+  };
+  const timers = [
+    setTimeout(stopAll, GATHER_BUDGET_MS),
+    setTimeout(() => logs.abort(), LOG_BUDGET_MS),
+  ];
+  signal?.addEventListener('abort', stopAll, { once: true });
+  const read = reader(everything.signal, signal);
   try {
     const app = useAppStore.getState();
     const cluster = app.clusters.find((c) => c.id === clusterId);
     const status = app.statuses[clusterId] ?? null;
     const namespace = obj.metadata.namespace ?? null;
     const isPod = gvk.group === '' && gvk.kind === 'Pod';
-    const pods = isPod
-      ? [obj]
-      : worstPods(await soft(workloadPods(clusterId, obj, signal), [], signal));
+    const pods = isPod ? [obj] : worstPods(await read(workloadPods(clusterId, obj, read), []));
     const objects = isPod ? [obj] : [obj, ...pods];
     const uids = [...new Set(objects.map((o) => o.metadata.uid))];
-    const skips = await logSkips(clusterId, pods, signal);
-    const readable = pods.filter((p) => !skips.has(p.metadata.name));
 
-    const [events, logs, changes, metrics] = await abortable(
+    const [events, logged, changes, metrics] = await abortable(
       Promise.all([
-        eventsOf(clusterId, namespace, uids),
-        logSections(clusterId, readable, deadline, logsAbort.signal),
-        changesOf(clusterId, obj),
+        eventsOf(clusterId, namespace, uids, read),
+        (async () => {
+          // Node checks run beside the other reads, before any log is asked for.
+          const skips = await logSkips(clusterId, pods, read);
+          const readable = pods.filter((p) => !skips.has(p.metadata.name));
+          const sections = await logSections(clusterId, readable, logDeadline, logs.signal);
+          return { skips, sections };
+        })(),
+        changesOf(clusterId, obj, read),
         namespace && pods.length
-          ? soft(ipc.metricsPods(clusterId, namespace), null)
+          ? read(ipc.metricsPods(clusterId, namespace), null)
           : Promise.resolve(null),
       ]),
       signal,
     );
+    if (signal?.aborted) throw abortError(signal);
     const byUid = useHealthStore.getState().scans[clusterId]?.byUid;
     const findings = uids.flatMap((uid) => byUid?.get(uid) ?? []);
 
     return [
       cluster ? scopeSection({ cluster, status, namespace, obj }) : null,
       objectSection(obj),
-      containersSection(pods, skips),
+      containersSection(pods, logged.skips),
       eventsSection(events, `${obj.kind.toLowerCase()}/${obj.metadata.name}`),
-      ...logs,
+      ...logged.sections,
       healthSection(findings),
       changesSection(changes),
       alertsSection(alertsOf(clusterId, objects)),
       metrics?.available ? metricsSection(pods, metrics.items) : null,
     ].filter((s): s is AiContextSection => s !== null);
   } finally {
-    clearTimeout(timer);
-    signal?.removeEventListener('abort', stopLogs);
+    for (const timer of timers) clearTimeout(timer);
+    signal?.removeEventListener('abort', stopAll);
   }
 }
