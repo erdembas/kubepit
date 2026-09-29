@@ -61,6 +61,11 @@ export function rightsizingNoteText(note: RightsizingNote): string {
       return i18n.t(
         'HorizontalPodAutoscalers cannot be listed, so autoscaled workloads are not flagged.',
       );
+    case 'recollection-failed':
+      return i18n.t(
+        "The strategy's own usage window could not be collected ({detail}); the recommendations use the window collected first and the strategy it fits.",
+        { detail },
+      );
   }
 }
 

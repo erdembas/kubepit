@@ -2430,7 +2430,9 @@ export type RightsizingNoteKind =
   | 'partial-data'
   | 'namespace-failed'
   | 'query-budget-exceeded'
-  | 'hpa-unavailable';
+  | 'hpa-unavailable'
+  /** The resolved strategy's own window could not be collected; the first window is used. */
+  | 'recollection-failed';
 
 export interface RightsizingNote {
   kind: RightsizingNoteKind;

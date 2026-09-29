@@ -905,8 +905,35 @@ async fn both_collections_share_one_budget() {
     assert_eq!(p95, 32, "at most 32 batches for the whole report");
     let last = *scan.progress.last().unwrap();
     assert_eq!((last.total, last.completed), (32 * 16, 32 * 16));
-    // The second collection had nothing left: abandoned, typed, and the
-    // strategy is still the first pass's.
-    assert_eq!(scan.abort, Some(SourceAbortKind::AllBatchesFailed));
-    assert_eq!(scan.report.strategy, "percentile-headroom");
+    // The second collection had nothing left. Such a cluster would fail
+    // every scan, so the first pass is kept: its 7-day window with the
+    // strategy that window was collected for, and a note why.
+    let report = scan.report;
+    assert_eq!(scan.abort, None, "{:?}", report.notes);
+    assert_eq!(report.source, RightsizingSource::Prometheus);
+    assert_eq!(
+        (report.strategy.as_str(), report.strategy_auto),
+        ("workload-history", true)
+    );
+    assert_eq!((report.settings.days, report.window_secs), (7, 7 * 86_400));
+    let note = report
+        .notes
+        .iter()
+        .find(|n| n.kind == RightsizingNoteKind::RecollectionFailed)
+        .expect("a recollection-failed note");
+    assert!(
+        note.detail.as_deref().unwrap().contains("too many samples"),
+        "{note:?}"
+    );
+    assert!(!report
+        .notes
+        .iter()
+        .any(|n| n.kind == RightsizingNoteKind::PrometheusFailed));
+    assert_eq!(report.workloads.len(), 16);
+    for w in &report.workloads {
+        let c = &w.containers[0];
+        assert_eq!(c.usage.unwrap().cpu_p95, 100.0, "{}", w.namespace);
+        // Pods matched by name (no owner metrics) cap the confidence.
+        assert!(c.warnings.iter().any(|x| x.code == "identity-by-name"));
+    }
 }

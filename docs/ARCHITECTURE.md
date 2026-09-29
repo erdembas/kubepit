@@ -1008,7 +1008,14 @@ applying a recommendation only reads, so read-only clusters get it all.
   collected again at the resolved strategy's window when a per-strategy
   override differs; that first resolution is then kept (window, settings
   and strategy agree), and both collections share the 32-batch budget,
-  one batch kept back for the second while it is possible. `progress`
+  one batch kept back for the second while it is possible. When the
+  second collection gets no batch through (a cluster the first pass had
+  to split down leaves it one batch), the first window is kept with the
+  strategy it was collected for and a `recollection-failed` note, so such
+  a cluster does not fail every scan. When no batch succeeded, the detail
+  is the first error of a batch that was not split further, else
+  `cluster-label-unverified` (a shared Prometheus proved no namespace to
+  be this cluster's), else the first error of a split batch. `progress`
   counts answered queries against 16 × planned batches. A CronJob is read at its job template and counts one
   replica; its `cost_replicas` (and so its monthly amounts) is the largest
   duty cycle of its containers' evidence (average running pods), one

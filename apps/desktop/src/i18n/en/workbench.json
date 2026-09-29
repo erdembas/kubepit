@@ -2397,6 +2397,7 @@
   "The Service sends traffic to ready pods with all of these labels.": "The Service sends traffic to ready pods with all of these labels.",
   "The source has no running pods to evaluate.": "The source has no running pods to evaluate.",
   "The source is outside the cluster: no egress policy applies.": "The source is outside the cluster: no egress policy applies.",
+  "The strategy's own usage window could not be collected ({detail}); the recommendations use the window collected first and the strategy it fits.": "The strategy's own usage window could not be collected ({detail}); the recommendations use the window collected first and the strategy it fits.",
   "The table no longer matches this view": "The table no longer matches this view",
   "The trend could not be loaded: {detail}": "The trend could not be loaded: {detail}",
   "The upgrade renders exactly the same manifest.": "The upgrade renders exactly the same manifest.",
