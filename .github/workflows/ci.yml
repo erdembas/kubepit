@@ -52,9 +52,6 @@ jobs:
     name: Rust formatting, lint and fixture tests
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    env:
-      KUBEPIT_HOME: ${{ runner.temp }}/kubepit-ci
-      KUBECONFIG: ${{ runner.temp }}/kubepit-ci/kubeconfig
     steps:
       - uses: actions/checkout@v4
         with:
@@ -78,8 +75,9 @@ jobs:
           restore-keys: cargo-ci-${{ runner.os }}-
       - name: Isolate local state and kubeconfig
         run: |
-          mkdir -p "$KUBEPIT_HOME"
-          printf 'apiVersion: v1\nkind: Config\nclusters: []\ncontexts: []\nusers: []\n' > "$KUBECONFIG"
+          mkdir -p "$RUNNER_TEMP/kubepit-ci"
+          printf 'apiVersion: v1\nkind: Config\nclusters: []\ncontexts: []\nusers: []\n' > "$RUNNER_TEMP/kubepit-ci/kubeconfig"
+          printf 'KUBEPIT_HOME=%s\nKUBECONFIG=%s\n' "$RUNNER_TEMP/kubepit-ci" "$RUNNER_TEMP/kubepit-ci/kubeconfig" >> "$GITHUB_ENV"
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
