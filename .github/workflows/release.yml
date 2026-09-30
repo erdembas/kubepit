@@ -69,6 +69,10 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     steps:
+      - name: Preserve frozen source line endings on Windows
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -194,4 +198,4 @@ jobs:
         if: github.event_name == 'push' || inputs.publish
         env:
           GH_REPO: ${{ github.repository }}
-        run: gh workflow run pages.yml --ref main
+        run: gh workflow run pages.yml --ref main -F require_packages=true
