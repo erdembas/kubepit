@@ -24,7 +24,7 @@ change product code, dependencies, or license declarations.
 | third-party | `rustls` | 0.23 | crates.io | Apache-2.0 OR ISC OR MIT |
 | third-party | `tokio-rustls` | 0.26 | crates.io | MIT OR Apache-2.0 |
 | third-party | `hyper` | 1 | crates.io | MIT |
-| third-party | `reqwest` | 0.13 | crates.io | MIT |
+| third-party | `reqwest` | 0.13 | crates.io | MIT OR Apache-2.0 |
 | third-party | `tauri` + plugins | 2 | crates.io | MIT OR Apache-2.0 |
 | third-party | `portable-pty` | 0.8 | crates.io | MIT |
 | third-party | `keyring` | 4 | crates.io | MIT OR Apache-2.0 |
@@ -39,15 +39,16 @@ commits, all by a single contributor. No private Git URL, private crate, or
 
 ### Rust workspace — non-permissive and combined license categories
 
-The table above lists only permissive licenses. The full `Cargo.lock` transitive
-set also includes these license categories, classified from lockfile metadata:
+The table above lists only the most common permissive licenses. The full
+`Cargo.lock` transitive set also includes these license categories, classified
+from lockfile metadata:
 
 | Category | Crates (selected) | License | Runtime or build-time |
 | --- | --- | --- | --- |
 | Public domain | `notify` | CC0-1.0 | Runtime (file watcher for kubeconfig watch) |
+| Permissive (Boost) | `clipboard-win`, `error-code` (via `tauri-plugin-clipboard-manager` → `arboard`) | BSL-1.0 (Boost Software License 1.0, OSI-approved) | Runtime (Windows clipboard) |
 | Weak copyleft (file-level) | `cssparser`, `selectors`, `dtoa-short`, `lightningcss` (npm) | MPL-2.0 | Runtime (`cssparser`/`selectors` via `dom_query` ← `tauri-utils`/`wry` chain); `lightningcss` via Vite build |
 | Weak copyleft (file-level) | `option-ext` (via `dirs` → `dirs-sys`) | MPL-2.0 | Runtime (`dirs` used for `KUBEPIT_HOME` path resolution) |
-| Source-available | `clipboard-win`, `error-code` (via `tauri-plugin-clipboard-manager` → `arboard`) | BSL-1.0 | Runtime (Windows clipboard) |
 | Data license | `caniuse-lite` (npm) | CC-BY-4.0 | Build-time (browserslist/Vite) |
 | Data license | `webpki-root-certs` | CDLA-Permissive-2.0 | Runtime (TLS trust store) |
 | Data license | `icu_collections`, `icu_*` | Unicode-3.0 | Runtime (via `url` → `idna` → `idna_adapter` → `icu_normalizer`/`icu_properties`) |
@@ -55,11 +56,13 @@ set also includes these license categories, classified from lockfile metadata:
 | Combined (AND) | `brotli` | BSD-3-Clause AND MIT | Runtime (decompression) |
 | Combined (AND) | `encoding_rs` | (Apache-2.0 OR MIT) AND BSD-3-Clause | Runtime (encoding) |
 | Combined (AND) | `unicode-ident` | (MIT OR Apache-2.0) AND Unicode-3.0 | Build-time (proc-macro) |
+| Combined (AND) | `dpi` | Apache-2.0 AND MIT | Runtime (via `muda`/`tao`/`wry` ← `tauri`) |
 
 CC0-1.0 is a public domain dedication that does not grant patent rights (§4(a)).
-MPL-2.0 requires modified MPL-licensed files to be redistributed under MPL; it
-does not infect the whole binary. BSL-1.0 is source-available, not OSS; its
-grant terms must be reviewed for commercial distribution. CC-BY-4.0 and
+BSL-1.0 (Boost Software License 1.0) is an OSI-approved permissive license; it
+is distinct from BUSL-1.1 (Business Source License), which is source-available
+and not OSI-approved. MPL-2.0 requires modified MPL-licensed files to be
+redistributed under MPL; it does not infect the whole binary. CC-BY-4.0 and
 CDLA-Permissive-2.0 are data licenses with attribution requirements.
 Unicode-3.0 is a permissive data license. Combined (AND) licenses require
 compliance with all conjuncts. The technical classification above is from
@@ -74,7 +77,7 @@ technical classification for NOTICE/SBOM is a local L5/P18 task.
 | first-party | `@kubepit/desktop` | 0.1.0 | MIT (proposed AGPL-3.0-only) |
 | third-party | `react` / `react-dom` | 18.3.1 | MIT |
 | third-party | `@tauri-apps/api` + plugins | 2.x | MIT OR Apache-2.0 |
-| third-party | `@monaco-editor/react` / `monaco-editor` | 0.56.0 | MIT |
+| third-party | `@monaco-editor/react` / `monaco-editor` | 0.56.0 | MIT (runtime dep `dompurify` is MPL-2.0 OR Apache-2.0 — verification pending) |
 | third-party | `@xterm/xterm` + addons | 6.x | MIT |
 | third-party | `zustand` | 5.0.15 | MIT |
 | third-party | `tailwindcss` / `@tailwindcss/vite` | 4 | MIT |
@@ -337,7 +340,7 @@ the public repo).
 **Rights inventory summary (L1):**
 - **First-party code:** 395 commits @ `932011f` (base revision), all authored
   and committed by `erdembas <erdem.bas@mersel.io>` (corporate domain
-  `mersel.io`). P01 adds 2 commits by the same identity.
+  `mersel.io`). P01 adds 3 commits by the same identity.
   `Cargo.toml` authors field: `erdembas@users.noreply.github.com`. `LICENSE`:
   "Erdem Baş". No outside contributions recorded. The corporate email domain
   creates an employer/IP scope question: verification that the contributor has
@@ -354,19 +357,24 @@ the public repo).
   license-transition obligations apply. Provenance and license compatibility
   verification is an external gate (G01, file-level).
 - **Third-party dependencies:** Permissive (MIT, Apache-2.0, ISC, BSD),
-  public domain (CC0-1.0), weak copyleft (MPL-2.0), source-available (BSL-1.0),
+  public domain (CC0-1.0), permissive (BSL-1.0 Boost), weak copyleft (MPL-2.0),
   data licenses (CDLA-Permissive-2.0, Unicode-3.0, CC-BY-4.0), combined AND
-  licenses, and font license (OFL-1.1 via Google Fonts). Full list in
-  `Cargo.lock` and `pnpm-lock.yaml`. No AGPL/GPL dependencies identified in the
-  current workspace. Legal interpretation of each category is G03.
+  licenses, Zlib (runtime: `zlib-rs`, `foldhash`), and font license (OFL-1.1 via
+  Google Fonts). Full list in `Cargo.lock` and `pnpm-lock.yaml`. No AGPL/GPL
+  dependencies identified in the current workspace. Legal interpretation of each
+  category is G03.
 - **Assets:** `docs/icon.png`, `apps/desktop/public/kubepit.svg`,
   `assets/icon-source.png`, `assets/icon-source.svg` and Tauri bundle icons —
   provenance pending (G02). Third-party agent provider brand logos
-  (`assets/agents/{claude,codex,cursor,opencode}.svg`) — trademark/copyright
+  (`apps/desktop/src/assets/agents/{claude,codex,cursor,opencode}.svg`) —
+  trademark/copyright
   belong to respective providers, provenance pending (G02). Monaco codicon TTF
   ships via `monaco-editor` npm (MIT). JetBrains Mono font loaded at runtime from
   Google Fonts (OFL-1.1).
 - **Public git history:** The public repo tracks commercial planning content:
+  `docs/superpowers/specs/2026-09-29-open-core-commercial-strategy.md` (pricing,
+  Paddle, WorkOS, seat economics),
+  `docs/superpowers/plans/README.md` (commercial program summary with pricing),
   `docs/superpowers/{plans,specs}/2026-09-29-commercial-*.md` (pricing, Paddle,
   seat and operations details),
   `docs/superpowers/{plans,specs}/2026-09-28-team-sharing*.md` and
