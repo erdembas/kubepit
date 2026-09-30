@@ -40,6 +40,7 @@ jobs:
       - run: pnpm i18n:check
       - run: pnpm test:ui
       - run: pnpm test:site
+      - run: pnpm test:release
       - run: pnpm perf:test
       - run: pnpm build:pages
       - uses: actions/upload-artifact@v4

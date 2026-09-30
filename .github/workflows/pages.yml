@@ -4,6 +4,16 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      require_packages:
+        description: Require at least one verified desktop release before deploying
+        type: boolean
+        default: false
+  release:
+    types: [published, edited]
+  schedule:
+    # Refresh the bundled fallback after the independently maintained tap updates.
+    - cron: '41 */6 * * *'
 
 permissions:
   contents: read
@@ -23,6 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: main
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -40,6 +51,16 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm i18n:check
       - run: pnpm test:site
+      - name: Refresh verified desktop downloads
+        run: |
+          if [ "$REQUIRE_PACKAGES" = "true" ]; then
+            pnpm sync:releases -- --required
+          else
+            pnpm sync:releases
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUIRE_PACKAGES: ${{ inputs.require_packages }}
       - name: Export the site and the in-memory demo
         env:
           NEXT_PUBLIC_BASE_PATH: ${{ steps.pages.outputs.base_path }}

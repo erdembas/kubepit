@@ -26,6 +26,8 @@
     "i18n:check": "node scripts/check-i18n.mjs",
     "test:ui": "pnpm --filter @kubepit/desktop test",
     "test:site": "node --test scripts/site/*.test.mjs",
+    "test:release": "node --test scripts/release/*.test.mjs",
+    "sync:releases": "node scripts/site/sync-releases.mjs",
     "check:version": "node scripts/check-version.mjs",
     "perf:bench": "pnpm --filter @kubepit/desktop bench --outputJson ../../perf-results/frontend-bench.json",
     "perf:ui": "node scripts/perf/ui-perf.mjs",

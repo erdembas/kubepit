@@ -28,6 +28,8 @@ import {
 } from 'lucide-react';
 import * as i18n from '@/i18n';
 import { KubepitMark } from '@/components/ui/KubepitMark';
+import { Hero } from '@/components/Hero';
+import { Downloads } from '@/components/Downloads';
 import { asset, basePath, demo, repository } from '@/lib/links';
 
 type FeatureGroup = 'all' | 'operate' | 'understand' | 'protect';
@@ -242,8 +244,8 @@ export function Site() {
             <a href="#principles" onClick={() => setMenu(false)}>
               {t('Open source')}
             </a>
-            <a href="#start" onClick={() => setMenu(false)}>
-              {t('Get started')}
+            <a href="#downloads" onClick={() => setMenu(false)}>
+              {t('Download Kubepit')}
             </a>
           </nav>
           <div className="header-actions">
@@ -273,81 +275,7 @@ export function Site() {
         </div>
       </header>
       <main id="main">
-        <section className="hero container">
-          <a className="release-pill" href={`${repository}/blob/main/CHANGELOG.md`}>
-            <span className="release-dot" />
-            {t('INTRODUCING 0.0.1')}
-            <span className="pill-divider" />
-            {t('An open-source beginning')}
-            <ArrowUpRight size={13} />
-          </a>
-          <div className="hero-heading">
-            <h1>
-              {t('Your clusters.')}
-              <br />
-              <span>{t('Your cockpit.')}</span>
-            </h1>
-            <div className="hero-aside">
-              <span className="eyebrow">{t('KUBERNETES, WITH CONTEXT')}</span>
-              <p>
-                {t(
-                  'A local-first Kubernetes IDE for the people who keep things running. Your fleet, your tools, your next move — together.',
-                )}
-              </p>
-              <div className="hero-buttons">
-                <a className="button primary" href={demo}>
-                  <Play size={14} fill="currentColor" />
-                  {t('Explore the live demo')}
-                </a>
-                <a className="button secondary" href="#start">
-                  <Code2 size={16} />
-                  {t('Build from source')}
-                </a>
-              </div>
-              <p className="hero-fine">{t('Free & MIT licensed. No account. No subscription.')}</p>
-            </div>
-          </div>
-          <div className="product-window">
-            <div className="window-bar">
-              <div className="window-dots" aria-hidden="true">
-                <i />
-                <i />
-                <i />
-              </div>
-              <span>
-                kubepit <span className="slash">/</span> {t('your Kubernetes workspace')}
-              </span>
-              <span className="sample-label">{t('DEMO DATA')}</span>
-            </div>
-            <a
-              href={demo}
-              className="product-image-link"
-              aria-label={t('Open the interactive Kubepit demo')}
-            >
-              <img
-                className="product-image"
-                src={asset('workbench.png')}
-                width="1600"
-                height="1000"
-                alt={t(
-                  'Kubepit desktop workbench with fixture clusters, a resource table and details',
-                )}
-                fetchPriority="high"
-              />
-              <span className="image-cta">
-                <Play size={14} fill="currentColor" />
-                {t('Make yourself at home')}
-              </span>
-            </a>
-          </div>
-          <div className="hero-caption">
-            <span>
-              <Terminal size={13} />
-              {t('A desktop app. A keyboard-first workflow.')}
-            </span>
-            <span>{t('Try the real UI in your browser. Only sample data.')}</span>
-          </div>
-        </section>
+        <Hero installHref="#downloads" />
         <div className="trust-strip">
           <div className="trust-inner container">
             <span>{t('BUILT AROUND YOUR STACK')}</span>
@@ -647,6 +575,7 @@ export function Site() {
             </p>
           </div>
         </section>
+        <Downloads />
         <section className="section getting-started container" id="start">
           <div>
             <p className="eyebrow">{t('START WITH CURIOSITY')}</p>
@@ -668,7 +597,7 @@ export function Site() {
               <a href={`${repository}/releases`}>
                 <Code2 size={20} />
                 <span>
-                  <strong>{t('0.0.1 · source-first release')}</strong>
+                  <strong>{t('0.0.1 · first public release')}</strong>
                   <span>{t('Check GitHub for release notes and available artifacts.')}</span>
                 </span>
                 <ExternalLink size={15} />
@@ -676,7 +605,7 @@ export function Site() {
             </div>
             <p className="platform-note">
               {t(
-                'Desktop targets: macOS, Linux and Windows. Build prerequisites and validation vary by platform; signed installers and automatic updates are not promised for 0.0.1.',
+                'Prefer to build it yourself? The desktop app and this website are open source. Platform dependencies and setup instructions are in the README.',
               )}
             </p>
           </div>
