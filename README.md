@@ -28,11 +28,50 @@ feature tiers. MIT permits personal and commercial use. Optional services you
 choose, such as hosted AI providers, have their own terms and costs.
 
 This is the first public version, **0.0.1**. Expect rough edges and evolving APIs.
-Start with the demo or a development cluster. The getting-started path for this
-release is building from source; this README does not imply that signed installers
-or an automatic-update feed are available.
+Start with the demo or a development cluster. Choose an installer on the
+[download page](https://erdembas.github.io/kubepit/#downloads), or build from source.
+The page lists only published packages and shows their exact signing status.
+The signed in-app update feed is not configured in 0.0.1.
 
 ![Kubepit workbench with synthetic Kubernetes resources](apps/website/public/workbench.png)
+
+## Install the desktop app
+
+The [download page](https://erdembas.github.io/kubepit/#downloads) selects published
+packages by operating system, processor and format. The experimental **v0.0.1**
+release uses the pre-release channel. Its source tag stays fixed; packaging
+provenance and SHA-256 checksums are attached to the
+[GitHub release](https://github.com/erdembas/kubepit/releases/tag/v0.0.1).
+
+| System    | Processor             | Package formats     |
+| --------- | --------------------- | ------------------- |
+| macOS 11+ | Apple Silicon / Intel | DMG                 |
+| Linux     | ARM64 / x64           | AppImage, DEB, RPM  |
+| Windows   | x64                   | NSIS installer, MSI |
+| Windows   | ARM64                 | NSIS installer      |
+
+On macOS, the [Kubepit Homebrew cask](https://github.com/erdembas/homebrew-tap)
+tracks verified releases for both processors:
+
+```bash
+brew install --cask erdembas/tap/kubepit
+# Later, after a newer version is published:
+brew update
+brew upgrade --cask kubepit
+```
+
+Download the matching architecture; browser detection cannot reliably determine
+it. Linux packages require their platform libraries, including WebKitGTK 4.1;
+AppImage does not make every distribution compatible. Windows uses WebView2.
+`kubectl`, Helm and provider authentication helpers remain external tools where
+needed by the corresponding feature.
+
+The initial macOS packages use ad-hoc signatures, without Apple Developer ID or
+notarization; Windows packages are unsigned. Your operating system may block
+installation. Homebrew does not bypass these checks. See
+[release notes](https://github.com/erdembas/kubepit/releases/tag/v0.0.1) and
+[release operations](docs/RELEASING.md) for signing, checksums and verification limits.
+There is no enabled in-app automatic updater in this version.
 
 ## Try it before connecting anything
 
@@ -215,6 +254,7 @@ pnpm typecheck
 pnpm i18n:check
 pnpm test:ui
 pnpm test:site
+pnpm test:release
 pnpm check:version
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
@@ -228,7 +268,7 @@ real Kubernetes workflows. Start with [Contributing](CONTRIBUTING.md) and
 [Architecture](docs/ARCHITECTURE.md).
 
 See [Changelog](CHANGELOG.md) for the 0.0.1 scope and
-[Releasing](docs/RELEASING.md) for GitHub Pages, source tags and the signing boundary.
+[Releasing](docs/RELEASING.md) for GitHub Pages, desktop packaging, Homebrew and signing.
 The website needs no custom domain or hosted application server.
 
 ## License

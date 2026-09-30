@@ -1,6 +1,267 @@
 {
   "schemaVersion": 1,
-  "checkedAt": null,
-  "releases": [],
-  "homebrew": null
+  "checkedAt": "2026-09-30T21:37:36.986Z",
+  "releases": [
+    {
+      "release": {
+        "tag_name": "v0.0.1",
+        "draft": false,
+        "prerelease": true,
+        "published_at": "2026-09-30T19:24:18Z",
+        "html_url": "https://github.com/erdembas/kubepit/releases/tag/v0.0.1",
+        "assets": [
+          {
+            "id": 601839374,
+            "name": "kubepit.rb",
+            "state": "uploaded",
+            "size": 772,
+            "browser_download_url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/kubepit.rb",
+            "digest": "sha256:054850d687a711380b4e41a23cbe80bab2413345d899c0e152f6fbc24c2e99ab"
+          },
+          {
+            "id": 601838946,
+            "name": "Kubepit_0.0.1_linux_arm64.AppImage",
+            "state": "uploaded",
+            "size": 88930824,
+            "browser_download_url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/Kubepit_0.0.1_linux_arm64.AppImage",
+            "digest": "sha256:de9228473b3b20f1d1c6d378430dec25bfddae41b4a66a1d85b18530b4263ef9"
+          },
+          {
+            "id": 601838983,
+            "name": "Kubepit_0.0.1_linux_arm64.deb",
+            "state": "uploaded",
+            "size": 13110330,
+            "browser_download_url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/Kubepit_0.0.1_linux_arm64.deb",
+            "digest": "sha256:c32b7d8d6e7f8779acfbbc563e3dd7c41d3a13c604e983b3574aedfef18bb4e0"
+          },
+          {
+            "id": 601839001,
+            "name": "Kubepit_0.0.1_linux_arm64.rpm",
+            "state": "uploaded",
+            "size": 13111297,
+            "browser_download_url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/Kubepit_0.0.1_linux_arm64.rpm",
+            "digest": "sha256:5227bc1f090539986fa3d851a930e969717dda9b6ed327cd4aa062cbfb43ab84"
+          },
+          {
+            "id": 601839036,
+            "name": "Kubepit_0.0.1_linux_x64.AppImage",
+            "state": "uploaded",
+            "size": 91199992,
+            "browser_download_url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/Kubepit_0.0.1_linux_x64.AppImage",
+            "digest": "sha256:3e7de7731f811ebbf9c843ce34f2abebeb2925f2bd2bad8e61eb1b6b3990cf13"
+          },
+          {
+            "id": 601839120,
+            "name": "Kubepit_0.0.1_linux_x64.deb",
+            "state": "uploaded",
+            "size": 13487524,
+            "browser_download_url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/Kubepit_0.0.1_linux_x64.deb",
+            "digest": "sha256:a821baaa344862aa48119a68f1c15434497220817da83af43a9bd57688f9d9a1"
+          },
+          {
+            "id": 601839145,
+            "name": "Kubepit_0.0.1_linux_x64.rpm",
+            "state": "uploaded",
+            "size": 13488055,
+            "browser_download_url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/Kubepit_0.0.1_linux_x64.rpm",
+            "digest": "sha256:793a0e90d9eafd2bbcad6f0587be10ade3a9292e0023769df7e0ea2700d8e769"
+          },
+          {
+            "id": 601839165,
+            "name": "Kubepit_0.0.1_macos_arm64.dmg",
+            "state": "uploaded",
+            "size": 13051867,
+            "browser_download_url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/Kubepit_0.0.1_macos_arm64.dmg",
+            "digest": "sha256:cff02e111ec407801ab3b1bdd1b85151d089724a05313e673be7e2a2bae6ca07"
+          },
+          {
+            "id": 601839193,
+            "name": "Kubepit_0.0.1_macos_x64.dmg",
+            "state": "uploaded",
+            "size": 13812977,
+            "browser_download_url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/Kubepit_0.0.1_macos_x64.dmg",
+            "digest": "sha256:981b5a222f9740136f32ae7bb38542e6c84e49068cbd14359e52eb322eba64c9"
+          },
+          {
+            "id": 601839214,
+            "name": "Kubepit_0.0.1_windows_arm64-setup.exe",
+            "state": "uploaded",
+            "size": 9289619,
+            "browser_download_url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/Kubepit_0.0.1_windows_arm64-setup.exe",
+            "digest": "sha256:d2309df20c12160c86f84d53471f049eb4bcac8e483143b845583f9baefa743a"
+          },
+          {
+            "id": 601839287,
+            "name": "Kubepit_0.0.1_windows_x64-setup.exe",
+            "state": "uploaded",
+            "size": 9954413,
+            "browser_download_url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/Kubepit_0.0.1_windows_x64-setup.exe",
+            "digest": "sha256:d79f3a951deb9d6a7323c728e77bbe48bfca6920cc38cc67599873dd2b45d871"
+          },
+          {
+            "id": 601839328,
+            "name": "Kubepit_0.0.1_windows_x64.msi",
+            "state": "uploaded",
+            "size": 12382208,
+            "browser_download_url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/Kubepit_0.0.1_windows_x64.msi",
+            "digest": "sha256:386ed3c004f4581c4c827515b4b78bfdbc386cb0927f2fe21a91a6309e27ad2b"
+          },
+          {
+            "id": 601839407,
+            "name": "release-manifest.json",
+            "state": "uploaded",
+            "size": 4922,
+            "browser_download_url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/release-manifest.json",
+            "digest": "sha256:2cad521bfefb56083f83062b340b7c64015d7291108a36535a8f02206bbd55ca"
+          },
+          {
+            "id": 601839384,
+            "name": "SHA256SUMS",
+            "state": "uploaded",
+            "size": 1149,
+            "browser_download_url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/SHA256SUMS",
+            "digest": "sha256:de89c913b99e801b6fa0fa75493ec54367afa70a9000d5ac0833e08438fa1ee8"
+          }
+        ]
+      },
+      "manifest": {
+        "schemaVersion": 1,
+        "version": "0.0.1",
+        "tag": "v0.0.1",
+        "repository": "erdembas/kubepit",
+        "commit": "10b88447a380279844373eb04a04faf689088246",
+        "automationCommit": "d69041c662d6ce3aeff8b4caab420a6e543ba9d6",
+        "prerelease": true,
+        "publishedAt": "2026-09-30T19:24:18.000Z",
+        "releaseUrl": "https://github.com/erdembas/kubepit/releases/tag/v0.0.1",
+        "assets": [
+          {
+            "name": "Kubepit_0.0.1_linux_arm64.AppImage",
+            "platform": "linux",
+            "arch": "arm64",
+            "format": "AppImage",
+            "size": 88930824,
+            "sha256": "de9228473b3b20f1d1c6d378430dec25bfddae41b4a66a1d85b18530b4263ef9",
+            "signing": "unsigned",
+            "url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/Kubepit_0.0.1_linux_arm64.AppImage"
+          },
+          {
+            "name": "Kubepit_0.0.1_linux_arm64.deb",
+            "platform": "linux",
+            "arch": "arm64",
+            "format": "deb",
+            "size": 13110330,
+            "sha256": "c32b7d8d6e7f8779acfbbc563e3dd7c41d3a13c604e983b3574aedfef18bb4e0",
+            "signing": "unsigned",
+            "url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/Kubepit_0.0.1_linux_arm64.deb"
+          },
+          {
+            "name": "Kubepit_0.0.1_linux_arm64.rpm",
+            "platform": "linux",
+            "arch": "arm64",
+            "format": "rpm",
+            "size": 13111297,
+            "sha256": "5227bc1f090539986fa3d851a930e969717dda9b6ed327cd4aa062cbfb43ab84",
+            "signing": "unsigned",
+            "url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/Kubepit_0.0.1_linux_arm64.rpm"
+          },
+          {
+            "name": "Kubepit_0.0.1_linux_x64.AppImage",
+            "platform": "linux",
+            "arch": "x64",
+            "format": "AppImage",
+            "size": 91199992,
+            "sha256": "3e7de7731f811ebbf9c843ce34f2abebeb2925f2bd2bad8e61eb1b6b3990cf13",
+            "signing": "unsigned",
+            "url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/Kubepit_0.0.1_linux_x64.AppImage"
+          },
+          {
+            "name": "Kubepit_0.0.1_linux_x64.deb",
+            "platform": "linux",
+            "arch": "x64",
+            "format": "deb",
+            "size": 13487524,
+            "sha256": "a821baaa344862aa48119a68f1c15434497220817da83af43a9bd57688f9d9a1",
+            "signing": "unsigned",
+            "url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/Kubepit_0.0.1_linux_x64.deb"
+          },
+          {
+            "name": "Kubepit_0.0.1_linux_x64.rpm",
+            "platform": "linux",
+            "arch": "x64",
+            "format": "rpm",
+            "size": 13488055,
+            "sha256": "793a0e90d9eafd2bbcad6f0587be10ade3a9292e0023769df7e0ea2700d8e769",
+            "signing": "unsigned",
+            "url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/Kubepit_0.0.1_linux_x64.rpm"
+          },
+          {
+            "name": "Kubepit_0.0.1_macos_arm64.dmg",
+            "platform": "macos",
+            "arch": "arm64",
+            "format": "dmg",
+            "size": 13051867,
+            "sha256": "cff02e111ec407801ab3b1bdd1b85151d089724a05313e673be7e2a2bae6ca07",
+            "signing": "ad-hoc",
+            "url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/Kubepit_0.0.1_macos_arm64.dmg"
+          },
+          {
+            "name": "Kubepit_0.0.1_macos_x64.dmg",
+            "platform": "macos",
+            "arch": "x64",
+            "format": "dmg",
+            "size": 13812977,
+            "sha256": "981b5a222f9740136f32ae7bb38542e6c84e49068cbd14359e52eb322eba64c9",
+            "signing": "ad-hoc",
+            "url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/Kubepit_0.0.1_macos_x64.dmg"
+          },
+          {
+            "name": "Kubepit_0.0.1_windows_arm64-setup.exe",
+            "platform": "windows",
+            "arch": "arm64",
+            "format": "nsis",
+            "size": 9289619,
+            "sha256": "d2309df20c12160c86f84d53471f049eb4bcac8e483143b845583f9baefa743a",
+            "signing": "unsigned",
+            "url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/Kubepit_0.0.1_windows_arm64-setup.exe"
+          },
+          {
+            "name": "Kubepit_0.0.1_windows_x64-setup.exe",
+            "platform": "windows",
+            "arch": "x64",
+            "format": "nsis",
+            "size": 9954413,
+            "sha256": "d79f3a951deb9d6a7323c728e77bbe48bfca6920cc38cc67599873dd2b45d871",
+            "signing": "unsigned",
+            "url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/Kubepit_0.0.1_windows_x64-setup.exe"
+          },
+          {
+            "name": "Kubepit_0.0.1_windows_x64.msi",
+            "platform": "windows",
+            "arch": "x64",
+            "format": "msi",
+            "size": 12382208,
+            "sha256": "386ed3c004f4581c4c827515b4b78bfdbc386cb0927f2fe21a91a6309e27ad2b",
+            "signing": "unsigned",
+            "url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/Kubepit_0.0.1_windows_x64.msi"
+          }
+        ],
+        "homebrew": {
+          "caskUrl": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/kubepit.rb",
+          "sha256": "054850d687a711380b4e41a23cbe80bab2413345d899c0e152f6fbc24c2e99ab",
+          "tap": null,
+          "installCommand": null
+        },
+        "checksums": {
+          "name": "SHA256SUMS",
+          "url": "https://github.com/erdembas/kubepit/releases/download/v0.0.1/SHA256SUMS"
+        }
+      },
+      "checksums": "054850d687a711380b4e41a23cbe80bab2413345d899c0e152f6fbc24c2e99ab  kubepit.rb\n386ed3c004f4581c4c827515b4b78bfdbc386cb0927f2fe21a91a6309e27ad2b  Kubepit_0.0.1_windows_x64.msi\n3e7de7731f811ebbf9c843ce34f2abebeb2925f2bd2bad8e61eb1b6b3990cf13  Kubepit_0.0.1_linux_x64.AppImage\n5227bc1f090539986fa3d851a930e969717dda9b6ed327cd4aa062cbfb43ab84  Kubepit_0.0.1_linux_arm64.rpm\n793a0e90d9eafd2bbcad6f0587be10ade3a9292e0023769df7e0ea2700d8e769  Kubepit_0.0.1_linux_x64.rpm\n981b5a222f9740136f32ae7bb38542e6c84e49068cbd14359e52eb322eba64c9  Kubepit_0.0.1_macos_x64.dmg\na821baaa344862aa48119a68f1c15434497220817da83af43a9bd57688f9d9a1  Kubepit_0.0.1_linux_x64.deb\nc32b7d8d6e7f8779acfbbc563e3dd7c41d3a13c604e983b3574aedfef18bb4e0  Kubepit_0.0.1_linux_arm64.deb\ncff02e111ec407801ab3b1bdd1b85151d089724a05313e673be7e2a2bae6ca07  Kubepit_0.0.1_macos_arm64.dmg\nd2309df20c12160c86f84d53471f049eb4bcac8e483143b845583f9baefa743a  Kubepit_0.0.1_windows_arm64-setup.exe\nd79f3a951deb9d6a7323c728e77bbe48bfca6920cc38cc67599873dd2b45d871  Kubepit_0.0.1_windows_x64-setup.exe\nde9228473b3b20f1d1c6d378430dec25bfddae41b4a66a1d85b18530b4263ef9  Kubepit_0.0.1_linux_arm64.AppImage\n"
+    }
+  ],
+  "homebrew": {
+    "url": "https://github.com/erdembas/homebrew-tap/blob/main/Casks/kubepit.rb",
+    "content": "cask \"kubepit\" do\n  arch arm: \"arm64\", intel: \"x64\"\n\n  version \"0.0.1\"\n  sha256 arm:   \"cff02e111ec407801ab3b1bdd1b85151d089724a05313e673be7e2a2bae6ca07\",\n         intel: \"981b5a222f9740136f32ae7bb38542e6c84e49068cbd14359e52eb322eba64c9\"\n\n  url \"https://github.com/erdembas/kubepit/releases/download/v#{version}/Kubepit_#{version}_macos_#{arch}.dmg\",\n      verified: \"github.com/erdembas/kubepit/\"\n\n  name \"Kubepit\"\n  desc \"Local-first Kubernetes IDE\"\n  homepage \"https://erdembas.github.io/kubepit/\"\n\n  depends_on macos: \">= :big_sur\"\n  app \"Kubepit.app\"\n\n  zap trash: [\n    \"~/Library/Caches/io.github.erdembas.kubepit\",\n    \"~/Library/Preferences/io.github.erdembas.kubepit.plist\",\n    \"~/Library/Saved Application State/io.github.erdembas.kubepit.savedState\",\n  ]\nend\n"
+  }
 }

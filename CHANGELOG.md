@@ -5,8 +5,8 @@
 ### English
 
 Kubepit's first public version establishes the complete MIT-licensed community
-edition and its source-first release path. This version is experimental; a tag or
-source release does not certify production readiness or signed binary availability.
+edition, source builds and desktop packages. This version is experimental; a
+successful package build does not certify production readiness or platform signing.
 
 Included in the initial codebase:
 
@@ -21,9 +21,11 @@ Included in the initial codebase:
 - Cancellable Linux PTY input and output: closing a terminal releases a blocked large paste even when the child stops reading.
 - English/Turkish Next.js static product website, the fixture-backed interactive browser demo, GitHub Pages deployment, contribution/security/release guides and version consistency checks.
 
+- Follow-up release automation builds 11 installers across six OS/architecture targets from the frozen version tag, publishes a complete checksum manifest, generates a checksum-pinned Homebrew cask and refreshes website download metadata. The website gains a motion-controlled hero and platform/architecture download selection.
+
 Known launch boundaries:
 
-- This is a source-first release. Public installers, platform certification, notarization and a signed automatic-update feed are separate release work.
+- macOS packages are ad-hoc signed without Developer ID/notarization; Windows packages are unsigned. The in-app updater is not configured. CI checks package structure, metadata and hashes; it does not certify runtime behavior on every supported machine.
 - Integrations need their documented tools, permissions and data sources. The demo simulates cluster and provider behavior.
 - Recommendations and cost numbers are estimates; health, network and upgrade findings have explicit coverage limits.
 - Performance fixtures are reproducible engineering checks, not comparative benchmarks against other products. GitHub runner timing budgets still require calibration.
@@ -31,8 +33,8 @@ Known launch boundaries:
 ### Türkçe
 
 Kubepit'in ilk herkese açık sürümü, tamamı MIT lisanslı topluluk ürününü ve kaynak
-koddan kullanım yolunu sunar. Bu sürüm deneyseldir; etiket veya kaynak yayını,
-üretime hazır olunduğunu ya da imzalı kurulum paketi bulunduğunu belgelemez.
+koddan derleme ve masaüstü paketlerini sunar. Bu sürüm deneyseldir; başarılı paket
+derlemesi, üretime hazır olunduğunu veya platform imzası bulunduğunu belgelemez.
 
 İlk kod tabanına dâhil olanlar:
 
@@ -47,9 +49,11 @@ koddan kullanım yolunu sunar. Bu sürüm deneyseldir; etiket veya kaynak yayın
 - İptal edilebilir Linux PTY giriş/çıkışı: alt süreç okumayı durdursa bile terminali kapatmak, büyük bir yapıştırma işleminde bekleyen yazmayı sonlandırır.
 - İngilizce/Türkçe Next.js statik ürün sitesi, örnek verili etkileşimli tarayıcı demosu, GitHub Pages dağıtımı, katkı/güvenlik/yayımlama rehberleri, sürüm tutarlılığı denetimleri.
 
+- Sonradan eklenen yayın otomasyonu, sabit sürüm etiketinden altı sistem/mimari hedefinde 11 kurulum paketi derler; eksiksiz sağlama bildirimi yayımlar, sağlama toplamına bağlı Homebrew cask dosyasını üretir ve sitenin indirme bilgilerini günceller. Siteye hareket kontrolü olan hero ve sistem/mimari seçmeli indirme alanı eklendi.
+
 İlk yayının bilinen sınırları:
 
-- Başlangıç yolu kaynak koddur. Herkese açık kurulum paketleri, platform doğrulaması, noter onayı ve imzalı otomatik güncelleme akışı ayrı yayın işleridir.
+- macOS paketleri ad-hoc imzalıdır; Developer ID/noter onayı yoktur. Windows paketleri imzasızdır. Uygulama içi güncelleyici yapılandırılmamıştır. CI paket yapısını, üst veriyi ve sağlama toplamlarını denetler; desteklenen her makinede çalışma davranışını belgelemez.
 - Entegrasyonlar belgelenen araçlara, izinlere ve veri kaynaklarına ihtiyaç duyar. Demo, küme ve sağlayıcı davranışlarını simüle eder.
 - Öneriler ve maliyetler tahmindir; sağlık, ağ ve yükseltme bulgularının açık kapsam sınırları vardır.
 - Performans örnekleri tekrarlanabilir mühendislik kontrolleridir; diğer ürünlerle karşılaştırmalı benchmark değildir. GitHub runner süre bütçelerinin kalibrasyonu henüz gereklidir.

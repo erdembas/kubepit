@@ -4,11 +4,10 @@
 
 ## English
 
-Version **0.0.1** is a source-first, experimental release. The website and browser
-demo are a static GitHub Pages deployment; the desktop app is built locally from
-source. Publishing the website or a Git tag does not produce signed desktop
-installers. This document describes the actual workflows in the repository and
-the separate work required for signed updates.
+Version **0.0.1** is experimental. GitHub Actions builds desktop packages from an
+immutable version tag, publishes their checksums and manifest, and refreshes the
+static GitHub Pages website. The Homebrew tap tracks verified releases. Platform
+signing is optional and reported per package; the in-app updater remains disabled.
 
 ### 1. Verify the release candidate
 
@@ -24,6 +23,7 @@ pnpm typecheck
 pnpm i18n:check
 pnpm test:ui
 pnpm test:site
+pnpm test:release
 pnpm perf:test
 pnpm build:pages
 cargo fmt --all -- --check
@@ -71,35 +71,105 @@ NEXT_PUBLIC_BASE_PATH=/kubepit NEXT_PUBLIC_SITE_ORIGIN=https://erdembas.github.i
 pnpm preview:pages
 ```
 
-### 3. Tag the source release
+### 3. Build and publish desktop packages
 
-After the reviewed release commit is on `main` and CI is green, verify that the
-local checkout is that exact commit and `v0.0.1` does not already exist. Then:
+For a **new** version, update the eight package/version entries, verify CI, and push
+an annotated `vX.Y.Z` tag. [`release.yml`](../.github/workflows/release.yml) runs on
+`v*` pushes. Never move or recreate an existing release tag.
+
+The existing **v0.0.1** tag points to `10b88447a380279844373eb04a04faf689088246`.
+Packaging was added afterward. To package this exact source with the current
+reviewed workflow, use the manual dispatch:
 
 ```bash
-git tag -a v0.0.1 -m "Kubepit v0.0.1"
-git push origin v0.0.1
+gh workflow run release.yml --ref main -f ref=v0.0.1 -F publish=true -F prerelease=true
 ```
 
-Create a GitHub release from the tag, use the English/Turkish 0.0.1 changelog as
-notes, and clearly label it experimental and source-first. Choose GitHub's
-pre-release flag for this initial experimental release. GitHub supplies source
-archives; no installer-building release workflow is included. Attach binaries
-only after platform builds and smoke tests have actually completed, with their
-signing status stated explicitly. Never invent download links for future assets.
+Use `publish=false` for build-only verification. For an existing release its
+pre-release flag is preserved. For a new release, choose the flag deliberately;
+0.0.1 is experimental. The workflow checks out automation and tagged application
+source separately, verifies all version entries, and records both commits.
 
-### 4. Build and verify desktop packages separately
+| Build target  | Runner                        | Packages           |
+| ------------- | ----------------------------- | ------------------ |
+| macOS ARM64   | macos-14                      | DMG                |
+| macOS x64     | macos-14, Rust cross-target   | DMG                |
+| Linux x64     | ubuntu-22.04                  | AppImage, DEB, RPM |
+| Linux ARM64   | ubuntu-22.04-arm              | AppImage, DEB, RPM |
+| Windows x64   | windows-2022                  | NSIS EXE, MSI      |
+| Windows ARM64 | windows-2022, ARM64 C++ tools | NSIS EXE           |
 
-`pnpm tauri:build` builds the native target on a machine with its Tauri platform
-prerequisites. `pnpm tauri:build:local` is the local app-bundle command. Record the
-OS/architecture, commit, build command and smoke-test outcome for each distributed
-artifact. Do not infer cross-platform validation from browser CI or one host build.
+The frozen pnpm/Cargo lockfiles are used. Builds isolate application state and
+kubeconfig in runner temp storage; they do not connect to clusters. The release
+config disables updater artifacts, sets macOS 11 minimum and offers English and
+Turkish NSIS installer languages. Packages keep architecture-specific names,
+such as `Kubepit_0.0.1_linux_arm64.AppImage`.
 
-The committed macOS configuration uses ad-hoc signing (`signingIdentity: "-"`).
-That is not Developer ID signing or notarization. Windows code signing and macOS
-notarization require their own release setup. Updater signing does not replace
-either of them. Do not ask users to disable platform security as an installation
-strategy.
+Every target must succeed before publication. Checks cover package magic,
+architecture where inspectable, native package metadata, macOS bundle version and
+signature, configured Windows signatures, and SHA-256 hashes. These are packaging
+checks, **not interactive smoke tests on all target machines**. Test installed app
+startup, kubeconfig import with fixtures and core workflows on target hardware
+before treating a platform as runtime-certified.
+
+The publisher assembles all **11 installers**, `SHA256SUMS`, `kubepit.rb`, and
+`release-manifest.json`. It rechecks the source tag, verifies uploaded bytes and
+uploads the manifest last as the completeness marker. Already published bytes
+are never replaced. If publication is interrupted, rerun the failed publish job
+using the same build artifacts; a complete rebuild may produce different bytes
+and will correctly fail collision checks. Changed distributed binaries need a
+new version. Keep the complete release artifact while investigating failures.
+
+### 4. Signing, Homebrew and automatic website links
+
+Without signing secrets, macOS uses an ad-hoc signature; Windows/Linux packages
+are unsigned. This does not provide Apple Developer ID, notarization or Windows
+publisher trust. OS installation checks may block these early packages; the cask
+does not remove quarantine or bypass them.
+
+For protected production releases, configure repository Actions secrets:
+
+| Platform             | Required secrets                                                                         |
+| -------------------- | ---------------------------------------------------------------------------------------- |
+| macOS Developer ID   | `APPLE_CERTIFICATE` (base64 P12), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` |
+| macOS notarization   | Above plus `APPLE_ID`, `APPLE_PASSWORD` (app-specific), `APPLE_TEAM_ID`                  |
+| Windows Authenticode | `WINDOWS_CERTIFICATE` (base64 PFX), `WINDOWS_CERTIFICATE_PASSWORD`                       |
+
+Incomplete signing configuration fails the build. Temporary signing material is
+removed after use. No private signing key belongs in Git or logs. Platform
+signing and updater signing are separate systems.
+
+The public [Homebrew tap](https://github.com/erdembas/homebrew-tap) owns its
+verification workflow and updater helper. Manual dispatch validates public
+release metadata/checksums and the exact generated cask, then produces a reviewable
+artifact. Maintainers publish only `Casks/kubepit.rb`. It supports Apple Silicon
+and Intel. The tap uses its own read-only `GITHUB_TOKEN` for discovery; Kubepit needs
+no cross-repository PAT. Scheduled automatic commits are not enabled.
+
+The initial pre-release is eligible while no complete stable release exists.
+Once stable releases exist, the helper selects the newest complete stable release.
+Existing RunHQ cask maintenance is independent.
+
+```bash
+brew install --cask erdembas/tap/kubepit
+brew update
+brew upgrade --cask kubepit
+```
+
+Pages runs `pnpm sync:releases` before exporting. It fetches public release assets
+through GitHub's API, checks the manifest against actual uploaded assets and
+`SHA256SUMS`, and embeds a validated snapshot. Use
+`pnpm sync:releases -- --required` for a check that must find packages. The release
+workflow explicitly dispatches Pages after publication; scheduled Pages builds
+also pick up tap updates. GitHub's default token does not trigger other workflows
+through a release event alone.
+
+The browser can refresh from the public API, but CORS/rate limits are not required
+for installation links: validated bundled data is the fallback. Drafts, missing
+assets, mismatched hashes and source-only releases do not generate download
+buttons. Stable and pre-release channels stay distinct. Homebrew appears only
+when the actual tap file matches the generated cask hash. Links use versioned
+release URLs, never guessed `/latest` installer names.
 
 ### 5. Signed automatic updates: separate, not enabled in 0.0.1
 
@@ -120,18 +190,17 @@ To introduce signed releases later:
 The configured future feed is
 `https://github.com/erdembas/kubepit/releases/latest/download/latest.json`.
 GitHub's `latest` route excludes drafts and prereleases. Do not expect the initial
-source prerelease to activate it. Losing the signing private key breaks continuity
+prerelease to activate it. Losing the signing private key breaks continuity
 for installed clients; changing the key requires a deliberate migration/manual
 installation plan. Linux self-updating is an AppImage path; package-manager formats
 need their own upgrade path.
 
 ## Türkçe
 
-**0.0.1**, kaynak koddan kullanıma odaklanan deneysel bir sürümdür. Web sitesi ve
-tarayıcı demosu GitHub Pages'e statik olarak yayımlanır; masaüstü uygulaması kaynak
-koddan yerelde derlenir. Siteyi veya Git etiketini yayımlamak imzalı masaüstü
-kurulum paketi üretmez. Bu belge depodaki gerçek iş akışlarını ve imzalı
-güncellemeler için ayrıca yapılması gerekenleri anlatır.
+**0.0.1** deneyseldir. GitHub Actions, sabit sürüm etiketinden masaüstü paketlerini
+derler; sağlama toplamları ve bildirimini yayımlar, statik GitHub Pages sitesini
+yeniler. Homebrew tap doğrulanan sürümleri izler. Platform imzalama isteğe bağlıdır
+ve paket bazında belirtilir; uygulama içi güncelleyici kapalı kalır.
 
 ### 1. Sürüm adayını doğrulayın
 
@@ -147,6 +216,7 @@ pnpm typecheck
 pnpm i18n:check
 pnpm test:ui
 pnpm test:site
+pnpm test:release
 pnpm perf:test
 pnpm build:pages
 cargo fmt --all -- --check
@@ -194,37 +264,109 @@ NEXT_PUBLIC_BASE_PATH=/kubepit NEXT_PUBLIC_SITE_ORIGIN=https://erdembas.github.i
 pnpm preview:pages
 ```
 
-### 3. Kaynak sürümünü etiketleyin
+### 3. Masaüstü paketlerini derleyip yayımlayın
 
-İncelenen sürüm commit'i `main` dalına geldikten ve CI başarılı olduktan sonra
-yerel checkout'un tam olarak o commit olduğunu ve `v0.0.1` etiketinin henüz
-bulunmadığını doğrulayın. Ardından:
+**Yeni** sürüm için sekiz paket/sürüm kaydını güncelleyin, CI sonucunu doğrulayın
+ve açıklamalı `vX.Y.Z` etiketi gönderin.
+[`release.yml`](../.github/workflows/release.yml), `v*` etiketlerinde çalışır.
+Mevcut sürüm etiketini taşımayın veya yeniden oluşturmayın.
+
+Mevcut **v0.0.1** etiketi `10b88447a380279844373eb04a04faf689088246` commit'ini
+gösterir. Paketleme sonradan eklendi. Tam olarak bu kaynağı güncel ve incelenmiş
+iş akışıyla derlemek için elle başlatın:
 
 ```bash
-git tag -a v0.0.1 -m "Kubepit v0.0.1"
-git push origin v0.0.1
+gh workflow run release.yml --ref main -f ref=v0.0.1 -F publish=true -F prerelease=true
 ```
 
-Etiketten GitHub release oluşturun; İngilizce/Türkçe 0.0.1 değişiklik günlüğünü not
-olarak kullanın, deneysel olduğunu ve başlangıcın kaynak koddan olduğunu belirtin.
-İlk deneysel sürümde GitHub'ın pre-release seçeneğini işaretleyin. GitHub kaynak
-arşivlerini sağlar; kurulum paketi üreten release iş akışı eklenmemiştir. İkili
-paketleri ancak ilgili platformda derleme ve temel çalışma testleri tamamlandıktan
-sonra, imza durumunu açıkça belirterek ekleyin. Gelecekteki dosyalar için indirme
-bağlantısı uydurmayın.
+Yalnızca derleme doğrulaması için `publish=false` verin. Mevcut sürümün ön sürüm
+bayrağı korunur. Yeni sürümde bayrağı bilinçli seçin; 0.0.1 deneyseldir. İş akışı,
+otomasyonu ve etiketlenmiş uygulama kaynağını ayrı checkout eder; tüm sürüm
+kayıtlarını denetler ve her iki commit'i kaydeder.
 
-### 4. Masaüstü paketlerini ayrıca derleyip doğrulayın
+| Derleme hedefi | Runner                           | Paketler           |
+| -------------- | -------------------------------- | ------------------ |
+| macOS ARM64    | macos-14                         | DMG                |
+| macOS x64      | macos-14, Rust çapraz hedefi     | DMG                |
+| Linux x64      | ubuntu-22.04                     | AppImage, DEB, RPM |
+| Linux ARM64    | ubuntu-22.04-arm                 | AppImage, DEB, RPM |
+| Windows x64    | windows-2022                     | NSIS EXE, MSI      |
+| Windows ARM64  | windows-2022, ARM64 C++ araçları | NSIS EXE           |
 
-`pnpm tauri:build`, Tauri ön koşulları kurulu makinede yerel hedefi derler.
-`pnpm tauri:build:local` yerel app-bundle komutudur. Dağıtılan her paket için işletim
-sistemi/mimari, commit, derleme komutu ve temel çalışma testi sonucunu kaydedin.
-Tarayıcı CI sonucundan veya tek makine derlemesinden tüm platformların doğrulandığı
-sonucunu çıkarmayın.
+Sabit pnpm/Cargo kilit dosyaları kullanılır. Derlemeler uygulama durumunu ve
+kubeconfig'i runner'ın geçici dizininde yalıtır; kümelere bağlanmaz. Yayın ayarı
+güncelleyici çıktılarını kapatır, macOS alt sınırını 11 yapar ve NSIS kurulumunda
+İngilizce/Türkçe sunar. Dosya adları mimariyi belirtir; örneğin
+`Kubepit_0.0.1_linux_arm64.AppImage`.
 
-Depodaki macOS ayarı ad-hoc imzalama kullanır (`signingIdentity: "-"`); bu Developer
-ID imzası veya noter onayı değildir. Windows kod imzası ve macOS noter onayı kendi
-yayın kurulumlarını gerektirir. Güncelleme imzası bunların yerine geçmez. Kurulum
-yöntemi olarak kullanıcılardan platform güvenliğini kapatmalarını istemeyin.
+Yayımdan önce tüm hedefler başarılı olmalıdır. Denetimler; paket yapısını,
+incelenebilen mimariyi, yerel paket üst verisini, macOS uygulama sürümü ve imzasını,
+yapılandırılmış Windows imzasını ve SHA-256 sağlama toplamlarını kapsar. Bunlar
+paketleme kontrolleridir; **tüm hedef makinelerde etkileşimli çalışma testi
+değildir**. Bir platformun çalışma davranışını doğrulanmış saymadan önce hedef
+donanımda uygulama açılışını, örnek kubeconfig içe aktarımını ve temel iş akışlarını
+test edin.
+
+Yayıncı **11 kurulum paketini**, `SHA256SUMS`, `kubepit.rb` ve
+`release-manifest.json` dosyalarını birleştirir. Kaynak etiketini tekrar kontrol
+eder, yüklenen baytları doğrular ve eksiksizlik işareti olarak bildirimi en son
+yükler. Yayımlanmış baytlar değiştirilmez. Yayın kesilirse aynı derleme çıktılarıyla
+başarısız publish işini yeniden çalıştırın; tüm paketleri yeniden derlemek farklı
+baytlar üretebilir ve çakışma denetimi haklı olarak reddeder. Dağıtılmış ikili
+dosyaların değişmesi yeni sürüm gerektirir. Sorunu araştırırken birleşik yayın
+çıktısını saklayın.
+
+### 4. İmzalama, Homebrew ve otomatik site bağlantıları
+
+İmzalama sırları yoksa macOS ad-hoc imzalıdır; Windows/Linux paketleri imzasızdır.
+Bu, Apple Developer ID, noter onayı veya Windows yayıncı güveni sağlamaz. İşletim
+sistemi ilk paketlerin kurulumunu engelleyebilir; cask karantinayı kaldırmaz ve bu
+kontrolleri atlatmaz.
+
+Korumalı üretim yayınları için depo Actions sırlarını yapılandırın:
+
+| Platform             | Gereken sırlar                                                                           |
+| -------------------- | ---------------------------------------------------------------------------------------- |
+| macOS Developer ID   | `APPLE_CERTIFICATE` (base64 P12), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` |
+| macOS noter onayı    | Yukarıdakilere ek olarak `APPLE_ID`, `APPLE_PASSWORD` (uygulamaya özel), `APPLE_TEAM_ID` |
+| Windows Authenticode | `WINDOWS_CERTIFICATE` (base64 PFX), `WINDOWS_CERTIFICATE_PASSWORD`                       |
+
+Eksik imzalama ayarı derlemeyi durdurur. Geçici imzalama malzemesi iş bitince
+kaldırılır. Özel anahtarlar Git'e veya loglara konmaz. Platform ve güncelleyici
+imzalama birbirinden ayrıdır.
+
+Herkese açık [Homebrew tap](https://github.com/erdembas/homebrew-tap), kendi
+doğrulama iş akışını ve güncelleme yardımcısını barındırır. Elle tetiklendiğinde
+herkese açık sürüm bilgilerini, sağlama toplamlarını ve üretilmiş cask'ı doğrular;
+incelenebilir bir çıktı üretir. Bakımcılar yalnızca `Casks/kubepit.rb` dosyasını
+yayımlar. Apple Silicon ve Intel desteklenir. Tap, sürüm keşfi için kendi salt
+okunur `GITHUB_TOKEN` değerini kullanır; Kubepit deposunda başka depoya erişen PAT
+gerekmez. Zamanlanmış otomatik commit etkin değildir.
+
+Eksiksiz kararlı sürüm yoksa ilk ön sürüm kapsama dâhildir. Kararlı sürümler
+bulunduğunda yardımcı en yeni eksiksiz kararlı sürümü seçer. RunHQ cask bakımı
+bağımsızdır.
+
+```bash
+brew install --cask erdembas/tap/kubepit
+brew update
+brew upgrade --cask kubepit
+```
+
+Pages, dışa aktarımdan önce `pnpm sync:releases` çalıştırır. Herkese açık sürüm
+dosyalarını GitHub API üzerinden alır, bildirimi gerçek yüklenen dosyalar ve
+`SHA256SUMS` ile eşler, doğrulanmış kayıtlı veriyi siteye ekler. Paket bulunmasını
+zorunlu kılan kontrol için `pnpm sync:releases -- --required` kullanın. Yayın iş
+akışı yayın tamamlanınca Pages'i açıkça tetikler; zamanlanmış Pages derlemeleri tap
+güncellemelerini de alır. GitHub'ın varsayılan token'ıyla oluşturulan release olayı
+tek başına diğer iş akışlarını tetiklemez.
+
+Tarayıcı herkese açık API'den yenileyebilir; CORS/hız sınırları indirme bağlantıları
+için zorunlu değildir: siteye gömülü doğrulanmış veri yedek kaynaktır. Taslaklar,
+eksik dosyalar, uyuşmayan sağlama toplamları ve yalnızca kaynak içeren sürümler
+indirme düğmesi üretmez. Kararlı/ön sürüm kanalları ayrıdır. Homebrew yalnızca gerçek
+tap dosyası, üretilen cask'ın sağlama toplamıyla eşleşirse gösterilir. Bağlantılar
+sürümlü adresleri kullanır; `/latest` için dosya adı tahmin edilmez.
 
 ### 5. İmzalı otomatik güncelleme: ayrı bir iş, 0.0.1'de açık değil
 
@@ -245,7 +387,7 @@ kontrol edebilir; indirme/kurulum kullanıcı eylemi gerektirir.
 Gelecek güncelleme akışı
 `https://github.com/erdembas/kubepit/releases/latest/download/latest.json` olarak
 ayarlıdır. GitHub `latest` yolu taslakları ve ön sürümleri dışarıda bırakır. İlk
-kaynak ön sürümünün bunu etkinleştirmesini beklemeyin. Özel anahtarın kaybı kurulu
+ön sürümün bunu etkinleştirmesini beklemeyin. Özel anahtarın kaybı kurulu
 istemcilerin güncelleme devamlılığını bozar; anahtar değişikliği bilinçli bir geçiş
 veya elle kurulum planı gerektirir. Linux'ta kendini güncelleme AppImage yoludur;
 paket yöneticisi biçimleri kendi yükseltme yolunu gerektirir.

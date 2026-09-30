@@ -29,11 +29,49 @@ barındırılan yapay zekâ sağlayıcıları gibi isteğe bağlı hizmetlerin k
 ve ücretleri olabilir.
 
 Bu, ilk herkese açık sürüm olan **0.0.1**. Eksikler ve değişebilen API'ler bekleyin.
-Önce demoyla veya geliştirme kümesiyle başlayın. Bu sürümün başlangıç yolu kaynak
-koddan derlemedir; bu belge imzalı kurulum paketlerinin veya otomatik güncelleme
-akışının yayımlandığı anlamına gelmez.
+Önce demoyla veya geliştirme kümesiyle başlayın.
+[İndirme sayfasından](https://erdembas.github.io/kubepit/tr/#downloads) kurulum
+paketini seçin veya kaynak koddan derleyin. Sayfa yalnızca yayımlanmış paketleri
+gösterir ve imza durumlarını belirtir. İmzalı uygulama içi güncelleme akışı
+0.0.1 sürümünde yapılandırılmamıştır.
 
 ![Örnek Kubernetes kaynaklarıyla Kubepit çalışma alanı](../apps/website/public/workbench.png)
+
+## Masaüstü uygulamasını kurun
+
+[İndirme sayfası](https://erdembas.github.io/kubepit/tr/#downloads), yayımlanmış
+paketleri işletim sistemi, işlemci ve biçime göre sunar. Deneysel **v0.0.1**,
+ön sürüm kanalındadır. Kaynak etiketi sabit kalır; derleme bilgileri ve SHA-256
+sağlama toplamları [GitHub sürümüne](https://github.com/erdembas/kubepit/releases/tag/v0.0.1) eklenir.
+
+| Sistem    | İşlemci               | Paket biçimleri          |
+| --------- | --------------------- | ------------------------ |
+| macOS 11+ | Apple Silicon / Intel | DMG                      |
+| Linux     | ARM64 / x64           | AppImage, DEB, RPM       |
+| Windows   | x64                   | NSIS kurulum paketi, MSI |
+| Windows   | ARM64                 | NSIS kurulum paketi      |
+
+macOS'ta [Kubepit Homebrew cask dosyası](https://github.com/erdembas/homebrew-tap),
+her iki işlemci için doğrulanan sürümleri takip eder:
+
+```bash
+brew install --cask erdembas/tap/kubepit
+# Daha sonra yeni sürüm yayımlandığında:
+brew update
+brew upgrade --cask kubepit
+```
+
+İşlemcinize uygun paketi seçin; tarayıcı mimariyi güvenilir biçimde belirleyemez.
+Linux paketleri WebKitGTK 4.1 dâhil platform kütüphanelerini gerektirir; AppImage
+her dağıtımla uyumluluk sağlamaz. Windows, WebView2 kullanır. İlgili özelliklerin
+istediği `kubectl`, Helm ve sağlayıcı kimlik doğrulama yardımcıları harici araçlardır.
+
+İlk macOS paketlerinde ad-hoc imza vardır; Apple Developer ID imzası ve noter
+onayı yoktur. Windows paketleri imzasızdır. İşletim sisteminiz kurulumu
+engelleyebilir; Homebrew bu kontrolleri atlatmaz. İmza, sağlama toplamı ve doğrulama
+sınırları için [sürüm notlarını](https://github.com/erdembas/kubepit/releases/tag/v0.0.1)
+ve [yayımlama rehberini](RELEASING.md#türkçe) okuyun. Bu sürümde uygulama içi
+otomatik güncelleyici etkin değildir.
 
 ## Bir kümeye bağlanmadan deneyin
 
@@ -225,6 +263,7 @@ pnpm typecheck
 pnpm i18n:check
 pnpm test:ui
 pnpm test:site
+pnpm test:release
 pnpm check:version
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
@@ -237,8 +276,8 @@ bildirimleri, platform doğrulaması, erişilebilirlik, çeviriler ve gerçek Ku
 iş akışlarını iyileştiren düzeltmeler değerlidir.
 [Katkı rehberi](../CONTRIBUTING.md) ve [Mimari](ARCHITECTURE.md) ile başlayın.
 
-0.0.1 kapsamı [Değişiklik günlüğünde](../CHANGELOG.md); GitHub Pages, kaynak kod
-etiketleri ve imzalama ayrımı [Yayımlama](RELEASING.md) belgesindedir. Site için özel
+0.0.1 kapsamı [Değişiklik günlüğünde](../CHANGELOG.md); GitHub Pages, masaüstü
+paketleri, Homebrew ve imzalama [Yayımlama](RELEASING.md) belgesindedir. Site için özel
 alan adı veya barındırılan uygulama sunucusu gerekmez.
 
 ## Lisans
