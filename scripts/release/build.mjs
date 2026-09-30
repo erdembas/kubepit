@@ -148,7 +148,11 @@ try {
       '--target',
       target.target,
       '--bundles',
-      target.formats.map((f) => f.toLowerCase()).join(','),
+      // Tauri removes its intermediate .app after DMG-only builds. Keep it for
+      // executable architecture/version/signature verification before upload.
+      [...(target.platform === 'macos' ? ['app'] : []), ...target.formats]
+        .map((format) => format.toLowerCase())
+        .join(','),
       '--config',
       config,
       '--',
