@@ -12,6 +12,7 @@ import { DiscoverDialog } from '@/components/discover/DiscoverDialog';
 import { CommandPalette } from '@/components/palette/CommandPalette';
 import { ConfirmHost } from '@/components/app/ConfirmHost';
 import { Toasts } from '@/components/app/Toasts';
+import { PublicDemoBanner } from '@/components/app/PublicDemoBanner';
 // Power user: custom actions (confirmations, runs) and keyboard mode.
 import { CustomActionHost } from '@/components/workbench/actions/custom/CustomActionHost';
 import { KeyboardHost } from '@/components/workbench/keyboard/KeyboardHost';
@@ -24,6 +25,7 @@ export function AppShell() {
   useStartupUpdateCheck();
   return (
     <div className="bg-surface text-fg relative flex h-screen flex-col overflow-hidden">
+      {import.meta.env.VITE_PUBLIC_DEMO === 'true' && <PublicDemoBanner />}
       <WorkspaceChrome />
       <AppOverlays />
       <GlobalTooltip />

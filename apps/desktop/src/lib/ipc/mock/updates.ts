@@ -1,4 +1,5 @@
 import type { UpdateInfo, UpdateProgress, UpdaterStatus } from '@/types';
+import { APP_VERSION } from '@/lib/version';
 import { sleep } from './bus';
 import { register, type MockArgs } from './registry';
 
@@ -8,7 +9,7 @@ import { register, type MockArgs } from './registry';
  * reviewed end to end in `pnpm dev:ui`.
  */
 
-const CURRENT = '0.1.0';
+const CURRENT = APP_VERSION;
 const TOTAL_BYTES = 18_874_368;
 
 const AVAILABLE: UpdateInfo = {

@@ -13,6 +13,7 @@ import type {
   WorkspaceSnapshot,
 } from '@/types';
 import * as i18n from '@/i18n/core';
+import { APP_VERSION } from '@/lib/version';
 import { importedKubeconfigSource, parseKubeconfigText } from './kubeconfig';
 import { DEFAULT_AI_SETTINGS } from '@/lib/ai/defaults';
 import { DEFAULT_ALERT_SETTINGS } from '@/lib/alerts/policy';
@@ -417,7 +418,7 @@ function emitClusters() {
 
 register({
   app_info: (): AppInfo => ({
-    version: '0.1.0',
+    version: APP_VERSION,
     platform: /Mac/.test(navigator.userAgent) ? 'macos' : 'linux',
     data_dir: '~/.kubepit',
     kubectl: { path: '/usr/local/bin/kubectl', version: 'v1.32.2' },

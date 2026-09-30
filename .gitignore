@@ -34,6 +34,8 @@ yarn-debug.log*
 yarn-error.log*
 
 # Build outputs
+apps/website/.next/
+apps/website/out/
 **/src-tauri/gen/
 **/src-tauri/target/
 
@@ -46,3 +48,7 @@ perf-results/
 # Other lockfiles (we use pnpm)
 yarn.lock
 package-lock.json
+
+# Next.js static site
+.next/
+out/

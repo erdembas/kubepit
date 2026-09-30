@@ -1,9 +1,8 @@
 # Performance regression guard (large-cluster performance plan, Task 11;
 # docs/ARCHITECTURE.md, "Performance").
 #
-# Standalone for now: the CI plan's `.github/workflows/ci.yml` does not exist
-# yet. When it lands, this job moves into ci.yml as its `perf-guard` job and
-# this file is deleted.
+# Timing calibration remains separate from the required correctness checks
+# in ci.yml until the first GitHub runner baselines have been reviewed.
 #
 # The structural probe (tests/perf_probe.rs: watch streams per path, unpaged
 # lists), Criterion in quick mode (rust, e2e and the structural count) and

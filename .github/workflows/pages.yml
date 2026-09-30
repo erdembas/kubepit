@@ -1,0 +1,66 @@
+name: GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build website and browser demo
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Set up pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.14.4 --activate
+      - run: pnpm install --frozen-lockfile
+      # Repository Settings → Pages → Source must be set to GitHub Actions.
+      - name: Read Pages configuration
+        id: pages
+        uses: actions/configure-pages@v5
+      - run: pnpm check:version
+      - run: pnpm typecheck
+      - run: pnpm i18n:check
+      - run: pnpm test:site
+      - name: Export the site and the in-memory demo
+        env:
+          NEXT_PUBLIC_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          NEXT_PUBLIC_SITE_ORIGIN: ${{ steps.pages.outputs.origin }}
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: pnpm build:pages
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: apps/website/out
+
+  deploy:
+    name: Publish GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy the static artifact
+        id: deployment
+        uses: actions/deploy-pages@v4

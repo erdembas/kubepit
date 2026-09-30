@@ -1,15 +1,27 @@
 # Plan roadmap
 
-## Commercial program — current direction (2026-09-29)
+> **Superseded — 2026-09-30.** Kubepit is launching v0.0.1 as a free, open-source
+> community project under the [MIT license](../../../LICENSE). The commercial,
+> subscription, private-edition and license-transition plans below are historical
+> records, not the current roadmap or instructions to execute. See the
+> [project README](../../../README.md) for the current direction.
+>
+> **Geçerliliğini yitirdi — 2026-09-30.** Kubepit, v0.0.1 sürümünü
+> [MIT lisanslı](../../../LICENSE), ücretsiz ve açık kaynaklı bir topluluk projesi
+> olarak yayımlıyor. Aşağıdaki ticari ürün, abonelik, özel sürüm ve lisans geçişi
+> planları tarihsel kayıtlardır; güncel yol haritası veya uygulama talimatı değildir.
+> Güncel yön için [proje README'sine](../../../README.md) bakın.
 
-Start with [Open-core commercial program](2026-09-29-commercial-program.md) for the
-paid cloud-import and team-profile work. It coordinates the
+## Commercial program — historical proposal (2026-09-29)
+
+The [Open-core commercial program](2026-09-29-commercial-program.md) recorded the
+proposed paid cloud-import and team-profile work. It coordinated the
 [cloud implementation](2026-09-29-commercial-cloud.md),
 [desktop implementation](2026-09-29-commercial-desktop.md),
 [product strategy](../specs/2026-09-29-open-core-commercial-strategy.md) and
 [licensing/repository decision](../specs/2026-09-29-commercial-licensing-and-repository.md).
 
-The proposed product is an independently buildable open-source Community app plus
+The proposed product was an independently buildable open-source Community app plus
 private paid desktop features and a small Node/PostgreSQL service for organizations,
 teams, Paddle subscriptions and profiles. Pricing is $3/seat/month or $30/seat/year.
 The founder says the current MIT-labeled code has not been published; the new

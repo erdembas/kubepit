@@ -2335,8 +2335,12 @@ in-memory demo backend.
   an Apple M-series machine and a runner's speed is unknown. Every timing
   it checks has at least 2.3× headroom there (the least is
   `prometheus/parse_200x240`), so at `ci_slack` 2.5 a runner up to ≈ 5.8×
-  slower passes. It moves into
-  `ci.yml` as its `perf-guard` job when the CI plan lands.
+  slower passes. Performance calibration remains in this separate workflow.
+  `.github/workflows/ci.yml` runs version consistency, TypeScript, EN/TR catalog,
+  UI, website and performance-script checks, then builds the static Next.js site
+  with the Vite browser demo for GitHub Pages. Its Rust job runs formatting,
+  Clippy and workspace fixture tests with a temporary `KUBEPIT_HOME` and an empty
+  kubeconfig; it never connects to a real cluster.
   `.github/workflows/perf-nightly.yml` (03:00 UTC and manual) builds the UI,
   installs Chromium, runs `perf:ui` at `l` with churn 50 and the 30-minute
   soak, `ttfr,map,health` at `s` and `m`, and

@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NEXT_TELEMETRY_DISABLED: '1'
+  CARGO_TERM_COLOR: always
+
+jobs:
+  frontend:
+    name: Frontend, translations and Pages export
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Set up pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.14.4 --activate
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check:version
+      - run: pnpm typecheck
+      - run: pnpm i18n:check
+      - run: pnpm test:ui
+      - run: pnpm test:site
+      - run: pnpm perf:test
+      - run: pnpm build:pages
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pages-preview
+          path: apps/website/out
+          retention-days: 7
+
+  rust:
+    name: Rust formatting, lint and fixture tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      KUBEPIT_HOME: ${{ runner.temp }}/kubepit-ci
+      KUBECONFIG: ${{ runner.temp }}/kubepit-ci/kubeconfig
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Tauri Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential pkg-config curl wget file libxdo-dev libssl-dev libdbus-1-dev libayatana-appindicator3-dev librsvg2-dev
+      - name: Set up stable Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy --no-self-update
+          rustup default stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: cargo-ci-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-ci-${{ runner.os }}-
+      - name: Isolate local state and kubeconfig
+        run: |
+          mkdir -p "$KUBEPIT_HOME"
+          printf 'apiVersion: v1\nkind: Config\nclusters: []\ncontexts: []\nusers: []\n' > "$KUBECONFIG"
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked

@@ -1,5 +1,18 @@
 # Kubepit Commercial — RunHQ import paketi
 
+> **Arşivlendi — 2026-09-30.** Ticari ürün planından vazgeçildi. Kubepit v0.0.1,
+> [MIT lisanslı](../../../LICENSE), ücretsiz ve açık kaynaklı bir topluluk
+> sürümüdür. Bu paket yalnızca tarihsel kayıt olarak korunuyor; içindeki ticari
+> ürün, abonelik, özel depo ve lisans geçişi iş akışını güncel çalışma olarak
+> başlatmayın. Güncel yön: [proje README'si](../../../README.md).
+>
+> **Archived — 2026-09-30.** The commercial product plan was abandoned. Kubepit
+> v0.0.1 is a free, open-source community release under the
+> [MIT license](../../../LICENSE). This package is retained only as a historical
+> record; its commercial, subscription, private-repository and license-transition
+> workflow is not current work and should not be started. See the
+> [project README](../../../README.md) for the current direction.
+
 **İçe aktarılacak dosya: `kubepit-commercial.zip`.** ZIP; manifest, 62 ajan promptu, 20 bölüm brief'i, gerçek komutları çalıştıran doğrulama gate'i ve yedi planın sabit kopyasını içerir. İçe aktarma kod çalıştırmaz; Workflows editöründe taslak açar.
 
 54 uygulama görevi (26 cloud + 28 desktop) ve L1–L7 lisans/depo işleri mantıklı sırada 20 bölüme ayrılmıştır. Bölüm tablosu [PHASES.md](PHASES.md), tam görev/komut eşlemesi [phase-map.json](phase-map.json), uygulayıcı sözleşmesi [EXECUTION.md](EXECUTION.md) içindedir.

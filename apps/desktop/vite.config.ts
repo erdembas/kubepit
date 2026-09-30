@@ -6,6 +6,9 @@ import path from 'node:path';
 const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig(() => ({
+  // The published browser demo lives beside the website on GitHub Pages.
+  // Desktop and local UI development keep Vite's normal root base.
+  base: process.env.VITE_BASE_PATH || '/',
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {

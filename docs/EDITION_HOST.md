@@ -1,5 +1,17 @@
 # Kubepit edition host and free-feature baseline
 
+> **Historical document — superseded 2026-09-30.** The commercial product and
+> license-transition proposal was abandoned. Kubepit v0.0.1 is a free, open-source
+> community release under the [MIT license](../LICENSE). Edition hooks, private
+> features, pricing and alternate licenses described below are archived proposals,
+> not the current product direction. The original baseline is preserved for context.
+>
+> **Tarihsel belge — 2026-09-30 itibarıyla geçersiz.** Ticari ürün ve lisans geçişi
+> önerisinden vazgeçildi. Kubepit v0.0.1, [MIT lisanslı](../LICENSE), ücretsiz ve
+> açık kaynaklı bir topluluk sürümüdür. Aşağıdaki sürüm ayrımı, özel özellikler,
+> fiyatlandırma ve alternatif lisanslar güncel ürün yönü değil, arşivlenmiş
+> önerilerdir. İlk durum kaydı bağlam sağlamak için korunmuştur.
+
 Date: 2026-09-30 - Phase: P01 - Status: recorded baseline, NOT a license change or
 publication action.
 
