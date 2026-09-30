@@ -18,6 +18,7 @@ Included in the initial codebase:
 - Local accountability: change timeline, SQLite audit history, optional persisted events/changes, exports and reviewed reverts where supported.
 - Optional assistant with provider/agent choice, per-cluster opt-in, redacted context preview, read-only tools and review of generated YAML.
 - English and Turkish UI, optional vim/k9s-style keyboard mode and custom actions with supported k9s plugin import.
+- Cancellable Linux PTY input and output: closing a terminal releases a blocked large paste even when the child stops reading.
 - English/Turkish Next.js static product website, the fixture-backed interactive browser demo, GitHub Pages deployment, contribution/security/release guides and version consistency checks.
 
 Known launch boundaries:
@@ -43,6 +44,7 @@ koddan kullanım yolunu sunar. Bu sürüm deneyseldir; etiket veya kaynak yayın
 - Yerel izlenebilirlik: değişiklik zaman çizelgesi, SQLite işlem geçmişi, isteğe bağlı kalıcı olay/değişiklikler, dışa aktarma, desteklenen işlemlerde incelenerek geri alma.
 - Sağlayıcı/ajan seçimi, küme bazlı izin, maskelenmiş bağlam önizlemesi, salt okunur araçlar ve üretilen YAML'ı inceleme içeren isteğe bağlı asistan.
 - İngilizce ve Türkçe arayüz, isteğe bağlı vim/k9s tarzı klavye modu, desteklenen k9s eklentilerinin içe aktarımıyla özel eylemler.
+- İptal edilebilir Linux PTY giriş/çıkışı: alt süreç okumayı durdursa bile terminali kapatmak, büyük bir yapıştırma işleminde bekleyen yazmayı sonlandırır.
 - İngilizce/Türkçe Next.js statik ürün sitesi, örnek verili etkileşimli tarayıcı demosu, GitHub Pages dağıtımı, katkı/güvenlik/yayımlama rehberleri, sürüm tutarlılığı denetimleri.
 
 İlk yayının bilinen sınırları:

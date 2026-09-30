@@ -17,6 +17,7 @@
 pub mod commands;
 mod manager;
 mod pipeline;
+mod pty_io;
 mod shell;
 mod types;
 

@@ -171,16 +171,8 @@ impl TerminalManager {
         // EOF from arriving) after the child exits.
         drop(pair.slave);
 
-        let io = pair
-            .master
-            .try_clone_reader()
-            .context("clone reader")
-            .and_then(|r| {
-                pair.master
-                    .take_writer()
-                    .context("take writer")
-                    .map(|w| (r, w))
-            });
+        let flow = Arc::new(OutputFlow::new(stream_id.to_owned()));
+        let io = super::pty_io::open(pair.master.as_ref(), flow.clone());
         let (reader, writer) = match io {
             Ok(io) => io,
             Err(e) => {
@@ -189,7 +181,6 @@ impl TerminalManager {
             }
         };
 
-        let flow = Arc::new(OutputFlow::new(stream_id.to_owned()));
         let term = Arc::new(TermInstance {
             writer: Mutex::new(writer),
             master: Mutex::new(pair.master),
@@ -548,8 +539,9 @@ mod tests {
         let mut ready = [0; 5];
         reader.read_exact(&mut ready).unwrap();
         assert_eq!(&ready, b"ready");
-        let writer = pair.master.take_writer().unwrap();
         let flow = Arc::new(OutputFlow::default());
+        let (_reader, writer) =
+            super::super::pty_io::open(pair.master.as_ref(), flow.clone()).unwrap();
         let stream_id = flow.id.clone();
         let killer = child.clone_killer();
         std::thread::spawn(move || {

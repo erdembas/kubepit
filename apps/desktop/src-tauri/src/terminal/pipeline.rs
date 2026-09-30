@@ -66,6 +66,11 @@ impl OutputFlow {
         self.state.lock().closed = true;
         self.ready.notify_all();
     }
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn is_closed(&self) -> bool {
+        self.state.lock().closed
+    }
 }
 
 /// Start the reader and sender threads. The returned receiver disconnects
