@@ -21,38 +21,51 @@ change product code, dependencies, or license declarations.
 | third-party | `tokio` | 1 | crates.io | MIT |
 | third-party | `serde` / `serde_json` | 1 | crates.io | MIT OR Apache-2.0 |
 | third-party | `rusqlite` | 0.32 (bundled) | crates.io | MIT |
-| third-party | `rustls` / `tokio-rustls` | 0.23 / 0.26 | crates.io | Apache-2.0 OR ISC OR MIT |
+| third-party | `rustls` | 0.23 | crates.io | Apache-2.0 OR ISC OR MIT |
+| third-party | `tokio-rustls` | 0.26 | crates.io | MIT OR Apache-2.0 |
 | third-party | `hyper` | 1 | crates.io | MIT |
 | third-party | `reqwest` | 0.13 | crates.io | MIT |
 | third-party | `tauri` + plugins | 2 | crates.io | MIT OR Apache-2.0 |
 | third-party | `portable-pty` | 0.8 | crates.io | MIT |
 | third-party | `keyring` | 4 | crates.io | MIT OR Apache-2.0 |
-| third-party | `notify` | 8 | crates.io | MIT OR Apache-2.0 |
+| third-party | `notify` | 8 | crates.io | CC0-1.0 |
 | third-party | `chrono` | 0.4 | crates.io | MIT OR Apache-2.0 |
 | third-party | `regex` | 1 | crates.io | MIT OR Apache-2.0 |
-| third-party | `flate2` | 1 | crates.io | MIT OR Apache-2.0 OR Zlib |
+| third-party | `flate2` | 1 | crates.io | MIT OR Apache-2.0 |
 
-Full transitive set is in `Cargo.lock` (396 commits, single contributor). No
-private Git URL, private crate, or `LicenseRef` appears in the public workspace.
+Full transitive set is in `Cargo.lock`. The base revision `932011f` has 395
+commits, all by a single contributor. No private Git URL, private crate, or
+`LicenseRef` appears in the public workspace.
 
-### Rust workspace — weak copyleft and other license categories
+### Rust workspace — non-permissive and combined license categories
 
 The table above lists only permissive licenses. The full `Cargo.lock` transitive
 set also includes these license categories, classified from lockfile metadata:
 
 | Category | Crates (selected) | License | Runtime or build-time |
 | --- | --- | --- | --- |
-| Weak copyleft (file-level) | `cssparser`, `selectors`, `dtoa-short`, `lightningcss` (npm) | MPL-2.0 | Runtime (`cssparser`/`selectors` via `markup5ever`/`scraper`-like chain); `lightningcss` via Vite build |
+| Public domain | `notify` | CC0-1.0 | Runtime (file watcher for kubeconfig watch) |
+| Weak copyleft (file-level) | `cssparser`, `selectors`, `dtoa-short`, `lightningcss` (npm) | MPL-2.0 | Runtime (`cssparser`/`selectors` via `dom_query` ← `tauri-utils`/`wry` chain); `lightningcss` via Vite build |
 | Weak copyleft (file-level) | `option-ext` (via `dirs` → `dirs-sys`) | MPL-2.0 | Runtime (`dirs` used for `KUBEPIT_HOME` path resolution) |
+| Source-available | `clipboard-win`, `error-code` (via `tauri-plugin-clipboard-manager` → `arboard`) | BSL-1.0 | Runtime (Windows clipboard) |
 | Data license | `caniuse-lite` (npm) | CC-BY-4.0 | Build-time (browserslist/Vite) |
 | Data license | `webpki-root-certs` | CDLA-Permissive-2.0 | Runtime (TLS trust store) |
-| Data license | `icu_collections`, `icu_*` | Unicode-3.0 | Runtime (i18n data via `icu_*`) |
+| Data license | `icu_collections`, `icu_*` | Unicode-3.0 | Runtime (via `url` → `idna` → `idna_adapter` → `icu_normalizer`/`icu_properties`) |
+| Combined (AND) | `ring` | Apache-2.0 AND ISC | Runtime (TLS) |
+| Combined (AND) | `brotli` | BSD-3-Clause AND MIT | Runtime (decompression) |
+| Combined (AND) | `encoding_rs` | (Apache-2.0 OR MIT) AND BSD-3-Clause | Runtime (encoding) |
+| Combined (AND) | `unicode-ident` | (MIT OR Apache-2.0) AND Unicode-3.0 | Build-time (proc-macro) |
 
+CC0-1.0 is a public domain dedication that does not grant patent rights (§4(a)).
 MPL-2.0 requires modified MPL-licensed files to be redistributed under MPL; it
-does not infect the whole binary. CC-BY-4.0 and CDLA-Permissive-2.0 are data
-licenses with attribution requirements. Unicode-3.0 is a permissive data license.
-Legal interpretation of distribution obligations for each category is an external
-gate (G03); the technical classification above is from lockfile metadata only.
+does not infect the whole binary. BSL-1.0 is source-available, not OSS; its
+grant terms must be reviewed for commercial distribution. CC-BY-4.0 and
+CDLA-Permissive-2.0 are data licenses with attribution requirements.
+Unicode-3.0 is a permissive data license. Combined (AND) licenses require
+compliance with all conjuncts. The technical classification above is from
+lockfile metadata only; legal interpretation of distribution obligations is
+an external gate (G03, legal interpretation only). Package-by-package
+technical classification for NOTICE/SBOM is a local L5/P18 task.
 
 ### Node workspace (pnpm-workspace.yaml, package.json)
 
@@ -115,7 +128,7 @@ src-tauri/src/lib.rs::run()
       .plugin(dialog, opener, process, clipboard, notification)
       .manage(updater)
       .setup(setup_app)
-      .invoke_handler(generate_handler![ 161 commands ])
+      .invoke_handler(generate_handler![ 167 commands (161 ipc::, 5 terminal::commands::, 1 windows::) ])
 
 setup.rs::setup_app()
   -> shell_env::import_login_shell_path()  (kubectl/helm/plugin PATH)
@@ -132,9 +145,11 @@ setup.rs::setup_app()
   -> app.manage(AppState { ... })
 ```
 
-**Assets:** `docs/icon.png`, Tauri bundle icon set, Monaco editor workers
-(generated at build), codicon TTF (Monaco). Third-party agent provider brand
-logos (`apps/desktop/src/assets/agents/{claude,codex,cursor,opencode}.svg`) are
+**Assets:** `docs/icon.png`, `apps/desktop/public/kubepit.svg` (favicon),
+`assets/icon-source.png` and `assets/icon-source.svg` (icon sources), Tauri
+bundle icon set, Monaco editor workers (generated at build), codicon TTF
+(Monaco). Third-party agent provider brand logos
+(`apps/desktop/src/assets/agents/{claude,codex,cursor,opencode}.svg`) are
 bundled in the binary; their trademark and copyright belong to the respective
 providers — provenance and attribution status pending (G02). JetBrains Mono
 font is loaded at runtime from Google Fonts (`index.html`: OFL-1.1 license,
@@ -162,12 +177,12 @@ configuration contributions and terminal renderers.
 | Extension slot | Current public component / store / hook | Proposed private consumer | Boundary |
 | --- | --- | --- | --- |
 | Settings pages | `SettingsView.tsx`, `SettingsCategory` union (`store/types.ts:41-52`: general, kubeconfig, terminal, notifications, history, assistant, custom-actions, keyboard, tools, about) | Commercial settings categories (billing, team, cloud) via edition host registry | Additive category IDs; no public category removed |
-| Add cluster tabs | `ClusterEditor.tsx`, `KubeconfigFields.tsx`, `PrometheusFields.tsx`, `CostFields.tsx`, `LokiFields.tsx` | Cloud provider discovery tab | Additive tab; manual import stays free |
-| Account/status slots | `MainTab` union (`store/types.ts:15-24`: dashboard, cluster, settings, ai-guide, port-forwards, search, activity) | Account/profile tab via edition host | Additive `MainTab` variant; no free tab removed |
+| Add cluster tabs | `ClusterEditor.tsx`, `KubeconfigFields.tsx`, `PrometheusFields.tsx`, `CostFields.tsx`, `LokiFields.tsx`, `components/discover/DiscoverDialog.tsx` | Cloud provider discovery tab | Additive tab; manual import stays free |
+| Account/status slots | `StatusBar.tsx`, `MainTab` union (`store/types.ts:15-24`: dashboard, cluster, settings, ai-guide, port-forwards, search, activity) | Account/profile status slot via edition host | Additive `MainTab` variant and status bar section; no free slot removed |
 | Palette entries | `CommandPalette.tsx` (`components/palette/`), `paletteItems.tsx` | Cloud/team commands in palette | Additive palette items; existing commands unchanged |
 | Cluster metadata badges | `ClusterDef` tags/environment/color in `types/index.ts` | `cloud_import` origin badge | Additive optional fields; `ClusterDef.read_only` preserved |
 | Read-only config contributions | `setup.rs` opt-in switches, `App.tsx` hooks | Commercial feature flags via host config | Runtime config; no public flag behind paywall |
-| Terminal renderers | `terminal.rs`, `TerminalManager`, `terminal/mod.rs` (PTY pipeline) | Cloud CLI fake executables as private terminal specs | Public PTY pipeline reused; private fake CLIs are test fixtures |
+| Terminal renderers | `TerminalView.tsx` (`components/workbench/dock/terminal/`), `xtermTheme.ts`, `terminal.rs`, `TerminalManager`, `terminal/mod.rs` (PTY pipeline) | Cloud CLI fake executables as private terminal specs | Public xterm frontend + PTY pipeline reused; private fake CLIs are test fixtures |
 | IPC command registry | `lib/ipc.ts` (162 commands), `ipc/` (161 Rust commands) | Private commands via `plugin:kubepit-commercial\|<cmd>` | Separate plugin handler; core handler stays installed once |
 | Store union | 16 Zustand stores (`useAppStore`, `useDockStore`, `useWorkbenchStore`, `useAssistantStore`, `useHealthStore`, `useRecommendationsStore`, `useConnectivityStore`, `useAlertStore`, `useAccessStore`, `useBookmarksStore`, `useCustomActionsStore`, `useExplainStore`, `useFleetSearchStore`, `useSavedViewsStore`, `useUpdaterStore`, `useUpgradeStore`) | `useEntitlementStore`, `useOrgStore`, `useTeamProfileStore` (private) | Private stores import public hooks; no public store depends on private code |
 | Rust host hooks | `lib.rs::run()` (configure/run API), `setup_app()` (post-core-setup), window-destroy, shutdown | Commercial init hook receives `Arc<Kubepit>` + approved host services | Core `AppState` init precedes commercial hook; shutdown cancels premium jobs first |
@@ -320,8 +335,9 @@ the public repo).
   build without explicit permission.
 
 **Rights inventory summary (L1):**
-- **First-party code:** 396 commits, all authored and committed by
-  `erdembas <erdem.bas@mersel.io>` (corporate domain `mersel.io`).
+- **First-party code:** 395 commits @ `932011f` (base revision), all authored
+  and committed by `erdembas <erdem.bas@mersel.io>` (corporate domain
+  `mersel.io`). P01 adds 2 commits by the same identity.
   `Cargo.toml` authors field: `erdembas@users.noreply.github.com`. `LICENSE`:
   "Erdem Baş". No outside contributions recorded. The corporate email domain
   creates an employer/IP scope question: verification that the contributor has
@@ -337,21 +353,30 @@ the public repo).
   RunHQ may have been previously distributed under MIT; if so, attribution and
   license-transition obligations apply. Provenance and license compatibility
   verification is an external gate (G01, file-level).
-- **Third-party dependencies:** Permissive (MIT, Apache-2.0, ISC, BSD, Zlib),
-  weak copyleft (MPL-2.0), data licenses (CDLA-Permissive-2.0, Unicode-3.0,
-  CC-BY-4.0) and font license (OFL-1.1 via Google Fonts). Full list in
+- **Third-party dependencies:** Permissive (MIT, Apache-2.0, ISC, BSD),
+  public domain (CC0-1.0), weak copyleft (MPL-2.0), source-available (BSL-1.0),
+  data licenses (CDLA-Permissive-2.0, Unicode-3.0, CC-BY-4.0), combined AND
+  licenses, and font license (OFL-1.1 via Google Fonts). Full list in
   `Cargo.lock` and `pnpm-lock.yaml`. No AGPL/GPL dependencies identified in the
-  current workspace. Legal classification of each category is G03.
-- **Assets:** `docs/icon.png` and Tauri bundle icons — provenance pending (G02).
-  Third-party agent provider brand logos
+  current workspace. Legal interpretation of each category is G03.
+- **Assets:** `docs/icon.png`, `apps/desktop/public/kubepit.svg`,
+  `assets/icon-source.png`, `assets/icon-source.svg` and Tauri bundle icons —
+  provenance pending (G02). Third-party agent provider brand logos
   (`assets/agents/{claude,codex,cursor,opencode}.svg`) — trademark/copyright
   belong to respective providers, provenance pending (G02). Monaco codicon TTF
   ships via `monaco-editor` npm (MIT). JetBrains Mono font loaded at runtime from
   Google Fonts (OFL-1.1).
 - **Public git history:** The public repo tracks commercial planning content:
   `docs/superpowers/{plans,specs}/2026-09-29-commercial-*.md` (pricing, Paddle,
-  seat and operations details), `exports/runnerhq/kubepit-commercial.zip`,
-  `exports/runnerhq/kubepit-commercial/**`, `exports/runnerhq/build-commercial-workflow.py`.
+  seat and operations details),
+  `docs/superpowers/{plans,specs}/2026-09-28-team-sharing*.md` and
+  `docs/superpowers/{plans,specs}/2026-09-28-cloud-import-and-local-clusters*.md`
+  (paid team/cloud designs superseded by commercial program),
+  `exports/runnerhq/kubepit-commercial.zip`,
+  `exports/runnerhq/kubepit-commercial/**`,
+  `exports/runnerhq/build-commercial-workflow.py`,
+  `exports/runnerhq/validate-commercial-workflow.py`,
+  `exports/runnerhq/validation-report.json` (122-step, 20-phase workflow).
   These should be moved to the private repo before first public push; they
   remain in git history (G07). `git tag -l` and `git remote -v` are empty (no
   tags, no remotes configured).
