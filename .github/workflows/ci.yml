@@ -80,4 +80,6 @@ jobs:
           printf 'KUBEPIT_HOME=%s\nKUBECONFIG=%s\n' "$RUNNER_TEMP/kubepit-ci" "$RUNNER_TEMP/kubepit-ci/kubeconfig" >> "$GITHUB_ENV"
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo test --workspace --locked
+      # Context-budget tests include wall-clock guards. Run test cases serially
+      # so competing fixture workloads do not consume their time on shared CPUs.
+      - run: cargo test --workspace --locked -- --test-threads=1
