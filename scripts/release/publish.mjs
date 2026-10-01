@@ -35,7 +35,7 @@ if (!release)
       name: `Kubepit ${manifest.tag}`,
       draft: true,
       prerelease: manifest.prerelease,
-      body: `Desktop installers built from ${manifest.commit}.\n\nMasaüstü kurulum paketleri ${manifest.commit} kaynak kodundan derlendi.\n\nSee release-manifest.json for architectures, checksums and signing status. İmza ve platform bilgileri için release-manifest.json dosyasına bakın.`,
+      body: `${manifest.releaseNotes ? `${manifest.releaseNotes}\n\n---\n\n` : ''}Desktop installers built from ${manifest.commit}.\n\nMasaüstü kurulum paketleri ${manifest.commit} kaynak kodundan derlendi.\n\nSee release-manifest.json for architectures, checksums and signing status. İmza ve platform bilgileri için release-manifest.json dosyasına bakın.`,
     },
   });
 assert(release.prerelease === manifest.prerelease, 'Release prerelease flag changed during build');
@@ -43,7 +43,13 @@ assert(!release.immutable, 'An immutable release cannot accept additional assets
 const names = await readdir(directory);
 const expected = [
   ...manifest.assets.map((a) => a.name),
+  ...new Set(
+    (manifest.updater?.artifacts || [])
+      .flatMap((artifact) => [artifact.name, artifact.signature.name])
+      .filter((name) => !manifest.assets.some((asset) => asset.name === name)),
+  ),
   'kubepit.rb',
+  ...(manifest.updater ? ['latest.json'] : []),
   'SHA256SUMS',
   'release-manifest.json',
 ];

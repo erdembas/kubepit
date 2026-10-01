@@ -16,7 +16,7 @@
   <a href="CONTRIBUTING.md">Contribute</a>
 </p>
 
-<p align="center"><strong>v0.0.1 · Experimental · MIT licensed · English & Turkish</strong></p>
+<p align="center"><strong>v0.0.2 · Experimental · MIT licensed · English & Turkish</strong></p>
 
 Kubepit brings live resource tables, logs, terminals, topology, change history,
 Helm, GitOps and fleet operations into one desktop workspace. Follow an incident
@@ -27,21 +27,23 @@ the fix in the same place.
 feature tiers. MIT permits personal and commercial use. Optional services you
 choose, such as hosted AI providers, have their own terms and costs.
 
-This is the first public version, **0.0.1**. Expect rough edges and evolving APIs.
+Kubepit is an early community project. Expect rough edges and evolving APIs.
 Start with the demo or a development cluster. Choose an installer on the
 [download page](https://erdembas.github.io/kubepit/#downloads), or build from source.
 The page lists only published packages and shows their exact signing status.
-The signed in-app update feed is not configured in 0.0.1.
+From **0.0.2**, the app checks for signed updates at startup and every five minutes,
+with release notes and explicit install/restart controls. Version 0.0.1 users must
+install the new package manually once to enable this update path.
 
 ![Kubepit workbench with synthetic Kubernetes resources](apps/website/public/workbench.png)
 
 ## Install the desktop app
 
 The [download page](https://erdembas.github.io/kubepit/#downloads) selects published
-packages by operating system, processor and format. The experimental **v0.0.1**
-release uses the pre-release channel. Its source tag stays fixed; packaging
+packages by operating system, processor and format. Experimental releases use
+the pre-release channel. Each source tag stays fixed; packaging
 provenance and SHA-256 checksums are attached to the
-[GitHub release](https://github.com/erdembas/kubepit/releases/tag/v0.0.1).
+[GitHub release](https://github.com/erdembas/kubepit/releases).
 
 | System    | Processor             | Package formats     |
 | --------- | --------------------- | ------------------- |
@@ -51,7 +53,7 @@ provenance and SHA-256 checksums are attached to the
 | Windows   | ARM64                 | NSIS installer      |
 
 On macOS, the [Kubepit Homebrew cask](https://github.com/erdembas/homebrew-tap)
-tracks verified releases for both processors:
+tracks verified releases for both processors, checking every six hours:
 
 ```bash
 brew install --cask erdembas/tap/kubepit
@@ -66,12 +68,15 @@ AppImage does not make every distribution compatible. Windows uses WebView2.
 `kubectl`, Helm and provider authentication helpers remain external tools where
 needed by the corresponding feature.
 
-The initial macOS packages use ad-hoc signatures, without Apple Developer ID or
-notarization; Windows packages are unsigned. Your operating system may block
-installation. Homebrew does not bypass these checks. See
-[release notes](https://github.com/erdembas/kubepit/releases/tag/v0.0.1) and
+New macOS release builds require Developer ID signing and Apple notarization;
+the original v0.0.1 packages remain ad-hoc signed. Windows publisher signing is
+separate from updater signatures and remains optional. Homebrew does not bypass
+OS installation checks. See
+[release notes](https://github.com/erdembas/kubepit/releases) and
 [release operations](docs/RELEASING.md) for signing, checksums and verification limits.
-There is no enabled in-app automatic updater in this version.
+Linux updates preserve your AppImage, DEB or RPM format; package-manager installs
+may request system administrator permission. Disable automatic checks in
+Settings → About & Updates if preferred.
 
 ## Try it before connecting anything
 
@@ -220,13 +225,14 @@ pnpm dev
 For a local release build:
 
 ```bash
-pnpm tauri:build
+pnpm --filter @kubepit/desktop exec tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
 ```
 
 Tauri targets macOS, Linux and Windows; build prerequisites and runtime behavior
-vary by platform. A platform target is not a promise of a verified installer for
-every architecture in 0.0.1. The committed macOS configuration uses ad-hoc signing,
-and in-app updates stay disabled until a release-signing key is configured.
+vary by platform. The command above creates a local development bundle without
+update artifacts. Release CI supplies updater and Apple signing credentials,
+verifies six platform targets and publishes the complete signed update feed.
+Native packaging checks do not replace interactive testing on every target.
 
 For production access, use a least-privilege kubeconfig. Kubepit's read-only setting
 blocks built-in mutations but cannot sandbox arbitrary commands in a local shell
@@ -267,7 +273,7 @@ reproducible bugs, platform validation, accessibility, translations and fixes fo
 real Kubernetes workflows. Start with [Contributing](CONTRIBUTING.md) and
 [Architecture](docs/ARCHITECTURE.md).
 
-See [Changelog](CHANGELOG.md) for the 0.0.1 scope and
+See [Changelog](CHANGELOG.md) for each version's scope and
 [Releasing](docs/RELEASING.md) for GitHub Pages, desktop packaging, Homebrew and signing.
 The website needs no custom domain or hosted application server.
 

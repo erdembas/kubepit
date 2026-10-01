@@ -4,10 +4,10 @@
 
 ## English
 
-Version **0.0.1** is experimental. GitHub Actions builds desktop packages from an
+Version **0.0.2** is experimental. GitHub Actions builds desktop packages from an
 immutable version tag, publishes their checksums and manifest, and refreshes the
-static GitHub Pages website. The Homebrew tap tracks verified releases. Platform
-signing is optional and reported per package; the in-app updater remains disabled.
+static GitHub Pages website. The Homebrew tap tracks verified releases every six
+hours. New releases require signed updater artifacts and notarized macOS packages.
 
 ### 1. Verify the release candidate
 
@@ -101,7 +101,7 @@ source separately, verifies all version entries, and records both commits.
 
 The frozen pnpm/Cargo lockfiles are used. Builds isolate application state and
 kubeconfig in runner temp storage; they do not connect to clusters. The release
-config disables updater artifacts, sets macOS 11 minimum and offers English and
+config enables signed updater artifacts, sets macOS 11 minimum and offers English and
 Turkish NSIS installer languages. Packages keep architecture-specific names,
 such as `Kubepit_0.0.1_linux_arm64.AppImage`.
 
@@ -112,8 +112,9 @@ checks, **not interactive smoke tests on all target machines**. Test installed a
 startup, kubeconfig import with fixtures and core workflows on target hardware
 before treating a platform as runtime-certified.
 
-The publisher assembles all **11 installers**, `SHA256SUMS`, `kubepit.rb`, and
-`release-manifest.json`. It rechecks the source tag, verifies uploaded bytes and
+The publisher assembles **11 installers**, two macOS update archives, eleven
+signature sidecars, `latest.json`, `SHA256SUMS`, `kubepit.rb`, and
+`release-manifest.json` (28 assets). It rechecks the source tag, verifies uploaded bytes and
 uploads the manifest last as the completeness marker. Already published bytes
 are never replaced. If publication is interrupted, rerun the failed publish job
 using the same build artifacts; a complete rebuild may produce different bytes
@@ -122,10 +123,11 @@ new version. Keep the complete release artifact while investigating failures.
 
 ### 4. Signing, Homebrew and automatic website links
 
-Without signing secrets, macOS uses an ad-hoc signature; Windows/Linux packages
-are unsigned. This does not provide Apple Developer ID, notarization or Windows
-publisher trust. OS installation checks may block these early packages; the cask
-does not remove quarantine or bypass them.
+The historical v0.0.1 macOS packages use ad-hoc signatures. From v0.0.2, missing
+Apple or updater credentials stop the release: macOS must be Developer ID signed
+and notarized, and every update artifact must have a valid updater signature.
+Windows Authenticode remains optional; an updater signature does not provide
+Windows publisher trust. The cask never removes quarantine or bypasses OS checks.
 
 For protected production releases, configure repository Actions secrets:
 
@@ -134,17 +136,19 @@ For protected production releases, configure repository Actions secrets:
 | macOS Developer ID   | `APPLE_CERTIFICATE` (base64 P12), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` |
 | macOS notarization   | Above plus `APPLE_ID`, `APPLE_PASSWORD` (app-specific), `APPLE_TEAM_ID`                  |
 | Windows Authenticode | `WINDOWS_CERTIFICATE` (base64 PFX), `WINDOWS_CERTIFICATE_PASSWORD`                       |
+| Signed app updates   | `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`                        |
 
 Incomplete signing configuration fails the build. Temporary signing material is
 removed after use. No private signing key belongs in Git or logs. Platform
 signing and updater signing are separate systems.
 
 The public [Homebrew tap](https://github.com/erdembas/homebrew-tap) owns its
-verification workflow and updater helper. Manual dispatch validates public
-release metadata/checksums and the exact generated cask, then produces a reviewable
-artifact. Maintainers publish only `Casks/kubepit.rb`. It supports Apple Silicon
-and Intel. The tap uses its own read-only `GITHUB_TOKEN` for discovery; Kubepit needs
-no cross-repository PAT. Scheduled automatic commits are not enabled.
+verification workflow and updater helper. Every six hours, or on manual dispatch,
+it validates public release metadata, checksums and the exact generated cask.
+Only a verified change to `Casks/kubepit.rb` can be committed by the bot. It supports
+Apple Silicon and Intel. The tap uses its own `GITHUB_TOKEN`; only its update job
+has write permission. Kubepit needs no cross-repository PAT. Unchanged releases
+produce no commit, and the workflow cannot stage other paths.
 
 The initial pre-release is eligible while no complete stable release exists.
 Once stable releases exist, the helper selects the newest complete stable release.
@@ -171,36 +175,40 @@ buttons. Stable and pre-release channels stay distinct. Homebrew appears only
 when the actual tap file matches the generated cask hash. Links use versioned
 release URLs, never guessed `/latest` installer names.
 
-### 5. Signed automatic updates: separate, not enabled in 0.0.1
+### 5. Signed automatic updates
 
-The Tauri updater registers only if the bundled `plugins.updater.pubkey` is
-non-empty and all endpoints use HTTPS. The committed public key is empty, so
-update checks/install commands refuse and the UI reports that updates are not
-configured. With a valid configuration, the main window can check once after
-startup when `auto_check_updates` is enabled; download/install requires user action.
+The bundled public key enables the Tauri updater. The main window checks after
+startup and every five minutes when `auto_check_updates` is enabled. Checks never
+overlap installation. A dismissible announcement shows the new version and release
+notes without repeating the same announcement; download/install and restart remain
+explicit user actions. Settings → About & Updates also offers manual checks.
 
-To introduce signed releases later:
+The feed is `https://erdembas.github.io/kubepit/updates/latest.json`. Pages copies
+it only after verifying its hash, exact artifact URLs, complete platform set,
+signature sidecars and the trusted public key. A complete stable signed release
+wins; until one exists, a complete signed prerelease is eligible. A failed feed
+refresh fails deployment, preserving the previously deployed site and feed.
 
-1. Generate a signing pair on a trusted machine with `pnpm --filter @kubepit/desktop tauri signer generate -w ~/.tauri/kubepit.key`. Keep the private key/password outside the repository and store recoverable backups.
-2. Put the **public key content**, not its path, in the bundled `plugins.updater.pubkey` (or a release-only Tauri config override).
-3. Configure protected build secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Enable `bundle.createUpdaterArtifacts` only where those secrets are available.
-4. Build and test each actual platform artifact, publish its signature, and generate `latest.json` with the exact version and platform-specific URLs/signature contents.
-5. Publish only after testing an update from a previously installed build. Keep release notes and feed notes aligned. Never print signing secrets in logs.
+Keep the existing private key and password outside Git with owner-only access and
+recoverable backups. CI consumes `TAURI_SIGNING_PRIVATE_KEY` and
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`; only the public key is committed. Losing or
+replacing the private key breaks installed clients' update continuity. Local
+signed builds also require these environment variables. For an unsigned local
+development bundle use a Tauri config override with `createUpdaterArtifacts:false`.
 
-The configured future feed is
-`https://github.com/erdembas/kubepit/releases/latest/download/latest.json`.
-GitHub's `latest` route excludes drafts and prereleases. Do not expect the initial
-prerelease to activate it. Losing the signing private key breaks continuity
-for installed clients; changing the key requires a deliberate migration/manual
-installation plan. Linux self-updating is an AppImage path; package-manager formats
-need their own upgrade path.
+v0.0.1 contains no updater public key. Users must install v0.0.2 manually once;
+later signed releases can update in-app. Linux updates preserve AppImage, DEB or
+RPM format; DEB/RPM installation invokes the native package manager and may request
+administrator permission. The first enabled release establishes update
+trust; test an installed-to-new-version update on each target before claiming
+end-to-end update certification.
 
 ## Türkçe
 
-**0.0.1** deneyseldir. GitHub Actions, sabit sürüm etiketinden masaüstü paketlerini
+**0.0.2** deneyseldir. GitHub Actions, sabit sürüm etiketinden masaüstü paketlerini
 derler; sağlama toplamları ve bildirimini yayımlar, statik GitHub Pages sitesini
-yeniler. Homebrew tap doğrulanan sürümleri izler. Platform imzalama isteğe bağlıdır
-ve paket bazında belirtilir; uygulama içi güncelleyici kapalı kalır.
+yeniler. Homebrew tap doğrulanan sürümleri altı saatte bir izler. Yeni yayınlarda
+imzalı güncelleme paketleri ve macOS için Apple noter onayı zorunludur.
 
 ### 1. Sürüm adayını doğrulayın
 
@@ -295,7 +303,7 @@ kayıtlarını denetler ve her iki commit'i kaydeder.
 
 Sabit pnpm/Cargo kilit dosyaları kullanılır. Derlemeler uygulama durumunu ve
 kubeconfig'i runner'ın geçici dizininde yalıtır; kümelere bağlanmaz. Yayın ayarı
-güncelleyici çıktılarını kapatır, macOS alt sınırını 11 yapar ve NSIS kurulumunda
+imzalı güncelleyici çıktılarını açar, macOS alt sınırını 11 yapar ve NSIS kurulumunda
 İngilizce/Türkçe sunar. Dosya adları mimariyi belirtir; örneğin
 `Kubepit_0.0.1_linux_arm64.AppImage`.
 
@@ -307,8 +315,9 @@ değildir**. Bir platformun çalışma davranışını doğrulanmış saymadan �
 donanımda uygulama açılışını, örnek kubeconfig içe aktarımını ve temel iş akışlarını
 test edin.
 
-Yayıncı **11 kurulum paketini**, `SHA256SUMS`, `kubepit.rb` ve
-`release-manifest.json` dosyalarını birleştirir. Kaynak etiketini tekrar kontrol
+Yayıncı **11 kurulum paketini**, iki macOS güncelleme arşivini, on bir imza dosyasını,
+`latest.json`, `SHA256SUMS`, `kubepit.rb` ve `release-manifest.json` dosyalarını
+birleştirir (28 dosya). Kaynak etiketini tekrar kontrol
 eder, yüklenen baytları doğrular ve eksiksizlik işareti olarak bildirimi en son
 yükler. Yayımlanmış baytlar değiştirilmez. Yayın kesilirse aynı derleme çıktılarıyla
 başarısız publish işini yeniden çalıştırın; tüm paketleri yeniden derlemek farklı
@@ -318,30 +327,32 @@ dosyaların değişmesi yeni sürüm gerektirir. Sorunu araştırırken birleşi
 
 ### 4. İmzalama, Homebrew ve otomatik site bağlantıları
 
-İmzalama sırları yoksa macOS ad-hoc imzalıdır; Windows/Linux paketleri imzasızdır.
-Bu, Apple Developer ID, noter onayı veya Windows yayıncı güveni sağlamaz. İşletim
-sistemi ilk paketlerin kurulumunu engelleyebilir; cask karantinayı kaldırmaz ve bu
-kontrolleri atlatmaz.
+Eski v0.0.1 macOS paketleri ad-hoc imzalıdır. v0.0.2’den itibaren eksik Apple veya
+güncelleyici sırları yayını durdurur: macOS Developer ID imzalı ve noter onaylı,
+tüm güncelleme dosyaları geçerli güncelleyici imzalı olmalıdır. Windows Authenticode
+isteğe bağlıdır; güncelleyici imzası Windows yayıncı güveni sağlamaz. Cask,
+karantinayı kaldırmaz ve işletim sistemi kontrollerini atlatmaz.
 
 Korumalı üretim yayınları için depo Actions sırlarını yapılandırın:
 
-| Platform             | Gereken sırlar                                                                           |
-| -------------------- | ---------------------------------------------------------------------------------------- |
-| macOS Developer ID   | `APPLE_CERTIFICATE` (base64 P12), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` |
-| macOS noter onayı    | Yukarıdakilere ek olarak `APPLE_ID`, `APPLE_PASSWORD` (uygulamaya özel), `APPLE_TEAM_ID` |
-| Windows Authenticode | `WINDOWS_CERTIFICATE` (base64 PFX), `WINDOWS_CERTIFICATE_PASSWORD`                       |
+| Platform                     | Gereken sırlar                                                                           |
+| ---------------------------- | ---------------------------------------------------------------------------------------- |
+| macOS Developer ID           | `APPLE_CERTIFICATE` (base64 P12), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` |
+| macOS noter onayı            | Yukarıdakilere ek olarak `APPLE_ID`, `APPLE_PASSWORD` (uygulamaya özel), `APPLE_TEAM_ID` |
+| Windows Authenticode         | `WINDOWS_CERTIFICATE` (base64 PFX), `WINDOWS_CERTIFICATE_PASSWORD`                       |
+| İmzalı uygulama güncellemesi | `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`                        |
 
 Eksik imzalama ayarı derlemeyi durdurur. Geçici imzalama malzemesi iş bitince
 kaldırılır. Özel anahtarlar Git'e veya loglara konmaz. Platform ve güncelleyici
 imzalama birbirinden ayrıdır.
 
 Herkese açık [Homebrew tap](https://github.com/erdembas/homebrew-tap), kendi
-doğrulama iş akışını ve güncelleme yardımcısını barındırır. Elle tetiklendiğinde
-herkese açık sürüm bilgilerini, sağlama toplamlarını ve üretilmiş cask'ı doğrular;
-incelenebilir bir çıktı üretir. Bakımcılar yalnızca `Casks/kubepit.rb` dosyasını
-yayımlar. Apple Silicon ve Intel desteklenir. Tap, sürüm keşfi için kendi salt
-okunur `GITHUB_TOKEN` değerini kullanır; Kubepit deposunda başka depoya erişen PAT
-gerekmez. Zamanlanmış otomatik commit etkin değildir.
+doğrulama iş akışını ve güncelleme yardımcısını barındırır. Altı saatte bir veya elle
+tetiklendiğinde sürüm bilgilerini, sağlama toplamlarını ve üretilmiş cask’ı doğrular.
+Bot yalnızca doğrulanmış `Casks/kubepit.rb` değişikliğini commit edebilir. Apple
+Silicon ve Intel desteklenir. Tap kendi `GITHUB_TOKEN` değerini kullanır; yalnızca
+güncelleme işi yazma yetkilidir. Kubepit deposunda başka depoya erişen PAT gerekmez.
+Değişiklik yoksa commit üretilmez; iş akışı başka dosyaları hazırlama alanına alamaz.
 
 Eksiksiz kararlı sürüm yoksa ilk ön sürüm kapsama dâhildir. Kararlı sürümler
 bulunduğunda yardımcı en yeni eksiksiz kararlı sürümü seçer. RunHQ cask bakımı
@@ -368,26 +379,31 @@ indirme düğmesi üretmez. Kararlı/ön sürüm kanalları ayrıdır. Homebrew 
 tap dosyası, üretilen cask'ın sağlama toplamıyla eşleşirse gösterilir. Bağlantılar
 sürümlü adresleri kullanır; `/latest` için dosya adı tahmin edilmez.
 
-### 5. İmzalı otomatik güncelleme: ayrı bir iş, 0.0.1'de açık değil
+### 5. İmzalı otomatik güncelleme
 
-Tauri güncelleyicisi yalnızca paketlenmiş `plugins.updater.pubkey` doluysa ve tüm
-uç noktalar HTTPS kullanıyorsa kaydedilir. Depodaki açık anahtar boştur; kontrol ve
-kurulum komutları reddedilir, arayüz güncellemenin yapılandırılmadığını gösterir.
-Geçerli ayarda, `auto_check_updates` açıksa ana pencere başlangıçtan sonra bir kez
-kontrol edebilir; indirme/kurulum kullanıcı eylemi gerektirir.
+Pakete eklenen açık anahtar Tauri güncelleyicisini etkinleştirir. `auto_check_updates`
+açıksa ana pencere açılıştan sonra ve her beş dakikada kontrol yapar. Kontroller
+kurulumla çakışmaz. Kapatılabilir duyuru yeni sürümü ve sürüm notlarını aynı duyuruyu
+tekrarlamadan gösterir; indirme/kurulum ve yeniden başlatma kullanıcı tarafından
+başlatılır. Ayarlar → Hakkında ve Güncellemeler bölümünde elle kontrol de bulunur.
 
-İleride imzalı sürümler eklemek için:
+Akış `https://erdembas.github.io/kubepit/updates/latest.json` adresindedir. Pages;
+sağlama toplamı, dosya adresleri, tüm platformlar, imza dosyaları ve güvenilen açık
+anahtar doğrulandıktan sonra akışı kopyalar. Eksiksiz imzalı kararlı sürüm önceliklidir;
+henüz yoksa eksiksiz imzalı ön sürüm seçilir. Akış yenilemesi başarısızsa dağıtım
+durur; yayındaki site ve akış korunur.
 
-1. Güvenilir bir makinede `pnpm --filter @kubepit/desktop tauri signer generate -w ~/.tauri/kubepit.key` ile anahtar çifti üretin. Özel anahtar ve parolayı depo dışında tutup kurtarılabilir yedek alın.
-2. Anahtarın yolunu değil **açık anahtar içeriğini**, paketlenen `plugins.updater.pubkey` alanına veya release'e özel Tauri ayarına koyun.
-3. Korumalı derleme sırları `TAURI_SIGNING_PRIVATE_KEY` ve `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` değerlerini ayarlayın. `bundle.createUpdaterArtifacts` seçeneğini yalnızca bu sırların bulunduğu ortamlarda açın.
-4. Gerçek platform çıktılarını derleyip test edin, imzalarını yayımlayın; doğru sürüm, platform URL'leri ve imza içerikleriyle `latest.json` üretin.
-5. Önceden kurulu bir sürümden güncelleme testini yaptıktan sonra yayımlayın. Release notları ile akış notlarını eş tutun. İmzalama sırlarını loglara yazdırmayın.
+Mevcut özel anahtarı ve parolayı Git dışında, yalnızca sahibinin erişebildiği
+dosyalarda tutun ve kurtarılabilir yedek alın. CI, `TAURI_SIGNING_PRIVATE_KEY` ve
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` sırlarını kullanır; yalnızca açık anahtar
+commit edilir. Özel anahtarın kaybı veya değişmesi kurulu uygulamaların güncelleme
+devamlılığını bozar. Yerel imzalı derlemeler de bu ortam değişkenlerini gerektirir.
+İmzasız yerel geliştirme paketi için Tauri ayarını `createUpdaterArtifacts:false`
+ile geçersiz kılın.
 
-Gelecek güncelleme akışı
-`https://github.com/erdembas/kubepit/releases/latest/download/latest.json` olarak
-ayarlıdır. GitHub `latest` yolu taslakları ve ön sürümleri dışarıda bırakır. İlk
-ön sürümün bunu etkinleştirmesini beklemeyin. Özel anahtarın kaybı kurulu
-istemcilerin güncelleme devamlılığını bozar; anahtar değişikliği bilinçli bir geçiş
-veya elle kurulum planı gerektirir. Linux'ta kendini güncelleme AppImage yoludur;
-paket yöneticisi biçimleri kendi yükseltme yolunu gerektirir.
+v0.0.1 güncelleyici açık anahtarı içermez. v0.0.2 bir kez elle kurulmalıdır; sonraki
+imzalı sürümler uygulama içinden güncellenebilir. Linux’ta AppImage, DEB veya RPM
+biçimi korunur; DEB/RPM kurulumu sistemin paket yöneticisini kullanır ve yönetici
+izni isteyebilir. İlk etkin sürüm güncelleme güvenini başlatır;
+uçtan uca doğrulama iddiasından önce her hedefte kurulu sürümden yeni sürüme geçişi
+test edin.

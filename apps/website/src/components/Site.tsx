@@ -31,6 +31,7 @@ import { KubepitMark } from '@/components/ui/KubepitMark';
 import { Hero } from '@/components/Hero';
 import { Downloads } from '@/components/Downloads';
 import { asset, basePath, demo, repository } from '@/lib/links';
+import { publishedRelease } from '@/lib/publishedRelease';
 
 type FeatureGroup = 'all' | 'operate' | 'understand' | 'protect';
 
@@ -229,7 +230,9 @@ export function Site() {
           >
             <KubepitMark />
             <span>kubepit</span>
-            <span className="version">v0.0.1</span>
+            <span className="version">
+              {publishedRelease ? `v${publishedRelease.version}` : 'MIT'}
+            </span>
           </a>
           <nav
             className={menu ? 'navigation is-open' : 'navigation'}
@@ -500,7 +503,7 @@ export function Site() {
                 <h3>{t('A beginning you can help shape.')}</h3>
                 <p>
                   {t(
-                    '0.0.1 is an early community release. Expect rough edges, share reproducible issues, and help improve the workflows you use every day.',
+                    'Kubepit is an early community project. Expect rough edges, share reproducible issues, and help improve the workflows you use every day.',
                   )}
                 </p>
               </div>
@@ -597,7 +600,7 @@ export function Site() {
               <a href={`${repository}/releases`}>
                 <Code2 size={20} />
                 <span>
-                  <strong>{t('0.0.1 · first public release')}</strong>
+                  <strong>{t('Explore the latest release')}</strong>
                   <span>{t('Check GitHub for release notes and available artifacts.')}</span>
                 </span>
                 <ExternalLink size={15} />
@@ -711,7 +714,7 @@ export function Site() {
             </details>
             <details>
               <summary>
-                {t('Can I use 0.0.1 in production?')}
+                {t('Can I use Kubepit in production?')}
                 <ChevronDown size={16} />
               </summary>
               <p>

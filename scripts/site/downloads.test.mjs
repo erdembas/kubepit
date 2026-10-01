@@ -87,6 +87,9 @@ function fixture(version = '0.0.1', prerelease = true) {
     checksums: { name: 'SHA256SUMS', url: url('SHA256SUMS') },
     homebrew: { caskUrl: url('kubepit.rb'), sha256: caskHash, tap: null, installCommand: null },
   };
+  const metadata = release.assets.find((asset) => asset.name === 'release-manifest.json');
+  metadata.digest = `sha256:${hash(JSON.stringify(manifest))}`;
+  metadata.size = Buffer.byteLength(JSON.stringify(manifest));
   return { release, manifest, checksums, homebrew: { url: HOMEBREW_URL, content } };
 }
 function validated(pair) {
@@ -383,7 +386,7 @@ test('API failures retain a validated site snapshot and truthfully distinguish u
   assert.equal(empty.releases.length, 0);
 });
 
-test('live removal invalidates stale downloads; metadata CORS failure only reuses unchanged assets', async () => {
+test('unchanged live digests reuse bundled metadata without redundant browser asset downloads', async () => {
   const pair = fixture();
   const cached = snapshotOf(pair);
   const empty = await loadPublishedReleases(cached, { fetcher: async () => response([]) });
@@ -396,12 +399,40 @@ test('live removal invalidates stale downloads; metadata CORS failure only reuse
     },
   };
   const unchanged = await loadPublishedReleases(cached, { fetcher: fakeFetch(pair, failed) });
-  assert.equal(unchanged.status, 'partial');
+  assert.equal(unchanged.status, 'live');
   assert.equal(unchanged.releases.length, 1);
   const replaced = clone(pair);
   replaced.release.assets[0].digest = `sha256:${'f'.repeat(64)}`;
   const mismatch = await loadPublishedReleases(cached, { fetcher: fakeFetch(replaced, failed) });
   assert.equal(mismatch.releases.length, 0);
+});
+
+test('replaced or unverifiable metadata never reuses stale signing claims', async () => {
+  const pair = fixture();
+  const cached = snapshotOf(pair);
+  for (const mutate of [
+    (asset) => {
+      asset.id += 100;
+    },
+    (asset) => {
+      asset.digest = `sha256:${'f'.repeat(64)}`;
+    },
+    (asset) => {
+      delete asset.digest;
+    },
+    (asset) => {
+      asset.size++;
+    },
+  ]) {
+    const changed = clone(pair);
+    mutate(changed.release.assets.find((asset) => asset.name === 'release-manifest.json'));
+    const endpoints = releaseMetadataEndpoints(changed.release);
+    const result = await loadPublishedReleases(cached, {
+      fetcher: fakeFetch(changed, { [endpoints.manifest]: () => response('unavailable', 403) }),
+    });
+    assert.equal(result.status, 'partial');
+    assert.deepEqual(result.releases, []);
+  }
 });
 
 test('an unavailable tap never gets advertised from a stale cask after a successful release refresh', async () => {

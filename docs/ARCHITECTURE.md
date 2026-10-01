@@ -1694,9 +1694,16 @@ signing is configured: the plugin is registered only when
 `plugins.updater.pubkey` in `tauri.conf.json` is non-empty and every endpoint
 is `https://` (`kubepit_core::updates::UpdaterConfig`); otherwise the
 commands refuse and Settings → About & Updates says updates are not
-configured. The main window checks once after startup when
-`Settings.auto_check_updates` is on. Keys, artifacts and the `latest.json`
-feed are described in `docs/RELEASING.md`.
+configured. The main window checks after startup and every five minutes when
+`Settings.auto_check_updates` is on. One scheduler owns the timer; checks pause
+during installation and after the update is ready to restart. A dismissible
+announcement and status-bar entry expose release notes and explicit install and
+restart actions. Per-version announcements are remembered in local storage.
+All windows share a backend operation lock; installation also requires the
+`expectedVersion` displayed by the caller so a later check in another window
+cannot silently change what is installed. Since 0.0.2 the public key is bundled,
+and Pages publishes the verified signed feed at `updates/latest.json`.
+Keys, artifacts and migration from 0.0.1 are described in `docs/RELEASING.md`.
 
 ## Health checks & certificates
 

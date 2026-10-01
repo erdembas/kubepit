@@ -36,6 +36,7 @@ yarn-error.log*
 # Build outputs
 apps/website/.next/
 apps/website/out/
+apps/website/public/updates/latest.json
 **/src-tauri/gen/
 **/src-tauri/target/
 

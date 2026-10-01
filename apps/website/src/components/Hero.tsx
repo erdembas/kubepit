@@ -19,6 +19,7 @@ import {
 import * as i18n from '@/i18n';
 import { KubepitMark } from '@/components/ui/KubepitMark';
 import { asset, demo, repository } from '@/lib/links';
+import { publishedRelease } from '@/lib/publishedRelease';
 import styles from './Hero.module.css';
 
 type HeroProps = {
@@ -97,7 +98,11 @@ export function Hero({
         <div className={styles.intro}>
           <a className={styles.release} href={releaseHref}>
             <span className={styles.releaseDot} aria-hidden="true" />
-            <span>{t('INTRODUCING 0.0.1')}</span>
+            <span>
+              {publishedRelease
+                ? t('INTRODUCING {version}', { version: publishedRelease.version })
+                : t('COMMUNITY EDITION')}
+            </span>
             <span className={styles.releaseDivider} aria-hidden="true" />
             <span className={styles.releaseNote}>{t('An open-source beginning')}</span>
             <ArrowUpRight size={13} aria-hidden="true" />

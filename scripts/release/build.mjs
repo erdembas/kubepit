@@ -3,11 +3,14 @@ import { resolve, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { targets, assert, assetName, sha256, checkMagic } from './model.mjs';
+import { updaterEntries, updaterPublicKey, verifyUpdaterSignature } from './updater.mjs';
 
 const target = targets.find((t) => t.id === process.env.RELEASE_TARGET);
 assert(target, 'Unknown release target');
 const source = resolve('source');
 const version = process.env.RELEASE_VERSION;
+const updaterEnabled = process.env.RELEASE_UPDATER_ENABLED === 'true';
+const publicKey = process.env.RELEASE_UPDATER_PUBLIC_KEY || '';
 const output = resolve('release-target');
 const temporary = resolve(process.env.RUNNER_TEMP || 'release-temp', `kubepit-${target.id}`);
 await mkdir(temporary, { recursive: true });
@@ -23,10 +26,23 @@ const env = {
 for (const name of Object.keys(env))
   if ((name.startsWith('APPLE_') || name.startsWith('TAURI_SIGNING_')) && !env[name])
     delete env[name];
-// The updater is deliberately disabled until a separately provisioned public
-// key is committed to source. OS code signing is independent of updater signing.
-delete env.TAURI_SIGNING_PRIVATE_KEY;
-delete env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD;
+const sourceConfig = JSON.parse(
+  await readFile(join(source, 'apps/desktop/src-tauri/tauri.conf.json'), 'utf8'),
+);
+if (updaterEnabled) {
+  updaterPublicKey(publicKey);
+  assert(
+    sourceConfig.bundle.createUpdaterArtifacts === true &&
+      sourceConfig.plugins.updater.pubkey === publicKey,
+    'Frozen source updater configuration mismatch',
+  );
+  assert(env.TAURI_SIGNING_PRIVATE_KEY, 'Updater signing private key is required');
+  env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ||= '';
+} else {
+  assert(version === '0.0.1', 'New releases require signed updater artifacts');
+  delete env.TAURI_SIGNING_PRIVATE_KEY;
+  delete env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD;
+}
 function run(command, args, { visible = false, extraEnv = {}, cwd = source } = {}) {
   const result = spawnSync(command, args, {
     cwd,
@@ -42,8 +58,8 @@ function run(command, args, { visible = false, extraEnv = {}, cwd = source } = {
 }
 const overlay = {
   bundle: {
-    createUpdaterArtifacts: false,
-    macOS: { minimumSystemVersion: '11.0' },
+    createUpdaterArtifacts: updaterEnabled,
+    macOS: { minimumSystemVersion: '11.0', hardenedRuntime: true },
     windows: { nsis: { languages: ['English', 'Turkish'], displayLanguageSelector: true } },
   },
 };
@@ -53,6 +69,18 @@ let windowsThumbprint;
 try {
   if (target.platform === 'macos') {
     const certificate = env.APPLE_CERTIFICATE;
+    if (updaterEnabled)
+      assert(
+        [
+          'APPLE_CERTIFICATE',
+          'APPLE_CERTIFICATE_PASSWORD',
+          'APPLE_SIGNING_IDENTITY',
+          'APPLE_ID',
+          'APPLE_PASSWORD',
+          'APPLE_TEAM_ID',
+        ].every((name) => env[name]),
+        'Updater-enabled macOS releases require complete Developer ID and notarization credentials',
+      );
     if (certificate) {
       assert(
         env.APPLE_CERTIFICATE_PASSWORD &&
@@ -192,9 +220,17 @@ try {
       signing === 'ad-hoc' || details.includes('Authority=Developer ID Application'),
       'Expected Developer ID signature',
     );
-    if (signing === 'notarized') run('xcrun', ['stapler', 'validate', app]);
+    if (signing === 'notarized') {
+      assert(
+        details.includes('runtime') && details.includes(`TeamIdentifier=${env.APPLE_TEAM_ID}`),
+        'Expected hardened runtime and Apple team signature',
+      );
+      run('xcrun', ['stapler', 'validate', app]);
+      run('spctl', ['--assess', '--type', 'execute', '--verbose=2', app]);
+    }
   }
   const assets = [];
+  const installerFiles = new Map();
   for (const format of target.formats) {
     const directory = join(bundle, format.toLowerCase());
     const extension = format === 'nsis' ? '.exe' : `.${format}`;
@@ -239,6 +275,7 @@ try {
       assert(status === 'Valid', 'Installer Authenticode signature is not valid');
     }
     const name = assetName(version, target, format);
+    installerFiles.set(format, file);
     await copyFile(file, join(output, name));
     assets.push({
       name,
@@ -250,6 +287,36 @@ try {
       signing,
     });
   }
+  let updater;
+  if (updaterEnabled) {
+    const artifacts = [];
+    for (const entry of updaterEntries(version, target)) {
+      let file = installerFiles.get(entry.format);
+      if (entry.format === 'app.tar.gz') {
+        const directory = join(bundle, 'macos');
+        const matches = (await readdir(directory)).filter((name) => name.endsWith('.app.tar.gz'));
+        assert(matches.length === 1, 'Expected exactly one macOS updater archive');
+        file = join(directory, matches[0]);
+      }
+      const bytes = await readFile(file);
+      const signature = await readFile(`${file}.sig`, 'utf8');
+      verifyUpdaterSignature(bytes, signature, publicKey, version);
+      await copyFile(file, join(output, entry.name));
+      await writeFile(join(output, `${entry.name}.sig`), signature);
+      artifacts.push({
+        ...entry,
+        size: bytes.length,
+        sha256: sha256(bytes),
+        signature: {
+          name: `${entry.name}.sig`,
+          size: Buffer.byteLength(signature),
+          sha256: sha256(signature),
+          content: signature,
+        },
+      });
+    }
+    updater = { schemaVersion: 1, publicKey, artifacts };
+  }
   await writeFile(
     join(output, `${target.id}.json`),
     JSON.stringify(
@@ -260,6 +327,7 @@ try {
         commit: process.env.RELEASE_COMMIT,
         automationCommit: process.env.GITHUB_SHA,
         assets,
+        ...(updater ? { updater } : {}),
       },
       null,
       2,

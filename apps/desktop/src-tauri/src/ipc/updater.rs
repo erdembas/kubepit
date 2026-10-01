@@ -26,6 +26,8 @@ const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct UpdaterState {
     config: UpdaterConfig,
     pending: Mutex<Option<Update>>,
+    /// Every app window shares one pending update and installer.
+    operation: tauri::async_runtime::Mutex<()>,
 }
 
 impl UpdaterState {
@@ -33,6 +35,7 @@ impl UpdaterState {
         Self {
             config,
             pending: Mutex::new(None),
+            operation: tauri::async_runtime::Mutex::new(()),
         }
     }
 
@@ -63,6 +66,10 @@ pub async fn update_check(
     if !state.enabled() {
         return Err(NOT_CONFIGURED.to_string());
     }
+    let _operation = state
+        .operation
+        .try_lock()
+        .map_err(|_| "An update operation is already in progress in another window".to_string())?;
     let mut builder = app.updater_builder().timeout(CHECK_TIMEOUT);
     if state.config.endpoints.is_empty() {
         let url = Url::parse(DEFAULT_UPDATE_ENDPOINT).map_err(|e| e.to_string())?;
@@ -94,16 +101,26 @@ pub async fn update_check(
 #[tauri::command]
 pub async fn update_install(
     state: State<'_, UpdaterState>,
+    expected_version: String,
     on_event: Channel<UpdateProgress>,
 ) -> IpcResult<()> {
     if !state.enabled() {
         return Err(NOT_CONFIGURED.to_string());
     }
+    let _operation = state
+        .operation
+        .try_lock()
+        .map_err(|_| "An update operation is already in progress in another window".to_string())?;
     let update = state
         .pending
         .lock()
         .clone()
         .ok_or_else(|| "No update to install. Check for updates first.".to_string())?;
+    if update.version != expected_version {
+        return Err(
+            "The available update changed. Check for updates again before installing.".to_string(),
+        );
+    }
     let mut progress = DownloadProgress::default();
     let chunks = on_event.clone();
     update

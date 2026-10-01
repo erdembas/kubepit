@@ -16,7 +16,7 @@
   <a href="../CONTRIBUTING.md">Katkıda bulun</a>
 </p>
 
-<p align="center"><strong>v0.0.1 · Deneysel · MIT lisanslı · Türkçe ve İngilizce</strong></p>
+<p align="center"><strong>v0.0.2 · Deneysel · MIT lisanslı · Türkçe ve İngilizce</strong></p>
 
 Kubepit; canlı kaynak tablolarını, logları, terminalleri, topolojiyi, değişiklik
 geçmişini, Helm'i, GitOps'u ve filo işlemlerini tek masaüstü çalışma alanında
@@ -28,21 +28,23 @@ paketleri yok. MIT lisansı kişisel ve ticari kullanıma izin verir. Tercih ett
 barındırılan yapay zekâ sağlayıcıları gibi isteğe bağlı hizmetlerin kendi koşulları
 ve ücretleri olabilir.
 
-Bu, ilk herkese açık sürüm olan **0.0.1**. Eksikler ve değişebilen API'ler bekleyin.
+Kubepit, gelişiminin başındaki bir topluluk projesidir. Eksikler ve değişebilen API'ler bekleyin.
 Önce demoyla veya geliştirme kümesiyle başlayın.
 [İndirme sayfasından](https://erdembas.github.io/kubepit/tr/#downloads) kurulum
 paketini seçin veya kaynak koddan derleyin. Sayfa yalnızca yayımlanmış paketleri
-gösterir ve imza durumlarını belirtir. İmzalı uygulama içi güncelleme akışı
-0.0.1 sürümünde yapılandırılmamıştır.
+gösterir ve imza durumlarını belirtir. **0.0.2** ile açılışta ve her beş dakikada
+imzalı güncelleme kontrolü, sürüm notları ve kullanıcının başlattığı kurulum/yeniden
+başlatma seçenekleri gelir. 0.0.1 kullanıcıları bu yolu etkinleştirmek için yeni
+paketi bir kez elle kurmalıdır.
 
 ![Örnek Kubernetes kaynaklarıyla Kubepit çalışma alanı](../apps/website/public/workbench.png)
 
 ## Masaüstü uygulamasını kurun
 
 [İndirme sayfası](https://erdembas.github.io/kubepit/tr/#downloads), yayımlanmış
-paketleri işletim sistemi, işlemci ve biçime göre sunar. Deneysel **v0.0.1**,
-ön sürüm kanalındadır. Kaynak etiketi sabit kalır; derleme bilgileri ve SHA-256
-sağlama toplamları [GitHub sürümüne](https://github.com/erdembas/kubepit/releases/tag/v0.0.1) eklenir.
+paketleri işletim sistemi, işlemci ve biçime göre sunar. Deneysel yayınlar ön sürüm
+kanalındadır. Her kaynak etiketi sabit kalır; derleme bilgileri ve SHA-256
+sağlama toplamları [GitHub sürümüne](https://github.com/erdembas/kubepit/releases) eklenir.
 
 | Sistem    | İşlemci               | Paket biçimleri          |
 | --------- | --------------------- | ------------------------ |
@@ -52,7 +54,7 @@ sağlama toplamları [GitHub sürümüne](https://github.com/erdembas/kubepit/re
 | Windows   | ARM64                 | NSIS kurulum paketi      |
 
 macOS'ta [Kubepit Homebrew cask dosyası](https://github.com/erdembas/homebrew-tap),
-her iki işlemci için doğrulanan sürümleri takip eder:
+her iki işlemci için doğrulanan sürümleri altı saatte bir kontrol eder:
 
 ```bash
 brew install --cask erdembas/tap/kubepit
@@ -66,12 +68,14 @@ Linux paketleri WebKitGTK 4.1 dâhil platform kütüphanelerini gerektirir; AppI
 her dağıtımla uyumluluk sağlamaz. Windows, WebView2 kullanır. İlgili özelliklerin
 istediği `kubectl`, Helm ve sağlayıcı kimlik doğrulama yardımcıları harici araçlardır.
 
-İlk macOS paketlerinde ad-hoc imza vardır; Apple Developer ID imzası ve noter
-onayı yoktur. Windows paketleri imzasızdır. İşletim sisteminiz kurulumu
-engelleyebilir; Homebrew bu kontrolleri atlatmaz. İmza, sağlama toplamı ve doğrulama
-sınırları için [sürüm notlarını](https://github.com/erdembas/kubepit/releases/tag/v0.0.1)
-ve [yayımlama rehberini](RELEASING.md#türkçe) okuyun. Bu sürümde uygulama içi
-otomatik güncelleyici etkin değildir.
+Yeni macOS yayınlarında Developer ID imzası ve Apple noter onayı zorunludur;
+eski v0.0.1 paketleri ad-hoc imzalı kalır. Windows yayıncı imzası güncelleyici
+imzasından ayrıdır ve isteğe bağlıdır. Homebrew işletim sistemi kontrollerini
+atlatmaz. İmza, sağlama toplamı ve doğrulama sınırları için
+[sürüm notlarını](https://github.com/erdembas/kubepit/releases) ve
+[yayımlama rehberini](RELEASING.md#türkçe) okuyun. Linux güncellemeleri AppImage, DEB veya RPM biçimini korur; paket yöneticisiyle
+kurulum yönetici izni isteyebilir. Otomatik
+kontrol, Ayarlar → Hakkında ve Güncellemeler bölümünden kapatılabilir.
 
 ## Bir kümeye bağlanmadan deneyin
 
@@ -227,14 +231,14 @@ pnpm dev
 Yerel release derlemesi:
 
 ```bash
-pnpm tauri:build
+pnpm --filter @kubepit/desktop exec tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
 ```
 
 Tauri macOS, Linux ve Windows'u hedefler; derleme gereksinimleri ve çalışma
-davranışı platforma göre değişir. Bir platformun hedeflenmesi, 0.0.1'de her mimari
-için doğrulanmış kurulum paketi olduğu anlamına gelmez. Depodaki macOS ayarı ad-hoc
-imzalama kullanır; sürüm imzalama anahtarı tanımlanana kadar uygulama içi güncelleme
-kapalı kalır.
+davranışı platforma göre değişir. Yukarıdaki komut güncelleyici çıktıları olmadan
+yerel geliştirme paketi oluşturur. Yayın CI’sı güncelleyici ve Apple kimlik
+bilgilerini sağlar; altı hedefi doğrulayıp eksiksiz imzalı güncelleme akışını yayımlar.
+Yerel paketleme denetimleri her hedefte etkileşimli testin yerini tutmaz.
 
 Üretim erişiminde en az yetkili kubeconfig kullanın. Kubepit'in salt okunur ayarı
 yerleşik değişiklikleri engeller; ancak yerel kabukta yazılan komutları yalıtamaz

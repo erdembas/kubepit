@@ -13,7 +13,7 @@ const CURRENT = APP_VERSION;
 const TOTAL_BYTES = 18_874_368;
 
 const AVAILABLE: UpdateInfo = {
-  version: '0.2.0',
+  version: '0.0.3',
   current_version: CURRENT,
   date: new Date(Date.now() - 2 * 86_400_000).toISOString(),
   notes: [
@@ -41,9 +41,11 @@ register({
     await sleep(700);
     return installed ? null : AVAILABLE;
   },
-  update_install: async ({ onEvent }: MockArgs) => {
+  update_install: async ({ expectedVersion, onEvent }: MockArgs) => {
     const emit = onEvent as (progress: UpdateProgress) => void;
     if (installed) throw new Error('No update to install. Check for updates first.');
+    if (expectedVersion !== AVAILABLE.version)
+      throw new Error('The available update changed. Check for updates again before installing.');
     emit({ event: 'started', total: TOTAL_BYTES });
     const steps = 30;
     for (let i = 1; i <= steps; i++) {

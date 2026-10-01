@@ -17,8 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Update feed used when `plugins.updater.endpoints` is empty.
-pub const DEFAULT_UPDATE_ENDPOINT: &str =
-    "https://github.com/erdembas/kubepit/releases/latest/download/latest.json";
+pub const DEFAULT_UPDATE_ENDPOINT: &str = "https://erdembas.github.io/kubepit/updates/latest.json";
 
 /// Progress events are sent at most every this many bytes when the size is unknown.
 const UNKNOWN_SIZE_STEP: u64 = 256 * 1024;

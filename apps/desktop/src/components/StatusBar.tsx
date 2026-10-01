@@ -1,6 +1,7 @@
 import { useLocaleMemo as useMemo } from '@/i18n';
 import * as i18n from '@/i18n';
 import { Activity, Cpu, MemoryStick, Network, Settings as SettingsIcon } from 'lucide-react';
+import { UpdateStatusButton } from '@/components/app/UpdateAnnouncement';
 import { LanguageMenu } from '@/components/LanguageMenu';
 import { AlertBell } from '@/components/alerts/AlertBell';
 import { ThemeMenu } from '@/components/ThemeMenu';
@@ -127,6 +128,7 @@ export function StatusBar() {
           <span className="text-fg-dim">{i18n.t('Settings')}</span>
         </button>
         <ThemeMenu />
+        <UpdateStatusButton />
         {appVersion && (
           <button
             type="button"

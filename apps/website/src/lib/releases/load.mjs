@@ -9,6 +9,29 @@ import {
   sortReleases,
 } from './model.mjs';
 
+/** A bundled manifest is current only while GitHub identifies the same metadata bytes. */
+function unchangedSnapshot(release, snapshot) {
+  for (const pair of snapshot.pairs) {
+    if (pair.release.tag_name !== release.tag_name) continue;
+    const sameMetadata = ['release-manifest.json', 'SHA256SUMS'].every((name) => {
+      const current = release.assets.find((asset) => asset.name === name);
+      const previous = pair.release.assets.find((asset) => asset.name === name);
+      return (
+        current &&
+        previous &&
+        current.id === previous.id &&
+        current.size === previous.size &&
+        /^sha256:[a-f0-9]{64}$/.test(current.digest ?? '') &&
+        current.digest === previous.digest
+      );
+    });
+    if (!sameMetadata) continue;
+    const verified = validateReleasePair(release, pair.manifest, pair.checksums);
+    if (verified) return verified;
+  }
+  return null;
+}
+
 /** Bounded public requests. No account cookies or credentials are sent to GitHub or asset redirects. */
 async function requestText(fetcher, url, signal, limit, accept) {
   const response = await fetcher(url, {
@@ -72,6 +95,10 @@ export async function loadPublishedReleases(snapshot, options = {}) {
     let incomplete = false;
     const resolved = await Promise.all(
       candidates.map(async (release) => {
+        // The API already confirms the exact bundled metadata and installer digests.
+        // Avoid downloading those same bytes through browser asset redirects again.
+        const unchanged = unchangedSnapshot(release, snapshot);
+        if (unchanged) return unchanged;
         const endpoints = releaseMetadataEndpoints(release);
         try {
           const [manifestText, checksums] = await Promise.all([
@@ -95,10 +122,6 @@ export async function loadPublishedReleases(snapshot, options = {}) {
           return result;
         } catch {
           incomplete = true;
-          for (const pair of snapshot.pairs) {
-            const result = validateReleasePair(release, pair.manifest, pair.checksums);
-            if (result) return result;
-          }
           return null;
         }
       }),

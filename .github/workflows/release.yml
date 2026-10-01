@@ -8,7 +8,7 @@ on:
       ref:
         description: Existing immutable version tag to package (never moved)
         required: true
-        default: v0.0.1
+        default: v0.0.2
         type: string
       publish:
         description: Publish the complete validated asset set to GitHub Releases
@@ -41,6 +41,8 @@ jobs:
       version: ${{ steps.release.outputs.version }}
       prerelease: ${{ steps.release.outputs.prerelease }}
       published_at: ${{ steps.release.outputs.published_at }}
+      updater_enabled: ${{ steps.release.outputs.updater_enabled }}
+      updater_public_key: ${{ steps.release.outputs.updater_public_key }}
       matrix: ${{ steps.release.outputs.matrix }}
     steps:
       # Automation comes from this workflow's commit. Application source is
@@ -59,6 +61,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_REF: ${{ inputs.ref || github.ref_name }}
           RELEASE_PRERELEASE: ${{ inputs.prerelease }}
+          UPDATER_SIGNING_CONFIGURED: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+          APPLE_NOTARIZATION_CONFIGURED: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' && secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
 
   build:
     needs: prepare
@@ -137,6 +141,10 @@ jobs:
           RELEASE_TARGET: ${{ matrix.id }}
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
           RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
+          RELEASE_UPDATER_ENABLED: ${{ needs.prepare.outputs.updater_enabled }}
+          RELEASE_UPDATER_PUBLIC_KEY: ${{ needs.prepare.outputs.updater_public_key }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -167,6 +175,8 @@ jobs:
       RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
       RELEASE_PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
       RELEASE_PUBLISHED_AT: ${{ needs.prepare.outputs.published_at }}
+      RELEASE_UPDATER_ENABLED: ${{ needs.prepare.outputs.updater_enabled }}
+      RELEASE_UPDATER_PUBLIC_KEY: ${{ needs.prepare.outputs.updater_public_key }}
     steps:
       - uses: actions/checkout@v4
         with:

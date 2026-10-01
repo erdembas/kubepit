@@ -1,5 +1,23 @@
 # Changelog / Değişiklik günlüğü
 
+## 0.0.2 — Signed updates / İmzalı güncellemeler
+
+### English
+
+- Check for updates after startup and every five minutes when automatic checks are enabled. A dismissible announcement presents the new version, release notes and explicit download/install controls without repeatedly announcing the same version.
+- Show download progress and a restart action after installation; protect checks and installation from overlapping across application windows.
+- Require Developer ID signing and Apple notarization for new macOS release packages. Verify signed update artifacts for all six desktop targets and publish the update feed through GitHub Pages.
+- Refresh the Homebrew cask every six hours after verifying release metadata and checksums. Website version labels follow verified published releases; unchanged metadata no longer triggers redundant browser asset requests.
+- Migration: v0.0.1 has no updater public key. Install v0.0.2 manually once to receive later signed updates. Linux updates preserve AppImage, DEB or RPM format; package-manager installation may request administrator permission.
+
+### Türkçe
+
+- Otomatik denetim açıksa açılıştan sonra ve her beş dakikada bir güncelleme kontrol edilir. Kapatılabilir duyuru yeni sürümü, sürüm notlarını ve kullanıcının başlattığı indirme/kurulum seçeneklerini sunar; aynı sürümü tekrar tekrar duyurmaz.
+- İndirme ilerlemesi ve kurulumdan sonra yeniden başlatma seçeneği gösterilir; farklı uygulama pencerelerindeki kontrollerin ve kurulumların çakışması önlenir.
+- Yeni macOS sürüm paketlerinde Developer ID imzası ve Apple noter onayı zorunludur. Altı masaüstü hedefinin imzalı güncelleme paketleri doğrulanır ve güncelleme akışı GitHub Pages üzerinden yayımlanır.
+- Homebrew cask dosyası, sürüm bilgileri ve sağlama toplamları doğrulandıktan sonra altı saatte bir güncellenir. Sitedeki sürüm etiketleri doğrulanmış yayınları izler; değişmemiş bilgiler için gereksiz tarayıcı indirme istekleri yapılmaz.
+- Geçiş: v0.0.1 güncelleyici açık anahtarı içermez. Sonraki imzalı güncellemeleri almak için v0.0.2’yi bir kez elle kurun. Linux güncellemeleri AppImage, DEB veya RPM biçimini korur; paket yöneticisiyle kurulum yönetici izni isteyebilir.
+
 ## 0.0.1 — Initial public release / İlk herkese açık sürüm
 
 ### English

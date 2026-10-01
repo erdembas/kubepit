@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import {
   RELEASE_API,
@@ -9,10 +9,46 @@ import {
   validateReleasePair,
   validateHomebrew,
   readReleaseSnapshot,
+  sortReleases,
 } from '../../apps/website/src/lib/releases/model.mjs';
+import { validateUpdaterFeed } from '../release/updater.mjs';
 
 const snapshotPath = new URL('../../apps/website/src/lib/releases/snapshot.json', import.meta.url);
 const releasePath = '/repos/erdembas/kubepit/releases';
+const updaterPath = new URL('../../apps/website/public/updates/latest.json', import.meta.url);
+
+/** Stable releases win; until one has a signed feed, use the newest verified preview. */
+export async function collectUpdaterFeed(snapshot, { publicKey, token, fetchImpl } = {}) {
+  const candidates = snapshot.releases
+    .filter((pair) => pair.manifest.updater)
+    .map((pair) => ({
+      ...pair,
+      version: pair.manifest.version,
+      publishedAt: pair.release.published_at,
+    }));
+  const stable = candidates.filter((pair) => !pair.release.prerelease);
+  const ordered = sortReleases(
+    stable.length ? stable : candidates.filter((pair) => pair.release.prerelease),
+  );
+  if (!ordered.length) return null;
+  if (!publicKey?.trim())
+    throw new Error('Cannot publish an update feed without the trusted public key');
+  for (const pair of ordered) {
+    try {
+      const asset = pair.release.assets.find((item) => item.name === 'latest.json');
+      if (!asset || !Number.isSafeInteger(asset.id) || asset.id <= 0) continue;
+      const text = await readPublicReleaseResource(
+        `https://api.github.com/repos/erdembas/kubepit/releases/assets/${asset.id}`,
+        { token, fetchImpl, accept: 'application/octet-stream' },
+      );
+      validateUpdaterFeed(pair.manifest, text, pair.checksums, pair.release.assets, publicKey);
+      return text;
+    } catch {
+      // A broken newer release may not replace the last complete, trusted feed.
+    }
+  }
+  throw new Error('No published updater feed passed signature and artifact validation');
+}
 
 /** Credentials stay on the GitHub API; redirected public asset downloads get no token. */
 export async function readPublicReleaseResource(
@@ -117,6 +153,15 @@ export async function collectReleaseSnapshot({
       warn(`Skipping ${release.tag_name}: ${error.message}`);
     }
   }
+  const advertisedSigned = selected.filter((release) =>
+    release.assets.some((asset) => asset.name === 'latest.json'),
+  );
+  if (
+    (advertisedSigned.length && !releases.some((pair) => pair.manifest.updater)) ||
+    (advertisedSigned.some((release) => !release.prerelease) &&
+      !releases.some((pair) => !pair.release.prerelease && pair.manifest.updater))
+  )
+    throw new Error('Published signed update metadata is unavailable; keep the deployed feed');
   let homebrew = null;
   if (releases.length) {
     try {
@@ -142,18 +187,34 @@ export async function collectReleaseSnapshot({
 
 async function main() {
   const required = process.argv.includes('--required');
+  const config = JSON.parse(
+    await readFile(
+      new URL('../../apps/desktop/src-tauri/tauri.conf.json', import.meta.url),
+      'utf8',
+    ),
+  );
+  const publicKey = config.plugins?.updater?.pubkey;
   try {
+    const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
     const snapshot = await collectReleaseSnapshot({
-      token: process.env.GITHUB_TOKEN || process.env.GH_TOKEN,
+      token,
     });
     if (required && !snapshot.releases.length)
       throw new Error('No verified binary release is available');
+    const feed = await collectUpdaterFeed(snapshot, { publicKey, token });
+    if (feed) {
+      await mkdir(new URL('./', updaterPath), { recursive: true });
+      await writeFile(updaterPath, feed);
+    } else {
+      await rm(updaterPath, { force: true });
+    }
     await writeFile(snapshotPath, `${JSON.stringify(snapshot, null, 2)}\n`);
     console.log(
       `Download snapshot: ${snapshot.releases.length} verified release(s), Homebrew ${snapshot.homebrew ? 'ready' : 'pending'}.`,
     );
   } catch (error) {
-    if (required) throw error;
+    // Failed refresh must never replace a deployed updater feed with missing or stale data.
+    if (required || publicKey) throw error;
     const previous = readReleaseSnapshot(JSON.parse(await readFile(snapshotPath, 'utf8')));
     console.warn(
       `Release refresh unavailable; keeping ${previous.releases.length} verified bundled release(s). ${error.message}`,

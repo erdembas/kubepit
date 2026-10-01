@@ -162,9 +162,14 @@ export const ipc = {
   updateStatus: () => call<UpdaterStatus>('update_status'),
   /** Null when this is the newest version; rejects when updates are not configured. */
   updateCheck: () => call<UpdateInfo | null>('update_check'),
-  /** Downloads and installs the update found by the last check; relaunch afterwards. */
-  updateInstall: (onEvent: (progress: UpdateProgress) => void) =>
-    callWithChannel<void, UpdateProgress>('update_install', {}, 'onEvent', onEvent),
+  /** Installs only the reviewed version; rejects if another window changed the pending update. */
+  updateInstall: (expectedVersion: string, onEvent: (progress: UpdateProgress) => void) =>
+    callWithChannel<void, UpdateProgress>(
+      'update_install',
+      { expectedVersion },
+      'onEvent',
+      onEvent,
+    ),
 
   // -- Windows --------------------------------------------------------------
   /** Open another app window labelled `label` (`win-…`), cascaded from this one. */

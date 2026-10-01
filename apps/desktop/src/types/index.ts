@@ -1479,6 +1479,7 @@ export interface UpdaterStatus {
 
 /** An available update announced by the release feed (`latest.json`). */
 export interface UpdateInfo {
+  /** Pass this exact version as `expectedVersion` to `update_install` after user consent. */
   version: string;
   current_version: string;
   /** `pub_date` of the feed (RFC 3339). */
