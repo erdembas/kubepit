@@ -13,12 +13,15 @@
       <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#7a3a10" flood-opacity="0.35"/>
     </filter>
   </defs>
-  <rect x="0" y="0" width="1024" height="1024" rx="230" fill="url(#bg)"/>
-  <rect x="0" y="0" width="1024" height="1024" rx="230" fill="url(#glow)"/>
-  <rect x="3" y="3" width="1018" height="1018" rx="227" fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="6"/>
-  <g filter="url(#shadow)" fill="none" stroke="#fdf4ea" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M512 214 770 363v298L512 810 254 661V363z" stroke-width="58"/>
-    <path d="M512 330v104M512 590v104M354 421l90 52M580 551l90 52M670 421l-90 52M444 551l-90 52" stroke-width="44"/>
+  <!-- Match RunHQ's Dock footprint: an 824px body with 100px transparent margins. -->
+  <g transform="translate(100 100) scale(0.8046875)">
+    <rect x="0" y="0" width="1024" height="1024" rx="230" fill="url(#bg)"/>
+    <rect x="0" y="0" width="1024" height="1024" rx="230" fill="url(#glow)"/>
+    <rect x="3" y="3" width="1018" height="1018" rx="227" fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="6"/>
+    <g filter="url(#shadow)" fill="none" stroke="#fdf4ea" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M512 214 770 363v298L512 810 254 661V363z" stroke-width="58"/>
+      <path d="M512 330v104M512 590v104M354 421l90 52M580 551l90 52M670 421l-90 52M444 551l-90 52" stroke-width="44"/>
+    </g>
+    <circle cx="512" cy="512" r="62" fill="#fdf4ea" filter="url(#shadow)"/>
   </g>
-  <circle cx="512" cy="512" r="62" fill="#fdf4ea" filter="url(#shadow)"/>
 </svg>
