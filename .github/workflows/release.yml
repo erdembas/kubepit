@@ -60,7 +60,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_REF: ${{ inputs.ref || github.ref_name }}
-          RELEASE_PRERELEASE: ${{ inputs.prerelease }}
+          # Tag-triggered community builds are previews; stable publication is an explicit dispatch choice.
+          RELEASE_PRERELEASE: ${{ github.event_name == 'push' || inputs.prerelease }}
           UPDATER_SIGNING_CONFIGURED: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
           APPLE_NOTARIZATION_CONFIGURED: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' && secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
 
