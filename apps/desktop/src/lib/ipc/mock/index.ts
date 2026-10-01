@@ -39,6 +39,10 @@ import './recommendations';
 // lifecycle (after './recommendations'); its request log shows in the history
 // (`provideAiHistory`).
 import './ai';
+import './connectionDoctor';
+import './investigations';
+import './networkDiagnostics';
+import './nodeMaintenance';
 // Registered last: it wraps every mutating command to derive the demo audit log.
 import './history';
 

@@ -1,5 +1,6 @@
 import * as i18n from '@/i18n';
-import { AlertTriangle, Loader2, Pencil, Plug, RotateCcw } from 'lucide-react';
+import { useState } from 'react';
+import { AlertTriangle, Loader2, Pencil, Plug, RotateCcw, Stethoscope } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { ClusterProxyLine } from '@/components/connectivity/ClusterProxyLine';
 import { connectCluster } from '@/lib/clusterActions';
@@ -7,6 +8,7 @@ import { serverLabel } from '@/lib/clusterMeta';
 import { useAppStore } from '@/store/useAppStore';
 import type { ClusterDef, ClusterStatus } from '@/types';
 import { ClusterAvatar, EnvPill, ReadOnlyBadge } from './ClusterAvatar';
+import { ConnectionDoctorDialog } from './doctor/ConnectionDoctor';
 
 /** Centered connect / connecting / error state for a cluster tab. */
 export function ConnectScreen({
@@ -17,6 +19,7 @@ export function ConnectScreen({
   status: ClusterStatus | undefined;
 }) {
   i18n.useLocale();
+  const [doctorOpen, setDoctorOpen] = useState(false);
   const state = status?.state ?? 'disconnected';
   const server = status?.server ? serverLabel(status.server) : cluster.context;
   const edit = () => useAppStore.getState().openClusterEditor({ mode: 'edit', cluster });
@@ -106,7 +109,20 @@ export function ConnectScreen({
             </div>
           </>
         )}
+        {state !== 'connecting' && (
+          <Button
+            className="mt-4"
+            variant="ghost"
+            leftIcon={<Stethoscope className="h-3.5 w-3.5" />}
+            onClick={() => setDoctorOpen(true)}
+          >
+            {i18n.t('Connection doctor')}
+          </Button>
+        )}
       </div>
+      {doctorOpen && (
+        <ConnectionDoctorDialog clusterId={cluster.id} onClose={() => setDoctorOpen(false)} />
+      )}
     </div>
   );
 }

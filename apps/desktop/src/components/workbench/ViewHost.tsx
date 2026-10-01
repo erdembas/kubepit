@@ -22,6 +22,9 @@ import { ResourceMapPage } from './topology/ResourceMapPage';
 import { NetpolPage } from './netpol/NetpolPage';
 import { UpgradeReadinessPage } from './upgrade/UpgradeReadinessPage';
 import { SecurityPage } from './security/SecurityPage';
+import { ConnectionDoctorPage } from './doctor/ConnectionDoctor';
+import { InvestigationsPage } from './investigations/InvestigationsPage';
+import { NetworkDiagnosticsPage } from './network-diagnostics/NetworkDiagnosticsPage';
 
 /**
  * Renders the page of one view tab. Hidden tabs stay mounted with
@@ -72,6 +75,19 @@ export const ViewHost = memo(function ViewHost({
     );
   if (activeKind === VIEW.portForwards)
     return <PortForwardsPage clusterId={clusterId} isActive={isActive} />;
+  if (activeKind === VIEW.connectionDoctor)
+    return <ConnectionDoctorPage clusterId={clusterId} isActive={isActive} />;
+  if (activeKind === VIEW.investigations)
+    return <InvestigationsPage clusterId={clusterId} active={isActive} />;
+  if (activeKind === VIEW.networkDiagnostics)
+    return (
+      <NetworkDiagnosticsPage
+        clusterId={clusterId}
+        namespaces={namespaces}
+        isActive={isActive}
+        apiResources={apiResources}
+      />
+    );
   if (activeKind === VIEW.helmReleases)
     return <HelmPage clusterId={clusterId} namespaces={namespaces} isActive={isActive} />;
   if (activeKind === VIEW.myPermissions)

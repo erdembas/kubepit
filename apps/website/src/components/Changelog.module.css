@@ -1,0 +1,240 @@
+.main {
+  padding-top: 44px;
+  padding-bottom: 100px;
+}
+.navigation {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  font-size: 12px;
+  color: rgb(var(--fg-muted));
+}
+.navigation a:hover {
+  color: rgb(var(--fg));
+}
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: rgb(var(--fg-dim));
+}
+.back:hover {
+  color: rgb(var(--fg));
+}
+.intro {
+  padding: 54px 0 60px;
+  max-width: 640px;
+}
+.intro h1 {
+  font-size: clamp(38px, 5vw, 62px);
+  letter-spacing: -2.5px;
+  line-height: 1.1;
+  margin-bottom: 22px;
+}
+.intro > p:not(:first-child) {
+  font-size: 13px;
+  color: rgb(var(--fg-muted));
+}
+.intro > a {
+  margin-top: 22px;
+  font-size: 12px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 60px;
+  align-items: start;
+}
+.sidebar {
+  position: sticky;
+  top: 108px;
+}
+.sidebar nav > p {
+  margin-bottom: 15px;
+  font: 10px var(--font-mono);
+  color: rgb(var(--fg-dim));
+  letter-spacing: 1.4px;
+}
+.sidebar nav > a {
+  display: block;
+  border-left: 2px solid rgb(var(--border));
+  padding: 10px 14px;
+  font: 12px var(--font-mono);
+  color: rgb(var(--fg-muted));
+}
+.sidebar nav > a:hover {
+  background: rgb(var(--fg) / 0.04);
+  color: rgb(var(--fg));
+}
+.sidebar nav > a.nextLink {
+  color: rgb(var(--accent));
+  border-color: rgb(var(--accent));
+}
+.downloadLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 25px;
+  font-size: 11px;
+  color: rgb(var(--fg-muted));
+}
+.downloadLink:hover {
+  color: rgb(var(--accent));
+}
+.entries {
+  min-width: 0;
+}
+.entry {
+  scroll-margin-top: 105px;
+  border-top: 1px solid rgb(var(--border));
+  padding: 32px 0 42px;
+}
+.entry:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+.entry h2 {
+  font-size: 25px;
+  line-height: 1.35;
+  letter-spacing: -0.8px;
+  margin: 18px 0 24px;
+}
+.entryMeta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  color: rgb(var(--fg-dim));
+  font-size: 11px;
+}
+.entryMeta a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  color: rgb(var(--fg-muted));
+}
+.entryMeta a:hover {
+  color: rgb(var(--accent));
+}
+.versionBadge,
+.unreleasedBadge {
+  border-radius: 4px;
+  border: 1px solid rgb(var(--border-strong));
+  padding: 5px 8px;
+  color: rgb(var(--fg));
+  font: 11px var(--font-mono);
+}
+.unreleasedBadge {
+  color: rgb(var(--accent));
+  border-color: rgb(var(--accent) / 0.3);
+  background: rgb(var(--accent) / 0.06);
+}
+.notice {
+  margin-bottom: 24px;
+  padding: 12px 16px;
+  border-left: 2px solid rgb(var(--accent));
+  background: rgb(var(--accent) / 0.04);
+  color: rgb(var(--fg-muted));
+  font-size: 12px;
+}
+.prose {
+  font-size: 13px;
+  line-height: 1.8;
+  color: rgb(var(--fg-muted));
+  overflow-wrap: anywhere;
+}
+.prose p {
+  margin: 14px 0;
+  line-height: inherit;
+}
+.prose h3 {
+  margin: 28px 0 12px;
+  color: rgb(var(--fg));
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.prose ul {
+  padding-left: 19px;
+  margin: 16px 0;
+}
+.prose li {
+  padding-left: 5px;
+  margin: 10px 0;
+}
+.prose li::marker {
+  color: rgb(var(--fg-dim));
+}
+.prose strong {
+  color: rgb(var(--fg));
+  font-weight: 600;
+}
+.prose code {
+  color: rgb(var(--fg));
+  font: 11px var(--font-mono);
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: rgb(var(--fg) / 0.06);
+}
+.prose a {
+  color: rgb(var(--accent));
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+@media (max-width: 1000px) {
+  .layout {
+    grid-template-columns: 145px minmax(0, 1fr);
+    gap: 36px;
+  }
+}
+@media (max-width: 760px) {
+  .main {
+    padding-top: 28px;
+    padding-bottom: 52px;
+  }
+  .header {
+    gap: 12px;
+  }
+  .navigation {
+    gap: 18px;
+  }
+  .navigation > a:first-child {
+    display: none;
+  }
+  .navigation :global(.github-link) span {
+    display: none;
+  }
+  .intro {
+    padding: 40px 0;
+  }
+  .layout {
+    display: block;
+  }
+  .sidebar {
+    position: static;
+    margin-bottom: 35px;
+  }
+  .sidebar nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .sidebar nav > p {
+    flex-basis: 100%;
+    margin-bottom: 10px;
+  }
+  .sidebar nav > a {
+    padding: 8px 12px;
+    border-left: 0;
+    border-bottom: 2px solid rgb(var(--border));
+  }
+  .downloadLink {
+    margin-top: 16px;
+  }
+  .entry h2 {
+    font-size: 23px;
+  }
+}

@@ -236,6 +236,54 @@ export function watchCacheStats() {
   }));
 }
 
+/** A bounded metadata projection for local search completion. Reading this
+ * accessor never subscribes, reconnects, refreshes or returns resource bodies. */
+export interface CachedResourceMetadata {
+  clusterId: ClusterId;
+  gvk: Gvk;
+  name: string;
+  namespace: string | null;
+  uid: string;
+  labels: Readonly<Record<string, string>>;
+}
+
+export function cachedResourceMetadata(
+  clusterIds: readonly ClusterId[],
+  kindKeys: readonly string[] = [],
+): CachedResourceMetadata[] {
+  const clusters = new Set(clusterIds);
+  const kinds = new Set(kindKeys);
+  const perCluster = new Map<string, number>();
+  const seen = new Set<string>();
+  const rows: CachedResourceMetadata[] = [];
+  // Newer workbench views are usually most relevant. Bound both returned
+  // rows and inspected rows, including duplicate overlapping watch scopes.
+  let inspected = 0;
+  for (const entry of [...entries.values()].reverse()) {
+    if (!clusters.has(entry.clusterId) || (perCluster.get(entry.clusterId) ?? 0) >= 256) continue;
+    const key = kindKey(entry.gvk);
+    if (kinds.size && !kinds.has(key) && key !== 'namespaces') continue;
+    for (const object of entry.snapshot.items) {
+      if (++inspected > 8192 || rows.length >= 2048) return rows;
+      if ((perCluster.get(entry.clusterId) ?? 0) >= 256) break;
+      const namespace = object.metadata.namespace ?? null;
+      const identity = `${entry.clusterId}|${key}|${namespace ?? ''}|${object.metadata.uid || object.metadata.name}`;
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      rows.push({
+        clusterId: entry.clusterId,
+        gvk: entry.gvk,
+        name: object.metadata.name,
+        namespace,
+        uid: object.metadata.uid,
+        labels: Object.fromEntries(Object.entries(object.metadata.labels ?? {}).slice(0, 24)),
+      });
+      perCluster.set(entry.clusterId, (perCluster.get(entry.clusterId) ?? 0) + 1);
+    }
+  }
+  return rows;
+}
+
 /** Restart every watch of a kind (retry button). */
 export function restartWatch(clusterId: ClusterId, gvk: Gvk, namespaces: readonly string[]) {
   entries.get(watchKey(clusterId, gvk, namespaces))?.restart();

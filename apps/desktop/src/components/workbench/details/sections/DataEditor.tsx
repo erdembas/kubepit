@@ -5,6 +5,7 @@ import {
   Check,
   Eye,
   EyeOff,
+  GitBranch,
   Loader2,
   Lock,
   Pencil,
@@ -16,7 +17,6 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
-import { ipc } from '@/lib/ipc';
 import { asObject, asString, field } from '@/lib/kube/accessors';
 import {
   DATA_FORMATS,
@@ -36,8 +36,13 @@ import { modChord } from '@/lib/platform';
 import { useAppStore } from '@/store/useAppStore';
 import type { Gvk, KubeObject } from '@/types';
 import { InlineCodeEditor, PlainTextEditor } from '../../common/InlineCodeEditor';
-import { errorText, scrollParent } from '../../util';
+import { scrollParent } from '../../util';
 import { CodeBlock, CopyButton, Section } from '../primitives';
+import { applyReviewedConfig } from '../../config-impact/actions';
+import {
+  ConfigImpactDialog,
+  type ConfigImpactRequest,
+} from '../../config-impact/ConfigImpactDialog';
 
 /**
  * Editable `data` of a ConfigMap or Secret (Lens-style): short values are
@@ -116,12 +121,14 @@ export function DataEditor({
   clusterId,
   readOnly,
   secret = false,
+  isActive = true,
 }: {
   obj: KubeObject;
   gvk: Gvk;
   clusterId: string;
   readOnly: boolean;
   secret?: boolean;
+  isActive?: boolean;
 }) {
   i18n.useLocale();
   const [draft, setDraftState] = useState<Draft>(EMPTY);
@@ -135,12 +142,11 @@ export function DataEditor({
   const [syntax, setSyntax] = useState<Record<string, DataFormatId>>({});
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
+  const [impact, setImpact] = useState<ConfigImpactRequest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showKeyErrors, setShowKeyErrors] = useState(false);
   // The patch response, shown until the watch delivers a newer version.
   const [latest, setLatest] = useState<{ obj: KubeObject; from: string | undefined } | null>(null);
-  const objRef = useRef(obj);
-  objRef.current = obj;
   const savingRef = useRef(false);
 
   const source = latest && latest.from === obj.metadata.resourceVersion ? latest.obj : obj;
@@ -225,7 +231,7 @@ export function DataEditor({
 
   const save = async () => {
     const d = draftRef.current;
-    if (!editable || savingRef.current) return;
+    if (!editable || savingRef.current || impact) return;
     const changed = Object.keys(d.edits).filter((k) => {
       const e = entries.get(k);
       return !!e && !d.removed[k] && d.edits[k]!.value !== e.text;
@@ -238,8 +244,8 @@ export function DataEditor({
       return;
     }
     const encode = (text: string) => (secret ? encodeBase64(text) : text);
-    const data: Record<string, string | null> = {};
-    const binaryData: Record<string, null> = {};
+    const data: Record<string, string | null> = Object.create(null);
+    const binaryData: Record<string, null> = Object.create(null);
     for (const k of gone) {
       if (entries.get(k)!.binaryField) binaryData[k] = null;
       else data[k] = null;
@@ -249,29 +255,39 @@ export function DataEditor({
     const patch: Record<string, unknown> = { data };
     if (Object.keys(binaryData).length) patch.binaryData = binaryData;
 
-    const run = async () => {
-      savingRef.current = true;
-      setSaving(true);
-      setError(null);
-      try {
-        const next = await ipc.resourcePatch(
-          clusterId,
-          gvk,
-          obj.metadata.namespace ?? null,
-          name,
-          patch,
-          'merge',
-        );
-        setLatest({ obj: next, from: objRef.current.metadata.resourceVersion });
-        setDraft(() => EMPTY);
-        setShowKeyErrors(false);
-        useAppStore.getState().pushToast('success', i18n.t('Saved {name}', { name }));
-      } catch (e) {
-        setError(errorText(e));
-      } finally {
-        savingRef.current = false;
-        setSaving(false);
-      }
+    // Freeze the reviewed identity, version and draft. Watch updates during the
+    // review must not silently become the base of a stale overwrite.
+    const reviewed = source;
+    const run = () => {
+      setImpact({
+        obj: reviewed,
+        changes: [
+          ...changed.map((key) => ({ key, operation: 'changed' as const })),
+          ...gone
+            .filter((key) => !d.added.some((item) => item.key === key))
+            .map((key) => ({ key, operation: 'removed' as const })),
+          ...d.added.map(({ key }) => ({
+            key,
+            operation: entries.has(key) ? ('changed' as const) : ('added' as const),
+          })),
+        ],
+        apply: async () => {
+          savingRef.current = true;
+          setSaving(true);
+          setError(null);
+          try {
+            const next = await applyReviewedConfig(clusterId, gvk, reviewed, patch);
+            setLatest({ obj: next, from: reviewed.metadata.resourceVersion });
+            setDraft(() => EMPTY);
+            setShowKeyErrors(false);
+            useAppStore.getState().pushToast('success', i18n.t('Saved {name}', { name }));
+            return next;
+          } finally {
+            savingRef.current = false;
+            setSaving(false);
+          }
+        },
+      });
     };
 
     const conflicts = [...changed, ...gone].filter((k) => {
@@ -325,6 +341,20 @@ export function DataEditor({
       title={i18n.t('Data')}
       actions={
         <>
+          <button
+            type="button"
+            onClick={() =>
+              setImpact({
+                obj: source,
+                changes: [...entries.keys()].map((key) => ({ key, operation: 'changed' })),
+              })
+            }
+            disabled={!isActive || saving || !!impact}
+            className="text-fg-dim hover:text-fg flex items-center gap-1 px-1 text-[11px] transition disabled:opacity-50"
+          >
+            <GitBranch className="h-3 w-3" />
+            {i18n.t('View consumers')}
+          </button>
           {secret && revealable.length > 0 && (
             <button
               type="button"
@@ -438,6 +468,13 @@ export function DataEditor({
             </div>
           </div>
         </div>
+      )}
+      {impact && (
+        <ConfigImpactDialog
+          clusterId={clusterId}
+          request={impact}
+          onClose={() => setImpact(null)}
+        />
       )}
     </Section>
   );

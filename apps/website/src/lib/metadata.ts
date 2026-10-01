@@ -35,3 +35,28 @@ export function siteMetadata(locale: i18n.Locale): Metadata {
     twitter: { card: 'summary', title, description },
   };
 }
+
+export function changelogMetadata(locale: i18n.Locale): Metadata {
+  const title = i18n.t('Changelog — Kubepit', {}, locale);
+  const description = i18n.t('New features, improvements and fixes, in one place.', {}, locale);
+  const languages = {
+    en: `${siteOrigin}${basePath}/changelog/`,
+    tr: `${siteOrigin}${basePath}/tr/changelog/`,
+    'x-default': `${siteOrigin}${basePath}/changelog/`,
+  };
+  const url = languages[locale];
+  return {
+    title,
+    description,
+    alternates: { canonical: url, languages },
+    openGraph: {
+      title,
+      description,
+      url,
+      type: 'website',
+      locale: locale === 'tr' ? 'tr_TR' : 'en_US',
+      siteName: 'Kubepit',
+    },
+    twitter: { card: 'summary', title, description },
+  };
+}

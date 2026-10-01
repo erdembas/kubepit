@@ -128,7 +128,10 @@ export function releaseNotesFromChangelog(changelog, version) {
     new RegExp(`^## \\[?${escaped}\\]?(?=\\s|$)`).test(entry),
   );
   assert(section, `CHANGELOG.md has no ${version} release notes`);
-  const notes = section.replace(/^## [^\n]*\n/, '').trim();
+  const notes = section
+    .replace(/^## [^\n]*\n/, '')
+    .replace(/^<!-- kubepit-actions: [a-z,-]+ -->\s*$/m, '')
+    .trim();
   assert(
     notes.length > 0 && Buffer.byteLength(notes) <= 64 * 1024,
     'Release notes are missing or too large',

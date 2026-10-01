@@ -16,7 +16,7 @@
   <a href="../CONTRIBUTING.md">Katkıda bulun</a>
 </p>
 
-<p align="center"><strong>v0.0.3 · Deneysel · MIT lisanslı · Türkçe ve İngilizce</strong></p>
+<p align="center"><strong>v0.0.4 · Deneysel · MIT lisanslı · Türkçe ve İngilizce</strong></p>
 
 Kubepit; canlı kaynak tablolarını, logları, terminalleri, topolojiyi, değişiklik
 geçmişini, Helm'i, GitOps'u ve filo işlemlerini tek masaüstü çalışma alanında
@@ -40,6 +40,8 @@ kurmanızı öneririz. 0.0.1 güncelleyici anahtarı içermez; anahtarın eklend
 0.0.2 bu düzeltmeden öncedir. Düzeltilmiş uygulama açılışta ve her
 beş dakikada imzalı güncelleme kontrolü, sürüm notları ve kullanıcının başlattığı
 kurulum/yeniden başlatma seçenekleri sunar.
+
+**0.0.4 yenilikleri:** yönlendirmeli Pod tanılaması, yapılandırma etki incelemesi, filo imaj sürüm matrisi ve incelenerek başlatılan node bakımı; ayrıca kayıtlı incelemeler, tanılama araçları ve akıllı kayıtlı aramalar. Tam [sürüm notlarını](../CHANGELOG.md) uygulamada veya [web sitesinde](https://erdembas.github.io/kubepit/tr/changelog/) okuyun.
 
 ![Örnek Kubernetes kaynaklarıyla Kubepit çalışma alanı](../apps/website/public/workbench.png)
 
@@ -120,6 +122,15 @@ sekmeler, kaydedilmiş tablo görünümleri, yer imleri ve birden fazla pencere 
 bağlamı elinizin altında tutar.
 
 ### Kanıtları takip edin
+
+Bir iş yükünden olay incelemesi başlatıp mevcut logları, event'leri, kaynak
+durumunu, son değişiklikleri ve metrikleri notlarınızla birlikte kaydedin.
+Kanıtları filo veya küme ekranından çevrimdışı açın; dışa aktarmadan önce
+maskelenmiş paketi gözden geçirin. Bağlantı Doktoru küme erişimini aşamalı
+olarak denetler. Ağ Tanılama, seçilen çalışan container'dan bir Service'e
+kullanıcı tarafından başlatılan, süre sınırlı DNS, TCP ve HTTP/TLS testleri
+çalıştırır ve endpoint bilgisini gösterir. Testler Pod exec izni ve salt okunur
+olmayan bir küme gerektirir; container'da eksik araçlar ayrıca belirtilir.
 
 Canlı tablolar yerleşik kaynakları ve keşfedilen CRD'leri kapsar. Kaynak haritasında
 ilişkili nesneleri açın; bir iş yükünün pod ve container loglarını birleştirin;

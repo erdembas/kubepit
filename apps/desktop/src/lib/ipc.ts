@@ -1,5 +1,9 @@
 import { call, callWithChannel, listenEvent } from './ipc/invoke';
 import { terminalIpc } from './ipc/terminalIpc';
+import { connectionDoctorIpc } from './ipc/connectionDoctorIpc';
+import { investigationsIpc } from './ipc/investigationsIpc';
+import { networkDiagnosticsIpc } from './ipc/networkDiagnosticsIpc';
+import { nodeMaintenanceIpc } from './ipc/nodeMaintenanceIpc';
 import type {
   AccessCheck,
   AccessDecision,
@@ -148,6 +152,10 @@ export { isTauri } from './ipc/invoke';
  * snake_case parameters of each `#[tauri::command]`.
  */
 export const ipc = {
+  ...connectionDoctorIpc,
+  ...investigationsIpc,
+  ...networkDiagnosticsIpc,
+  ...nodeMaintenanceIpc,
   // -- App ------------------------------------------------------------------
   appInfo: () => call<AppInfo>('app_info'),
   settingsGet: () => call<Settings>('settings_get'),

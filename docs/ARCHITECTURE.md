@@ -57,17 +57,17 @@ watches stopped with the window that created them
 
 ## Persistence (`~/.kubepit`, override with `KUBEPIT_HOME`)
 
-| File                    | Owner    | Content                                             |
-| ----------------------- | -------- | --------------------------------------------------- |
-| `clusters.json`         | backend  | `ClusterDef[]`                                      |
-| `settings.json`         | backend  | `Settings`                                          |
-| `workspace.json`        | frontend | `WorkspaceSnapshot` (sections, ordering) — opaque   |
-| `manifests.json`        | backend  | recently opened local manifest sources (≤ 12)       |
-| `kubeconfigs/<storage-id>.yaml` | backend | imported kubeconfigs (`managed: true`), mode 0600 |
-| `run/<id>.kubeconfig`   | backend  | single-context kubeconfig for kubectl/helm/terminal |
-| `port_forwards.json`    | backend  | `SavedPortForward[]` (saved port forwards)          |
-| `history.db`            | backend  | audit log, events / changes, scans, assistant request log (SQLite)         |
-| `actions.json`          | backend  | `CustomActionsFile` (custom actions, see below)     |
+| File                            | Owner    | Content                                                            |
+| ------------------------------- | -------- | ------------------------------------------------------------------ |
+| `clusters.json`                 | backend  | `ClusterDef[]`                                                     |
+| `settings.json`                 | backend  | `Settings`                                                         |
+| `workspace.json`                | frontend | `WorkspaceSnapshot` (sections, ordering) — opaque                  |
+| `manifests.json`                | backend  | recently opened local manifest sources (≤ 12)                      |
+| `kubeconfigs/<storage-id>.yaml` | backend  | imported kubeconfigs (`managed: true`), mode 0600                  |
+| `run/<id>.kubeconfig`           | backend  | single-context kubeconfig for kubectl/helm/terminal                |
+| `port_forwards.json`            | backend  | `SavedPortForward[]` (saved port forwards)                         |
+| `history.db`                    | backend  | audit log, events / changes, scans, assistant request log (SQLite) |
+| `actions.json`                  | backend  | `CustomActionsFile` (custom actions, see below)                    |
 
 With `settings.keychain_kubeconfigs` managed kubeconfigs live in the OS
 credential store instead of `kubeconfigs/` (see Connectivity).
@@ -418,7 +418,87 @@ typed confirmations, `read_only` in the backend, RBAC all unchanged).
   POSIX `sh` scripts over exec (GNU coreutils and busybox); folders download
   as `.tar`.
 
+## Saved investigations and diagnostics
+
+Three on-demand workflows share the workbench and have native commands plus
+browser-demo implementations. Their types are re-exported by `types/index.ts`
+and their typed command groups are composed into `lib/ipc.ts`.
+
+- **Investigations** (`investigations.rs`, `investigations/`,
+  `components/workbench/investigations/`): frozen workload evidence, notes,
+  import and previewed export. The native app keeps a versioned
+  `investigations.json` under `KUBEPIT_HOME` using private atomic writes;
+  browser demo records use a separate localStorage key. Capture reads only
+  the selected workload and bounded related evidence; missing, forbidden,
+  timed-out and truncated sources remain explicit. Imported content is
+  validated and redacted again. Editing notes never recaptures evidence.
+  The fleet opens all saved investigations, including records whose cluster
+  was removed; disconnected cluster screens also expose local records.
+  These local operations require no active Kubernetes connection.
+  `comparison.ts` compares two stored captures with the same
+  cluster ID, API group, kind, namespace and name. It orders by capture time,
+  canonicalizes saved redacted objects for the manifest diff, keys Pod restart
+  changes by UID/container, and compares event observations by UID. Missing,
+  truncated or malformed evidence stays explicit. Imported bundles have no local
+  cluster ID and cannot establish a comparable origin. Comparison is read-only
+  and never fetches current cluster data.
+- **Connection doctor** (`connection_doctor.rs`,
+  `components/workbench/doctor/`): an isolated client checks kubeconfig,
+  authentication helper, network/proxy, TLS, API access, identity and
+  namespace permissions. It does not start the normal connection's watches
+  or change connection status. Auth helpers have bounded execution and
+  output; fixed result codes keep credentials and raw helper errors out of
+  reports. Tool and metrics availability are shown separately from RBAC.
+- **Network diagnostics** (`network_diagnostics.rs`,
+  `components/workbench/network-diagnostics/`): explicitly requested probes
+  from a running Pod/container to a selected Service TCP port. Fixed argument
+  arrays, bounded output and timeouts prevent unbounded commands. Missing or
+  incompatible tools are unavailable, never proof of a broken network. The
+  source and target are revalidated by the backend; EndpointSlice lookup
+  failures are reported separately. Pod exec requires a writable cluster
+  and an access review. `network_diagnostics_run` goes through the audit
+  wrapper; request paths and probe output are not stored in the audit log.
+
+All three are available through the navigator and command bar (`:investigations`,
+`:doctor`, `:network`). Tests use temporary storage, synthetic objects and a
+loopback fixture API; they never use the user's kubeconfig.
+
+Additional resource-level workflows reuse these evidence and guard primitives:
+
+- **Pod diagnosis** (`components/workbench/troubleshooting/`) adds a Pod-only
+  details tab and context action. Pure rules combine container states and recent
+  events for crash loops, OOM, image/configuration errors and Pending Pods.
+  Current metrics are context, not historical OOM evidence. Previous logs require
+  an explicit read and stop at 200 lines, 64 KiB or ten seconds; changing the
+  selected Pod/container or hiding the tab cancels the stream. Findings can be
+  saved through the existing investigation flow.
+- **Configuration impact** (`components/workbench/config-impact/`) reviews changed
+  ConfigMap/Secret keys against namespace-scoped built-in consumers before the
+  data editor saves. The scan tracks environment, mounted/projected files,
+  subpath and image-pull references without copying configuration values into
+  the review. Partial, forbidden and timed-out scans stay visible. Save uses
+  reviewed UID/resourceVersion preconditions; optional controller restarts are
+  selected after save, revalidated and passed through shared confirmations.
+  Discovery does not inspect arbitrary operators or external consumers.
+- **Node maintenance** (`nodes/maintenance.rs`,
+  `components/workbench/node-maintenance/`) creates a bounded server-owned plan
+  before any cordon. It reports affected/skipped Pods, shared PDB allowance,
+  unmanaged Pods and local-volume risks. Drain requires a fresh matching plan,
+  writable cluster and access reviews, then applies node UID/resourceVersion and
+  Pod UID preconditions. Receipt statuses and subsequent source/replacement
+  observations are separate. Progress accepts only the cluster-bound plan ID;
+  cached plans expire after 30 minutes and reviews after two minutes. The browser
+  demo uses synthetic fixtures; native tests use a loopback API.
+
 ## Fleet
+
+- `components/image-matrix/` compares built-in Deployment, StatefulSet and
+  DaemonSet container templates across up to eight selected clusters. It shares
+  existing watches, pauses when hidden and never connects an offline cluster.
+  Pod observations follow controller UIDs (including ReplicaSets), with explicit
+  incomplete-list states. Runtime image IDs carry the reported node platform;
+  they are not equated with registry manifest-index digests. Processing is capped
+  at 10,000 objects per source and the rendered matrix at 500 rows.
 
 - `metrics_history.rs` samples metrics-server every 15 s while a cluster is
   connected and keeps 60 minutes of f32 ring buffers for the cluster, each
@@ -433,6 +513,12 @@ typed confirmations, `read_only` in the backend, RBAC all unchanged).
 - `fleet_search.rs` searches every connected cluster concurrently with
   metadata-only lists (substring, glob or `/regex/` names, server-side label
   selectors) and streams results per cluster.
+- `useSavedFleetSearchStore` persists named query/kind/scope snapshots through
+  window storage, validates hydration and storage events, and bounds the list to
+  50 searches and eight pins. Restoring applies all fields atomically, cancels a
+  previous search and clears its results; the visible view's normal validation
+  and debounce decide when to search. A missing section is an error and never
+  widens scope. Results and cluster metadata are not saved with a search.
 - Cross-cluster compare and drift are UI-side: `resource_get` on each
   cluster, `lib/kube/normalize.ts` (mode `compare`) and `lib/diff.ts`.
 
@@ -531,7 +617,7 @@ An optional, richer metrics source next to the metrics-server history
   `^[a-zA-Z_][a-zA-Z0-9_]*$` and are none of the labels the presets use —
   `__name__`, `namespace`, `pod`, `container`, `resource`, `uid`,
   `owner_name`, `owner_kind`, `job`, `instance`, `replicaset`, `job_name`,
-  `reason` — and values are non-empty), an optional `auth` that *references*
+  `reason` — and values are non-empty), an optional `auth` that _references_
   a Secret (bearer token key, or username and password keys; names DNS-1123,
   keys Kubernetes key names) and `tls` for an `https` service behind the
   tunnel (a CA from a ConfigMap or Secret key, else the system roots, or an
@@ -776,12 +862,12 @@ or more clusters like `kubectl diff`, then applies the selected changes.
   `problems`. Each render carries a fingerprint (path/size/mtime of every
   file the source depends on); successful renders land in `manifests.json`.
 - "Watch" (`manifests/watch.rs`): `manifests_watch(source, since,
-  onEvent)` returns an id and watches with `notify` the source's folders
+onEvent)` returns an id and watches with `notify` the source's folders
   recursively (a chart's or Kustomize directory's root, a plain source's
   picked folders) plus, non-recursively, the folders of picked files and
   Helm values files, so rename-based editor saves are seen. After 300 ms
   of quiet it recomputes the fingerprint and sends `ManifestsWatchEvent {
-  watch_id, fingerprint }` only when it changed (edits of hidden folders
+watch_id, fingerprint }` only when it changed (edits of hidden folders
   or `node_modules` stay silent); the tab re-renders when it differs from
   the render's. The baseline is `since`, the fingerprint the tab rendered:
   edits made while no watch ran (tab hidden, Watch off) are reported as
@@ -937,7 +1023,7 @@ that never leaves the machine.
   value) replaced by a marker; stdout and stderr are never stored.
   Background runs record `exit {code}` (a non-zero exit fails the entry; a
   timeout fails it with `timed out after {s}s`, a signal with `terminated
-  by a signal`), terminal launches the keyword `terminal-started`. The
+by a signal`), terminal launches the keyword `terminal-started`. The
   Activity view translates both results (`resultText` in
   `lib/history/audit.ts`); other results stay verbatim. Targets are the
   selected objects (≤ 20) or the cluster. Non-mutating and open-url runs
@@ -1058,7 +1144,7 @@ applying a recommendation only reads, so read-only clusters get it all.
   7-day namespace totals for the dashboard).
 - **Right-sizing**: usage fetching and math are separate. One collection
   pipeline, `rightsizing/collect.rs` (`Kubepit::compute_rightsizing(cluster,
-  request, progress)`, behind `rightsizing_report` and the background
+request, progress)`, behind `rightsizing_report` and the background
   scans), feeds every strategy: it lists the Deployments, StatefulSets,
   DaemonSets and CronJobs in scope (every readable namespace, else the
   accessible ones; one workload is read at its own path and its queries
@@ -1147,7 +1233,7 @@ applying a recommendation only reads, so read-only clusters get it all.
   not). The metrics-server path produces `ContainerUsage` without
   evidence. The math sits behind `rightsizing::strategy::RecommendationStrategy`
   (`fn info() -> RightsizingStrategyInfo`, `fn recommend(&ContainerInput) ->
-  StrategyOutput`; input = name, current requests/limits, `UsageStats`,
+StrategyOutput`; input = name, current requests/limits, `UsageStats`,
   source, settings, optional `UsageEvidence` and `HpaInfo`; output =
   recommended values, confidence, warnings). `info()` also carries the
   strategy's own `defaults` and the `settings_keys` it reads, so the UI
@@ -1265,10 +1351,11 @@ applying a recommendation only reads, so read-only clusters get it all.
 ## Recommendations
 
 Stored, scheduled right-sizing scans (`crates/kubepit-core/src/recommendations.rs`
-+ `recommendations/`), kept in `history.db` (migration 2, see "Persistent
-history") and re-evaluated for the UI with the current settings.
 
-- **Scans** (`recommendations/scan.rs`): one strategy-free collection of
+- `recommendations/`), kept in `history.db` (migration 2, see "Persistent
+  history") and re-evaluated for the UI with the current settings.
+
+* **Scans** (`recommendations/scan.rs`): one strategy-free collection of
   every workload the user can read — `compute_rightsizing` with the saved
   strategy (else automatic) and its effective settings, under a 20-minute
   timeout — stored as a run: `rec_begin` inserts it `running`,
@@ -1282,7 +1369,7 @@ history") and re-evaluated for the UI with the current settings.
   One scan per cluster (a claim held until its history writes are done)
   and two overall (a semaphore; the rest `queued`). Scans only read, so
   read-only clusters are scanned; they never connect on their own.
-- **Stopping**: a scan is cancelled only by dropping its future (abort on
+* **Stopping**: a scan is cancelled only by dropping its future (abort on
   disconnect, removal, shutdown), which is safe because a collection has
   no side effects. Its drop guard finishes the run as interrupted
   (`stopped`) without blocking, unless the real outcome was already handed
@@ -1294,7 +1381,7 @@ history") and re-evaluated for the UI with the current settings.
   was dropped is stopped by the begin itself; a scan that outlives its
   removed cluster stores nothing; runs still `running` at the next start
   become `app-restarted`.
-- **Scheduling** (`recommendations/schedule.rs`): opt-in per process
+* **Scheduling** (`recommendations/schedule.rs`): opt-in per process
   (`Kubepit::set_recommendation_scans`, enabled only in
   `src-tauri/src/setup.rs`, so tests and other binaries start no
   scheduler; manual scans work either way) and per cluster
@@ -1313,7 +1400,7 @@ history") and re-evaluated for the UI with the current settings.
   synced after `settings_set` (opting out stops the scheduler and its
   scan), stopped at shutdown. Removing a cluster waits (bounded) until no
   scan of it will write, then clears its stored scans.
-- **Status and event**: `recommendations://scan` carries a
+* **Status and event**: `recommendations://scan` carries a
   `RecommendationScanStatus` (state idle / queued / running / success /
   failed / interrupted, run id, trigger, progress while running — queries
   answered against 16 × planned batches, growing with splits and a
@@ -1323,7 +1410,7 @@ history") and re-evaluated for the UI with the current settings.
   without progress, after its last progress. "Scan now" is refused while
   disconnected and within 60 s of the last manual scan; during a scan it
   returns the running status.
-- **Reads** (on the blocking pool; no cluster access):
+* **Reads** (on the blocking pool; no cluster access):
   `recommendations_latest` (the latest successful scan, or a past run,
   re-evaluated with `rightsizing::reevaluate` when the current strategy or
   settings differ — `reevaluated`, `days_changed` when the window no
@@ -1344,7 +1431,7 @@ history") and re-evaluated for the UI with the current settings.
   The fleet read also carries each cluster's `last_failure`
   (`rec::fleet_failures`: its newest failed or interrupted run when newer
   than its latest success, or of a cluster that never succeeded).
-- **Alerts (optional, off by default)**: with
+* **Alerts (optional, off by default)**: with
   `Settings.recommendations.alerts` on and alert monitoring on in the
   process (the desktop app only), a stored success raises a
   `RightsizingSaving` alert per workload with a large saving that the
@@ -1369,7 +1456,7 @@ history") and re-evaluated for the UI with the current settings.
   History or as the `RightsizingSaving` reason in Settings →
   Notifications (both set the opt-in; turning it on also re-enables the
   reason).
-- **UI.** Stored scans are read through `store/useRecommendationsStore.ts`:
+* **UI.** Stored scans are read through `store/useRecommendationsStore.ts`:
   per cluster the latest scan (`useLatestRecommendations`), a picked past
   run and the runs (`useShownRecommendations`) and the scan status, with
   sequence-guarded loads; a scan event that ends a scan reloads the scan
@@ -1420,7 +1507,7 @@ history") and re-evaluated for the UI with the current settings.
     it), the scan age per cluster, and "Clear" per cluster and for every
     cluster (`history_clear` with `recommendations`, then `forget` and a
     fleet re-read).
-- **Demo** (`mock/recommendations.ts`, `mock/fixtures/recommendations.ts`,
+* **Demo** (`mock/recommendations.ts`, `mock/fixtures/recommendations.ts`,
   registered after `./cost` and before `./history`): every command, with a
   seeded history per cluster — prod-eu-west-1 30 days of scans (hourly
   for 48 hours, then daily, one failed and one interrupted), staging-gke
@@ -1705,6 +1792,39 @@ cannot silently change what is installed. Since 0.0.2 the public key is bundled,
 and Pages publishes the verified signed feed at `updates/latest.json`.
 Keys, artifacts and migration from 0.0.1 are described in `docs/RELEASING.md`.
 
+### Bundled changelog
+
+`CHANGELOG.md` is the bilingual, human-edited source for all product notes.
+`scripts/changelog/sync.mjs` validates its English/Turkish sections and writes
+`shared/changelog/generated.json`. The desktop's independent About & Updates
+changelog section and the site's `/changelog/` and `/tr/changelog/` routes import
+that same bundle; neither needs a network request to display it. Both render
+Markdown as safe React elements. CI and Pages builds reject a stale bundle.
+
+Unreleased notes are separate from numbered version notes and never imply a
+published package. Missing historical dates remain unknown. The desktop reader
+is independent of updater configuration and of `UpdateCard`, which continues
+to display the available update's actual notes. Packaging already extracts only
+the matching numbered section from the frozen source tag for the signed feed
+and new GitHub Releases; it does not use the working tree's Unreleased section.
+See `docs/RELEASING.md` for the edit/sync/version workflow.
+
+Optional `kubepit-actions` metadata on an entry maps only to the allowlist in
+`shared/changelog/action-ids.json`. The parser validates and removes the comment
+from displayed notes; release extraction also removes it. Desktop buttons open
+existing feature views through `changelogNavigation`. Cluster-specific actions
+use a picker; Network diagnostics requires an already connected cluster. They
+do not connect a cluster or run a diagnostic probe.
+
+`WhatsNewHost` watches the installed version after bootstrap. A versioned local
+watermark makes first launch quiet, preserves its high-water mark on downgrade,
+and limits automatic summaries to releases newer than the previous installation
+and no newer than the current one. Browser Web Locks serialize claims across
+windows; only the native main window may fall back without locks. Storage/lock
+failures suppress automatic prompts. The separate manual preview supports
+Unreleased notes and never updates the watermark. Full-history navigation selects
+and scrolls to the requested entry in About & Updates.
+
 ## Health checks & certificates
 
 - `lib/kube/health/` is a Popeye-style rules engine in pure TS, one file per
@@ -1849,7 +1969,7 @@ the generic watches.
 - **Enforce dry run** (`pod_security.rs`, `pod_security_dry_run`): the enforce
   label change as a merge patch with `dryRun=All`; the `Warning` headers of
   the PodSecurity admission plugin are parsed into violating pods (`pod (and
-  N other pods): checks`) and notes. A dry run never persists, so it is
+N other pods): checks`) and notes. A dry run never persists, so it is
   allowed on read-only clusters (the user still needs `patch` on the
   namespace). Asking for the policy a namespace already enforces sends
   nothing (`unchanged`): the API server only evaluates changes. The server
@@ -2019,7 +2139,7 @@ Custom actions).
   `[A-Za-z0-9_.,:=@%+/-]` are inserted bare. URLs percent-encode values and
   must start with `http(s)://` in the template. Tests run hostile values
   (`$(…)`, backticks, quotes, `;`, newlines) through `/bin/sh`.
-- **Runs** always resolve the *saved* definition by id in the backend, so
+- **Runs** always resolve the _saved_ definition by id in the backend, so
   disabled, out-of-scope and — for `mutating` actions — read-only runs are
   refused whatever the UI sends. `KUBECONFIG` is the cluster's
   `run/<id>.kubeconfig` (`KUBEPIT_CLUSTER`, `KUBEPIT_CONTEXT`,
@@ -2393,6 +2513,7 @@ in-memory demo backend.
 
   The map scenario's summary (`perf-results/ui.json` `raw.mapAll`) counts
   the builds and the long tasks.
+
 - **Open checks.** The first three are manual: they need a `tauri dev`
   window, WKWebView or a GitHub remote. The spec's Results has the steps.
   - H6: in `pnpm tauri:dev`, close a secondary window and confirm in the

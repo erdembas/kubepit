@@ -33,6 +33,9 @@ export const VIEW_KEYS = {
   security: '@security',
   cost: '@cost',
   recommendations: '@recommendations',
+  investigations: '@investigations',
+  connectionDoctor: '@connection-doctor',
+  networkDiagnostics: '@network-diagnostics',
 } as const;
 
 export interface NavItem {
@@ -113,6 +116,9 @@ export function viewLabel(key: string, apiResources?: readonly ApiResourceInfo[]
   if (key === VIEW_KEYS.security) return i18n.t('Security');
   if (key === VIEW_KEYS.cost) return i18n.t('Cost');
   if (key === VIEW_KEYS.recommendations) return i18n.t('Recommendations');
+  if (key === VIEW_KEYS.investigations) return i18n.t('Investigations');
+  if (key === VIEW_KEYS.connectionDoctor) return i18n.t('Connection doctor');
+  if (key === VIEW_KEYS.networkDiagnostics) return i18n.t('Network diagnostics');
   const builtin = Object.values(BUILTIN).find((k) => k.key === key);
   if (builtin)
     return builtin.key === BUILTIN.CustomResourceDefinition.key
@@ -180,6 +186,11 @@ export function buildNav(apiResources: readonly ApiResourceInfo[] | null): NavGr
       items: [
         viewItem(VIEW_KEYS.clusterOverview, i18n.t('Overview'), 'overview cluster dashboard'),
         viewItem(
+          VIEW_KEYS.connectionDoctor,
+          i18n.t('Connection doctor'),
+          'connection doctor diagnose authentication kubeconfig dns tls permissions',
+        ),
+        viewItem(
           VIEW_KEYS.clusterHealth,
           i18n.t('Health'),
           'health checks popeye lint score findings certificates tls expiry',
@@ -193,6 +204,11 @@ export function buildNav(apiResources: readonly ApiResourceInfo[] | null): NavGr
           VIEW_KEYS.changes,
           i18n.t('Changes'),
           'changes timeline history audit diff what changed incident',
+        ),
+        viewItem(
+          VIEW_KEYS.investigations,
+          i18n.t('Investigations'),
+          'incident investigations evidence notes snapshot offline bundle',
         ),
         viewItem(
           VIEW_KEYS.upgradeReadiness,
@@ -252,6 +268,11 @@ export function buildNav(apiResources: readonly ApiResourceInfo[] | null): NavGr
           'network policy policies netpol simulator reachability can talk connectivity isolation',
         ),
         viewItem(VIEW_KEYS.portForwards, i18n.t('Port Forwarding'), 'port forward pf'),
+        viewItem(
+          VIEW_KEYS.networkDiagnostics,
+          i18n.t('Network diagnostics'),
+          'network diagnostics live probe dns tcp http tls service endpoints connectivity',
+        ),
       ],
       subgroups: [],
     },

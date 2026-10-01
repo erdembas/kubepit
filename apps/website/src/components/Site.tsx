@@ -250,6 +250,12 @@ export function Site() {
             <a href="#downloads" onClick={() => setMenu(false)}>
               {t('Download Kubepit')}
             </a>
+            <a
+              href={`${basePath}/${locale === 'tr' ? 'tr/' : ''}changelog/`}
+              onClick={() => setMenu(false)}
+            >
+              {t('Changelog')}
+            </a>
           </nav>
           <div className="header-actions">
             <a
@@ -762,6 +768,7 @@ export function Site() {
         </a>
         <span>{t('Local-first Kubernetes IDE. MIT licensed.')}</span>
         <nav aria-label={t('Footer navigation')}>
+          <a href={`${basePath}/${locale === 'tr' ? 'tr/' : ''}changelog/`}>{t('Changelog')}</a>
           <a
             href={`${repository}/blob/main/${locale === 'tr' ? 'docs/README.tr.md' : 'README.md'}`}
           >

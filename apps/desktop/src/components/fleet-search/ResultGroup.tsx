@@ -14,7 +14,7 @@ import { copyText } from '@/components/workbench/util';
 import { connectCluster, openAndConnect } from '@/lib/clusterActions';
 import { cn } from '@/lib/cn';
 import { matchRanges } from '@/lib/fleet/nameMatch';
-import { isRegexText } from '@/lib/fleet/searchQuery';
+import { parseSearchInput } from '@/lib/fleet/searchQuery';
 import { formatAge } from '@/lib/format';
 import { kindKey } from '@/lib/kube/catalog';
 import { kindIcon } from '@/lib/kube/icons';
@@ -34,12 +34,7 @@ export function rowKey(row: Row): string {
 
 /** Name with the matched parts of the query highlighted. */
 function Highlighted({ name, query }: { name: string; query: string }) {
-  const text = isRegexText(query.trim())
-    ? query.trim()
-    : query
-        .split(/\s+/)
-        .filter((t) => t && !t.includes(':') && !/[=!]/.test(t))
-        .join(' ');
+  const text = parseSearchInput(query).text;
   const ranges = matchRanges(text, name);
   if (!ranges.length) return <>{name}</>;
   const parts: React.ReactNode[] = [];

@@ -16,7 +16,7 @@
   <a href="CONTRIBUTING.md">Contribute</a>
 </p>
 
-<p align="center"><strong>v0.0.3 · Experimental · MIT licensed · English & Turkish</strong></p>
+<p align="center"><strong>v0.0.4 · Experimental · MIT licensed · English & Turkish</strong></p>
 
 Kubepit brings live resource tables, logs, terminals, topology, change history,
 Helm, GitOps and fleet operations into one desktop workspace. Follow an incident
@@ -110,6 +110,8 @@ pnpm install --frozen-lockfile
 pnpm dev:ui
 ```
 
+**New in 0.0.4:** guided Pod diagnosis, configuration impact review, a fleet image version matrix and reviewed node maintenance, alongside saved investigations, diagnostic tools and smart saved searches. Read the complete [release notes](CHANGELOG.md) in the app or on the [website](https://erdembas.github.io/kubepit/changelog/).
+
 ## Built around the work, from investigation to review
 
 ### A workspace for your fleet
@@ -127,6 +129,14 @@ the resource map; combine workload logs across pods and containers; filter
 structured records by level and field; correlate events, rollout revisions and
 changes. CPU and memory history can come from metrics-server, with richer charts
 and historical logs available through Prometheus and Loki.
+
+Save an investigation from a workload to freeze available logs, events, resource
+state, recent changes and metrics with your notes. Reopen the evidence offline
+from the fleet or cluster, and review a redacted bundle before exporting it.
+Connection doctor checks cluster access in stages; Network diagnostics runs
+explicit, bounded DNS, TCP and HTTP/TLS probes from a selected running container
+to a Service, alongside its endpoint information. Probes require Pod exec access
+and a writable cluster; missing container tools are reported as unavailable.
 
 ### Review the change you are about to make
 

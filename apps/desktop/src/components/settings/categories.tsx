@@ -13,6 +13,7 @@ import { useAppStore } from '@/store/useAppStore';
 import type { Settings } from '@/types';
 import { SettingsPageShell, SettingsSection } from './SettingsView';
 import { UpdatesSection } from './UpdatesSection';
+import { ChangelogSection } from './ChangelogSection';
 
 /**
  * Local draft of backend settings with an explicit Save, like RunHQ's settings pages.
@@ -506,6 +507,7 @@ export function AboutCategory({ description }: { description: string }) {
         autoCheck={draft ? draft.auto_check_updates : null}
         onAutoCheck={(v) => update('auto_check_updates', v)}
       />
+      <ChangelogSection />
       <SettingsSection
         title={i18n.t('Data folder')}
         description={i18n.t('Cluster registry, settings and workspace layout live here as JSON.')}

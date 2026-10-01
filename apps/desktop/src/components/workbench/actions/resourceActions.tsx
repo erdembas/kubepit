@@ -6,6 +6,7 @@ import {
   Ban,
   Bug,
   CalendarSearch,
+  ClipboardCheck,
   FolderTree,
   Copy,
   Link2,
@@ -44,6 +45,8 @@ import { wizardActions } from './wizardActions';
 // Power user: user-defined custom actions (k9s-plugin style).
 import { customResourceActions } from './custom/customActions';
 import { hasLokiLogs, openLokiForObject } from './lokiActions';
+import { startInvestigation } from '../investigations/navigation';
+import { openPodDiagnosis } from '../details/detailsTabs';
 
 import {
   openPodLogs,
@@ -73,6 +76,15 @@ export interface ResourceAction {
 }
 
 const SCALABLE = new Set(['Deployment', 'StatefulSet', 'ReplicaSet', 'ReplicationController']);
+const INVESTIGABLE = new Set([
+  'Pod',
+  'Deployment',
+  'StatefulSet',
+  'DaemonSet',
+  'ReplicaSet',
+  'Job',
+  'CronJob',
+]);
 export const RESTARTABLE = new Set(['Deployment', 'StatefulSet', 'DaemonSet']);
 
 export function resourceActions({
@@ -95,6 +107,15 @@ export function resourceActions({
   const add = (a: ResourceAction) => actions.push(a);
 
   if (kind === 'Pod') {
+    if (gvk.group === '')
+      add({
+        id: 'diagnosis',
+        label: i18n.t('Diagnosis'),
+        icon: ClipboardCheck,
+        mutating: false,
+        access: [],
+        run: () => openPodDiagnosis(clusterId, gvk, obj),
+      });
     add({
       id: 'logs',
       label: i18n.t('Logs'),
@@ -184,6 +205,14 @@ export function resourceActions({
       icon: Sparkles,
       mutating: false,
       run: () => explainObject(clusterId, gvk, obj),
+    });
+  if (INVESTIGABLE.has(kind))
+    add({
+      id: 'investigate',
+      label: i18n.t('Start investigation'),
+      icon: ClipboardCheck,
+      mutating: false,
+      run: () => void startInvestigation(clusterId, gvk, obj),
     });
   if (SCALABLE.has(kind))
     add({
@@ -299,26 +328,12 @@ export function resourceActions({
     });
     add({
       id: 'drain',
-      label: i18n.t('Drain'),
+      label: i18n.t('Review node maintenance'),
       icon: ArrowRightLeft,
-      tone: 'danger',
-      mutating: true,
+      mutating: false,
+      access: [],
       primary: true,
-      run: () =>
-        confirmDestructive({
-          cluster,
-          title: i18n.t('Drain node'),
-          message: i18n.t('Cordon {name} and evict every pod except DaemonSet and mirror pods?', {
-            name,
-          }),
-          confirmLabel: i18n.t('Drain'),
-          typeName: name,
-          run: () =>
-            void runMutation(
-              () => ipc.nodeDrain(clusterId, name, false),
-              i18n.t('Draining {name}', { name }),
-            ),
-        }),
+      run: () => useActionDialogs.getState().open({ kind: 'node-maintenance', clusterId, name }),
     });
   }
   add({

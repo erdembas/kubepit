@@ -286,6 +286,15 @@ export function appActions(): PaletteItem[] {
     },
     {
       type: 'action',
+      id: 'image-matrix',
+      label: i18n.t('Image version matrix'),
+      icon: Boxes,
+      keywords: 'fleet image version matrix digest deployment container sürüm imaj matris',
+      group: 'actions',
+      run: () => store.openMainTab({ kind: 'image-matrix' }),
+    },
+    {
+      type: 'action',
       id: 'forwards',
       label: i18n.t('Port forwards'),
       icon: Network,

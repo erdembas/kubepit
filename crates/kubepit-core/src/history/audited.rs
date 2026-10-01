@@ -22,7 +22,9 @@ use crate::custom_actions::{
     CustomAction, CustomActionMode, CustomActionResult, CustomActionTarget,
 };
 use crate::manifests::apply::parse_single;
+use crate::network_diagnostics::{NetworkDiagnosticsReport, NetworkDiagnosticsRequest};
 use crate::node_shell::NodeShellPod;
+use crate::nodes::{NodeMaintenanceDrainRequest, NodeMaintenanceReceipt};
 use crate::objects::to_kube_object;
 use crate::resources::parse_documents;
 use crate::rightsizing::{workload_gvk, ContainerResourceChange, WorkloadRef};
@@ -95,6 +97,36 @@ fn helm_result(result: &Result<HelmInstallResult>) -> Option<String> {
 }
 
 impl Kubepit {
+    /// Pod exec probes are explicit operations and remain visible in local activity.
+    pub async fn network_diagnostics_run(
+        &self,
+        cluster_id: &str,
+        request: &NetworkDiagnosticsRequest,
+    ) -> Result<NetworkDiagnosticsReport> {
+        let target = AuditTarget::core("Pod", Some(&request.namespace), &request.pod);
+        let audit = self.audit(
+            cluster_id,
+            AuditAction::NetworkDiagnostics,
+            false,
+            vec![target],
+        );
+        let result = self
+            .network_diagnostics_run_unaudited(cluster_id, request)
+            .await;
+        if let Some(mut audit) = audit {
+            // Paths can contain user data. Only the target and protocol are recorded.
+            audit.request(json!({
+                "container": request.container,
+                "target_namespace": request.target_namespace,
+                "service": request.service,
+                "port": request.port,
+                "protocol": request.protocol,
+            }));
+            audit.finish(self, &result);
+        }
+        result
+    }
+
     /// Resolve each document like the apply does (kind through discovery,
     /// namespace settled) and read its live version. Bounded: at most
     /// [`MAX_CAPTURED_OBJECTS`] documents, sequential, each GET time-boxed.
@@ -379,6 +411,40 @@ impl Kubepit {
         audit.request(json!({"force": force}));
         let result = self.node_drain_unaudited(cluster_id, name, force).await;
         audit.finish(self, &result);
+        result
+    }
+
+    /// Reviewed drain: read-only preflight/progress are not audit actions.
+    pub async fn node_maintenance_drain(
+        &self,
+        cluster_id: &str,
+        request: &NodeMaintenanceDrainRequest,
+    ) -> Result<NodeMaintenanceReceipt> {
+        self.ensure_writable(cluster_id, "drain")?;
+        let target = AuditTarget::core("Node", None, &request.name);
+        let Some(mut audit) = self.audit(cluster_id, AuditAction::Drain, false, vec![target])
+        else {
+            return self
+                .node_maintenance_drain_unaudited(cluster_id, request)
+                .await;
+        };
+        audit.request(json!({"reviewed":true,"node_uid":request.node_uid}));
+        let result = self
+            .node_maintenance_drain_unaudited(cluster_id, request)
+            .await;
+        let outcome = match &result {
+            Ok(receipt)
+                if receipt
+                    .evictions
+                    .iter()
+                    .any(|item| !matches!(item.status.as_str(), "accepted" | "already-gone")) =>
+            {
+                Err(anyhow::anyhow!("node-maintenance:evictions-incomplete"))
+            }
+            Ok(_) => Ok(()),
+            Err(error) => Err(anyhow::anyhow!("{error:#}")),
+        };
+        audit.finish(self, &outcome);
         result
     }
 

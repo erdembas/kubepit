@@ -17,6 +17,9 @@ use serde_json::json;
 use crate::app::Kubepit;
 use crate::error::{api_code, kube_error};
 
+mod maintenance;
+pub use maintenance::*;
+
 const EVICTION_CONCURRENCY: usize = 8;
 const MIRROR_ANNOTATION: &str = "kubernetes.io/config.mirror";
 
@@ -109,7 +112,6 @@ impl Kubepit {
         force: bool,
     ) -> Result<()> {
         self.ensure_writable(cluster_id, "drain")?;
-        self.node_cordon_unaudited(cluster_id, name, true).await?;
         let client = self.client(cluster_id).await?;
         let all_pods: Api<Pod> = Api::all(client.clone());
         let pods = all_pods
@@ -121,12 +123,14 @@ impl Kubepit {
 
         if !plan.unmanaged.is_empty() && !force {
             bail!(
-                "node {name} is cordoned but not drained: {} pod(s) are not managed by a controller \
+                "node {name} was not drained: {} pod(s) are not managed by a controller \
                  and would be lost ({}). Drain with force to delete them.",
                 plan.unmanaged.len(),
                 format_pods(&plan.unmanaged)
             );
         }
+
+        self.node_cordon_unaudited(cluster_id, name, true).await?;
 
         let unmanaged = if force {
             plan.unmanaged.clone()

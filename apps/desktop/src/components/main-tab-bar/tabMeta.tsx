@@ -3,6 +3,7 @@ import {
   BookOpen,
   History,
   LayoutDashboard,
+  Layers,
   Network,
   ScanSearch,
   Settings as SettingsIcon,
@@ -57,6 +58,12 @@ export function resolveTabMeta(
       return {
         label: i18n.t('Activity'),
         icon: <History className="h-3 w-3" />,
+        closable: true,
+      };
+    case 'image-matrix':
+      return {
+        label: i18n.t('Image version matrix'),
+        icon: <Layers className="h-3 w-3" />,
         closable: true,
       };
     case 'cluster': {

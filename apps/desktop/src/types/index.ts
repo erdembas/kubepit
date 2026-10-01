@@ -797,7 +797,8 @@ export type AuditAction =
   | 'file-upload'
   | 'node-shell'
   | 'rightsize'
-  | 'custom-action';
+  | 'custom-action'
+  | 'network-diagnostics';
 
 export type AuditOutcome = 'ok' | 'error';
 
@@ -3122,3 +3123,7 @@ export interface AiLogPage {
   /** Summed cost of the rows that have one; null when none has. */
   cost: number | null;
 }
+export * from './connectionDoctor';
+export * from './investigations';
+export * from './nodeMaintenance';
+export * from './networkDiagnostics';

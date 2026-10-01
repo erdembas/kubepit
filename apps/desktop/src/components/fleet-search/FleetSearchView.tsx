@@ -1,14 +1,14 @@
 import { useLocaleMemo as useMemo } from '@/i18n';
 import * as i18n from '@/i18n';
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Loader2, Plug, ScanSearch, Square, X } from 'lucide-react';
+import { AlertTriangle, Plug, ScanSearch } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Kbd } from '@/components/ui/Kbd';
 import { Select, type SelectOption } from '@/components/ui/Select';
 import { connectCluster } from '@/lib/clusterActions';
 import { ENVIRONMENTS } from '@/lib/clusterMeta';
 import { cn } from '@/lib/cn';
-import { SEARCH_KINDS, isBroad } from '@/lib/fleet/searchQuery';
+import { SEARCH_KINDS, isBroad, parseSearchInput, scanSearchInput } from '@/lib/fleet/searchQuery';
 import { openObject } from '@/lib/navigation';
 import { IS_MAC } from '@/lib/platform';
 import { sectionColor } from '@/lib/sectionColors';
@@ -23,6 +23,9 @@ import {
 import type { ClusterEnvironment } from '@/types';
 import { ResultGroup, rowKey, type Row } from './ResultGroup';
 import { EXAMPLES, SyntaxHints } from './SyntaxHints';
+import { FleetSearchInput } from './FleetSearchInput';
+import { useSearchSuggestionContext } from './useSearchSuggestions';
+import { SavedSearches } from './SavedSearches';
 
 /** Environment → CSS colour for the scope select's dot. */
 const ENV_COLOR: Record<string, string> = {
@@ -73,6 +76,14 @@ export function FleetSearchView({ visible }: { visible: boolean }) {
   const focusToken = useFleetSearchStore((s) => s.focusToken);
   const { setInput, toggleKind, setScope, run, cancel, reset } = useFleetSearchStore.getState();
   const inputRef = useRef<HTMLInputElement>(null);
+  const suggestionContext = useSearchSuggestionContext(visible);
+  const currentParsed = useMemo(
+    () => parseSearchInput(input, suggestionContext.apiResources),
+    [input, suggestionContext.apiResources],
+  );
+  const pendingFilter = scanSearchInput(input, suggestionContext.apiResources).some(
+    (token) => token.type !== 'text' && (!token.complete || !token.valid),
+  );
   const listRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [activeKey, setActiveKey] = useState<string | null>(null);
@@ -88,10 +99,11 @@ export function FleetSearchView({ visible }: { visible: boolean }) {
       if (useFleetSearchStore.getState().signature) reset();
       return;
     }
+    if (pendingFilter) return;
     if (useFleetSearchStore.getState().signature === searchSignature(input, kinds, scope)) return;
     const timer = window.setTimeout(() => void run(), 280);
     return () => window.clearTimeout(timer);
-  }, [input, kinds, scope, visible, run, reset]);
+  }, [input, kinds, scope, visible, pendingFilter, run, reset]);
 
   const byId = useMemo(() => new Map(clusters.map((c) => [c.id, c])), [clusters]);
   const rows = useMemo<Row[]>(
@@ -126,6 +138,7 @@ export function FleetSearchView({ visible }: { visible: boolean }) {
       if (next) setActiveKey(rowKey(next));
     } else if (e.key === 'Enter') {
       e.preventDefault();
+      if (pendingFilter) return;
       const stale =
         useFleetSearchStore.getState().signature !== searchSignature(input, kinds, scope);
       if (stale || !active) void run();
@@ -154,7 +167,7 @@ export function FleetSearchView({ visible }: { visible: boolean }) {
   const skipped = order.filter((id) => results[id]?.state === 'skipped');
   const truncated = order.some((id) => results[id]?.truncated);
   const elapsed = ((finishedAt ?? Date.now()) - startedAt) / 1000;
-  const kindOverride = !!parsed?.kinds.length && query === input;
+  const kindOverride = !!currentParsed.kinds.length;
 
   const scopeOptions: SelectOption[] = [
     { value: 'all', label: i18n.t('All clusters') },
@@ -182,7 +195,7 @@ export function FleetSearchView({ visible }: { visible: boolean }) {
             'radial-gradient(800px 260px at 50% -30%, rgb(var(--accent) / 0.07), transparent 70%)',
         }}
       />
-      <header className="relative mx-auto w-full max-w-5xl shrink-0 px-8 pt-7 pb-3">
+      <header className="relative z-20 mx-auto w-full max-w-5xl shrink-0 px-4 pt-7 pb-3 sm:px-8">
         <div className="text-fg-dim mb-3 flex items-center gap-2 text-[11px] tabular-nums">
           <span className="bg-accent/15 text-accent inline-flex h-5 w-5 items-center justify-center rounded-md">
             <ScanSearch className="h-3.5 w-3.5" />
@@ -200,54 +213,25 @@ export function FleetSearchView({ visible }: { visible: boolean }) {
           <Kbd className="ml-auto">{SHORTCUT}</Kbd>
         </div>
 
-        <div className="border-border/80 bg-surface-raised/70 focus-within:border-accent/45 flex h-11 items-center gap-2.5 rounded-xl border px-3.5 transition">
-          {running ? (
-            <Loader2 className="text-accent h-4 w-4 shrink-0 animate-spin" />
-          ) : (
-            <ScanSearch className="text-fg-dim h-4 w-4 shrink-0" />
-          )}
-          <input
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={onKeyDown}
-            placeholder={i18n.t('Search every connected cluster by name, label, kind…')}
-            aria-label={i18n.t('Fleet search')}
-            spellCheck={false}
-            autoCorrect="off"
-            autoCapitalize="off"
-            className="text-fg placeholder:text-fg-dim/80 h-full min-w-0 flex-1 bg-transparent font-mono text-[13.5px] tracking-[-0.01em] outline-none"
-          />
-          {running && (
-            <button
-              type="button"
-              onClick={cancel}
-              className="text-fg-dim hover:text-fg hover:bg-fg/6 flex h-6 items-center gap-1 rounded-md px-1.5 text-[11px]"
-            >
-              <Square className="h-2.5 w-2.5 fill-current" />
-              {i18n.t('Stop')}
-            </button>
-          )}
-          {input && (
-            <button
-              type="button"
-              aria-label={i18n.t('Clear search')}
-              onClick={() => {
-                setInput('');
-                inputRef.current?.focus();
-              }}
-              className="text-fg-dim hover:text-fg hover:bg-fg/6 flex h-6 w-6 items-center justify-center rounded-md"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
+        <FleetSearchInput
+          value={input}
+          onChange={setInput}
+          context={suggestionContext}
+          running={running}
+          onCancel={cancel}
+          inputRef={inputRef}
+          onKeyDown={onKeyDown}
+        />
 
-        <SyntaxHints onInsert={insertToken} parsed={query === input ? parsed : null} />
+        <SyntaxHints onInsert={insertToken} parsed={currentParsed} />
 
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           {SEARCH_KINDS.map(({ def, label }) => {
-            const on = kinds.includes(def.key);
+            const on = kindOverride
+              ? currentParsed.kinds.some(
+                  (kind) => kind.group === def.group && kind.plural === def.plural,
+                )
+              : kinds.includes(def.key);
             return (
               <button
                 key={def.key}
@@ -280,6 +264,7 @@ export function FleetSearchView({ visible }: { visible: boolean }) {
             />
           </div>
         </div>
+        <SavedSearches visible={visible} pendingFilter={pendingFilter} />
       </header>
 
       <div

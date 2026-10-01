@@ -5,6 +5,7 @@ import {
   DASHBOARD_TAB,
   DASHBOARD_TAB_KEY,
   SEARCH_TAB_KEY,
+  IMAGE_MATRIX_TAB_KEY,
   type MainTab,
 } from './types';
 
@@ -27,6 +28,7 @@ export function tabFromKey(key: string): MainTab | null {
   if (key === AI_GUIDE_TAB_KEY) return { kind: 'ai-guide' };
   if (key === 'port-forwards:port-forwards') return { kind: 'port-forwards' };
   if (key === SEARCH_TAB_KEY) return { kind: 'search' };
+  if (key === IMAGE_MATRIX_TAB_KEY) return { kind: 'image-matrix' };
   if (key === ACTIVITY_TAB_KEY) return { kind: 'activity' };
   return null;
 }

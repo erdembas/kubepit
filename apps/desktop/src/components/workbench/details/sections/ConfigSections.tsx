@@ -5,7 +5,7 @@ import { CertificateCards } from './CertificateSections';
 import { DataEditor } from './DataEditor';
 import type { SectionProps } from './types';
 
-export function ConfigMapSections({ obj, gvk, ctx, readOnly }: SectionProps) {
+export function ConfigMapSections({ obj, gvk, ctx, readOnly, isActive }: SectionProps) {
   return (
     <>
       <CertificateCards obj={obj} now={ctx.now} />
@@ -15,12 +15,13 @@ export function ConfigMapSections({ obj, gvk, ctx, readOnly }: SectionProps) {
         gvk={gvk}
         clusterId={ctx.clusterId}
         readOnly={readOnly}
+        isActive={isActive}
       />
     </>
   );
 }
 
-export function SecretSections({ obj, gvk, ctx, readOnly }: SectionProps) {
+export function SecretSections({ obj, gvk, ctx, readOnly, isActive }: SectionProps) {
   i18n.useLocale();
   return (
     <>
@@ -43,6 +44,7 @@ export function SecretSections({ obj, gvk, ctx, readOnly }: SectionProps) {
         gvk={gvk}
         clusterId={ctx.clusterId}
         readOnly={readOnly}
+        isActive={isActive}
         secret
       />
     </>

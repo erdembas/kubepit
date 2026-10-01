@@ -1,7 +1,7 @@
 {
   "name": "kubepit",
   "private": true,
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "A local-first Kubernetes IDE for many clusters.",
   "type": "module",
   "license": "MIT",
@@ -27,6 +27,9 @@
     "test:ui": "pnpm --filter @kubepit/desktop test",
     "test:site": "node --test scripts/site/*.test.mjs",
     "test:release": "node --test scripts/release/*.test.mjs",
+    "changelog:sync": "node scripts/changelog/sync.mjs",
+    "changelog:check": "node scripts/changelog/sync.mjs --check",
+    "test:changelog": "node --test scripts/changelog/*.test.mjs",
     "sync:releases": "node scripts/site/sync-releases.mjs",
     "check:version": "node scripts/check-version.mjs",
     "perf:bench": "pnpm --filter @kubepit/desktop bench --outputJson ../../perf-results/frontend-bench.json",

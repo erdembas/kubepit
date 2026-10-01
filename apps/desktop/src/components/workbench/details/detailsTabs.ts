@@ -10,7 +10,7 @@ import type { ClusterId, Gvk, KubeObject } from '@/types';
 
 // Keyboard mode: `y` / `d` open the YAML and details tabs.
 export type DetailsTabId =
-  'history' | 'map' | 'changes' | 'reachability' | 'details' | 'yaml' | 'events';
+  'history' | 'map' | 'changes' | 'reachability' | 'details' | 'yaml' | 'events' | 'diagnosis';
 
 export interface DetailsTabRequest {
   clusterId: ClusterId;
@@ -61,6 +61,13 @@ export function openObjectChanges(
 ) {
   navigateTo(clusterId, gvk, namespace, name);
   useDetailsTabRequest.getState().open({ clusterId, uid, tab: 'changes' });
+}
+
+/** Select a Pod and open its read-only evidence-guided diagnosis. */
+export function openPodDiagnosis(clusterId: ClusterId, gvk: Gvk, obj: KubeObject) {
+  if (gvk.kind !== 'Pod' || gvk.group !== '' || obj.kind !== 'Pod') return;
+  navigateTo(clusterId, gvk, obj.metadata.namespace ?? null, obj.metadata.name);
+  useDetailsTabRequest.getState().open({ clusterId, uid: obj.metadata.uid, tab: 'diagnosis' });
 }
 
 /** Cache key of an object's rollout history (shared by the History tab and the Rollout section). */

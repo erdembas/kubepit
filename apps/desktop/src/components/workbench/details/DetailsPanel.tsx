@@ -1,6 +1,6 @@
 import * as i18n from '@/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, FileCode2, FileDiff, History, Info, Loader2, X } from 'lucide-react';
+import { Bell, FileCode2, FileDiff, History, Info, Loader2, Stethoscope, X } from 'lucide-react';
 import { ResizeHandle } from '@/components/ui/ResizeHandle';
 import { ipc } from '@/lib/ipc';
 import { resolveRef } from '@/lib/kube/catalog';
@@ -44,8 +44,10 @@ import { ChangesTab } from './ChangesTab';
 import { Radar } from 'lucide-react';
 import { hasReachability } from '@/lib/kube/netpol/subject';
 import { ReachabilityTab } from '../netpol/ReachabilityTab';
+import { PodDiagnosisTab } from '../troubleshooting/PodDiagnosisTab';
 
-type Tab = 'details' | 'yaml' | 'events' | 'history' | 'map' | 'changes' | 'reachability';
+type Tab =
+  'details' | 'yaml' | 'events' | 'history' | 'map' | 'changes' | 'reachability' | 'diagnosis';
 
 const POD_METRIC_KINDS = new Set([
   'Pod',
@@ -171,6 +173,9 @@ export function DetailsPanel({
     .join(' · ');
   const tabs: Array<{ id: Tab; label: string; icon: typeof Info }> = [
     { id: 'details', label: i18n.t('Details'), icon: Info },
+    ...(gvk.kind === 'Pod' && gvk.group === ''
+      ? [{ id: 'diagnosis' as const, label: i18n.t('Diagnosis'), icon: Stethoscope }]
+      : []),
     { id: 'yaml', label: 'YAML', icon: FileCode2 },
     { id: 'events', label: i18n.t('Events'), icon: Bell },
     ...(obj && hasRollout(obj)
@@ -297,12 +302,22 @@ export function DetailsPanel({
           )}
         </div>
       ) : tab === 'details' ||
+        (tab === 'diagnosis' && (obj.kind !== 'Pod' || gvk.group !== '')) ||
         (tab === 'history' && !hasRollout(obj)) ||
         (tab === 'changes' && !isJournaled(obj)) ||
         (tab === 'reachability' && !hasReachability(obj)) ? (
         <div data-details-scroll className="overlay-scroll min-h-0 flex-1 overflow-auto">
           <DetailsOverview obj={obj} gvk={gvk} ctx={ctx} isActive={isActive} readOnly={readOnly} />
         </div>
+      ) : tab === 'diagnosis' ? (
+        <PodDiagnosisTab
+          clusterId={clusterId}
+          obj={obj}
+          isActive={isActive}
+          ctx={ctx}
+          onEvents={() => setTab('events')}
+          onDetails={() => setTab('details')}
+        />
       ) : tab === 'history' ? (
         <HistoryTab {...{ clusterId, gvk, obj, readOnly, isActive }} />
       ) : tab === 'map' ? (

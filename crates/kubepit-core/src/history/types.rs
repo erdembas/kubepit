@@ -93,6 +93,8 @@ pub enum AuditAction {
     /// A `mutating` custom action run in the background or launched in a
     /// terminal (the command is stored redacted, its output never).
     CustomAction,
+    /// Explicit bounded DNS/TCP/HTTP probes executed in an existing pod.
+    NetworkDiagnostics,
 }
 
 impl AuditAction {
@@ -120,6 +122,7 @@ impl AuditAction {
         Self::NodeShell,
         Self::Rightsize,
         Self::CustomAction,
+        Self::NetworkDiagnostics,
     ];
 
     /// The wire name (`set-image`), also stored in the database.
@@ -148,6 +151,7 @@ impl AuditAction {
             Self::NodeShell => "node-shell",
             Self::Rightsize => "rightsize",
             Self::CustomAction => "custom-action",
+            Self::NetworkDiagnostics => "network-diagnostics",
         }
     }
 

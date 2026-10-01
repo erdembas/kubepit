@@ -4,6 +4,7 @@ import {
   BookOpen,
   History,
   LayoutDashboard,
+  Layers,
   Network,
   Search,
   Settings as SettingsIcon,
@@ -16,6 +17,7 @@ import {
   DASHBOARD_TAB_KEY,
   PORT_FORWARDS_TAB_KEY,
   SEARCH_TAB_KEY,
+  IMAGE_MATRIX_TAB_KEY,
   SETTINGS_TAB_KEY,
   useAppStore,
 } from '@/store/useAppStore';
@@ -48,6 +50,12 @@ export function FleetNav({ expanded }: { expanded: boolean }) {
       icon: Search,
       hint: modChord(IS_MAC ? '⇧F' : 'Shift+F'),
       run: () => openFleetSearch(),
+    },
+    {
+      tabKey: IMAGE_MATRIX_TAB_KEY,
+      label: i18n.t('Image version matrix'),
+      icon: Layers,
+      run: () => useAppStore.getState().openMainTab({ kind: 'image-matrix' }),
     },
     {
       tabKey: PORT_FORWARDS_TAB_KEY,

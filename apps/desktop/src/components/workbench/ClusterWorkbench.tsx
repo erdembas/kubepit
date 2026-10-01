@@ -11,6 +11,8 @@ import { ResourceNavigator } from './nav/ResourceNavigator';
 import { ViewPanes } from './tabs/ViewPanes';
 import { WorkbenchHeader } from './WorkbenchHeader';
 import { WizardHost } from './wizards/WizardHost';
+import { Button } from '@/components/ui/Button';
+import { InvestigationsPage } from './investigations/InvestigationsPage';
 
 /**
  * One cluster tab. The shell keeps hidden workbenches mounted, so every
@@ -34,6 +36,7 @@ export function ClusterWorkbench({
   const wasConnected = useRef(false);
   // Header slot the lone pane's view tabs render into (see `ViewPanes`).
   const [tabSlot, setTabSlot] = useState<HTMLDivElement | null>(null);
+  const [offlineInvestigations, setOfflineInvestigations] = useState(false);
   const apiResources = useApiResources(clusterId, isActive && connected);
   const activeKind = useWorkbenchStore((s) => s.activeKind[clusterId] ?? VIEW.clusterOverview);
   const namespaces = useSelectedNamespaces(clusterId);
@@ -87,8 +90,27 @@ export function ClusterWorkbench({
                 apiResources={apiResources}
                 tabSlot={tabSlot}
               />
+            ) : offlineInvestigations ? (
+              <>
+                <div className="border-border flex items-center gap-3 border-b px-4 py-2">
+                  <Button size="sm" variant="ghost" onClick={() => setOfflineInvestigations(false)}>
+                    {i18n.t('Back to connection')}
+                  </Button>
+                  <span className="text-fg-muted text-[11px]">
+                    {i18n.t('Saved evidence is available offline.')}
+                  </span>
+                </div>
+                <InvestigationsPage clusterId={clusterId} active={isActive} />
+              </>
             ) : (
-              <ConnectScreen cluster={cluster} status={status} />
+              <>
+                <ConnectScreen cluster={cluster} status={status} />
+                <div className="border-border flex justify-center border-t p-3">
+                  <Button size="sm" variant="ghost" onClick={() => setOfflineInvestigations(true)}>
+                    {i18n.t('Open saved investigations')}
+                  </Button>
+                </div>
+              </>
             )}
           </div>
           <ClusterDock clusterId={clusterId} visible={isActive} />

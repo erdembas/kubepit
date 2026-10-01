@@ -36,6 +36,8 @@ jobs:
           corepack prepare pnpm@9.14.4 --activate
       - run: pnpm install --frozen-lockfile
       - run: pnpm check:version
+      - run: pnpm changelog:check
+      - run: pnpm test:changelog
       - run: pnpm typecheck
       - run: pnpm i18n:check
       - run: pnpm test:ui

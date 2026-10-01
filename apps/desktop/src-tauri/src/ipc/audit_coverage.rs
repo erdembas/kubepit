@@ -28,6 +28,14 @@ const HELM_CHARTS: Source = ("ipc/helm_charts.rs", include_str!("helm_charts.rs"
 const LOGS_DEBUG: Source = ("ipc/logs_debug.rs", include_str!("logs_debug.rs"));
 const COST: Source = ("ipc/cost.rs", include_str!("cost.rs"));
 const CUSTOM_ACTIONS: Source = ("ipc/custom_actions.rs", include_str!("custom_actions.rs"));
+const NETWORK_DIAGNOSTICS: Source = (
+    "ipc/network_diagnostics.rs",
+    include_str!("network_diagnostics.rs"),
+);
+const NODE_MAINTENANCE: Source = (
+    "ipc/node_maintenance.rs",
+    include_str!("node_maintenance.rs"),
+);
 
 /// Mutating IPC commands: (command, its source). Each command's body must
 /// call the core method of the same name, defined in `history/audited.rs`.
@@ -52,6 +60,8 @@ const MUTATING: &[(&str, Source)] = &[
     ("pod_fs_upload", LOGS_DEBUG),
     ("rightsizing_apply", COST),
     ("custom_action_run", CUSTOM_ACTIONS),
+    ("network_diagnostics_run", NETWORK_DIAGNOSTICS),
+    ("node_maintenance_drain", NODE_MAINTENANCE),
 ];
 
 /// Mutating commands that reach the core through another function:
@@ -114,6 +124,17 @@ const NOT_MUTATING: &[&str] = &[
     "cluster_export_kubeconfig",
     "cluster_client_certificate",
     "cluster_proxy_info",
+    "connection_doctor_run",
+    // Captures read cluster data; bundles and annotations stay local.
+    "investigations_list",
+    "node_maintenance_preflight",
+    "node_maintenance_progress",
+    "investigation_get",
+    "investigation_capture",
+    "investigation_update",
+    "investigation_delete",
+    "investigation_export",
+    "investigation_import",
     // Reads: discovery, schemas, objects, watches, logs, metrics.
     "cluster_overview",
     "api_resources",

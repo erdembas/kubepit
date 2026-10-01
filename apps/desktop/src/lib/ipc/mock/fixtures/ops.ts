@@ -1,4 +1,5 @@
 import YAML from 'yaml';
+import * as i18n from '@/i18n/core';
 import { kindKey, resolveRef } from '@/lib/kube/catalog';
 import type { ApplyMode, Gvk, KubeObject, PatchType } from '@/types';
 import { syncOwner } from './controllers';
@@ -143,6 +144,19 @@ export function patchObject(
       ? jsonPatch(o, patch as Array<{ op: string; path: string; value?: unknown }>)
       : mergePatch(o, patch)
   ) as KubeObject;
+  // The API server enforces UID immutability and resourceVersion preconditions.
+  // Check before touching the demo store, including through merge patches.
+  if (
+    next.metadata?.uid !== o.metadata.uid ||
+    next.metadata?.resourceVersion !== o.metadata.resourceVersion
+  )
+    throw new Error(
+      i18n.t('The resource changed or was replaced. Refresh before applying the patch.'),
+    );
+  const restarted =
+    next.spec?.template?.metadata?.annotations?.['kubectl.kubernetes.io/restartedAt'];
+  const previousRestart =
+    o.spec?.template?.metadata?.annotations?.['kubectl.kubernetes.io/restartedAt'];
   next.metadata = {
     ...next.metadata,
     uid: o.metadata.uid,
@@ -154,6 +168,14 @@ export function patchObject(
   const table = db.kinds.get(kindKey(gvk));
   table?.delete(o.metadata.uid);
   put(db, next);
+  if (
+    restarted &&
+    restarted !== previousRestart &&
+    ['Deployment', 'StatefulSet', 'DaemonSet'].includes(next.kind) &&
+    next.spec?.paused !== true &&
+    next.spec?.updateStrategy?.type !== 'OnDelete'
+  )
+    rolloutRestart(db, next);
   if (next.spec?.replicas !== o.spec?.replicas) reconcile(db, next);
   if (o.kind === 'Node' && next.spec?.unschedulable !== o.spec?.unschedulable)
     cordonNode(db, next.metadata.name, !!next.spec?.unschedulable);

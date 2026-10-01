@@ -25,6 +25,7 @@ import { useActionDialogs, type ActionDialog } from './dialogStore';
 import { runMutation } from './guard';
 import { openExternal } from './openExternal';
 import { SetImageDialog } from './SetImageDialog';
+import { NodeMaintenanceDialog } from '../node-maintenance/NodeMaintenanceDialog';
 
 /** Renders the open action dialog for this cluster (scale, port-forward, pickers). */
 export function ActionDialogs({ clusterId }: { clusterId: string }) {
@@ -32,6 +33,10 @@ export function ActionDialogs({ clusterId }: { clusterId: string }) {
   const dialog = useActionDialogs((s) => s.dialog);
   const close = useActionDialogs((s) => s.close);
   if (!dialog || dialog.clusterId !== clusterId) return null;
+  if (dialog.kind === 'node-maintenance')
+    return (
+      <NodeMaintenanceDialog clusterId={dialog.clusterId} name={dialog.name} onClose={close} />
+    );
   if (dialog.kind === 'menu')
     return <FileContextMenu x={dialog.x} y={dialog.y} items={dialog.items} onClose={close} />;
   if (dialog.kind === 'scale') return <ScaleDialog dialog={dialog} onClose={close} />;

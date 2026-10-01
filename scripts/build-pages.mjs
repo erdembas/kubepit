@@ -27,6 +27,7 @@ function run(args, extraEnv = {}) {
 }
 
 await run(['check:version']);
+await run(['changelog:check']);
 await run(['--filter', '@kubepit/website', 'build']);
 await run(['--filter', '@kubepit/desktop', 'build'], {
   VITE_BASE_PATH: `${base}/demo/`,

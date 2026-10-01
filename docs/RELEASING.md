@@ -4,8 +4,8 @@
 
 ## English
 
-Version **0.0.3** is experimental. It corrects a Linux custom-action cleanup bug
-affecting 0.0.1 and 0.0.2; do not publish or recommend those affected versions.
+Version **0.0.4** is experimental. It includes the 0.0.3 fix for a Linux custom-action
+cleanup bug affecting 0.0.1 and 0.0.2; do not publish or recommend those affected versions.
 Their source tags and original bytes remain unchanged. GitHub Actions builds
 desktop packages from an
 immutable version tag, publishes their checksums and manifest, and refreshes the
@@ -18,6 +18,52 @@ Keep these versions aligned: root `package.json`, desktop and website
 `package.json`, Tauri `tauri.conf.json`, both Rust packages' `Cargo.toml`, and the
 two local package entries in `Cargo.lock`. The website consumes package metadata.
 Update [CHANGELOG.md](../CHANGELOG.md) and both READMEs when the scope changes.
+The changelog workflow below keeps the app, website and GitHub notes aligned.
+
+#### Maintain one changelog
+
+Edit `CHANGELOG.md`; do not edit `shared/changelog/generated.json` by hand.
+Add user-visible changes to the top `Unreleased` entry in both languages. Group
+them under Added, Changed, Fixed, Removed, Deprecated or Security when relevant;
+omit empty categories. Explain the result for users, where to find a feature and
+material limits. Keep implementation details and test logs in the PR.
+This follows [Keep a Changelog](https://keepachangelog.com/en/2.0.0/).
+
+An entry may include one `<!-- kubepit-actions: fleet-search,investigations -->`
+comment before its language sections. Supported IDs are `fleet-search`,
+`investigations`, `connection-doctor`, `network-diagnostics` and `image-matrix`; include only
+features relevant to that entry. The desktop turns these into shortcuts and
+prompts for a cluster where needed. The comment is removed from rendered notes,
+GitHub release bodies and updater notes. Unknown or duplicate IDs fail validation.
+The app shows an automatic summary only after an installed-version increase;
+Unreleased highlights remain an explicit preview.
+
+Use `### English` and `### Türkçe` within every entry, and `####` for categories.
+Before releasing, move the reviewed changes into a new version entry, retain the
+Unreleased entry at the top (with a short “No changes yet” note in both languages
+when empty), and use the actual release date. Do not backfill unknown dates or
+move existing tags. A new numbered heading uses this format:
+
+```markdown
+## [0.0.4] - YYYY-MM-DD — English title / Türkçe başlık
+```
+
+The version above is an example, not a scheduled release. A heading documents
+version scope; it does not establish package availability. After editing:
+
+```bash
+pnpm changelog:sync
+pnpm changelog:check
+pnpm test:changelog
+```
+
+The generated bundle is checked in with its source and powers Settings → About &
+Updates and the website's English/Turkish changelog pages. It is available offline
+in the app. CI rejects missing translations, duplicate versions and stale data.
+GitHub release bodies and signed updater notes continue to come from only the
+exact version section at the frozen tag. Unreleased notes are never included in
+those versioned release notes. Existing GitHub release bodies are not rewritten
+by a packaging retry. No network request is needed to generate or validate notes.
 
 ```bash
 pnpm install --frozen-lockfile
@@ -95,7 +141,7 @@ release only if that GitHub release does not already exist. An existing release'
 pre-release flag is preserved; redispatching does not promote it. Do not change
 the GitHub flag alone: it must match the channel in the immutable release manifest.
 The current workflow does not promote existing previews in place. A future stable
-version must be configured deliberately before its initial publication; 0.0.3
+version must be configured deliberately before its initial publication; 0.0.4
 is intended as a pre-release. The workflow checks out automation and tagged application
 source separately, verifies all version entries, and records both commits. Use
 `publish=false` whenever only build verification is intended.
@@ -113,7 +159,7 @@ The frozen pnpm/Cargo lockfiles are used. Builds isolate application state and
 kubeconfig in runner temp storage; they do not connect to clusters. The release
 config enables signed updater artifacts, sets macOS 11 minimum and offers English and
 Turkish NSIS installer languages. Packages keep architecture-specific names,
-such as `Kubepit_0.0.3_linux_arm64.AppImage`.
+such as `Kubepit_0.0.4_linux_arm64.AppImage`.
 
 Every target must succeed before publication. Checks cover package magic,
 architecture where inspectable, native package metadata, macOS bundle version and
@@ -226,8 +272,8 @@ certification.
 
 ## Türkçe
 
-**0.0.3** deneyseldir. 0.0.1 ve 0.0.2'yi etkileyen Linux özel eylem temizleme
-hatasını düzeltir; etkilenen sürümleri yayımlamayın veya önermeyin. Kaynak etiketleri
+**0.0.4** deneyseldir. 0.0.1 ve 0.0.2'yi etkileyen Linux özel eylem temizleme
+hatasının 0.0.3 düzeltmesini içerir; etkilenen sürümleri yayımlamayın veya önermeyin. Kaynak etiketleri
 ve özgün dosyaları değişmeden kalır. GitHub Actions, sabit sürüm etiketinden
 masaüstü paketlerini
 derler; sağlama toplamları ve bildirimini yayımlar, statik GitHub Pages sitesini
@@ -240,6 +286,56 @@ Kök `package.json`, masaüstü ve site `package.json` dosyaları, Tauri
 `tauri.conf.json`, iki Rust paketinin `Cargo.toml` dosyaları ve `Cargo.lock`
 içindeki iki yerel paket sürümü aynı olmalıdır. Site sürümü paket bilgisinden
 alır. Kapsam değiştiğinde [CHANGELOG.md](../CHANGELOG.md) ve iki README'yi güncelleyin.
+
+#### Tek bir değişiklik günlüğü tutun
+
+`CHANGELOG.md` dosyasını düzenleyin; `shared/changelog/generated.json` dosyasını
+elle değiştirmeyin. Kullanıcıya görünen değişiklikleri en üstteki `Unreleased`
+bölümüne iki dilde ekleyin. İlgili olduğunda Eklenenler, Değişiklikler,
+Düzeltmeler, Kaldırılanlar, Kullanımdan kaldırılacaklar veya Güvenlik başlıklarını
+kullanın; boş kategorileri atlayın. Kullanıcı açısından sonucu, özelliğin nereden
+açıldığını ve önemli sınırlarını anlatın. Uygulama ayrıntılarını ve test loglarını
+PR açıklamasında tutun. Bu düzen [Keep a Changelog](https://keepachangelog.com/en/2.0.0/)
+yaklaşımını izler.
+
+Bir kaydın dil bölümlerinden önce tek bir
+`<!-- kubepit-actions: fleet-search,investigations -->` yorumu eklenebilir.
+Desteklenen kimlikler `fleet-search`, `investigations`, `connection-doctor`,
+`network-diagnostics` ve `image-matrix` değerleridir; yalnızca o kayıttaki ilgili özellikleri ekleyin.
+Masaüstü bunları kısayollara dönüştürür ve gerektiğinde küme seçtirir. Yorum,
+gösterilen notlardan, GitHub yayın açıklamasından ve güncelleyici notlarından
+çıkarılır. Bilinmeyen veya yinelenen kimlikler doğrulamadan geçmez. Uygulama
+otomatik özeti yalnızca kurulu sürüm yükseldikten sonra gösterir; henüz
+yayımlanmamış özelliklerin özeti isteğe bağlı önizlemedir.
+
+Her kayıtta `### English` ve `### Türkçe`, kategorilerde ise `####` kullanın.
+Yayın öncesinde incelenmiş değişiklikleri yeni sürüm kaydına taşıyın; `Unreleased`
+bölümünü en üstte koruyun. Bölüm boşsa iki dilde kısa bir “Henüz değişiklik yok”
+notu bırakın. Gerçek yayın tarihini kullanın; bilinmeyen eski tarihleri tahmin
+etmeyin ve mevcut etiketleri taşımayın. Yeni sürüm başlığının biçimi:
+
+```markdown
+## [0.0.4] - YYYY-MM-DD — English title / Türkçe başlık
+```
+
+Yukarıdaki sürüm yalnızca örnektir; planlanmış bir yayın değildir. Bir başlık
+sürüm kapsamını belgeler, indirilebilir bir paketin bulunduğunu kanıtlamaz.
+Düzenlemeden sonra:
+
+```bash
+pnpm changelog:sync
+pnpm changelog:check
+pnpm test:changelog
+```
+
+Üretilen dosya kaynağıyla birlikte depoda tutulur; Ayarlar → Hakkında ve
+Güncellemeler bölümünü ve sitenin İngilizce/Türkçe değişiklik geçmişi sayfalarını
+besler. Uygulamada çevrimdışı okunabilir. CI; eksik çeviriyi, yinelenen sürümü ve
+güncelliğini yitirmiş çıktıyı reddeder. GitHub yayın açıklamaları ve imzalı
+güncelleyici notları, sabit etiketteki yalnızca ilgili numaralı sürüm bölümünden
+alınır. Henüz yayımlanmamış notlar bu sürüm notlarına eklenmez. Paketleme yeniden
+denemesi mevcut GitHub yayın açıklamalarını değiştirmez. Notları üretmek ve
+doğrulamak için ağ isteği gerekmez.
 
 ```bash
 pnpm install --frozen-lockfile
@@ -319,7 +415,7 @@ yalnızca ilgili GitHub yayını henüz yoksa kararlı yayın oluşturur. Mevcut
 GitHub bayrağını tek başına değiştirmeyin; değiştirilemez sürüm bildirimindeki
 kanalla eşleşmelidir. Mevcut iş akışı yayımlanmış ön sürümleri yerinde kararlı
 sürüme dönüştürmez. Gelecekteki bir kararlı sürüm, ilk yayınından önce bilinçli
-olarak yapılandırılmalıdır; 0.0.3 ön sürüm olarak planlanır. İş akışı, otomasyonu ve
+olarak yapılandırılmalıdır; 0.0.4 ön sürüm olarak planlanır. İş akışı, otomasyonu ve
 etiketlenmiş uygulama kaynağını ayrı checkout eder; tüm sürüm kayıtlarını denetler
 ve her iki commit'i kaydeder. Yalnızca derleme doğrulaması için `publish=false` verin.
 
@@ -336,7 +432,7 @@ Sabit pnpm/Cargo kilit dosyaları kullanılır. Derlemeler uygulama durumunu ve
 kubeconfig'i runner'ın geçici dizininde yalıtır; kümelere bağlanmaz. Yayın ayarı
 imzalı güncelleyici çıktılarını açar, macOS alt sınırını 11 yapar ve NSIS kurulumunda
 İngilizce/Türkçe sunar. Dosya adları mimariyi belirtir; örneğin
-`Kubepit_0.0.3_linux_arm64.AppImage`.
+`Kubepit_0.0.4_linux_arm64.AppImage`.
 
 Yayımdan önce tüm hedefler başarılı olmalıdır. Denetimler; paket yapısını,
 incelenebilen mimariyi, yerel paket üst verisini, macOS uygulama sürümü ve imzasını,

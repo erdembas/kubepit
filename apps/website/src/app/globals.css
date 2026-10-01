@@ -1302,6 +1302,7 @@ pre {
     gap: 18px;
     font-size: 10px;
     width: 100%;
+    flex-wrap: wrap;
   }
   pre {
     font-size: 11px;

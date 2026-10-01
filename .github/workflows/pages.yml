@@ -48,6 +48,7 @@ jobs:
         id: pages
         uses: actions/configure-pages@v5
       - run: pnpm check:version
+      - run: pnpm changelog:check
       - run: pnpm typecheck
       - run: pnpm i18n:check
       - run: pnpm test:site

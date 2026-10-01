@@ -19,6 +19,11 @@ import type {
 } from '@/types';
 import { useAppStore } from './useAppStore';
 import { useWorkbenchStore } from './useWorkbenchStore';
+import {
+  savedSearchScopeExists,
+  searchSnapshot,
+  type FleetSearchSnapshot,
+} from '@/lib/fleet/savedSearches';
 
 /**
  * Fleet search state (the "Fleet search" main tab). Lives in a store so
@@ -68,6 +73,9 @@ interface FleetSearchState {
   setInput: (input: string) => void;
   toggleKind: (key: string) => void;
   setScope: (scope: SearchScope) => void;
+  /** Restore all query fields together; the visible view runs its normal
+   * validation/debounce. This never connects a cluster. */
+  applySavedSearch: (snapshot: FleetSearchSnapshot) => 'applied' | 'missing-section' | 'invalid';
   run: () => Promise<void>;
   cancel: () => void;
   reset: () => void;
@@ -219,6 +227,30 @@ export const useFleetSearchStore = create<FleetSearchState>((set, get) => {
     setScope: (scope) => {
       set({ scope });
       savePrefs(get().kinds, scope);
+    },
+    applySavedSearch: (value) => {
+      const snapshot = searchSnapshot(value);
+      if (!snapshot) return 'invalid';
+      if (!savedSearchScopeExists(snapshot.scope, useAppStore.getState().sections))
+        return 'missing-section';
+      const { searchId, running } = get();
+      if (searchId && running) void ipc.fleetSearchCancel(searchId).catch(() => undefined);
+      set((state) => ({
+        ...snapshot,
+        generation: state.generation + 1,
+        focusToken: state.focusToken + 1,
+        running: false,
+        searchId: null,
+        query: '',
+        signature: '',
+        parsed: null,
+        order: [],
+        results: {},
+        error: null,
+        finishedAt: null,
+      }));
+      savePrefs(snapshot.kinds, snapshot.scope);
+      return 'applied';
     },
     cancel: () => {
       const { searchId, running } = get();

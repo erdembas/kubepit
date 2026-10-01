@@ -13,6 +13,8 @@ import { CommandPalette } from '@/components/palette/CommandPalette';
 import { ConfirmHost } from '@/components/app/ConfirmHost';
 import { Toasts } from '@/components/app/Toasts';
 import { UpdateAnnouncement, UpdateDetailsDialog } from '@/components/app/UpdateAnnouncement';
+import { WhatsNewHost } from '@/components/app/WhatsNewHost';
+import { ChangelogActionHost } from '@/components/changelog/ChangelogActionHost';
 import { PublicDemoBanner } from '@/components/app/PublicDemoBanner';
 // Power user: custom actions (confirmations, runs) and keyboard mode.
 import { CustomActionHost } from '@/components/workbench/actions/custom/CustomActionHost';
@@ -69,6 +71,8 @@ function AppOverlays() {
       <CustomActionHost />
       <KeyboardHost />
       <UpdateDetailsDialog />
+      <WhatsNewHost />
+      <ChangelogActionHost />
       <Toasts />
     </>
   );

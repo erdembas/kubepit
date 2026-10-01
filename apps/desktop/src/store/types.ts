@@ -20,6 +20,7 @@ export type MainTab =
   | { kind: 'port-forwards' }
   /** Fleet search across every connected cluster. */
   | { kind: 'search' }
+  | { kind: 'image-matrix' }
   /** Own-action audit log across every cluster (persistent history). */
   | { kind: 'activity' };
 
@@ -29,6 +30,7 @@ export const SETTINGS_TAB_KEY = 'settings:settings';
 export const AI_GUIDE_TAB_KEY = 'ai-guide:ai-guide';
 export const PORT_FORWARDS_TAB_KEY = 'port-forwards:port-forwards';
 export const SEARCH_TAB_KEY = 'search:search';
+export const IMAGE_MATRIX_TAB_KEY = 'image-matrix:image-matrix';
 export const ACTIVITY_TAB_KEY = 'activity:activity';
 
 export function mainTabKey(tab: MainTab): string {

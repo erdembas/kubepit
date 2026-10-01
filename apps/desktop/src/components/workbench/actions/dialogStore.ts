@@ -11,6 +11,7 @@ export interface PortOption {
 }
 
 export type ActionDialog =
+  | { kind: 'node-maintenance'; clusterId: string; name: string }
   | { kind: 'scale'; clusterId: string; gvk: Gvk; obj: KubeObject }
   | {
       kind: 'port-forward';

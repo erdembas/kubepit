@@ -44,6 +44,9 @@ export const VIEW_COMMANDS: Record<string, string> = {
   gitops: VIEW_KEYS.gitops,
   changes: VIEW_KEYS.changes,
   recommendations: VIEW_KEYS.recommendations,
+  investigations: VIEW_KEYS.investigations,
+  doctor: VIEW_KEYS.connectionDoctor,
+  network: VIEW_KEYS.networkDiagnostics,
 };
 
 const ALL_NAMESPACES = new Set(['all', '-a', '*']);

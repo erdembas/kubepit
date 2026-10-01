@@ -441,6 +441,13 @@ wrap('node_drain', (args) => ({
   targets: [coreTarget('Node', null, String(args.name))],
   request: { force: !!args.force },
 }));
+wrap('node_maintenance_drain', (args) => ({
+  clusterId: String(args.clusterId),
+  action: 'drain',
+  targets: [coreTarget('Node', null, String(args.request.name))],
+  request: { reviewed: true, node_uid: args.request.node_uid },
+  failure: (result) => (result as import('@/types/nodeMaintenance').NodeMaintenanceReceipt).evictions.some((item) => !['accepted','already-gone'].includes(item.status)) ? 'node-maintenance:evictions-incomplete' : null,
+}));
 wrap('helm_rollback', (args) => ({
   clusterId: String(args.clusterId),
   action: 'helm-rollback',
@@ -530,6 +537,21 @@ wrap('pod_debug', (args) => ({
   },
   result: (container) => `container ${String(container)}`,
 }));
+wrap('network_diagnostics_run', (args) => {
+  const request = args.request as Json;
+  return {
+    clusterId: String(args.clusterId),
+    action: 'network-diagnostics',
+    targets: [coreTarget('Pod', String(request.namespace), String(request.pod))],
+    request: {
+      container: request.container,
+      target_namespace: request.target_namespace,
+      service: request.service,
+      port: request.port,
+      protocol: request.protocol,
+    },
+  };
+});
 wrap('pod_fs_upload', (args) => ({
   clusterId: String(args.clusterId),
   action: 'file-upload',

@@ -5,6 +5,7 @@ import {
   Activity,
   AlertTriangle,
   CircleSlash,
+  ClipboardCheck,
   Cpu,
   FileSearch,
   Loader2,
@@ -18,6 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { InvestigationsPage } from '@/components/workbench/investigations/InvestigationsPage';
 import { Kbd } from '@/components/ui/Kbd';
 import { KubepitMark } from '@/components/ui/KubepitMark';
 import { connectCluster } from '@/lib/clusterActions';
@@ -69,6 +71,7 @@ export function Dashboard({ visible }: { visible: boolean }) {
   const openClusterEditor = useAppStore((s) => s.openClusterEditor);
   const setImportDialogOpen = useAppStore((s) => s.setImportDialogOpen);
   const [query, setQuery] = useState('');
+  const [showInvestigations, setShowInvestigations] = useState(false);
   const [envFilter, setEnvFilter] = useState<string | null>(null);
   const [groupBy, setGroupByState] = useState<DashboardGroupBy>(initialGroup);
   const setGroupBy = (next: DashboardGroupBy) => {
@@ -121,12 +124,32 @@ export function Dashboard({ visible }: { visible: boolean }) {
     );
   }
 
+  if (showInvestigations) {
+    return (
+      <div className="bg-surface flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="border-border/60 flex shrink-0 items-center border-b px-4 py-2">
+          <Button size="sm" variant="ghost" onClick={() => setShowInvestigations(false)}>
+            {i18n.t('Back to fleet')}
+          </Button>
+        </div>
+        <InvestigationsPage active={visible} />
+      </div>
+    );
+  }
+
   if (clusters.length === 0) {
     return (
-      <EmptyFleet
-        onAdd={() => openClusterEditor({ mode: 'add' })}
-        onDiscover={() => setImportDialogOpen(true)}
-      />
+      <div className="flex min-h-0 flex-1 flex-col">
+        <EmptyFleet
+          onAdd={() => openClusterEditor({ mode: 'add' })}
+          onDiscover={() => setImportDialogOpen(true)}
+        />
+        <div className="flex justify-center p-3">
+          <Button size="sm" variant="ghost" onClick={() => setShowInvestigations(true)}>
+            {i18n.t('Open saved investigations')}
+          </Button>
+        </div>
+      </div>
     );
   }
 
@@ -210,7 +233,15 @@ export function Dashboard({ visible }: { visible: boolean }) {
                 </p>
               )}
             </div>
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                leftIcon={<ClipboardCheck className="h-3.5 w-3.5" />}
+                onClick={() => setShowInvestigations(true)}
+              >
+                {i18n.t('Investigations')}
+              </Button>
               {stats.connected > 0 && (
                 <Button
                   variant="ghost"

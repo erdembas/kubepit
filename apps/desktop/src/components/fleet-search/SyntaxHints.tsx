@@ -2,7 +2,7 @@ import * as i18n from '@/i18n';
 import { AlertTriangle } from 'lucide-react';
 import type { ParsedSearch } from '@/lib/fleet/searchQuery';
 
-/** Clickable query syntax cheatsheet under the search box, plus what the query resolved to. */
+/** Optional syntax shortcuts; committed filters are shown inside the search editor. */
 
 const TOKENS: Array<{ token: string; hint: () => string }> = [
   { token: 'kind:', hint: () => i18n.t('Kinds, e.g. kind:pod,deploy') },
@@ -30,15 +30,6 @@ export function SyntaxHints({
   parsed: ParsedSearch | null;
 }) {
   i18n.useLocale();
-  const filters = parsed
-    ? [
-        ...parsed.kinds.map((k) => ({ key: `k:${k.kind}`, label: k.kind })),
-        ...(parsed.namespace ? [{ key: 'ns', label: `ns:${parsed.namespace}` }] : []),
-        ...parsed.labels.map((l) => ({ key: `l:${l}`, label: l })),
-        ...parsed.clusters.map((c) => ({ key: `c:${c}`, label: `cluster:${c}` })),
-        ...parsed.environments.map((e) => ({ key: `e:${e}`, label: `env:${e}` })),
-      ]
-    : [];
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1 text-[10.5px]">
       <span className="text-fg-dim mr-1">{i18n.t('Syntax')}</span>
@@ -53,16 +44,6 @@ export function SyntaxHints({
           {token}
         </button>
       ))}
-      {filters.length > 0 && (
-        <span className="text-fg-dim ml-auto flex flex-wrap items-center gap-1">
-          {i18n.t('Filters')}
-          {filters.map((f) => (
-            <span key={f.key} className="bg-accent/10 text-accent rounded px-1.5 py-px font-mono">
-              {f.label}
-            </span>
-          ))}
-        </span>
-      )}
       {parsed?.unknownKinds.length ? (
         <span className="text-status-starting flex items-center gap-1">
           <AlertTriangle className="h-3 w-3" />

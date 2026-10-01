@@ -56,6 +56,7 @@ export const AUDIT_ACTIONS: readonly AuditAction[] = [
   'node-shell',
   'rightsize',
   'custom-action',
+  'network-diagnostics',
 ];
 
 export function actionLabel(action: AuditAction): string {
@@ -106,6 +107,8 @@ export function actionLabel(action: AuditAction): string {
       return i18n.t('Right-size');
     case 'custom-action':
       return i18n.t('Custom action');
+    case 'network-diagnostics':
+      return i18n.t('Network diagnostics');
   }
 }
 
@@ -113,6 +116,7 @@ export function actionLabel(action: AuditAction): string {
 export type ActionTone = 'danger' | 'change' | 'neutral';
 
 export function actionTone(action: AuditAction): ActionTone {
+  if (action === 'network-diagnostics') return 'neutral';
   if (
     action === 'delete' ||
     action === 'drain' ||
