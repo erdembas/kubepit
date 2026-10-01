@@ -60,7 +60,7 @@ jobs:
       - name: Install Tauri Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential pkg-config curl wget file libxdo-dev libssl-dev libdbus-1-dev libayatana-appindicator3-dev librsvg2-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential pkg-config curl wget file libxdo-dev libssl-dev libdbus-1-dev libayatana-appindicator3-dev librsvg2-dev gdb
       - name: Set up stable Rust
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy --no-self-update
@@ -83,4 +83,13 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # Context-budget tests include wall-clock guards. Run test cases serially
       # so competing fixture workloads do not consume their time on shared CPUs.
-      - run: cargo test --workspace --locked -- --test-threads=1
+      - name: Run full serial Rust tests with bounded hang diagnostics
+        run: bash scripts/ci/rust-tests.sh
+      - name: Preserve Rust test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-test-diagnostics
+          path: ${{ runner.temp }}/kubepit-rust-diagnostics/
+          if-no-files-found: ignore
+          retention-days: 7
