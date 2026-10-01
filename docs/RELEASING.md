@@ -77,18 +77,25 @@ For a **new** version, update the eight package/version entries, verify CI, and 
 an annotated `vX.Y.Z` tag. [`release.yml`](../.github/workflows/release.yml) runs on
 `v*` pushes. Never move or recreate an existing release tag.
 
-The existing **v0.0.1** tag points to `10b88447a380279844373eb04a04faf689088246`.
-Packaging was added afterward. To package this exact source with the current
-reviewed workflow, use the manual dispatch:
+The historical **v0.0.1** tag points to `10b88447a380279844373eb04a04faf689088246`.
+Packaging was added afterward. To verify that source with the current reviewed
+workflow without replacing its published packages, use a build-only dispatch:
 
 ```bash
-gh workflow run release.yml --ref main -f ref=v0.0.1 -F publish=true -F prerelease=true
+gh workflow run release.yml --ref main -f ref=v0.0.1 -F publish=false -F prerelease=true
 ```
 
-Use `publish=false` for build-only verification. For an existing release its
-pre-release flag is preserved. For a new release, choose the flag deliberately;
-0.0.1 is experimental. The workflow checks out automation and tagged application
-source separately, verifies all version entries, and records both commits.
+Rebuilding historical source is not a promise of byte-identical packages; already
+published assets remain immutable. Tag-triggered builds create new releases as
+pre-releases. Dispatching with `publish=true` and `prerelease=false` creates a stable
+release only if that GitHub release does not already exist. An existing release's
+pre-release flag is preserved; redispatching does not promote it. Do not change
+the GitHub flag alone: it must match the channel in the immutable release manifest.
+The current workflow does not promote existing previews in place. A future stable
+version must be configured deliberately before its initial publication; 0.0.2
+remains a pre-release. The workflow checks out automation and tagged application
+source separately, verifies all version entries, and records both commits. Use
+`publish=false` whenever only build verification is intended.
 
 | Build target  | Runner                        | Packages           |
 | ------------- | ----------------------------- | ------------------ |
@@ -180,8 +187,11 @@ release URLs, never guessed `/latest` installer names.
 The bundled public key enables the Tauri updater. The main window checks after
 startup and every five minutes when `auto_check_updates` is enabled. Checks never
 overlap installation. A dismissible announcement shows the new version and release
-notes without repeating the same announcement; download/install and restart remain
-explicit user actions. Settings → About & Updates also offers manual checks.
+notes without repeating the same announcement. Download and installation begin
+only after user action. On macOS and Linux, the installed update presents a
+**Relaunch now** button. On Windows, the installer can close and reopen Kubepit as
+part of installation, so save your work before choosing **Download and install**.
+Settings → About & Updates also offers manual checks.
 
 The feed is `https://erdembas.github.io/kubepit/updates/latest.json`. Pages copies
 it only after verifying its hash, exact artifact URLs, complete platform set,
@@ -279,18 +289,25 @@ ve açıklamalı `vX.Y.Z` etiketi gönderin.
 [`release.yml`](../.github/workflows/release.yml), `v*` etiketlerinde çalışır.
 Mevcut sürüm etiketini taşımayın veya yeniden oluşturmayın.
 
-Mevcut **v0.0.1** etiketi `10b88447a380279844373eb04a04faf689088246` commit'ini
-gösterir. Paketleme sonradan eklendi. Tam olarak bu kaynağı güncel ve incelenmiş
-iş akışıyla derlemek için elle başlatın:
+Eski **v0.0.1** etiketi `10b88447a380279844373eb04a04faf689088246` commit'ini
+gösterir. Paketleme sonradan eklendi. Yayımlanmış paketleri değiştirmeden bu kaynağı
+güncel ve incelenmiş iş akışıyla doğrulamak için yalnızca derleme başlatın:
 
 ```bash
-gh workflow run release.yml --ref main -f ref=v0.0.1 -F publish=true -F prerelease=true
+gh workflow run release.yml --ref main -f ref=v0.0.1 -F publish=false -F prerelease=true
 ```
 
-Yalnızca derleme doğrulaması için `publish=false` verin. Mevcut sürümün ön sürüm
-bayrağı korunur. Yeni sürümde bayrağı bilinçli seçin; 0.0.1 deneyseldir. İş akışı,
-otomasyonu ve etiketlenmiş uygulama kaynağını ayrı checkout eder; tüm sürüm
-kayıtlarını denetler ve her iki commit'i kaydeder.
+Eski kaynağı yeniden derlemek bayt düzeyinde aynı paketleri üretme garantisi vermez;
+yayımlanmış dosyalar değiştirilemez. Etiketle tetiklenen derlemeler yeni yayınları
+ön sürüm olarak oluşturur. `publish=true` ve `prerelease=false` ile elle başlatma,
+yalnızca ilgili GitHub yayını henüz yoksa kararlı yayın oluşturur. Mevcut yayının
+ön sürüm bayrağı korunur; iş akışını yeniden başlatmak onu kararlı sürüme dönüştürmez.
+GitHub bayrağını tek başına değiştirmeyin; değiştirilemez sürüm bildirimindeki
+kanalla eşleşmelidir. Mevcut iş akışı yayımlanmış ön sürümleri yerinde kararlı
+sürüme dönüştürmez. Gelecekteki bir kararlı sürüm, ilk yayınından önce bilinçli
+olarak yapılandırılmalıdır; 0.0.2 ön sürüm olarak kalır. İş akışı, otomasyonu ve
+etiketlenmiş uygulama kaynağını ayrı checkout eder; tüm sürüm kayıtlarını denetler
+ve her iki commit'i kaydeder. Yalnızca derleme doğrulaması için `publish=false` verin.
 
 | Derleme hedefi | Runner                           | Paketler           |
 | -------------- | -------------------------------- | ------------------ |
@@ -384,8 +401,11 @@ sürümlü adresleri kullanır; `/latest` için dosya adı tahmin edilmez.
 Pakete eklenen açık anahtar Tauri güncelleyicisini etkinleştirir. `auto_check_updates`
 açıksa ana pencere açılıştan sonra ve her beş dakikada kontrol yapar. Kontroller
 kurulumla çakışmaz. Kapatılabilir duyuru yeni sürümü ve sürüm notlarını aynı duyuruyu
-tekrarlamadan gösterir; indirme/kurulum ve yeniden başlatma kullanıcı tarafından
-başlatılır. Ayarlar → Hakkında ve Güncellemeler bölümünde elle kontrol de bulunur.
+tekrarlamadan gösterir. İndirme ve kurulum yalnızca kullanıcının eylemiyle başlar.
+macOS ve Linux'ta kurulan güncelleme **Şimdi yeniden başlat** düğmesini sunar.
+Windows'ta yükleyici, kurulum sırasında Kubepit'i kapatıp yeniden açabilir;
+**İndir ve kur** seçeneğini kullanmadan önce çalışmanızı kaydedin.
+Ayarlar → Hakkında ve Güncellemeler bölümünde elle kontrol de bulunur.
 
 Akış `https://erdembas.github.io/kubepit/updates/latest.json` adresindedir. Pages;
 sağlama toplamı, dosya adresleri, tüm platformlar, imza dosyaları ve güvenilen açık

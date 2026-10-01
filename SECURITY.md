@@ -13,8 +13,8 @@ so a maintainer can arrange a private channel. Do not post kubeconfigs, tokens,
 private keys, cluster identifiers or exploitable details in public issues.
 
 Include the affected version/commit, OS, impact, a minimal reproduction using
-synthetic resources and any proposed fix. Kubepit is a community project at
-experimental version 0.0.1; there is no guaranteed response time, long-term support
+synthetic resources and any proposed fix. Kubepit is an experimental community
+project; there is no guaranteed response time, long-term support
 branch or independent security-audit claim. Fixes target the current codebase.
 
 ### Trust boundaries
@@ -25,7 +25,7 @@ branch or independent security-audit claim. Fixes target the current codebase.
 - **AI:** The assistant starts disabled and clusters require opt-in. Remote providers and supported installed agents can receive redacted selected context and messages. Context previews, tool-result consent and masking are provided; redaction is not a guarantee against every form of secret. IP/hostname masking is off by default. Typed follow-ups without context send directly. AI local-only mode limits assistant transports, not all application networking.
 - **Diagnostics:** NetworkPolicy simulation does not test live traffic or evaluate every CNI policy. Health/security findings and upgrade checks have coverage limits. Trivy integration displays existing operator reports. An empty or incomplete result is not a security attestation.
 - **Demo:** The browser demo uses fixtures and simulated actions. Never submit real credentials or confidential material to it. Browser preferences can persist locally.
-- **Distribution:** The current source configuration does not establish signed/notarized public installers. The in-app updater refuses to operate without a configured public signing key and HTTPS endpoints. Updater signatures and operating-system code signing are separate. See [Releasing](docs/RELEASING.md).
+- **Distribution:** Version 0.0.2 embeds the updater public key and uses the HTTPS GitHub Pages update feed. Its release workflow requires valid updater signatures for every platform and Developer ID signing plus Apple notarization for macOS. Windows publisher signing remains optional; updater signatures and operating-system code signing are separate. The historical v0.0.1 macOS packages are ad-hoc signed and that version has no updater key. Its users must install a published v0.0.2 or later package manually once before receiving in-app updates. Check the [published release](https://github.com/erdembas/kubepit/releases) for available packages and exact signing status; configuration alone does not confirm publication. See [Releasing](docs/RELEASING.md) for verification and key management.
 
 Use least-privilege credentials, keep trusted executables on your `PATH`, inspect
 manifests and commands before execution, and treat exported diagnostic material
@@ -43,8 +43,8 @@ contact requested” başlıklı bir issue açın. Kubeconfig, token, özel anah
 tanımlayıcıları veya kötüye kullanılabilecek ayrıntıları herkese açık paylaşmayın.
 
 Etkilenen sürüm/commit, işletim sistemi, etki, örnek kaynaklarla hazırlanmış en
-küçük tekrar senaryosu ve varsa çözüm önerisini iletin. Kubepit, deneysel 0.0.1
-sürümünde bir topluluk projesidir; garanti edilen yanıt süresi, uzun süre desteklenen
+küçük tekrar senaryosu ve varsa çözüm önerisini iletin. Kubepit, deneysel bir
+topluluk projesidir; garanti edilen yanıt süresi, uzun süre desteklenen
 sürüm dalı veya bağımsız güvenlik denetimi iddiası yoktur. Düzeltmeler güncel kodu
 hedefler.
 
@@ -56,7 +56,7 @@ hedefler.
 - **Yapay zekâ:** Asistan başlangıçta kapalıdır; kümeler için ayrı izin gerekir. Uzak sağlayıcılar ve desteklenen kurulu ajanlar, maskelenmiş seçili bağlamı ve mesajları alabilir. Bağlam önizlemesi, araç sonucu onayı ve maskeleme sağlanır; maskeleme her gizli bilginin yakalanacağını garanti etmez. IP/host adı maskelemesi varsayılan olarak kapalıdır. Bağlamsız yazılı takip mesajları doğrudan gönderilir. Yalnızca yerel mod, tüm uygulama ağını değil asistan bağlantılarını sınırlar.
 - **Tanı araçları:** NetworkPolicy simülasyonu canlı trafik testi yapmaz ve her CNI politikasını değerlendirmez. Sağlık/güvenlik bulguları ve yükseltme kontrollerinin kapsam sınırları vardır. Trivy entegrasyonu mevcut operator raporlarını gösterir. Boş veya eksik sonuç güvenlik sertifikası değildir.
 - **Demo:** Tarayıcı demosu örnek veri ve simüle edilmiş işlemler kullanır. Gerçek kimlik bilgisi veya gizli içerik girmeyin. Tarayıcı tercihleri yerelde saklanabilir.
-- **Dağıtım:** Mevcut kaynak ayarları imzalı/noter onaylı herkese açık kurulum paketi bulunduğunu göstermez. Açık imzalama anahtarı ve HTTPS uç noktaları tanımlanmadan uygulama içi güncelleme çalışmaz. Güncelleme imzası ile işletim sistemi kod imzası farklıdır. Ayrıntılar [Yayımlama](docs/RELEASING.md) belgesindedir.
+- **Dağıtım:** 0.0.2, güncelleyici açık anahtarını içerir ve HTTPS GitHub Pages güncelleme akışını kullanır. Yayın iş akışı her platformda geçerli güncelleyici imzası; macOS'ta Developer ID imzası ve Apple noter onayı gerektirir. Windows yayıncı imzası isteğe bağlıdır; güncelleyici imzası ile işletim sistemi kod imzası farklıdır. Eski v0.0.1 macOS paketleri ad-hoc imzalıdır ve bu sürüm güncelleyici anahtarı içermez. Kullanıcıları, uygulama içi güncellemeleri alabilmek için yayımlanmış v0.0.2 veya daha yeni bir paketi bir kez elle kurmalıdır. Mevcut paketleri ve kesin imza durumunu [yayımlanmış sürümden](https://github.com/erdembas/kubepit/releases) kontrol edin; yalnızca yapılandırma yayının tamamlandığını doğrulamaz. Doğrulama ve anahtar yönetimi [Yayımlama](docs/RELEASING.md#türkçe) belgesindedir.
 
 En az yetkili kimlik bilgilerini kullanın, `PATH` üzerindeki programların
 güvenilirliğini koruyun, manifest ve komutları çalıştırmadan önce inceleyin,
