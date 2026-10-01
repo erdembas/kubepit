@@ -99,9 +99,25 @@ jobs:
           pnpm check:version
       - name: Install native Linux packaging dependencies
         if: matrix.platform == 'linux'
+        shell: bash
+        timeout-minutes: 20
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential pkg-config curl wget file libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev libdbus-1-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils libfuse2 rpm
+          # The hosted amd64 runner's Azure mirror can stall without producing
+          # an APT error. Use the official archive without changing signing keys,
+          # distribution suites, third-party repositories or ARM ports sources.
+          if [ "$(dpkg --print-architecture)" = amd64 ]; then
+            for source_file in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+              if [ -f "$source_file" ]; then
+                sudo sed -i -E \
+                  -e 's#https?://azure[.]archive[.]ubuntu[.]com/ubuntu#https://archive.ubuntu.com/ubuntu#g' \
+                  -e 's#http://(archive|security)[.]ubuntu[.]com/ubuntu#https://\1.ubuntu.com/ubuntu#g' \
+                  "$source_file"
+              fi
+            done
+          fi
+          apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o DPkg::Lock::Timeout=60)
+          sudo timeout --signal=TERM --kill-after=15s 5m apt-get "${apt_options[@]}" -o APT::Update::Error-Mode=any update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get "${apt_options[@]}" install -y --no-install-recommends build-essential pkg-config curl wget file libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev libdbus-1-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils libfuse2 rpm
       - name: Ensure Windows ARM64 C++ build tools
         if: matrix.id == 'windows-arm64'
         shell: pwsh
