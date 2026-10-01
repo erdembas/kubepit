@@ -26,6 +26,7 @@ import { CostOverviewCard } from '../cost/CostOverviewCard';
 import { ClientCertNotice } from '../health/ClientCertificate';
 import { WarningList } from './WarningList';
 import { TlsSummaryCard } from './TlsSummaryCard';
+import { PvcUsageCard } from './PvcUsageCard';
 
 function ResourceCard({
   title,
@@ -354,6 +355,7 @@ export function ClusterOverviewPage({
           </div>
         </Card>
         <TlsSummaryCard clusterId={clusterId} isActive={isActive} />
+        <PvcUsageCard clusterId={clusterId} isActive={isActive} />
         <Card
           title={i18n.t('Warnings')}
           icon={<TriangleAlert />}

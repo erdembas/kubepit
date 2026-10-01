@@ -16,7 +16,7 @@
   <a href="CONTRIBUTING.md">Contribute</a>
 </p>
 
-<p align="center"><strong>v0.0.4 · Experimental · MIT licensed · English & Turkish</strong></p>
+<p align="center"><strong>v0.0.5 · Experimental · MIT licensed · English & Turkish</strong></p>
 
 Kubepit brings live resource tables, logs, terminals, topology, change history,
 Helm, GitOps and fleet operations into one desktop workspace. Follow an incident
@@ -110,7 +110,7 @@ pnpm install --frozen-lockfile
 pnpm dev:ui
 ```
 
-**New in 0.0.4:** guided Pod diagnosis, configuration impact review, a fleet image version matrix and reviewed node maintenance, alongside saved investigations, diagnostic tools and smart saved searches. Read the complete [release notes](CHANGELOG.md) in the app or on the [website](https://erdembas.github.io/kubepit/changelog/).
+**New in 0.0.5:** Overview shows up to five PVCs with the highest current usage when Prometheus volume metrics are available, including capacity, warning colors and direct access to PVC details. Read the complete [release notes](CHANGELOG.md) in the app or on the [website](https://erdembas.github.io/kubepit/changelog/).
 
 ## Built around the work, from investigation to review
 

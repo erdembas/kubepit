@@ -14,6 +14,7 @@ import type {
   ClusterId,
   PrometheusMetric,
   PrometheusMetricsResult,
+  PrometheusPvcUsageResult,
   PrometheusStatus,
   PrometheusTarget,
 } from '@/types';
@@ -82,6 +83,18 @@ export function usePrometheusMetrics(
     () => ipc.prometheusMetrics(clusterId, target!, metrics, rangeEndingNow(range)),
     PROM_POLL_MS[range],
     enabled && !!key,
+  );
+}
+
+/** Current cluster-wide PVC usage; shares the connection/configuration cache boundary. */
+export function usePrometheusPvcUsage(clusterId: ClusterId, enabled: boolean) {
+  const source = useSourceKey(clusterId);
+  const available = usePrometheusAvailable(clusterId, enabled);
+  return usePolled<PrometheusPvcUsageResult>(
+    source && available ? `${clusterId}|prometheus-pvc-usage|${source}` : null,
+    () => ipc.prometheusPvcUsage(clusterId),
+    60_000,
+    enabled && available,
   );
 }
 

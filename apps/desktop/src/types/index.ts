@@ -1732,6 +1732,24 @@ export interface PrometheusMetricsResult {
   series: PrometheusSeries[];
 }
 
+/** Current measured filesystem usage of one persistent volume claim. */
+export interface PrometheusPvcUsage {
+  namespace: string;
+  name: string;
+  used_bytes: number;
+  capacity_bytes: number;
+  used_percent: number;
+}
+
+export interface PrometheusPvcUsageResult {
+  service: PrometheusService;
+  /** Epoch ms. */
+  checked_at: number;
+  /** At most five claims, highest measured usage percentage first. */
+  rows: PrometheusPvcUsage[];
+  warnings: string[];
+}
+
 export interface PromQuerySeries {
   labels: Record<string, string>;
   points: PromPoint[];

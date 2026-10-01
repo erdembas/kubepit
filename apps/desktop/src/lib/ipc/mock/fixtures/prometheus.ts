@@ -5,10 +5,11 @@ import type {
   PromPoint,
   PromQuerySeries,
   PrometheusMetric,
+  PrometheusPvcUsage,
   PrometheusService,
   PrometheusTarget,
 } from '@/types';
-import { list, type ClusterDb } from './db';
+import { find, list, type ClusterDb } from './db';
 import { buildService } from './network';
 import { hashString } from './util';
 
@@ -267,15 +268,14 @@ function podsOf(db: ClusterDb, target: PrometheusTarget): KubeObject[] {
 }
 
 function pvcOf(db: ClusterDb, namespace: string, name: string) {
-  return list(db, 'persistentvolumeclaims').find(
-    (p) => p.metadata.namespace === namespace && p.metadata.name === name,
-  );
+  return find(db, 'persistentvolumeclaims', namespace, name);
 }
 
 function pvcCapacity(pvc: KubeObject | undefined): number {
+  if (!pvc || asObject(pvc.status).phase !== 'Bound') return 0;
   const status = asObject(asObject(pvc?.status).capacity).storage;
-  const spec = asObject(asObject(asObject(pvc?.spec).resources).requests).storage;
-  return memoryBytes(status ?? spec) || 10 * GiB;
+  const capacity = memoryBytes(status);
+  return Number.isFinite(capacity) && capacity > 0 ? capacity : 0;
 }
 
 // -- Preset series -----------------------------------------------------------------
@@ -303,6 +303,7 @@ export function presetPoints(
     if (metric !== 'volume_usage' && metric !== 'volume_capacity') return null;
     const pvc = pvcOf(db, target.namespace, target.name);
     const capacity = pvcCapacity(pvc);
+    if (!capacity) return [];
     const seed = `${target.namespace}/${target.name}`;
     const fill = 0.3 + unit(seed, 7) * 0.45;
     return times.map((t) => {
@@ -400,6 +401,44 @@ export function presetPoints(
         return [t, Math.round((expected + spike) * 10) / 10];
       });
   }
+}
+
+/** Cluster-wide snapshot of the same measured claims shown in PVC charts. */
+export function pvcUsageRows(db: ClusterDb, checkedAt: number): PrometheusPvcUsage[] {
+  return list(db, 'persistentvolumeclaims')
+    .flatMap((pvc): PrometheusPvcUsage[] => {
+      const namespace = pvc.metadata.namespace;
+      const name = pvc.metadata.name;
+      if (!namespace || !name) return [];
+      const target = { kind: 'pvc', namespace, name } as const;
+      const used = presetPoints(db, target, 'volume_usage', [checkedAt], 120)?.[0]?.[1];
+      const capacity = presetPoints(db, target, 'volume_capacity', [checkedAt], 120)?.[0]?.[1];
+      if (
+        used === undefined ||
+        capacity === undefined ||
+        !Number.isFinite(used) ||
+        !Number.isFinite(capacity) ||
+        used < 0 ||
+        capacity <= 0
+      )
+        return [];
+      return [
+        {
+          namespace,
+          name,
+          used_bytes: used,
+          capacity_bytes: capacity,
+          used_percent: (used / capacity) * 100,
+        },
+      ];
+    })
+    .sort(
+      (a, b) =>
+        b.used_percent - a.used_percent ||
+        a.namespace.localeCompare(b.namespace) ||
+        a.name.localeCompare(b.name),
+    )
+    .slice(0, 5);
 }
 
 /** The PromQL the backend would send (simplified; shown and runnable in the PromQL tab). */

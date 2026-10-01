@@ -156,6 +156,7 @@ pub fn run() {
             // Prometheus metrics (optional source)
             ipc::prometheus_status,
             ipc::prometheus_metrics,
+            ipc::prometheus_pvc_usage,
             ipc::prometheus_query_range,
             // Loki historical logs (read-only)
             ipc::loki_status,

@@ -160,6 +160,7 @@ const NOT_MUTATING: &[&str] = &[
     "metrics_history_fleet",
     "prometheus_status",
     "prometheus_metrics",
+    "prometheus_pvc_usage",
     "prometheus_query_range",
     "loki_status",
     "loki_query_range",

@@ -3,6 +3,7 @@ import type {
   ClusterStatus,
   PrometheusMetric,
   PrometheusMetricsResult,
+  PrometheusPvcUsageResult,
   PrometheusRange,
   PrometheusService,
   PrometheusStatus,
@@ -20,6 +21,7 @@ import {
   presetPoints,
   presetQuery,
   promqlSyntaxError,
+  pvcUsageRows,
 } from './fixtures/prometheus';
 import { handlers, register, type MockArgs } from './registry';
 
@@ -172,6 +174,18 @@ function window(range: PrometheusRange) {
 
 register({
   prometheus_status: ({ clusterId, refresh }: MockArgs) => status(clusterId, Boolean(refresh)),
+
+  prometheus_pvc_usage: async ({ clusterId }: MockArgs): Promise<PrometheusPvcUsageResult> => {
+    const svc = await service(clusterId);
+    await sleep(90);
+    const checkedAt = Date.now();
+    return {
+      service: svc,
+      checked_at: checkedAt,
+      rows: pvcUsageRows(getDb(clusterId), checkedAt),
+      warnings: [],
+    };
+  },
 
   prometheus_metrics: async ({ clusterId, target, metrics, range }: MockArgs) => {
     const svc = await service(clusterId);

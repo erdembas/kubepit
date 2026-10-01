@@ -2,8 +2,8 @@
 //! All read-only (GETs through the API server's service proxy).
 
 use kubepit_core::types::{
-    PromQueryResult, PrometheusMetric, PrometheusMetricsResult, PrometheusRange, PrometheusStatus,
-    PrometheusTarget,
+    PromQueryResult, PrometheusMetric, PrometheusMetricsResult, PrometheusPvcUsageResult,
+    PrometheusRange, PrometheusStatus, PrometheusTarget,
 };
 use tauri::State;
 
@@ -45,6 +45,17 @@ pub async fn prometheus_query_range(
 ) -> IpcResult<PromQueryResult> {
     let core = state.core.clone();
     core.prometheus_query_range(&cluster_id, &query, &range)
+        .await
+        .map_err(ipc_err)
+}
+
+#[tauri::command]
+pub async fn prometheus_pvc_usage(
+    cluster_id: String,
+    state: State<'_, AppState>,
+) -> IpcResult<PrometheusPvcUsageResult> {
+    let core = state.core.clone();
+    core.prometheus_pvc_usage(&cluster_id)
         .await
         .map_err(ipc_err)
 }

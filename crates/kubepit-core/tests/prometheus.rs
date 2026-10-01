@@ -663,6 +663,71 @@ fn sent_queries(log: &Log) -> Vec<String> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pvc_usage_is_a_scoped_instant_query_allowed_on_read_only_clusters() {
+    let detection = stack_router(Arc::default());
+    let empty = Arc::new(AtomicBool::new(false));
+    let empty_response = empty.clone();
+    let server = start(Arc::new(move |req: &Request, log: &Log| {
+        let query = param(&req.path, "query").unwrap_or_default();
+        if req.path_only() == format!("{OPERATED}/api/v1/query") && query != "1" {
+            let result = if empty_response.load(Ordering::SeqCst) {
+                json!([])
+            } else {
+                json!([
+                    {"metric":{"__name__":"kubelet_volume_stats_used_bytes","namespace":"data","persistentvolumeclaim":"database"},"value":[1_700_000_000,"95"]},
+                    {"metric":{"__name__":"kubelet_volume_stats_capacity_bytes","namespace":"data","persistentvolumeclaim":"database"},"value":[1_700_000_000,"100"]},
+                    {"metric":{"__name__":"kubelet_volume_stats_used_bytes","namespace":"other","persistentvolumeclaim":"database"},"value":[1_700_000_000,"NaN"]},
+                    {"metric":{"__name__":"kubelet_volume_stats_capacity_bytes","namespace":"other","persistentvolumeclaim":"database"},"value":[1_700_000_000,"100"]}
+                ])
+            };
+            Reply::Json(
+                200,
+                json!({"status":"success","data":{"resultType":"vector","result":result},
+                    "warnings":["partial response"]}),
+            )
+        } else {
+            detection(req, log)
+        }
+    }))
+    .await;
+    let (_dir, app, _recorder, id) = setup(&server.url, true);
+    let mut def = app.cluster_def(&id).unwrap();
+    def.prometheus_access = shared_access();
+    app.cluster_update(def).unwrap();
+
+    let result = app.prometheus_pvc_usage(&id).await.unwrap();
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0].namespace, "data");
+    assert_eq!(result.rows[0].name, "database");
+    assert_eq!(result.rows[0].used_percent, 95.0);
+    assert!(result.checked_at > 1_700_000_000_000);
+    assert_eq!(result.warnings, ["partial response"]);
+    let requests: Vec<_> = server
+        .log
+        .lock()
+        .iter()
+        .filter(|r| r.path.starts_with(OPERATED) && param(&r.path, "query").as_deref() != Some("1"))
+        .cloned()
+        .collect();
+    assert_eq!(requests.len(), 1);
+    let request = &requests[0];
+    assert_eq!(request.method, "GET");
+    assert_eq!(request.path_only(), format!("{OPERATED}/api/v1/query"));
+    assert_eq!(request.header("x-scope-orgid"), Some("team-a"));
+    assert!(param(&request.path, "time").is_some());
+    let query = param(&request.path, "query").unwrap();
+    assert_eq!(
+        query.matches("cluster=\"production\"").count(),
+        3,
+        "{query}"
+    );
+    assert!(query.contains("topk(5"));
+
+    empty.store(true, Ordering::SeqCst);
+    assert!(app.prometheus_pvc_usage(&id).await.unwrap().rows.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn every_preset_query_carries_the_cluster_label_and_mismatches_fail() {
     let mismatch = Arc::new(AtomicBool::new(false));
     let server = start(shared_router(mismatch.clone())).await;

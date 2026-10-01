@@ -33,6 +33,8 @@ pub mod matchers;
 pub mod parse;
 pub mod promql;
 pub mod proxy;
+// Bounded instant PVC fullness summary for the overview.
+pub mod pvc_usage;
 pub mod range;
 pub(crate) mod tunnel;
 // Usage statistics for cost estimates and right-sizing.

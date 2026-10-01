@@ -1509,6 +1509,25 @@ pub struct PrometheusMetricsResult {
     pub series: Vec<PrometheusSeries>,
 }
 
+/// One PVC with observed kubelet volume usage and capacity, never requested size.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrometheusPvcUsage {
+    pub namespace: String,
+    pub name: String,
+    pub used_bytes: f64,
+    pub capacity_bytes: f64,
+    pub used_percent: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrometheusPvcUsageResult {
+    pub service: PrometheusService,
+    pub checked_at: i64,
+    /// At most five measured PVCs, highest fullness first.
+    pub rows: Vec<PrometheusPvcUsage>,
+    pub warnings: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PromQuerySeries {
     pub labels: std::collections::BTreeMap<String, String>,

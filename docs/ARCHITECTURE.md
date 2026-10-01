@@ -1914,6 +1914,17 @@ and scrolls to the requested entry in About & Updates.
   stay separate, and the row limit applies after grouping.
   Missing or incomplete certificates remain unknown; partial/RBAC watch
   failures are labelled incomplete. Hidden overviews release their watch.
+- The optional `PvcUsageCard` below TLS shows the five fullest PVCs with
+  current Prometheus kubelet volume statistics, across namespaces. The
+  read-only `prometheus_pvc_usage` backend preset applies the configured
+  cluster-label selector and deduplicates scrape series by namespace/claim
+  before ranking used bytes / capacity. Missing or invalid metrics are
+  excluded, never inferred from requested storage. The card is hidden when
+  no usage is available; rows link to PVC details and show percentage and
+  used/total bytes. This is current fullness, not a time-to-full forecast.
+  Polling runs once per minute while visible, shares the Prometheus
+  connection/configuration cache boundary, and marks retained metrics stale
+  if a refresh fails. Prometheus partial-response warnings are surfaced.
 - `client_cert.rs` (`cluster_client_certificate`) reads the kubeconfig
   user's client certificate (inline data or file; the cluster is never
   contacted) with a minimal DER reader. The cluster card and overview warn

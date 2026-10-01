@@ -14,6 +14,24 @@ No changes yet.
 
 Henüz değişiklik yok.
 
+## [0.0.5] - 2026-10-02 — PVC usage in Overview / Genel Bakış'ta PVC doluluğu
+
+### English
+
+#### Added
+
+- **PVC usage in Overview:** below TLS certificates, see up to five PVCs with the highest current usage across all namespaces. Each row shows the namespace, used and total capacity, and a usage percentage; click a row to open the PVC details. Usage is highlighted at 80% for warning and 90% for critical.
+- The card requires Prometheus `kubelet_volume_stats_used_bytes` and `kubelet_volume_stats_capacity_bytes` metrics. Only PVCs with valid measurements are included; the card stays hidden when none are available. Ranking uses the current percentage and does not predict when a volume will fill.
+- The last available metrics remain visible with a warning and Retry action if a refresh fails. Prometheus warnings flag a potentially incomplete ranking, and the card shows when it was last updated.
+
+### Türkçe
+
+#### Eklenenler
+
+- **Genel Bakış'ta PVC doluluğu:** TLS sertifikalarının altında, tüm namespace'ler arasında anlık doluluk oranı en yüksek beş PVC'ye kadar gösterilir. Her satırda namespace, kullanılan ve toplam kapasite ile doluluk yüzdesi bulunur; satıra tıklayarak PVC ayrıntılarını açabilirsiniz. %80'de uyarı, %90'da kritik renk kullanılır.
+- Kart, Prometheus'ta `kubelet_volume_stats_used_bytes` ve `kubelet_volume_stats_capacity_bytes` metriklerini gerektirir. Yalnızca geçerli ölçümü bulunan PVC'ler listelenir; hiç ölçüm yoksa kart gizlenir. Sıralama anlık yüzdeye dayanır, hacmin ne zaman dolacağını tahmin etmez.
+- Yenileme başarısız olursa son metrikler uyarı ve Yeniden dene seçeneğiyle görünür kalır. Prometheus uyarıları, sıralamanın eksik olabileceğini belirtir; kartta son güncelleme zamanı gösterilir.
+
 ## [0.0.4] - 2026-10-01 — Safer operations and fleet troubleshooting / Daha güvenli işlemler ve filo tanılaması
 
 <!-- kubepit-actions: image-matrix,fleet-search,investigations,connection-doctor,network-diagnostics -->

@@ -109,6 +109,7 @@ import type {
   PortForwardRequest,
   PrometheusMetric,
   PrometheusMetricsResult,
+  PrometheusPvcUsageResult,
   PrometheusRange,
   PrometheusStatus,
   PrometheusTarget,
@@ -466,6 +467,9 @@ export const ipc = {
   /** Detection result cached per connection; `refresh` detects again. */
   prometheusStatus: (clusterId: ClusterId, refresh = false) =>
     call<PrometheusStatus>('prometheus_status', { clusterId, refresh }),
+
+  prometheusPvcUsage: (clusterId: ClusterId) =>
+    call<PrometheusPvcUsageResult>('prometheus_pvc_usage', { clusterId }),
   /** Preset series of `target`; empty `metrics` = every metric that applies. */
   prometheusMetrics: (
     clusterId: ClusterId,
