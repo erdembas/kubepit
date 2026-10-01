@@ -16,7 +16,7 @@
   <a href="../CONTRIBUTING.md">Katkıda bulun</a>
 </p>
 
-<p align="center"><strong>v0.0.2 · Deneysel · MIT lisanslı · Türkçe ve İngilizce</strong></p>
+<p align="center"><strong>v0.0.3 · Deneysel · MIT lisanslı · Türkçe ve İngilizce</strong></p>
 
 Kubepit; canlı kaynak tablolarını, logları, terminalleri, topolojiyi, değişiklik
 geçmişini, Helm'i, GitOps'u ve filo işlemlerini tek masaüstü çalışma alanında
@@ -32,10 +32,14 @@ Kubepit, gelişiminin başındaki bir topluluk projesidir. Eksikler ve değişeb
 Önce demoyla veya geliştirme kümesiyle başlayın.
 [İndirme sayfasından](https://erdembas.github.io/kubepit/tr/#downloads) kurulum
 paketini seçin veya kaynak koddan derleyin. Sayfa yalnızca yayımlanmış paketleri
-gösterir ve imza durumlarını belirtir. **0.0.2** ile açılışta ve her beş dakikada
-imzalı güncelleme kontrolü, sürüm notları ve kullanıcının başlattığı kurulum/yeniden
-başlatma seçenekleri gelir. 0.0.1 kullanıcıları bu yolu etkinleştirmek için yeni
-paketi bir kez elle kurmalıdır.
+gösterir ve imza durumlarını belirtir. **0.0.3**, Linux özel eylemlerinde zaman aşımı veya arka plan pipe
+temizliği sırasında hedef alt süreç grubunun dışındaki süreçleri durdurabilen bir
+hatayı düzelten sürümdür. **0.0.1 ve 0.0.2 bu hatadan etkilenir**; bu sürümleri kurmayın veya
+kullanmaya devam etmeyin. **0.0.3 veya daha yeni** bir paket yayımlandığında elle
+kurmanızı öneririz. 0.0.1 güncelleyici anahtarı içermez; anahtarın eklendiği
+0.0.2 bu düzeltmeden öncedir. Düzeltilmiş uygulama açılışta ve her
+beş dakikada imzalı güncelleme kontrolü, sürüm notları ve kullanıcının başlattığı
+kurulum/yeniden başlatma seçenekleri sunar.
 
 ![Örnek Kubernetes kaynaklarıyla Kubepit çalışma alanı](../apps/website/public/workbench.png)
 
@@ -280,7 +284,7 @@ bildirimleri, platform doğrulaması, erişilebilirlik, çeviriler ve gerçek Ku
 iş akışlarını iyileştiren düzeltmeler değerlidir.
 [Katkı rehberi](../CONTRIBUTING.md) ve [Mimari](ARCHITECTURE.md) ile başlayın.
 
-0.0.1 kapsamı [Değişiklik günlüğünde](../CHANGELOG.md); GitHub Pages, masaüstü
+Her sürümün kapsamı [Değişiklik günlüğünde](../CHANGELOG.md); GitHub Pages, masaüstü
 paketleri, Homebrew ve imzalama [Yayımlama](RELEASING.md) belgesindedir. Site için özel
 alan adı veya barındırılan uygulama sunucusu gerekmez.
 

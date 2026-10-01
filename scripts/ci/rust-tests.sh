@@ -18,6 +18,13 @@ diagnostics=${RUST_TEST_DIAGNOSTICS_DIR:-${RUNNER_TEMP:-/tmp}/kubepit-rust-diagn
 mkdir -p "$diagnostics"
 log="$diagnostics/cargo-test.log"
 : > "$log"
+workspace=$(pwd -P)
+# Resolve the external program Rust's Command uses, not Bash's kill builtin.
+external_kill=$(type -P kill || true)
+if [[ -n $external_kill ]]; then
+  printf 'External kill executable: %s\n' "$external_kill"
+  "$external_kill" --version 2>&1 | head -n 1 || true
+fi
 
 # GNU timeout owns a separate process group and returns nonzero on expiration.
 # Preserve libtest's normal capture and the exact full serial workspace command.
@@ -40,16 +47,24 @@ capture_diagnostics() {
   local pid executable ids
   local -a children tests=()
   mapfile -t children < <(descendants "$controller")
+  ids=$(IFS=,; echo "$controller,${children[*]}")
+  if [[ $metadata_captured == false ]]; then
+    metadata_captured=true
+    echo '::group::Rust inactivity process metadata (no arguments or environment)'
+    ps -o pid,ppid,pgid,sid,stat,wchan:32,comm -p "${ids%,}" \
+      > "$diagnostics/processes-inactivity.txt" || true
+    cat "$diagnostics/processes-inactivity.txt"
+    echo '::endgroup::'
+  fi
   for pid in "${children[@]}"; do
     executable=$(readlink "/proc/$pid/exe" 2>/dev/null || true)
     case "$executable" in
-      "$PWD"/target/debug/deps/*) tests+=("$pid") ;;
+      "$workspace"/target/debug/deps/*|"$PWD"/target/debug/deps/*) tests+=("$pid") ;;
     esac
   done
   # A quiet compile must not consume the one diagnostic capture before tests
   # begin. Only collect when a test executable is actually running.
   (( ${#tests[@]} > 0 )) || return 1
-  ids=$(IFS=,; echo "$controller,${children[*]}")
   echo '::group::Rust test inactivity diagnostics (no arguments or environment)'
   ps -o pid,ppid,pgid,sid,stat,wchan:32,comm -p "${ids%,}" \
     > "$diagnostics/processes.txt" || true
@@ -74,6 +89,7 @@ capture_diagnostics() {
 }
 
 captured=false
+metadata_captured=false
 while kill -0 "$controller" 2>/dev/null; do
   if [[ $captured == false ]] && \
     (( $(date +%s) - $(stat -c %Y "$log") >= idle_limit )); then

@@ -10,10 +10,13 @@ import { register, type MockArgs } from './registry';
  */
 
 const CURRENT = APP_VERSION;
+const NEXT = CURRENT.replace(/^(\d+\.\d+\.)(\d+).*$/, (_, prefix, patch) =>
+  `${prefix}${Number(patch) + 1}`,
+);
 const TOTAL_BYTES = 18_874_368;
 
 const AVAILABLE: UpdateInfo = {
-  version: '0.0.3',
+  version: NEXT,
   current_version: CURRENT,
   date: new Date(Date.now() - 2 * 86_400_000).toISOString(),
   notes: [
@@ -35,7 +38,7 @@ register({
   update_status: (): UpdaterStatus => ({
     configured: true,
     current_version: CURRENT,
-    endpoint: 'https://github.com/erdembas/kubepit/releases/latest/download/latest.json',
+    endpoint: 'https://erdembas.github.io/kubepit/updates/latest.json',
   }),
   update_check: async (): Promise<UpdateInfo | null> => {
     await sleep(700);

@@ -3,6 +3,7 @@ import { resolve, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { assert, sha256 } from './model.mjs';
 import { github } from './github.mjs';
+import { verifySourceCi } from './ci-gate.mjs';
 
 const directory = resolve('release-output');
 const manifest = JSON.parse(await readFile(join(directory, 'release-manifest.json'), 'utf8'));
@@ -21,6 +22,10 @@ const actualCommit = execFileSync('git', ['rev-parse', `refs/tags/${manifest.tag
   encoding: 'utf8',
 }).trim();
 assert(actualCommit === manifest.commit, 'Release tag changed while the builders were running');
+// Native packaging can run alongside CI, but no release may be created,
+// uploaded to, or published until this exact frozen source commit is green.
+const sourceCi = await verifySourceCi(repository, manifest.commit);
+console.log(`Source CI passed: run ${sourceCi.id}, attempt ${sourceCi.run_attempt}.`);
 let release;
 try {
   release = await github(`repos/${repository}/releases/tags/${manifest.tag}`);

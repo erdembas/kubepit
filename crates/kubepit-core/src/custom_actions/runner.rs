@@ -66,13 +66,16 @@ async fn read_capped(mut reader: impl AsyncRead + Unpin, sink: Arc<Mutex<Capture
 
 #[cfg(unix)]
 fn kill_group(pid: Option<u32>) {
-    if let Some(pid) = pid {
-        // The child leads its own process group (`process_group(0)`).
-        let _ = std::process::Command::new("kill")
-            .args(["-KILL", &format!("-{pid}")])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+    if let Some(pgid) = pid
+        .and_then(|pid| libc::pid_t::try_from(pid).ok())
+        .filter(|pid| *pid > 1)
+    {
+        // The child leads its own process group (`process_group(0)`). Calling
+        // the syscall directly avoids external kill programs interpreting a
+        // negative PID as options, including a dangerous kill(-1, SIGKILL).
+        // SAFETY: pgid is a checked, positive child group ID greater than one;
+        // negation cannot overflow or select the caller's group/all processes.
+        unsafe { libc::kill(-pgid, libc::SIGKILL) };
     }
 }
 
@@ -165,6 +168,79 @@ pub async fn run_shell(
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    struct TestGroup {
+        child: tokio::process::Child,
+        pgid: u32,
+    }
+
+    impl TestGroup {
+        fn spawn(script: &str) -> Self {
+            let child = tokio::process::Command::new("/bin/sh")
+                .args(["-c", script])
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .kill_on_drop(true)
+                .process_group(0)
+                .spawn()
+                .unwrap();
+            let pgid = child.id().unwrap();
+            Self { child, pgid }
+        }
+
+        async fn ready(&mut self) -> BufReader<tokio::process::ChildStdout> {
+            let mut output = BufReader::new(self.child.stdout.take().unwrap());
+            let mut line = String::new();
+            tokio::time::timeout(Duration::from_secs(2), output.read_line(&mut line))
+                .await
+                .expect("fixture shell did not become ready")
+                .unwrap();
+            assert_eq!(line, "ready\n");
+            output
+        }
+    }
+
+    impl Drop for TestGroup {
+        fn drop(&mut self) {
+            kill_group(Some(self.pgid));
+            let _ = self.child.start_kill();
+        }
+    }
+
+    #[tokio::test]
+    async fn group_cleanup_kills_descendants_and_preserves_an_independent_observer() {
+        let mut target = TestGroup::spawn("sleep 30 & echo ready; wait");
+        let mut observer = TestGroup::spawn("echo ready; exec sleep 30");
+        let mut target_output = target.ready().await;
+        let _observer_output = observer.ready().await;
+
+        // None and invalid IDs must never reach special kill(0)/kill(-1)
+        // semantics or wrap during conversion/negation.
+        for invalid in [None, Some(0), Some(1), Some(u32::MAX)] {
+            kill_group(invalid);
+        }
+        assert!(target.child.try_wait().unwrap().is_none());
+        assert!(observer.child.try_wait().unwrap().is_none());
+
+        kill_group(Some(target.pgid));
+        let status = tokio::time::timeout(Duration::from_secs(2), target.child.wait())
+            .await
+            .expect("target shell was not terminated")
+            .unwrap();
+        assert!(!status.success());
+        let mut remaining = String::new();
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            target_output.read_to_string(&mut remaining),
+        )
+        .await
+        .expect("background child retained the output pipe")
+        .unwrap();
+        assert!(remaining.is_empty());
+        assert!(observer.child.try_wait().unwrap().is_none());
+    }
 
     #[tokio::test]
     async fn captures_output_and_exit_code() {

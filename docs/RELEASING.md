@@ -4,7 +4,10 @@
 
 ## English
 
-Version **0.0.2** is experimental. GitHub Actions builds desktop packages from an
+Version **0.0.3** is experimental. It corrects a Linux custom-action cleanup bug
+affecting 0.0.1 and 0.0.2; do not publish or recommend those affected versions.
+Their source tags and original bytes remain unchanged. GitHub Actions builds
+desktop packages from an
 immutable version tag, publishes their checksums and manifest, and refreshes the
 static GitHub Pages website. The Homebrew tap tracks verified releases every six
 hours. New releases require signed updater artifacts and notarized macOS packages.
@@ -92,8 +95,8 @@ release only if that GitHub release does not already exist. An existing release'
 pre-release flag is preserved; redispatching does not promote it. Do not change
 the GitHub flag alone: it must match the channel in the immutable release manifest.
 The current workflow does not promote existing previews in place. A future stable
-version must be configured deliberately before its initial publication; 0.0.2
-remains a pre-release. The workflow checks out automation and tagged application
+version must be configured deliberately before its initial publication; 0.0.3
+is intended as a pre-release. The workflow checks out automation and tagged application
 source separately, verifies all version entries, and records both commits. Use
 `publish=false` whenever only build verification is intended.
 
@@ -110,7 +113,7 @@ The frozen pnpm/Cargo lockfiles are used. Builds isolate application state and
 kubeconfig in runner temp storage; they do not connect to clusters. The release
 config enables signed updater artifacts, sets macOS 11 minimum and offers English and
 Turkish NSIS installer languages. Packages keep architecture-specific names,
-such as `Kubepit_0.0.1_linux_arm64.AppImage`.
+such as `Kubepit_0.0.3_linux_arm64.AppImage`.
 
 Every target must succeed before publication. Checks cover package magic,
 architecture where inspectable, native package metadata, macOS bundle version and
@@ -119,11 +122,17 @@ checks, **not interactive smoke tests on all target machines**. Test installed a
 startup, kubeconfig import with fixtures and core workflows on target hardware
 before treating a platform as runtime-certified.
 
+Native builds run alongside CI. Before any GitHub release change, the publisher
+requires the latest relevant CI run for the exact frozen source commit to have
+succeeded. Pending or failed CI blocks publication. After CI passes for that same
+commit, rerun the failed publish job using the existing native build artifacts.
+
 The publisher assembles **11 installers**, two macOS update archives, eleven
 signature sidecars, `latest.json`, `SHA256SUMS`, `kubepit.rb`, and
 `release-manifest.json` (28 assets). It rechecks the source tag, verifies uploaded bytes and
 uploads the manifest last as the completeness marker. Already published bytes
-are never replaced. If publication is interrupted, rerun the failed publish job
+are never replaced; only the internal `complete-desktop-release` workflow artifact
+may be replaced on retry. If publication is interrupted, rerun the failed publish job
 using the same build artifacts; a complete rebuild may produce different bytes
 and will correctly fail collision checks. Changed distributed binaries need a
 new version. Keep the complete release artifact while investigating failures.
@@ -206,16 +215,21 @@ replacing the private key breaks installed clients' update continuity. Local
 signed builds also require these environment variables. For an unsigned local
 development bundle use a Tauri config override with `createUpdaterArtifacts:false`.
 
-v0.0.1 contains no updater public key. Users must install v0.0.2 manually once;
-later signed releases can update in-app. Linux updates preserve AppImage, DEB or
-RPM format; DEB/RPM installation invokes the native package manager and may request
-administrator permission. The first enabled release establishes update
-trust; test an installed-to-new-version update on each target before claiming
-end-to-end update certification.
+v0.0.1 contains no updater public key; v0.0.2 introduced it but predates the Linux
+process cleanup correction. For users of either affected version, recommend a
+manual installation of a published v0.0.3 or later package once available. The
+corrected release retains the signing key for subsequent in-app updates. Linux
+updates preserve AppImage, DEB or RPM format; DEB/RPM installation invokes the
+native package manager and may request administrator permission. Test an
+installed-to-new-version update on each target before claiming end-to-end update
+certification.
 
 ## Türkçe
 
-**0.0.2** deneyseldir. GitHub Actions, sabit sürüm etiketinden masaüstü paketlerini
+**0.0.3** deneyseldir. 0.0.1 ve 0.0.2'yi etkileyen Linux özel eylem temizleme
+hatasını düzeltir; etkilenen sürümleri yayımlamayın veya önermeyin. Kaynak etiketleri
+ve özgün dosyaları değişmeden kalır. GitHub Actions, sabit sürüm etiketinden
+masaüstü paketlerini
 derler; sağlama toplamları ve bildirimini yayımlar, statik GitHub Pages sitesini
 yeniler. Homebrew tap doğrulanan sürümleri altı saatte bir izler. Yeni yayınlarda
 imzalı güncelleme paketleri ve macOS için Apple noter onayı zorunludur.
@@ -305,7 +319,7 @@ yalnızca ilgili GitHub yayını henüz yoksa kararlı yayın oluşturur. Mevcut
 GitHub bayrağını tek başına değiştirmeyin; değiştirilemez sürüm bildirimindeki
 kanalla eşleşmelidir. Mevcut iş akışı yayımlanmış ön sürümleri yerinde kararlı
 sürüme dönüştürmez. Gelecekteki bir kararlı sürüm, ilk yayınından önce bilinçli
-olarak yapılandırılmalıdır; 0.0.2 ön sürüm olarak kalır. İş akışı, otomasyonu ve
+olarak yapılandırılmalıdır; 0.0.3 ön sürüm olarak planlanır. İş akışı, otomasyonu ve
 etiketlenmiş uygulama kaynağını ayrı checkout eder; tüm sürüm kayıtlarını denetler
 ve her iki commit'i kaydeder. Yalnızca derleme doğrulaması için `publish=false` verin.
 
@@ -322,7 +336,7 @@ Sabit pnpm/Cargo kilit dosyaları kullanılır. Derlemeler uygulama durumunu ve
 kubeconfig'i runner'ın geçici dizininde yalıtır; kümelere bağlanmaz. Yayın ayarı
 imzalı güncelleyici çıktılarını açar, macOS alt sınırını 11 yapar ve NSIS kurulumunda
 İngilizce/Türkçe sunar. Dosya adları mimariyi belirtir; örneğin
-`Kubepit_0.0.1_linux_arm64.AppImage`.
+`Kubepit_0.0.3_linux_arm64.AppImage`.
 
 Yayımdan önce tüm hedefler başarılı olmalıdır. Denetimler; paket yapısını,
 incelenebilen mimariyi, yerel paket üst verisini, macOS uygulama sürümü ve imzasını,
@@ -332,11 +346,18 @@ değildir**. Bir platformun çalışma davranışını doğrulanmış saymadan �
 donanımda uygulama açılışını, örnek kubeconfig içe aktarımını ve temel iş akışlarını
 test edin.
 
+Yerel paket derlemeleri CI ile birlikte çalışır. Yayıncı, GitHub yayınına herhangi
+bir değişiklik yapmadan önce sabit kaynak commit'inin ilgili en son CI çalışmasının
+başarılı olmasını şart koşar. Bekleyen veya başarısız CI yayını engeller. Aynı
+commit'in CI kontrolü geçtikten sonra mevcut yerel derleme çıktılarıyla başarısız
+publish işini yeniden çalıştırın.
+
 Yayıncı **11 kurulum paketini**, iki macOS güncelleme arşivini, on bir imza dosyasını,
 `latest.json`, `SHA256SUMS`, `kubepit.rb` ve `release-manifest.json` dosyalarını
 birleştirir (28 dosya). Kaynak etiketini tekrar kontrol
 eder, yüklenen baytları doğrular ve eksiksizlik işareti olarak bildirimi en son
-yükler. Yayımlanmış baytlar değiştirilmez. Yayın kesilirse aynı derleme çıktılarıyla
+yükler. Yayımlanmış baytlar değiştirilmez; yeniden denemede yalnızca iş akışının
+dahili `complete-desktop-release` çıktısı değiştirilebilir. Yayın kesilirse aynı derleme çıktılarıyla
 başarısız publish işini yeniden çalıştırın; tüm paketleri yeniden derlemek farklı
 baytlar üretebilir ve çakışma denetimi haklı olarak reddeder. Dağıtılmış ikili
 dosyaların değişmesi yeni sürüm gerektirir. Sorunu araştırırken birleşik yayın
@@ -421,9 +442,10 @@ devamlılığını bozar. Yerel imzalı derlemeler de bu ortam değişkenlerini 
 İmzasız yerel geliştirme paketi için Tauri ayarını `createUpdaterArtifacts:false`
 ile geçersiz kılın.
 
-v0.0.1 güncelleyici açık anahtarı içermez. v0.0.2 bir kez elle kurulmalıdır; sonraki
-imzalı sürümler uygulama içinden güncellenebilir. Linux’ta AppImage, DEB veya RPM
-biçimi korunur; DEB/RPM kurulumu sistemin paket yöneticisini kullanır ve yönetici
-izni isteyebilir. İlk etkin sürüm güncelleme güvenini başlatır;
-uçtan uca doğrulama iddiasından önce her hedefte kurulu sürümden yeni sürüme geçişi
-test edin.
+v0.0.1 güncelleyici açık anahtarı içermez; anahtarın eklendiği v0.0.2, Linux süreç
+temizleme düzeltmesinden öncedir. Etkilenen iki sürümün kullanıcılarına, v0.0.3 veya
+daha yeni bir paket yayımlandığında elle kurmalarını önerin. Düzeltilmiş sürüm,
+sonraki uygulama içi güncellemeler için aynı imzalama anahtarını korur. Linux’ta
+AppImage, DEB veya RPM biçimi korunur; DEB/RPM kurulumu sistemin paket yöneticisini
+kullanır ve yönetici izni isteyebilir. Uçtan uca doğrulama iddiasından önce her
+hedefte kurulu sürümden yeni sürüme geçişi test edin.

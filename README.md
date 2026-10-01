@@ -16,7 +16,7 @@
   <a href="CONTRIBUTING.md">Contribute</a>
 </p>
 
-<p align="center"><strong>v0.0.2 · Experimental · MIT licensed · English & Turkish</strong></p>
+<p align="center"><strong>v0.0.3 · Experimental · MIT licensed · English & Turkish</strong></p>
 
 Kubepit brings live resource tables, logs, terminals, topology, change history,
 Helm, GitOps and fleet operations into one desktop workspace. Follow an incident
@@ -31,9 +31,15 @@ Kubepit is an early community project. Expect rough edges and evolving APIs.
 Start with the demo or a development cluster. Choose an installer on the
 [download page](https://erdembas.github.io/kubepit/#downloads), or build from source.
 The page lists only published packages and shows their exact signing status.
-From **0.0.2**, the app checks for signed updates at startup and every five minutes,
-with release notes and explicit install/restart controls. Version 0.0.1 users must
-install the new package manually once to enable this update path.
+**0.0.3** is the corrective release for a Linux custom-action cleanup bug that
+could stop processes outside the intended child group during timeout or
+background-pipe cleanup.
+Versions **0.0.1 and 0.0.2 are affected**; do not install or continue using them.
+We recommend manually installing a published **0.0.3 or later** package once
+available. Version 0.0.1 has no updater key; 0.0.2 introduced it but predates this
+correction.
+The corrected app checks for signed updates at startup and every five minutes,
+with release notes and explicit install/restart controls.
 
 ![Kubepit workbench with synthetic Kubernetes resources](apps/website/public/workbench.png)
 

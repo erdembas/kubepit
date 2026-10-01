@@ -8,7 +8,7 @@ on:
       ref:
         description: Existing immutable version tag to package (never moved)
         required: true
-        default: v0.0.2
+        default: v0.0.3
         type: string
       publish:
         description: Publish the complete validated asset set to GitHub Releases
@@ -197,6 +197,9 @@ jobs:
         with:
           name: complete-desktop-release
           path: release-output/
+          # A publish-only retry reuses the six native artifacts and may
+          # replace this internal staging copy; release assets are never replaced.
+          overwrite: true
           if-no-files-found: error
           compression-level: 0
           retention-days: 14

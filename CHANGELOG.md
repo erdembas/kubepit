@@ -1,6 +1,22 @@
 # Changelog / Değişiklik günlüğü
 
+## 0.0.3 — Linux process cleanup fix / Linux süreç temizleme düzeltmesi
+
+### English
+
+- Replace the Unix custom-action cleanup shell command with a direct, validated process-group signal. This fixes Linux timeout and background-pipe cleanup that could otherwise terminate processes outside the intended child group. Invalid process IDs are ignored; Windows behavior is unchanged.
+- Identify 0.0.1 and 0.0.2 as affected versions; do not install or continue using them. Their source tags and original release bytes remain unchanged.
+- Migration: manually install a published 0.0.3 or later package once available. Version 0.0.1 has no updater public key; 0.0.2 introduced it but predates this correction. Version 0.0.3 combines the process cleanup fix with signed-update support.
+
+### Türkçe
+
+- Unix özel eylem temizliğindeki kabuk komutu, doğrulanmış süreç grubuna doğrudan sinyal gönderimiyle değiştirildi. Linux'ta zaman aşımı ve arka plan pipe temizliğinin hedef alt süreç grubunun dışındaki süreçleri sonlandırabilmesi düzeltildi. Geçersiz süreç kimlikleri yok sayılır; Windows davranışı değişmez.
+- 0.0.1 ve 0.0.2 etkilenen sürümler olarak belirtilir; bu sürümleri kurmayın veya kullanmaya devam etmeyin. Kaynak etiketleri ve özgün yayın dosyaları değiştirilmez.
+- Geçiş: 0.0.3 veya daha yeni bir paket yayımlandığında elle kurun. 0.0.1 güncelleyici açık anahtarı içermez; anahtarın eklendiği 0.0.2 bu düzeltmeden öncedir. 0.0.3, süreç temizleme düzeltmesini imzalı güncelleme desteğiyle birleştirir.
+
 ## 0.0.2 — Signed updates / İmzalı güncellemeler
+
+**Affected by the Linux cleanup bug; use 0.0.3 or later once published. / Linux temizleme hatasından etkilenir; yayımlandığında 0.0.3 veya sonrasını kullanın.**
 
 ### English
 
@@ -8,7 +24,7 @@
 - Show download progress and a restart action after installation; protect checks and installation from overlapping across application windows.
 - Require Developer ID signing and Apple notarization for new macOS release packages. Verify signed update artifacts for all six desktop targets and publish the update feed through GitHub Pages.
 - Refresh the Homebrew cask every six hours after verifying release metadata and checksums. Website version labels follow verified published releases; unchanged metadata no longer triggers redundant browser asset requests.
-- Migration: v0.0.1 has no updater public key. Install v0.0.2 manually once to receive later signed updates. Linux updates preserve AppImage, DEB or RPM format; package-manager installation may request administrator permission.
+- Historical migration design: v0.0.1 has no updater public key; v0.0.2 introduced it. This version is affected by the Linux cleanup bug: install a published v0.0.3 or later package once available. Linux updates preserve AppImage, DEB or RPM format; package-manager installation may request administrator permission.
 
 ### Türkçe
 
@@ -16,9 +32,11 @@
 - İndirme ilerlemesi ve kurulumdan sonra yeniden başlatma seçeneği gösterilir; farklı uygulama pencerelerindeki kontrollerin ve kurulumların çakışması önlenir.
 - Yeni macOS sürüm paketlerinde Developer ID imzası ve Apple noter onayı zorunludur. Altı masaüstü hedefinin imzalı güncelleme paketleri doğrulanır ve güncelleme akışı GitHub Pages üzerinden yayımlanır.
 - Homebrew cask dosyası, sürüm bilgileri ve sağlama toplamları doğrulandıktan sonra altı saatte bir güncellenir. Sitedeki sürüm etiketleri doğrulanmış yayınları izler; değişmemiş bilgiler için gereksiz tarayıcı indirme istekleri yapılmaz.
-- Geçiş: v0.0.1 güncelleyici açık anahtarı içermez. Sonraki imzalı güncellemeleri almak için v0.0.2’yi bir kez elle kurun. Linux güncellemeleri AppImage, DEB veya RPM biçimini korur; paket yöneticisiyle kurulum yönetici izni isteyebilir.
+- Tarihsel geçiş tasarımı: v0.0.1 güncelleyici açık anahtarı içermez; anahtar v0.0.2'de eklendi. Bu sürüm Linux temizleme hatasından etkilenir; v0.0.3 veya daha yeni bir paket yayımlandığında onu kurun. Linux güncellemeleri AppImage, DEB veya RPM biçimini korur; paket yöneticisiyle kurulum yönetici izni isteyebilir.
 
 ## 0.0.1 — Initial public release / İlk herkese açık sürüm
+
+**Affected by the Linux cleanup bug; use 0.0.3 or later once published. / Linux temizleme hatasından etkilenir; yayımlandığında 0.0.3 veya sonrasını kullanın.**
 
 ### English
 

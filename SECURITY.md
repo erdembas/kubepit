@@ -4,6 +4,11 @@
 
 ## English
 
+**Linux cleanup issue in 0.0.1 and 0.0.2:** custom-action timeout or background-pipe
+cleanup can terminate processes outside the intended child group. Do not install
+or continue using affected versions. Version 0.0.3 corrects this behavior; we
+recommend manually installing a published 0.0.3 or later package once available.
+
 ### Reporting a vulnerability
 
 Use GitHub's **Report a vulnerability** option under this repository's Security
@@ -25,7 +30,7 @@ branch or independent security-audit claim. Fixes target the current codebase.
 - **AI:** The assistant starts disabled and clusters require opt-in. Remote providers and supported installed agents can receive redacted selected context and messages. Context previews, tool-result consent and masking are provided; redaction is not a guarantee against every form of secret. IP/hostname masking is off by default. Typed follow-ups without context send directly. AI local-only mode limits assistant transports, not all application networking.
 - **Diagnostics:** NetworkPolicy simulation does not test live traffic or evaluate every CNI policy. Health/security findings and upgrade checks have coverage limits. Trivy integration displays existing operator reports. An empty or incomplete result is not a security attestation.
 - **Demo:** The browser demo uses fixtures and simulated actions. Never submit real credentials or confidential material to it. Browser preferences can persist locally.
-- **Distribution:** Version 0.0.2 embeds the updater public key and uses the HTTPS GitHub Pages update feed. Its release workflow requires valid updater signatures for every platform and Developer ID signing plus Apple notarization for macOS. Windows publisher signing remains optional; updater signatures and operating-system code signing are separate. The historical v0.0.1 macOS packages are ad-hoc signed and that version has no updater key. Its users must install a published v0.0.2 or later package manually once before receiving in-app updates. Check the [published release](https://github.com/erdembas/kubepit/releases) for available packages and exact signing status; configuration alone does not confirm publication. See [Releasing](docs/RELEASING.md) for verification and key management.
+- **Distribution:** Version 0.0.3 retains the updater public key introduced in 0.0.2 and uses the HTTPS GitHub Pages update feed. Its release workflow requires valid updater signatures for every platform and Developer ID signing plus Apple notarization for macOS. Windows publisher signing remains optional; updater signatures and operating-system code signing are separate. The historical v0.0.1 macOS packages are ad-hoc signed and that version has no updater key, so its users require a manual installation to enable signed updates. Use a published v0.0.3 or later package because earlier versions contain the Linux cleanup bug. Check the [published release](https://github.com/erdembas/kubepit/releases) for available packages and exact signing status; configuration alone does not confirm publication. See [Releasing](docs/RELEASING.md) for verification and key management.
 
 Use least-privilege credentials, keep trusted executables on your `PATH`, inspect
 manifests and commands before execution, and treat exported diagnostic material
@@ -33,6 +38,11 @@ according to your organization's rules. Architectural details and implementation
 limits are documented in [Architecture](docs/ARCHITECTURE.md).
 
 ## Türkçe
+
+**0.0.1 ve 0.0.2'de Linux temizleme hatası:** özel eylem zaman aşımı veya arka plan
+pipe temizliği, hedef alt süreç grubunun dışındaki süreçleri sonlandırabilir.
+Etkilenen sürümleri kurmayın veya kullanmaya devam etmeyin. 0.0.3 bu davranışı
+düzeltir; 0.0.3 veya daha yeni bir paket yayımlandığında elle kurmanızı öneririz.
 
 ### Güvenlik açığı bildirme
 
@@ -56,7 +66,7 @@ hedefler.
 - **Yapay zekâ:** Asistan başlangıçta kapalıdır; kümeler için ayrı izin gerekir. Uzak sağlayıcılar ve desteklenen kurulu ajanlar, maskelenmiş seçili bağlamı ve mesajları alabilir. Bağlam önizlemesi, araç sonucu onayı ve maskeleme sağlanır; maskeleme her gizli bilginin yakalanacağını garanti etmez. IP/host adı maskelemesi varsayılan olarak kapalıdır. Bağlamsız yazılı takip mesajları doğrudan gönderilir. Yalnızca yerel mod, tüm uygulama ağını değil asistan bağlantılarını sınırlar.
 - **Tanı araçları:** NetworkPolicy simülasyonu canlı trafik testi yapmaz ve her CNI politikasını değerlendirmez. Sağlık/güvenlik bulguları ve yükseltme kontrollerinin kapsam sınırları vardır. Trivy entegrasyonu mevcut operator raporlarını gösterir. Boş veya eksik sonuç güvenlik sertifikası değildir.
 - **Demo:** Tarayıcı demosu örnek veri ve simüle edilmiş işlemler kullanır. Gerçek kimlik bilgisi veya gizli içerik girmeyin. Tarayıcı tercihleri yerelde saklanabilir.
-- **Dağıtım:** 0.0.2, güncelleyici açık anahtarını içerir ve HTTPS GitHub Pages güncelleme akışını kullanır. Yayın iş akışı her platformda geçerli güncelleyici imzası; macOS'ta Developer ID imzası ve Apple noter onayı gerektirir. Windows yayıncı imzası isteğe bağlıdır; güncelleyici imzası ile işletim sistemi kod imzası farklıdır. Eski v0.0.1 macOS paketleri ad-hoc imzalıdır ve bu sürüm güncelleyici anahtarı içermez. Kullanıcıları, uygulama içi güncellemeleri alabilmek için yayımlanmış v0.0.2 veya daha yeni bir paketi bir kez elle kurmalıdır. Mevcut paketleri ve kesin imza durumunu [yayımlanmış sürümden](https://github.com/erdembas/kubepit/releases) kontrol edin; yalnızca yapılandırma yayının tamamlandığını doğrulamaz. Doğrulama ve anahtar yönetimi [Yayımlama](docs/RELEASING.md#türkçe) belgesindedir.
+- **Dağıtım:** 0.0.3, 0.0.2'de eklenen güncelleyici açık anahtarını korur ve HTTPS GitHub Pages güncelleme akışını kullanır. Yayın iş akışı her platformda geçerli güncelleyici imzası; macOS'ta Developer ID imzası ve Apple noter onayı gerektirir. Windows yayıncı imzası isteğe bağlıdır; güncelleyici imzası ile işletim sistemi kod imzası farklıdır. Eski v0.0.1 macOS paketleri ad-hoc imzalıdır ve bu sürüm güncelleyici anahtarı içermez; kullanıcıları imzalı güncellemeleri etkinleştirmek için elle kurulum yapmalıdır. Önceki sürümler Linux temizleme hatası içerdiğinden yayımlanmış v0.0.3 veya daha yeni bir paket kullanın. Mevcut paketleri ve kesin imza durumunu [yayımlanmış sürümden](https://github.com/erdembas/kubepit/releases) kontrol edin; yalnızca yapılandırma yayının tamamlandığını doğrulamaz. Doğrulama ve anahtar yönetimi [Yayımlama](docs/RELEASING.md#türkçe) belgesindedir.
 
 En az yetkili kimlik bilgilerini kullanın, `PATH` üzerindeki programların
 güvenilirliğini koruyun, manifest ve komutları çalıştırmadan önce inceleyin,
