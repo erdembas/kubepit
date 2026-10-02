@@ -7,22 +7,36 @@ import { Switch } from '@/components/ui/Switch';
 import { cn } from '@/lib/cn';
 import { gvkForKey, resolveRef } from '@/lib/kube/catalog';
 import type { ObjectRef } from '@/lib/kube/columns';
+import {
+  POLICY_REPORT_KEYS,
+  detectPolicyReports,
+  policyReportKindOf,
+  type ReportScope,
+} from '@/lib/kube/policyreports';
 import { TRIVY_KEYS, detectTrivy, trivyKindOf } from '@/lib/kube/trivy';
+import { useAppStore } from '@/store/useAppStore';
 import { VIEW, navigateTo, useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { ApiResourceInfo, KubeObject } from '@/types';
+import { analyzeCveRisk } from '../actions/aiActions';
 import { DetailsPanel } from '../details/DetailsPanel';
-import { useTrivyOperatorMissing, useTrivyReports } from './hooks';
+import { useTrivyOperatorMissing, useTrivyReports, usePolicyReports } from './hooks';
 import { PodSecurityOverview } from './PodSecurityOverview';
+import {
+  PolicyReportsMissing,
+  PolicyReportsOverview,
+  type PolicyActions,
+} from './PolicyReportsOverview';
 import { TrivyMissing } from './TrivyMissing';
 import { TrivyOverview, type OverviewActions } from './TrivyOverview';
 
 /**
  * Security view (`@security`): Trivy Operator reports (when its CRDs are
- * served) and Pod Security Standards per namespace. Reports open in a
- * docked details panel; workloads and namespaces open in their own tabs.
+ * served), policy reports (`wgpolicyk8s.io`) and Pod Security Standards
+ * per namespace. Reports open in a docked details panel; workloads and
+ * namespaces open in their own tabs.
  */
 
-type Tab = 'trivy' | 'pss';
+type Tab = 'trivy' | 'policy' | 'pss';
 
 /** Tab picked per cluster (survives the page remounting). */
 const pickedTab = new Map<string, Tab>();
@@ -72,24 +86,41 @@ export function SecurityPage({
   );
   const trivyCard = tab === 'trivy' && (!trivyServed || operatorMissing);
 
+  const policyServed = detectPolicyReports(apiResources);
+  const policy = usePolicyReports(
+    clusterId,
+    apiResources,
+    namespaces,
+    isActive && tab === 'policy' && policyServed,
+  );
+  const policyCount = policy.items.PolicyReport.length + policy.items.ClusterPolicyReport.length;
+  const policyCard = tab === 'policy' && !policyServed;
+
   const selectedGvk = selection ? gvkForKey(selection.key, apiResources) : null;
   const selectedObj = useMemo(() => {
     if (!selection) return null;
-    for (const list of Object.values(trivy.items))
+    const pools = [
+      ...Object.values(trivy.items),
+      policy.items.PolicyReport,
+      policy.items.ClusterPolicyReport,
+    ];
+    for (const list of pools)
       for (const o of list)
         if (
           o.metadata.name === selection.name &&
           (o.metadata.namespace ?? null) === (selection.namespace ?? null) &&
-          TRIVY_KEYS[o.kind as keyof typeof TRIVY_KEYS] === selection.key
+          (TRIVY_KEYS[o.kind as keyof typeof TRIVY_KEYS] ??
+            POLICY_REPORT_KEYS[o.kind as keyof typeof POLICY_REPORT_KEYS]) === selection.key
         )
           return o;
     return null;
-  }, [selection, trivy.items]);
+  }, [selection, trivy.items, policy.items]);
 
   const navigate = (ref: ObjectRef) => {
     const gvk = resolveRef(ref.apiVersion, ref.kind, apiResources);
     if (gvk) navigateTo(clusterId, gvk, ref.namespace ?? null, ref.name);
   };
+  const aiEnabled = useAppStore((s) => s.settings?.ai.enabled) ?? false;
   const actions: OverviewActions = {
     openReport: (report: KubeObject) => {
       const kind = trivyKindOf(report);
@@ -102,13 +133,34 @@ export function SecurityPage({
     },
     openObject: (target) =>
       navigate({ kind: target.kind, name: target.name, namespace: target.namespace }),
+    askAssistant: aiEnabled
+      ? (row) => void analyzeCveRisk(clusterId, row).catch((error) =>
+          useAppStore.getState().pushToast('error', String(error)),
+        )
+      : null,
+  };
+  const policyActions: PolicyActions = {
+    openReport: (report: KubeObject) => {
+      const kind = policyReportKindOf(report);
+      if (!kind) return;
+      useWorkbenchStore.getState().select(clusterId, VIEW.security, {
+        key: POLICY_REPORT_KEYS[kind],
+        namespace: report.metadata.namespace ?? null,
+        name: report.metadata.name,
+      });
+    },
+    openObject: (scope: ReportScope | null) => {
+      if (!scope) return;
+      navigate({ kind: scope.kind, name: scope.name, namespace: scope.namespace });
+    },
   };
 
   const tabs: Array<{ id: Tab; label: string }> = [
     { id: 'trivy', label: i18n.t('Vulnerabilities & audits') },
+    { id: 'policy', label: i18n.t('Policy reports') },
     { id: 'pss', label: i18n.t('Pod Security Standards') },
   ];
-  const live = tab === 'trivy' ? trivy.synced : true;
+  const live = tab === 'trivy' ? trivy.synced : tab === 'policy' ? policy.synced : true;
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1">
@@ -131,12 +183,18 @@ export function SecurityPage({
                 placeholder={
                   tab === 'trivy'
                     ? i18n.t('Search CVE, package or title…')
-                    : i18n.t('Filter namespaces…')
+                    : tab === 'policy'
+                      ? i18n.t('Search policy, rule or object…')
+                      : i18n.t('Filter namespaces…')
                 }
                 aria-label={
-                  tab === 'trivy' ? i18n.t('Search vulnerabilities') : i18n.t('Filter namespaces')
+                  tab === 'trivy'
+                    ? i18n.t('Search vulnerabilities')
+                    : tab === 'policy'
+                      ? i18n.t('Search policy results')
+                      : i18n.t('Filter namespaces')
                 }
-                disabled={trivyCard}
+                disabled={trivyCard || policyCard}
                 className="text-fg placeholder:text-fg-dim min-w-0 flex-1 bg-transparent text-[12px] outline-none disabled:opacity-50"
               />
               {query && (
@@ -150,11 +208,11 @@ export function SecurityPage({
                 </button>
               )}
             </div>
-            {tab === 'trivy' && trivyServed && (
+            {((tab === 'trivy' && trivyServed) || (tab === 'policy' && policyServed)) && (
               <IconButton
                 label={i18n.t('Restart watches')}
                 icon={<RefreshCw />}
-                onClick={trivy.restart}
+                onClick={tab === 'trivy' ? trivy.restart : policy.restart}
               />
             )}
           </div>
@@ -202,6 +260,18 @@ export function SecurityPage({
             ))}
           </div>
         )}
+        {tab === 'policy' && policy.errors.length > 0 && (
+          <div className="border-tone-warning/30 bg-tone-warning/8 text-tone-warning-fg flex shrink-0 flex-col gap-0.5 border-b px-4 py-1.5 text-[11.5px]">
+            {policy.errors.map((w) => (
+              <span key={w.gvk.kind} className="flex items-start gap-2">
+                <TriangleAlert className="mt-0.5 h-3 w-3 shrink-0" />
+                <span className="min-w-0 break-words">
+                  {w.gvk.kind}: {w.snap.error}
+                </span>
+              </span>
+            ))}
+          </div>
+        )}
         {!apiResources ? (
           <div className="text-fg-muted flex flex-1 items-center justify-center gap-2 text-[12px]">
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -209,6 +279,8 @@ export function SecurityPage({
           </div>
         ) : trivyCard ? (
           <TrivyMissing clusterId={clusterId} crdsServed={trivyServed} />
+        ) : policyCard ? (
+          <PolicyReportsMissing clusterId={clusterId} />
         ) : (
           <div className="overlay-scroll min-h-0 flex-1 overflow-auto">
             <div className="mx-auto max-w-6xl p-5">
@@ -219,6 +291,8 @@ export function SecurityPage({
                   fixableOnly={fixableOnly}
                   actions={actions}
                 />
+              ) : tab === 'policy' ? (
+                <PolicyReportsOverview data={policy} query={query} actions={policyActions} />
               ) : (
                 <PodSecurityOverview
                   clusterId={clusterId}
@@ -236,7 +310,7 @@ export function SecurityPage({
           <span
             className={cn(
               'h-1.5 w-1.5 rounded-full',
-              tab === 'trivy' && trivy.errors.length
+              (tab === 'trivy' ? trivy.errors.length : tab === 'policy' ? policy.errors.length : 0)
                 ? 'bg-status-error'
                 : live && isActive
                   ? 'bg-status-running animate-breathe'
@@ -248,6 +322,12 @@ export function SecurityPage({
             <>
               <span className="text-fg-dim/40">·</span>
               <span>{i18n.plural('{count} report', '{count} reports', reportCount)}</span>
+            </>
+          )}
+          {tab === 'policy' && policyServed && (
+            <>
+              <span className="text-fg-dim/40">·</span>
+              <span>{i18n.plural('{count} report', '{count} reports', policyCount)}</span>
             </>
           )}
         </div>

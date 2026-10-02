@@ -3,6 +3,7 @@ import { GATEWAY_CRDS } from './gateway';
 import { gitopsCrds } from './gitops';
 import { buildInstances } from './instances';
 import { netpolCrds } from './netpol';
+import { policyReportCrds } from './policyReports';
 import { scalePreset, scalePresetOf, type ScalePresetName } from './scale';
 import { trivyCrds } from './trivy';
 import { DAY, meta, obj } from './util';
@@ -171,9 +172,13 @@ export function crdsFor(db: ClusterDb) {
   const preset = scalePresetOf(db.id);
   if (preset) return scaleCrds(preset);
   // GitOps: ApplicationSet and the Flux CRDs (./gitops.ts).
-  return [...CRDS, ...gitopsCrds(db), ...netpolCrds(db), ...trivyCrds(db)].filter(
-    (c) => db.profile.argocd || c.group !== 'argoproj.io',
-  );
+  return [
+    ...CRDS,
+    ...gitopsCrds(db),
+    ...netpolCrds(db),
+    ...trivyCrds(db),
+    ...policyReportCrds(db),
+  ].filter((c) => db.profile.argocd || c.group !== 'argoproj.io');
 }
 
 export function buildCrds(db: ClusterDb, crds: readonly CrdInput[] = crdsFor(db)) {

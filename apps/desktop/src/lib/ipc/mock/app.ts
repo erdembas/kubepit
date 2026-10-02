@@ -194,6 +194,8 @@ const defaultSettings = (): Settings => ({
   terminal_font_size: 13,
   log_tail_lines: 1000,
   confirm_destructive: true,
+  tab_open_mode: 'preview',
+  details_click_close: true,
   node_shell_image: 'docker.io/library/alpine:3.20',
   debug_image: 'docker.io/library/busybox:1.36',
   auto_check_updates: true,

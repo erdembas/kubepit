@@ -4,7 +4,7 @@
 
 ## English
 
-Version **0.0.5** is experimental. It includes the 0.0.3 fix for a Linux custom-action
+Version **0.0.6** is experimental. It includes the 0.0.3 fix for a Linux custom-action
 cleanup bug affecting 0.0.1 and 0.0.2; do not publish or recommend those affected versions.
 Their source tags and original bytes remain unchanged. GitHub Actions builds
 desktop packages from an
@@ -45,7 +45,7 @@ when empty), and use the actual release date. Do not backfill unknown dates or
 move existing tags. A new numbered heading uses this format:
 
 ```markdown
-## [0.0.5] - YYYY-MM-DD — English title / Türkçe başlık
+## [0.0.6] - YYYY-MM-DD — English title / Türkçe başlık
 ```
 
 The version above is an example, not a scheduled release. A heading documents
@@ -141,7 +141,7 @@ release only if that GitHub release does not already exist. An existing release'
 pre-release flag is preserved; redispatching does not promote it. Do not change
 the GitHub flag alone: it must match the channel in the immutable release manifest.
 The current workflow does not promote existing previews in place. A future stable
-version must be configured deliberately before its initial publication; 0.0.5
+version must be configured deliberately before its initial publication; 0.0.6
 is intended as a pre-release. The workflow checks out automation and tagged application
 source separately, verifies all version entries, and records both commits. Use
 `publish=false` whenever only build verification is intended.
@@ -159,7 +159,7 @@ The frozen pnpm/Cargo lockfiles are used. Builds isolate application state and
 kubeconfig in runner temp storage; they do not connect to clusters. The release
 config enables signed updater artifacts, sets macOS 11 minimum and offers English and
 Turkish NSIS installer languages. Packages keep architecture-specific names,
-such as `Kubepit_0.0.5_linux_arm64.AppImage`.
+such as `Kubepit_0.0.6_linux_arm64.AppImage`.
 
 Every target must succeed before publication. Checks cover package magic,
 architecture where inspectable, native package metadata, macOS bundle version and
@@ -272,7 +272,7 @@ certification.
 
 ## Türkçe
 
-**0.0.5** deneyseldir. 0.0.1 ve 0.0.2'yi etkileyen Linux özel eylem temizleme
+**0.0.6** deneyseldir. 0.0.1 ve 0.0.2'yi etkileyen Linux özel eylem temizleme
 hatasının 0.0.3 düzeltmesini içerir; etkilenen sürümleri yayımlamayın veya önermeyin. Kaynak etiketleri
 ve özgün dosyaları değişmeden kalır. GitHub Actions, sabit sürüm etiketinden
 masaüstü paketlerini
@@ -315,7 +315,7 @@ notu bırakın. Gerçek yayın tarihini kullanın; bilinmeyen eski tarihleri tah
 etmeyin ve mevcut etiketleri taşımayın. Yeni sürüm başlığının biçimi:
 
 ```markdown
-## [0.0.5] - YYYY-MM-DD — English title / Türkçe başlık
+## [0.0.6] - YYYY-MM-DD — English title / Türkçe başlık
 ```
 
 Yukarıdaki sürüm yalnızca örnektir; planlanmış bir yayın değildir. Bir başlık
@@ -415,7 +415,7 @@ yalnızca ilgili GitHub yayını henüz yoksa kararlı yayın oluşturur. Mevcut
 GitHub bayrağını tek başına değiştirmeyin; değiştirilemez sürüm bildirimindeki
 kanalla eşleşmelidir. Mevcut iş akışı yayımlanmış ön sürümleri yerinde kararlı
 sürüme dönüştürmez. Gelecekteki bir kararlı sürüm, ilk yayınından önce bilinçli
-olarak yapılandırılmalıdır; 0.0.5 ön sürüm olarak planlanır. İş akışı, otomasyonu ve
+olarak yapılandırılmalıdır; 0.0.6 ön sürüm olarak planlanır. İş akışı, otomasyonu ve
 etiketlenmiş uygulama kaynağını ayrı checkout eder; tüm sürüm kayıtlarını denetler
 ve her iki commit'i kaydeder. Yalnızca derleme doğrulaması için `publish=false` verin.
 
@@ -432,7 +432,7 @@ Sabit pnpm/Cargo kilit dosyaları kullanılır. Derlemeler uygulama durumunu ve
 kubeconfig'i runner'ın geçici dizininde yalıtır; kümelere bağlanmaz. Yayın ayarı
 imzalı güncelleyici çıktılarını açar, macOS alt sınırını 11 yapar ve NSIS kurulumunda
 İngilizce/Türkçe sunar. Dosya adları mimariyi belirtir; örneğin
-`Kubepit_0.0.5_linux_arm64.AppImage`.
+`Kubepit_0.0.6_linux_arm64.AppImage`.
 
 Yayımdan önce tüm hedefler başarılı olmalıdır. Denetimler; paket yapısını,
 incelenebilen mimariyi, yerel paket üst verisini, macOS uygulama sürümü ve imzasını,

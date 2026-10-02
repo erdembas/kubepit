@@ -48,7 +48,16 @@ export function GlobalTooltip() {
       targetRef.current = target;
       showTimerRef.current = window.setTimeout(() => {
         showTimerRef.current = null;
-        setTooltip(positionFor(target, text));
+        if (!target.isConnected) {
+          hide();
+          return;
+        }
+        const pos = positionFor(target, text);
+        if (!pos) {
+          hide();
+          return;
+        }
+        setTooltip(pos);
       }, delay);
     };
 
@@ -81,12 +90,22 @@ export function GlobalTooltip() {
     window.addEventListener('resize', hide);
     window.addEventListener('keydown', hideOnEscape);
 
+    // Hiding the tooltip when its target leaves the DOM (closing a tab, a pane
+    // collapsing, a row unmounting) avoids an orphaned tooltip stranded at the
+    // last position or collapsing to the top-left corner of a zero rect.
+    const observer = new MutationObserver(() => {
+      const active = targetRef.current;
+      if (active && !active.isConnected) hide();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
     function hideOnEscape(event: KeyboardEvent) {
       if (event.key === 'Escape') hide();
     }
 
     return () => {
       clearShowTimer();
+      observer.disconnect();
       document.removeEventListener('pointerover', onPointerOver, true);
       document.removeEventListener('pointerout', onPointerOut, true);
       document.removeEventListener('focusin', onFocusIn, true);
@@ -101,7 +120,17 @@ export function GlobalTooltip() {
 
   useLayoutEffect(() => {
     if (!tooltip || !tooltipRef.current || !targetRef.current) return;
+    if (!targetRef.current.isConnected) {
+      targetRef.current = null;
+      setTooltip(null);
+      return;
+    }
     const next = positionFor(targetRef.current, tooltip.text, tooltipRef.current);
+    if (!next) {
+      targetRef.current = null;
+      setTooltip(null);
+      return;
+    }
     if (
       Math.abs(next.x - tooltip.x) > 0.5 ||
       Math.abs(next.y - tooltip.y) > 0.5 ||
@@ -173,8 +202,11 @@ function ensureAccessibleName(target: Element, text: string): void {
   target.setAttribute('aria-label', text);
 }
 
-function positionFor(target: Element, text: string, tooltip?: HTMLDivElement): TooltipState {
+function positionFor(target: Element, text: string, tooltip?: HTMLDivElement): TooltipState | null {
   const rect = target.getBoundingClientRect();
+  // A detached or display:none target has a zero rect; never pin a tooltip to
+  // the top-left corner for it.
+  if (rect.width === 0 && rect.height === 0) return null;
   const width = tooltip?.offsetWidth ?? 0;
   const height = tooltip?.offsetHeight ?? 0;
   const centerX = rect.left + rect.width / 2;

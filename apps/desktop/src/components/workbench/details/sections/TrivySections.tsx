@@ -1,7 +1,7 @@
 import * as i18n from '@/i18n';
 import { useLocaleMemo as useMemo } from '@/i18n';
 import { useState } from 'react';
-import { ChevronRight, ExternalLink, Lightbulb, Search } from 'lucide-react';
+import { ChevronRight, ExternalLink, Lightbulb, Search, Sparkles } from 'lucide-react';
 import { Switch } from '@/components/ui/Switch';
 import { cn } from '@/lib/cn';
 import { RefLink } from '@/lib/kube/columns/cells';
@@ -28,6 +28,8 @@ import {
   type Vulnerability,
 } from '@/lib/kube/trivy';
 import { openExternal } from '../../actions/openExternal';
+import { analyzeVulnerabilityRisk } from '../../actions/aiActions';
+import { useAppStore } from '@/store/useAppStore';
 import { SeverityText, SEV_TEXT, countOf, severityName } from '../../security/severity';
 import { MonoText, Row, Rows, Section } from '../primitives';
 import type { SectionProps } from './types';
@@ -127,7 +129,7 @@ function Filter({
 // Vulnerabilities
 // ---------------------------------------------------------------------------
 
-function VulnRow({ v }: { v: Vulnerability }) {
+function VulnRow({ v, onAsk }: { v: Vulnerability; onAsk: ((v: Vulnerability) => void) | null }) {
   i18n.useLocale();
   const link = safeLink(v.link);
   return (
@@ -145,6 +147,17 @@ function VulnRow({ v }: { v: Vulnerability }) {
             className="text-fg-dim hover:text-accent shrink-0"
           >
             <ExternalLink className="h-3 w-3" />
+          </button>
+        )}
+        {onAsk && (
+          <button
+            type="button"
+            onClick={() => onAsk(v)}
+            title={i18n.t('Analyze risk with assistant')}
+            aria-label={i18n.t('Analyze risk with assistant')}
+            className="text-fg-dim hover:text-accent shrink-0"
+          >
+            <Sparkles className="h-3 w-3" />
           </button>
         )}
         {v.score !== null && (
@@ -171,10 +184,17 @@ function VulnRow({ v }: { v: Vulnerability }) {
 
 export function VulnerabilityReportSections(props: SectionProps) {
   i18n.useLocale();
-  const { obj } = props;
+  const { obj, ctx } = props;
   const [query, setQuery] = useState('');
   const [fixableOnly, setFixableOnly] = useState(false);
   const [limit, setLimit] = useState(PAGE);
+  const aiEnabled = useAppStore((s) => s.settings?.ai.enabled) ?? false;
+  const onAsk = aiEnabled
+    ? (v: Vulnerability) =>
+        void analyzeVulnerabilityRisk(ctx.clusterId, obj, v).catch((error) =>
+          useAppStore.getState().pushToast('error', String(error)),
+        )
+    : null;
   const all = useMemo(
     () =>
       vulnerabilities(obj).sort(
@@ -227,7 +247,7 @@ export function VulnerabilityReportSections(props: SectionProps) {
           <>
             <ul className="divide-border/40 divide-y">
               {visible.slice(0, limit).map((v, i) => (
-                <VulnRow key={`${v.id}|${v.pkg}|${v.installed}|${i}`} v={v} />
+                <VulnRow key={`${v.id}|${v.pkg}|${v.installed}|${i}`} v={v} onAsk={onAsk} />
               ))}
             </ul>
             {visible.length > limit && (

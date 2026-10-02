@@ -2,12 +2,13 @@ import { useLocaleMemo as useMemo } from '@/i18n';
 import { ipc } from '@/lib/ipc';
 import { BUILTIN, isServed, toGvk } from '@/lib/kube/catalog';
 import { podSpecOwners } from '@/lib/kube/pss';
+import { policyReportGvk, type PolicyReportKind } from '@/lib/kube/policyreports';
 import { TRIVY_CHART, trivyGvk, type TrivyKind } from '@/lib/kube/trivy';
 import type { ApiResourceInfo, ClusterId, Gvk, KubeObject } from '@/types';
 import { hasListError } from '../data/listState';
 import { usePolled } from '../data/polled';
 import { restartWatch, useWatch, type WatchSnapshot } from '../data/watchCache';
-import { trivyOperatorKey } from './trivyInstall';
+import { trivyOperatorKey } from './operatorInstall';
 
 /** Shared watches of the Security view and the security details sections. */
 
@@ -96,6 +97,50 @@ export function useTrivyReports(
   for (const k of OVERVIEW_KINDS) items[k] = gvks[k] ? snaps[k].items : [];
   return {
     items,
+    lists,
+    synced: lists.length > 0 && settled(lists),
+    errors: lists.filter((l) => hasListError(l.snap) && l.snap.error),
+    restart: () => lists.forEach((l) => restartWatch(clusterId, l.gvk, namespaces)),
+  };
+}
+
+export interface PolicyReportData {
+  items: { PolicyReport: readonly KubeObject[]; ClusterPolicyReport: readonly KubeObject[] };
+  lists: ListState[];
+  synced: boolean;
+  errors: ListState[];
+  restart: () => void;
+}
+
+/** Policy reports (`wgpolicyk8s.io`) of the Security view's third tab. */
+export function usePolicyReports(
+  clusterId: ClusterId,
+  apiResources: readonly ApiResourceInfo[] | null,
+  namespaces: string[],
+  enabled: boolean,
+): PolicyReportData {
+  const gvks = useMemo(
+    () =>
+      ({
+        PolicyReport: policyReportGvk('PolicyReport', apiResources),
+        ClusterPolicyReport: policyReportGvk('ClusterPolicyReport', apiResources),
+      }) as Record<PolicyReportKind, Gvk | null>,
+    [apiResources],
+  );
+  // One hook per kind keeps the hook order stable; unserved kinds watch nothing.
+  const policy = useWatch(clusterId, gvks.PolicyReport, namespaces, enabled);
+  const cluster = useWatch(clusterId, gvks.ClusterPolicyReport, [], enabled);
+  const lists: ListState[] = (
+    [
+      { gvk: gvks.PolicyReport, snap: policy },
+      { gvk: gvks.ClusterPolicyReport, snap: cluster },
+    ] as const
+  ).filter((l): l is ListState => !!l.gvk);
+  return {
+    items: {
+      PolicyReport: gvks.PolicyReport ? policy.items : [],
+      ClusterPolicyReport: gvks.ClusterPolicyReport ? cluster.items : [],
+    },
     lists,
     synced: lists.length > 0 && settled(lists),
     errors: lists.filter((l) => hasListError(l.snap) && l.snap.error),

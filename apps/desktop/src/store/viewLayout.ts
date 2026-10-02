@@ -1,5 +1,6 @@
 import { VIEW_KEYS } from '@/lib/kube/nav';
 import { createLayoutOps } from './splitLayout';
+import { focusPane as focusLayoutPane, openKeys } from './splitLayout';
 import type { FlatLayout, SplitLayout, TabGroup, TabKey } from './splitLayout';
 
 /**
@@ -39,6 +40,26 @@ export const {
   closeViews,
   closePane,
 } = createLayoutOps({ home: VIEW_KEYS.clusterOverview });
+
+/**
+ * Swap the ephemeral tab `from` for `to` in its own pane, keeping the tab's
+ * position, the pane's active tab and focus (VS Code's preview tab). `to`
+ * must not be open anywhere; a missing `from` falls back to a plain open.
+ */
+export function replaceView(layout: ViewLayout, from: ViewKey, to: ViewKey): ViewLayout {
+  const owner = layout.groups.find((g) => g.tabs.includes(from));
+  if (!owner || openKeys(layout).has(to)) return openView(layout, to);
+  const groups = layout.groups.map((g) =>
+    g.id === owner.id
+      ? {
+          ...g,
+          tabs: g.tabs.map((key) => (key === from ? to : key)),
+          active: g.active === from ? to : g.active,
+        }
+      : g,
+  );
+  return focusLayoutPane({ ...layout, groups }, owner.id);
+}
 
 /** First index after the pinned tabs in one pane. */
 export function pinBoundary(tabs: readonly ViewKey[], pinned: ReadonlySet<ViewKey>): number {

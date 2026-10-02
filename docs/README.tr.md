@@ -16,7 +16,7 @@
   <a href="../CONTRIBUTING.md">Katkıda bulun</a>
 </p>
 
-<p align="center"><strong>v0.0.5 · Deneysel · MIT lisanslı · Türkçe ve İngilizce</strong></p>
+<p align="center"><strong>v0.0.6 · Deneysel · MIT lisanslı · Türkçe ve İngilizce</strong></p>
 
 Kubepit; canlı kaynak tablolarını, logları, terminalleri, topolojiyi, değişiklik
 geçmişini, Helm'i, GitOps'u ve filo işlemlerini tek masaüstü çalışma alanında
@@ -41,7 +41,7 @@ kurmanızı öneririz. 0.0.1 güncelleyici anahtarı içermez; anahtarın eklend
 beş dakikada imzalı güncelleme kontrolü, sürüm notları ve kullanıcının başlattığı
 kurulum/yeniden başlatma seçenekleri sunar.
 
-**0.0.5 yenilikleri:** Genel Bakış, Prometheus hacim metrikleri varsa anlık doluluk oranı en yüksek beş PVC'ye kadar gösterir; kapasite, uyarı renkleri ve PVC ayrıntılarına doğrudan erişim sunar. Tam [sürüm notlarını](../CHANGELOG.md) uygulamada veya [web sitesinde](https://erdembas.github.io/kubepit/tr/changelog/) okuyun.
+**0.0.6 yenilikleri:** Güvenlik görünümüne Kyverno ve diğer politika motorlarının `wgpolicyk8s.io` raporlarını okuyan Politika raporları sekmesi gelir; Değişiklikler sekmesi nesnenin geçmiş bir andaki durumunu yeniden kurup canlı nesneyle karşılaştırır; küme gezginlerine önizleme sekmeleri, türe özel klavye kısayolları ve bağlam menüsü, ayrıca asistan destekli CVE risk analizi eklenir. Tam [sürüm notlarını](../CHANGELOG.md) uygulamada veya [web sitesinde](https://erdembas.github.io/kubepit/tr/changelog/) okuyun.
 
 ![Örnek Kubernetes kaynaklarıyla Kubepit çalışma alanı](../apps/website/public/workbench.png)
 

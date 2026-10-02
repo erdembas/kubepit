@@ -4,6 +4,7 @@ import { BUILTIN } from '../catalog';
 import { eventColumns, namespaceColumns, nodeColumns } from './cluster';
 import { customColumns, crdDefinitionColumns } from './custom';
 import { GITOPS_COLUMNS } from './gitops';
+import { POLICY_REPORT_COLUMNS } from './policyreports';
 import { TRIVY_COLUMNS } from './trivy';
 import {
   configMapColumns,
@@ -89,6 +90,8 @@ const REGISTRY: Record<string, KindColumns> = {
   ...GITOPS_COLUMNS,
   // Security: Trivy Operator reports.
   ...TRIVY_COLUMNS,
+  // Security: policy reports (wgpolicyk8s.io).
+  ...POLICY_REPORT_COLUMNS,
 };
 
 export interface PrinterColumn {

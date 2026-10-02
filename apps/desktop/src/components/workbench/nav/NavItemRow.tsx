@@ -1,6 +1,8 @@
 import * as i18n from '@/i18n';
 import { memo } from 'react';
 import { Lock, Star } from 'lucide-react';
+import { Kbd } from '@/components/ui/Kbd';
+import { formatChord } from '@/lib/keymap';
 import type { NavItem } from '@/lib/kube/nav';
 import { cn } from '@/lib/cn';
 
@@ -10,8 +12,11 @@ export const NavItemRow = memo(function NavItemRow({
   pinned,
   indent = false,
   locked = null,
+  shortcut = '',
   onSelect,
+  onKeep,
   onTogglePin,
+  onMenu,
 }: {
   item: NavItem;
   active: boolean;
@@ -19,8 +24,14 @@ export const NavItemRow = memo(function NavItemRow({
   indent?: boolean;
   /** Why the user cannot list this kind (dims the row); null = accessible or unknown. */
   locked?: string | null;
+  /** Keyboard shortcut chord that opens this kind, shown as a badge ('' = none). */
+  shortcut?: string;
   onSelect: (key: string) => void;
+  /** Double click: make the ephemeral tab permanent (ignored otherwise). */
+  onKeep: (key: string) => void;
   onTogglePin: (key: string) => void;
+  /** Right-click: open the row's context menu at the cursor. */
+  onMenu: (key: string, x: number, y: number) => void;
 }) {
   i18n.useLocale();
   const Icon = item.icon;
@@ -31,6 +42,12 @@ export const NavItemRow = memo(function NavItemRow({
         data-nav-item={item.key}
         aria-current={active ? 'page' : undefined}
         onClick={() => onSelect(item.key)}
+        onDoubleClick={() => onKeep(item.key)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onMenu(item.key, e.clientX, e.clientY);
+        }}
         title={
           locked ??
           (item.gvk ? `${item.gvk.kind}${item.gvk.group ? ` · ${item.gvk.group}` : ''}` : undefined)
@@ -62,6 +79,14 @@ export const NavItemRow = memo(function NavItemRow({
           )}
         />
         <span className="min-w-0 flex-1 truncate">{item.label}</span>
+        {shortcut && (
+          <Kbd
+            className="mr-0.5 h-4 min-w-[16px] px-1 text-[9.5px] opacity-70"
+            aria-hidden
+          >
+            {formatChord(shortcut)}
+          </Kbd>
+        )}
         {locked && <Lock className="text-fg-dim/70 h-3 w-3 shrink-0" aria-label={locked} />}
       </button>
       {item.key !== '' && (

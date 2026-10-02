@@ -1113,6 +1113,17 @@ pub const DEFAULT_NODE_SHELL_IMAGE: &str = "docker.io/library/alpine:3.20";
 /// Default image for ephemeral debug containers (`kubectl debug`).
 pub const DEFAULT_DEBUG_IMAGE: &str = "docker.io/library/busybox:1.36";
 
+/// How a navigator click opens a cluster view tab (see `Settings`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TabOpenMode {
+    /// One ephemeral tab is reused until double-clicked or pinned.
+    #[default]
+    Preview,
+    /// Every click opens a permanent tab.
+    Persistent,
+}
+
 /// User preferences. Every field has a default so older or hand-edited
 /// `settings.json` files keep loading after new fields are added.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1125,6 +1136,11 @@ pub struct Settings {
     pub terminal_font_size: u32,
     pub log_tail_lines: u32,
     pub confirm_destructive: bool,
+    /// How a navigator click opens a cluster view tab (`TabOpenMode`).
+    pub tab_open_mode: TabOpenMode,
+    /// Close the open details panel when clicking the empty workspace area
+    /// of its pane, like Esc.
+    pub details_click_close: bool,
     pub node_shell_image: String,
     /// Default image for ephemeral debug containers.
     pub debug_image: String,
@@ -1162,6 +1178,8 @@ impl Default for Settings {
             terminal_font_size: 13,
             log_tail_lines: 1000,
             confirm_destructive: true,
+            tab_open_mode: TabOpenMode::Preview,
+            details_click_close: true,
             node_shell_image: DEFAULT_NODE_SHELL_IMAGE.to_string(),
             debug_image: DEFAULT_DEBUG_IMAGE.to_string(),
             auto_check_updates: true,
@@ -1814,6 +1832,8 @@ mod tests {
         assert_eq!(s.terminal_font_size, 15);
         assert_eq!(s.log_tail_lines, 1000);
         assert!(s.confirm_destructive);
+        assert_eq!(s.tab_open_mode, TabOpenMode::Preview);
+        assert!(s.details_click_close);
         assert_eq!(s.node_shell_image, DEFAULT_NODE_SHELL_IMAGE);
         assert_eq!(s.debug_image, DEFAULT_DEBUG_IMAGE);
         assert!(s.kubeconfig_sync_paths.is_empty());

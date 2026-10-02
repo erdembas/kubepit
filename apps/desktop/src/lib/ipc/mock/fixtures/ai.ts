@@ -488,6 +488,8 @@ export interface AnswerTarget {
   container: string;
   /** The query of an `explain-query` request. */
   query: string;
+  /** The CVE id of a `risk-analysis` request, when the context names one. */
+  cve: string | null;
   now: string;
 }
 
@@ -831,8 +833,48 @@ Köşeli parantezdeki aralık pencereyi belirler; uzun bir pencere ani sıçrama
   },
 };
 
-function cronJob(t: AnswerTarget): string {
-  return `${F}yaml
+const riskAnalysis = {
+  en: (t: AnswerTarget) => {
+    const cve = t.cve ?? 'this CVE';
+    return `**Risk:** ${cve} is a real exposure here, but it is bounded: the affected package ships inside the scanned images listed in the context, and a fixed version is available, so the risk is mainly the window until the images are rebuilt.
+
+**What makes it worse or better here**
+
+- The affected workloads are internet-facing only if their Services expose them; check the ingress or LoadBalancer in front of them.
+- A fixed version exists, so a rebuild of the image removes the finding without code changes.
+- The same base image is shared by several workloads, so one rebuild can fix them all at once.
+
+**Mitigation, smallest first**
+
+1. Rebuild the affected images with the fixed package version and roll them out.
+2. Until then, restrict network reachability to the affected workloads if they are exposed.
+3. Verify after the rollout that the next Trivy report no longer lists ${cve}.
+
+I cannot see your network policy or ingress configuration from the vulnerability report alone; if you share them, I can say whether the workload is actually reachable from outside the cluster.
+`;
+  },
+  tr: (t: AnswerTarget) => {
+    const cve = t.cve ?? 'bu CVE';
+    return `**Risk:** ${cve} burada gerçek bir maruziyet, ama sınırlı: etkilenen paket bağlamda listelenen taranmış imajların içinde yer alıyor ve düzeltilmiş bir sürüm mevcut, yani risk büyük ölçüde imajlar yeniden derlenene kadar geçen süre.
+
+**Burada neyi kötüleştirir, neyi iyileştirir**
+
+- Etkilenen workload'lar yalnızca önlerindeki Service'ler onları dışa açıyorsa internete maruzdur; önlerindeki ingress veya LoadBalancer'ı kontrol edin.
+- Düzeltilmiş bir sürüm var, bu yüzden imajı yeniden derlemek bulguyu kod değişikliği olmadan ortadan kaldırır.
+- Aynı temel imajı birkaç workload paylaşıyor, tek bir derleme hepsini birden düzeltebilir.
+
+**Azaltım, en küçüğünden başlayarak**
+
+1. Etkilenen imajları düzeltilmiş paket sürümüyle yeniden derleyin ve yayınlayın.
+2. O ana kadar, dışa açıksa etkilenen workload'lara ağdan erişimi kısıtlayın.
+3. Yayından sonra sonraki Trivy raporunda ${cve}'nin artık listelenmediğini doğrulayın.
+
+Güvenlik açığı raporundan tek başına network policy veya ingress yapılandırmanızı göremiyorum; paylaşırsanız workload'un gerçekten küme dışından erişilebilir olup olmadığını söyleyebilirim.
+`;
+  },
+};
+
+function cronJob(t: AnswerTarget): string {  return `${F}yaml
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -904,6 +946,7 @@ const ANSWERS: Record<Exclude<AiIntent, 'explain'>, Answer> = {
   logql,
   'explain-query': explainQuery,
   yaml,
+  'risk-analysis': riskAnalysis,
 };
 
 /** The canned answer for an intent; `crashLoop` picks the crash-loop explanation. */

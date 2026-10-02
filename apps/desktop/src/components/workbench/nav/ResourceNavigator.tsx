@@ -1,12 +1,28 @@
 import * as i18n from '@/i18n';
 import { useLocaleMemo as useMemo } from '@/i18n';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { ChevronDown, EyeOff, PanelLeftClose, PanelLeftOpen, Search, X } from 'lucide-react';
+import {
+  ChevronDown,
+  CornerDownRight,
+  ExternalLink,
+  EyeOff,
+  Keyboard,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Pin,
+  PinOff,
+  Search,
+  X,
+} from 'lucide-react';
+import { FileContextMenu, type FileContextMenuEntry } from '@/components/ui/FileContextMenu';
 import { ResizeHandle } from '@/components/ui/ResizeHandle';
+import { formatChord } from '@/lib/keymap';
 import { SECTION_ICONS } from '@/lib/kube/icons';
 import { buildNav, flattenNav, type NavGroup, type NavItem } from '@/lib/kube/nav';
 import { cn } from '@/lib/cn';
 import { useAccessStore } from '@/store/useAccessStore';
+import { useAppStore } from '@/store/useAppStore';
+import { useNavShortcutsStore } from '@/store/useNavShortcutsStore';
 import { NAV_WIDTH, useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { ApiResourceInfo } from '@/types';
 import { useKindAccess } from '../access/hooks';
@@ -70,6 +86,7 @@ export function ResourceNavigator({
   const collapsedNav = useWorkbenchStore((s) => s.navCollapsed);
   const collapsedGroups = useWorkbenchStore((s) => s.collapsedGroups);
   const pinnedKinds = useWorkbenchStore((s) => s.pinnedKinds);
+  const shortcuts = useNavShortcutsStore((s) => s.shortcuts);
   const store = useWorkbenchStore.getState;
   const drag = useDragWidth({
     width: navWidth,
@@ -118,10 +135,74 @@ export function ResourceNavigator({
   }, [activeKind]);
 
   const select = useCallback(
-    (key: string) => store().setActiveKind(clusterId, key),
+    (key: string) => {
+      const preview = useAppStore.getState().settings?.tab_open_mode !== 'persistent';
+      store().setActiveKind(clusterId, key, { preview });
+    },
+    [clusterId, store],
+  );
+  const keep = useCallback(
+    (key: string) => {
+      // A double click makes the ephemeral tab permanent (VS Code parity).
+      if (useWorkbenchStore.getState().previewTabKeys[clusterId] === key)
+        store().keepPreviewTab(clusterId);
+    },
     [clusterId, store],
   );
   const togglePin = useCallback((key: string) => store().togglePinned(key), [store]);
+
+  const [menu, setMenu] = useState<{ key: string; x: number; y: number } | null>(null);
+  const openMenu = useCallback((key: string, x: number, y: number) => setMenu({ key, x, y }), []);
+  const menuItems = useMemo((): FileContextMenuEntry[] => {
+    if (!menu) return [];
+    const item = all.find((i) => i.key === menu.key);
+    if (!item) return [];
+    const chord = shortcuts[menu.key] ?? '';
+    const previewMode = useAppStore.getState().settings?.tab_open_mode !== 'persistent';
+    const items: FileContextMenuEntry[] = [
+      {
+        id: 'open',
+        label: i18n.t('Open'),
+        icon: <CornerDownRight size={12} />,
+        hint: chord ? formatChord(chord) : undefined,
+        onClick: () => select(menu.key),
+      },
+    ];
+    if (previewMode) {
+      items.push({
+        id: 'open-permanent',
+        label: i18n.t('Open permanently'),
+        icon: <ExternalLink size={12} />,
+        onClick: () => store().setActiveKind(clusterId, menu.key, { preview: false }),
+      });
+    }
+    items.push(
+      {
+        id: 'pin',
+        label: pinnedKinds.includes(menu.key) ? i18n.t('Unpin from top') : i18n.t('Pin to top'),
+        icon: pinnedKinds.includes(menu.key) ? <PinOff size={12} /> : <Pin size={12} />,
+        onClick: () => togglePin(menu.key),
+      },
+      { id: 'sep0', separator: true },
+      {
+        id: 'assign-shortcut',
+        label: chord ? i18n.t('Change shortcut…') : i18n.t('Assign shortcut…'),
+        icon: <Keyboard size={12} />,
+        onClick: () => {
+          useNavShortcutsStore.getState().requestFocus(menu.key);
+          useAppStore.getState().openSettings('keyboard');
+        },
+      },
+    );
+    if (chord) {
+      items.push({
+        id: 'clear-shortcut',
+        label: i18n.t('Clear shortcut'),
+        onClick: () => useNavShortcutsStore.getState().clearShortcut(menu.key),
+      });
+    }
+    return items;
+  }, [menu, all, shortcuts, pinnedKinds, select, store, clusterId, togglePin]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
@@ -189,8 +270,11 @@ export function ResourceNavigator({
         pinned={pinnedKinds.includes(item.key)}
         indent={indent}
         locked={lockOf(item)}
+        shortcut={shortcuts[item.key] ?? ''}
         onSelect={select}
+        onKeep={keep}
         onTogglePin={togglePin}
+        onMenu={openMenu}
       />
     ));
 
@@ -346,6 +430,9 @@ export function ResourceNavigator({
         className="focus-visible:bg-accent/15 absolute inset-y-0 -right-1 w-2 touch-none focus-visible:outline-none"
         title={i18n.t('Resize navigator · drag or use ←/→ · double-click to reset')}
       />
+      {menu && (
+        <FileContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />
+      )}
     </aside>
   );
 }

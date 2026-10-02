@@ -136,6 +136,14 @@ pub fn intent_instructions(intent: AiIntent) -> &'static str {
              fields, keep the names and namespace of the scope, and use no field the schema \
              does not define."
         }
+        AiIntent::RiskAnalysis => {
+            "Task: assess the risk of the vulnerability in the context for this cluster. \
+             Weigh how the affected workloads are exposed (services, ingresses, network \
+             reachability) against the severity, the installed and fixed versions and whether \
+             a fix exists. Lead with the risk verdict, then the evidence from the context, \
+             then the smallest mitigation steps in order. Name what the context does not \
+             show and what would change the verdict."
+        }
     }
 }
 
@@ -143,7 +151,9 @@ pub fn intent_instructions(intent: AiIntent) -> &'static str {
 /// harder than chat, translations least.
 pub fn default_effort(intent: AiIntent) -> AiEffort {
     match intent {
-        AiIntent::Explain | AiIntent::Fix | AiIntent::Yaml => AiEffort::High,
+        AiIntent::Explain | AiIntent::Fix | AiIntent::Yaml | AiIntent::RiskAnalysis => {
+            AiEffort::High
+        }
         AiIntent::Chat => AiEffort::Medium,
         AiIntent::Kubectl | AiIntent::Promql | AiIntent::Logql | AiIntent::ExplainQuery => {
             AiEffort::Low
@@ -155,7 +165,7 @@ pub fn default_effort(intent: AiIntent) -> AiEffort {
 mod tests {
     use super::*;
 
-    const INTENTS: [AiIntent; 8] = [
+    const INTENTS: [AiIntent; 9] = [
         AiIntent::Explain,
         AiIntent::Fix,
         AiIntent::Chat,
@@ -164,6 +174,7 @@ mod tests {
         AiIntent::Logql,
         AiIntent::ExplainQuery,
         AiIntent::Yaml,
+        AiIntent::RiskAnalysis,
     ];
 
     #[test]
@@ -249,6 +260,7 @@ mod tests {
         assert!(intent_instructions(AiIntent::Yaml).contains("```yaml"));
         assert!(intent_instructions(AiIntent::Yaml).contains("schema"));
         assert!(intent_instructions(AiIntent::Fix).contains("partial"));
+        assert!(intent_instructions(AiIntent::RiskAnalysis).contains("vulnerability"));
         let namespaced = "when the object is namespaced";
         assert!(intent_instructions(AiIntent::Fix).contains(namespaced));
         assert!(system_prompt(AiLocale::En).contains(namespaced));
@@ -258,6 +270,6 @@ mod tests {
     fn default_effort_follows_the_intent() {
         let effort: Vec<AiEffort> = INTENTS.iter().map(|i| default_effort(*i)).collect();
         use AiEffort::{High, Low, Medium};
-        assert_eq!(effort, [High, High, Medium, Low, Low, Low, Low, High]);
+        assert_eq!(effort, [High, High, Medium, Low, Low, Low, Low, High, High]);
     }
 }

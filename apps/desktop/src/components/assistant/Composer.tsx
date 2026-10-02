@@ -115,6 +115,8 @@ export function Composer({
     intents.push({ value: 'fix', label: i18n.t('Suggest a fix') });
   else if (state.composerIntent === 'explain-query')
     intents.push({ value: 'explain-query', label: i18n.t('Explain query') });
+  else if (state.composerIntent === 'risk-analysis')
+    intents.push({ value: 'risk-analysis', label: i18n.t('Analyze risk') });
   return (
     <div className="shrink-0 px-3 pt-2 pb-3">
       <div className="mx-auto w-full max-w-[860px]">

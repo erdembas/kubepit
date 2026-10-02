@@ -177,6 +177,9 @@ const KIND_ICONS: Record<string, LucideIcon> = {
   'clustercompliancereports.aquasecurity.github.io': BadgeCheck,
   'sbomreports.aquasecurity.github.io': PackageSearch,
   'clustersbomreports.aquasecurity.github.io': PackageSearch,
+  // Security: policy reports (wgpolicyk8s.io).
+  'policyreports.wgpolicyk8s.io': ScrollText,
+  'clusterpolicyreports.wgpolicyk8s.io': ScrollText,
 };
 
 export function kindIcon(key: string): LucideIcon {

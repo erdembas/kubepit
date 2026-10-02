@@ -1,10 +1,11 @@
 import * as i18n from '@/i18n';
 import { useEffect, useState } from 'react';
-import { FileDiff, Loader2, RefreshCw } from 'lucide-react';
+import { FileDiff, History, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { IconButton } from '@/components/ui/IconButton';
 import type { KubeObject } from '@/types';
 import { ChangeRow } from '../changes/TimelineRows';
+import { TimeTravelPanel } from '../changes/TimeTravelPanel';
 import { useJournal } from '../changes/useChanges';
 import {
   journalCoverageStart,
@@ -45,6 +46,7 @@ export function ChangesTab({
     10_000,
   );
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [timeTravel, setTimeTravel] = useState(false);
   const entries = journal.data?.entries ?? [];
   const status = journal.data?.status;
   // Persistent history: older entries on demand ("Load older").
@@ -97,7 +99,14 @@ export function ChangesTab({
           </>
         )}
         {journal.loading && <Loader2 className="h-3 w-3 animate-spin" />}
-        <div className="ml-auto flex items-center">
+        <div className="ml-auto flex items-center gap-1">
+          <IconButton
+            size="xs"
+            label={i18n.t('Compare a past state with the live object')}
+            icon={<History />}
+            onClick={() => setTimeTravel((v) => !v)}
+            className={timeTravel ? 'text-accent' : undefined}
+          />
           <IconButton
             size="xs"
             label={i18n.t('Refresh')}
@@ -106,6 +115,16 @@ export function ChangesTab({
           />
         </div>
       </div>
+      {timeTravel && (
+        <TimeTravelPanel
+          clusterId={clusterId}
+          obj={obj}
+          entries={entries}
+          olderEntries={olderEntries}
+          isActive={isActive}
+          onClose={() => setTimeTravel(false)}
+        />
+      )}
       {!journal.data ? (
         <div className="text-fg-muted flex flex-1 items-center justify-center gap-2 p-6 text-[12px]">
           {journal.error ? (

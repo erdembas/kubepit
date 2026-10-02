@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, FolderOpen, KeyRound, Loader2, Plus, Trash2, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
 import { Switch } from '@/components/ui/Switch';
 import { KubepitMark } from '@/components/ui/KubepitMark';
 import { setSidebarMode, sidebarModeOf, type SidebarMode } from '@/components/sidebar/sidebarMode';
@@ -99,23 +100,47 @@ export function GeneralCategory({ description }: { description: string }) {
           'Changes apply immediately. Kubernetes data, logs, YAML and your own content keep their original language.',
         )}
       >
-        <select
-          aria-label={i18n.t('Display language')}
+        <Select
+          size="md"
+          ariaLabel={i18n.t('Display language')}
           value={locale}
-          onChange={(event) => i18n.setLocale(event.target.value as i18n.Locale)}
-          className="border-border bg-surface-raised text-fg rounded-app-sm border px-3 py-2 text-sm"
-        >
-          <option value="tr" lang="tr">
-            Türkçe
-          </option>
-          <option value="en" lang="en">
-            English
-          </option>
-        </select>
+          onChange={(value) => i18n.setLocale(value)}
+          options={[
+            { value: 'tr', label: 'Türkçe' },
+            { value: 'en', label: 'English' },
+          ]}
+        />
       </SettingsSection>
       <SidebarModeSection />
       {draft ? (
         <>
+          <SettingsSection
+            title={i18n.t('View tabs')}
+            description={i18n.t(
+              'How the cluster navigator opens views. Preview mode reuses one temporary tab while you browse; double-click it (or pin it) to keep it open.',
+            )}
+          >
+            <Select
+              size="md"
+              ariaLabel={i18n.t('View tabs')}
+              value={draft.tab_open_mode}
+              onChange={(value) => update('tab_open_mode', value)}
+              options={[
+                { value: 'preview', label: i18n.t('Open temporarily (preview)') },
+                { value: 'persistent', label: i18n.t('Open permanently') },
+              ]}
+            />
+          </SettingsSection>
+          <SettingsSection title={i18n.t('Details panel')}>
+            <Switch
+              checked={draft.details_click_close}
+              onChange={(v) => update('details_click_close', v)}
+              label={i18n.t('Close details when clicking the workspace')}
+              description={i18n.t(
+                'Clicking an empty area of the workspace closes the open details panel, like Esc. Interactive elements, text selections and open dialogs never close it.',
+              )}
+            />
+          </SettingsSection>
           <SettingsSection title={i18n.t('Safety')}>
             <Switch
               checked={draft.confirm_destructive}
@@ -192,18 +217,13 @@ function SidebarModeSection() {
         },
       )}
     >
-      <select
-        aria-label={i18n.t('Sidebar')}
+      <Select
+        size="md"
+        ariaLabel={i18n.t('Sidebar')}
         value={mode}
-        onChange={(event) => setSidebarMode(event.target.value as SidebarMode)}
-        className="border-border bg-surface-raised text-fg rounded-app-sm border px-3 py-2 text-sm"
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
+        onChange={(value) => setSidebarMode(value)}
+        options={options}
+      />
     </SettingsSection>
   );
 }

@@ -12,6 +12,7 @@ import {
   Lightbulb,
   Loader2,
   Search,
+  Sparkles,
   Workflow,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
@@ -54,6 +55,8 @@ const TOP = 8;
 export interface OverviewActions {
   openReport: (report: KubeObject) => void;
   openObject: (target: WorkloadKey) => void;
+  /** Risk analysis of a CVE with the assistant; absent when the AI is off. */
+  askAssistant: ((row: CveRow) => void) | null;
 }
 
 function workloadText(w: WorkloadKey): string {
@@ -188,6 +191,20 @@ function CveRowView({ row, actions }: { row: CveRow; actions: OverviewActions })
               className="text-fg-dim hover:text-accent shrink-0"
             >
               <ExternalLink className="h-3 w-3" />
+            </button>
+          )}
+          {actions.askAssistant && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                actions.askAssistant?.(row);
+              }}
+              title={i18n.t('Analyze risk with assistant')}
+              aria-label={i18n.t('Analyze risk with assistant')}
+              className="text-fg-dim hover:text-accent shrink-0"
+            >
+              <Sparkles className="h-3 w-3" />
             </button>
           )}
           <SeverityText severity={row.severity} className="ml-auto text-[11px] @2xl:ml-0" />

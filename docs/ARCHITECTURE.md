@@ -948,6 +948,23 @@ shell enables it, tests and headless tools do not.
   it wraps the ranges, search and refresh onto a second row, the search
   fills that row below `@lg` and the recording label (kept as a tooltip)
   hides below `@2xl`.
+- **State at a past time** (`lib/kube/changes/timetravel.ts`, pure; UI in
+  the details Changes tab's `TimeTravelPanel`): every entry keeps a full
+  normalized after-snapshot, so "the object at time T" is simply the last
+  entry at or before T (`pickStateAt`; a delete entry means it did not
+  exist, a re-created object is followed by timestamp, not uid). The panel
+  diffs that snapshot with the live object after rendering both through one
+  canonical form: the snapshot and the live object are normalized with a TS
+  mirror of `normalize.rs` (`journalMirror`: no status or bookkeeping,
+  nodes reduced, noise annotations dropped, keys sorted), Secret values and
+  the journal's salted markers both become `<redacted>`, and
+  creationTimestamp is dropped on both sides. Entries stored without bodies
+  (`omitted`) fall back up to three entries back (`fallbackCandidates`,
+  `resolveState`), reporting what was skipped; times before the oldest
+  known entry (journal coverage, plus whatever older history was loaded)
+  stay explicitly unknown. Details are fetched with the existing
+  `changes_get` / `history_changes_get` commands; nothing is sent to the
+  cluster.
 - Tests keep the journal off (`tests/support` setup) unless they enable
   it; `tests/change_journal.rs` drives it through the fake API server.
 
@@ -1934,13 +1951,13 @@ and scrolls to the requested entry in About & Updates.
   in 12 days" and one "expired 9 days ago"); `mock/fixtures/health.ts`
   adds leftovers that trigger the other rules.
 
-## Security (Trivy Operator, Pod Security Standards, RBAC)
+## Security (Trivy Operator, Pod Security Standards, Policy reports, RBAC)
 
 The `@security` view (`VIEW_KEYS.security`, Cluster section,
-`components/workbench/security/`) has two parts: Trivy Operator reports
-and Pod Security Standards per namespace. RBAC "who can" lives in My
-Permissions. Everything except the Pod Security dry run is UI-side on top of
-the generic watches.
+`components/workbench/security/`) has three parts: Trivy Operator reports,
+policy reports (`wgpolicyk8s.io`) and Pod Security Standards per namespace.
+RBAC "who can" lives in My Permissions. Everything except the Pod Security
+dry run is UI-side on top of the generic watches.
 
 - **Trivy Operator** (`lib/kube/trivy/`): detection is discovery-driven
   (`aquasecurity.github.io`: Vulnerability, ConfigAudit, ExposedSecret,
@@ -1954,7 +1971,7 @@ the generic watches.
   image once (deduplicated by digest), images and workloads ranked worst
   first, CVE search (id, package, title), failed checks grouped by check id,
   exposed secrets and compliance summaries, all with a fixable-only switch.
-  Exposed-secret reports are read as metadata only: the `match` field is
+  Exposed-secret reports are read as metadata only: the   `match` field is
   never read. Reports open in a docked details panel with per-kind sections
   (`details/sections/TrivySections.tsx`: CVE list with installed → fixed
   version and advisory links (https only), checks with remediation,
@@ -1962,6 +1979,47 @@ the generic watches.
   (`lib/kube/columns/trivy.tsx`). Workloads and pods get a "Security"
   details section with their reports (`reportsFor`) and the Pod Security
   level their template passes.
+- **Policy reports** (`lib/kube/policyreports/`, the view's "Policy
+  reports" tab): `wgpolicyk8s.io/v1alpha2` PolicyReport and
+  ClusterPolicyReport as Kyverno, Falcosidekick and other engines write
+  them. Detection is discovery-driven like Trivy (`detectPolicyReports`);
+  without the CRDs the tab offers the same one-click Kyverno install as
+  Trivy Operator's missing card (below) — reports may come from any engine,
+  so when the kinds are served but empty the overview only explains that a
+  policy engine has not written anything yet. `model.ts` reads `scope`,
+  `results[]` (policy, rule, result, severity, message, timestamp) and
+  `summary` (counted from the results, with the summary as fallback);
+  `summary.ts` computes totals by result, failing/erroring/warning
+  policies grouped by policy name with their scopes and worst severity,
+  one row per report worst first, and search over policy, rule, message
+  and scope. Result words are translated; policy and rule names,
+  categories and messages are Kubernetes data and stay verbatim. Reports
+  open in the same docked details panel
+  (`details/sections/PolicyReportSections.tsx`: scope, counts, engine and
+  a filterable results list) and have table columns
+  (`lib/kube/columns/policyreports.tsx`). The demo backend derives reports
+  from the actual demo workloads (`mock/fixtures/policyReports.ts`:
+  require-team-label, disallow-privileged-containers,
+  restrict-image-registries, disallow-latest-tag,
+  require-resource-requests, plus cluster reports over ClusterRoles and
+  Namespaces) on the two cloud demo clusters.
+- **One-click operator install** (`security/operatorInstall.ts`, card in
+  `security/OperatorInstallCard.tsx`): one flow serves every operator —
+  Trivy Operator and Kyverno — from an `OperatorSpec` (repository plan,
+  install request, discovery detect, messages). It adds or updates the
+  operator's Helm repository through the user's helm configuration,
+  installs the chart (audited, read-only guarded in the backend, `wait`
+  and `atomic` so the CRDs are served when helm returns), then refreshes
+  discovery until the report kinds appear. State lives per cluster and
+  operator outside the component (leaving the view keeps the progress and
+  forbids a second install); a failed discovery only rediscovers, anything
+  earlier starts over (helm rolls a failed install back but keeps its
+  CRDs). The card gates on RBAC (`TRIVY_INSTALL_ACCESS`,
+  `KYVERNO_INSTALL_ACCESS`), read-only and a missing helm CLI, and asks
+  the typed confirmation on production clusters. Kyverno's plan lives in
+  `lib/kube/policyreports/install.ts`; the demo serves the install through
+  `installOperators` in `mock/helmCharts.ts`, with reports appearing a few
+  seconds later like the first evaluations.
 - **Pod Security Standards** (`lib/kube/pss/`, pure): the official baseline
   and restricted checks, versioned like `k8s.io/pod-security-admission`
   (checks apply from the version that introduced them; AppArmor fields from

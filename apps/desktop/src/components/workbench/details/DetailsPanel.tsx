@@ -135,6 +135,36 @@ export function DetailsPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, paneFocused, clusterId]);
 
+  // A click on the pane's empty workspace area closes the panel too, like Esc
+  // (Settings → General). Only this panel's pane dismisses it: the click must
+  // land on no control, selection drag or open overlay, and the panel's own
+  // surfaces and hidden tab copies never react.
+  const clickClose = useAppStore((s) => s.settings?.details_click_close ?? true);
+  const panelRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!isActive || !clickClose) return;
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as Element | null;
+      const panel = panelRef.current;
+      if (!target || !panel || !panel.offsetParent || panel.contains(target)) return;
+      const pane = panel.closest('[data-pane-root]');
+      if (!pane || !pane.contains(target)) return;
+      if (
+        target.closest(
+          'button, a, input, textarea, select, label, summary, [role="menu"], [role="dialog"], [role="alertdialog"], [role="tab"], [role="tablist"], [role="separator"], [role="slider"], [role="row"], [role="rowgroup"], [role="treeitem"], [role="option"], [role="listbox"], [data-resize-handle], [data-tauri-drag-region]',
+        )
+      )
+        return;
+      const selection = document.getSelection();
+      if (selection && !selection.isCollapsed) return;
+      if (document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"]')) return;
+      close();
+    };
+    window.addEventListener('click', onClick);
+    return () => window.removeEventListener('click', onClick);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive, clickClose, clusterId]);
+
   const now = useNow(30_000, isActive);
   const isNode = obj?.kind === 'Node';
   const wantsPodMetrics = !!obj && POD_METRIC_KINDS.has(obj.kind);
@@ -216,6 +246,7 @@ export function DetailsPanel({
 
   return (
     <aside
+      ref={panelRef}
       aria-label={i18n.t('{kind} details', { kind: gvk.kind })}
       className="border-border bg-surface animate-slide-in-right relative flex min-h-0 shrink-0 flex-col border-l shadow-[-12px_0_32px_-24px_rgb(0_0_0/0.45)]"
       style={{ width: drag.width, maxWidth: '72%' }}

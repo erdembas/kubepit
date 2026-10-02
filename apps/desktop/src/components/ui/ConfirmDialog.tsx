@@ -44,6 +44,7 @@ export function ConfirmDialog({
   const confirmRef = useRef<HTMLButtonElement>(null);
   const wordInputRef = useRef<HTMLInputElement>(null);
   const [typed, setTyped] = useState('');
+  const confirmedRef = useRef(false);
 
   // Focus strategy:
   // - When a confirmWord gate is present, focus the input so the user can
@@ -64,6 +65,17 @@ export function ConfirmDialog({
   }, [onCancel]);
 
   const gateSatisfied = !confirmWord || typed.trim() === confirmWord;
+
+  // Auto-confirm: the gate is an exact-match check, so the moment the typed
+  // text equals the word there is nothing left to decide — confirming right
+  // away removes the second, easy-to-miss submit step. The guard keeps it to
+  // one confirmation per keystroke burst.
+  useEffect(() => {
+    if (!confirmWord || !gateSatisfied || confirmedRef.current) return;
+    confirmedRef.current = true;
+    onConfirm();
+  }, [confirmWord, gateSatisfied, onConfirm]);
+
   const Icon = tone === 'info' ? Info : AlertTriangle;
   const iconColorCls =
     tone === 'danger'
@@ -113,18 +125,23 @@ export function ConfirmDialog({
                     ),
                   })}
                 </label>
-                <input
-                  ref={wordInputRef}
-                  value={typed}
-                  onChange={(e) => setTyped(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && gateSatisfied) onConfirm();
-                  }}
-                  className="border-border bg-surface-muted/60 text-fg focus:border-accent/60 focus:bg-surface mt-1 h-8 w-full rounded border px-2 font-mono text-[12px] transition focus:outline-none"
-                  spellCheck={false}
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                />
+                <div className="mt-1 flex items-center gap-1.5">
+                  <input
+                    ref={wordInputRef}
+                    value={typed}
+                    onChange={(e) => setTyped(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && gateSatisfied) onConfirm();
+                    }}
+                    className="border-border bg-surface-muted/60 text-fg focus:border-accent/60 focus:bg-surface h-8 min-w-0 flex-1 rounded border px-2 font-mono text-[12px] transition focus:outline-none"
+                    spellCheck={false}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                  />
+                </div>
+                <p className="text-fg-dim mt-1.5 text-[11px]">
+                  {i18n.t('It confirms on its own once the text matches.')}
+                </p>
               </div>
             )}
           </div>

@@ -7,6 +7,7 @@ import { actionApplies, isClusterLevel, isMultiSelect } from '@/lib/customAction
 import { chordFromEvent, globalShortcutFor, keymapCommandFor, type KeyBinding } from '@/lib/keymap';
 import { useAppStore } from '@/store/useAppStore';
 import { enabledCustomActions, useCustomActionsStore } from '@/store/useCustomActionsStore';
+import { shortcutForChord } from '@/store/useNavShortcutsStore';
 import { useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { CustomAction } from '@/types';
 import { useActionDialogs } from '../actions/dialogStore';
@@ -53,6 +54,19 @@ export function KeyboardHost() {
       const actions = enabledCustomActions().filter((a) => a.shortcut === chord);
       if (actions.length && runShortcut(actions, controller, inWorkbench(e.target))) {
         e.preventDefault();
+        return;
+      }
+      // Navigator kind shortcuts (Alt+1…9 by default, editable in Settings → Keyboard).
+      if (inWorkbench(e.target)) {
+        const clusterId = useAppStore.getState().selectedClusterId;
+        if (clusterId) {
+          const key = shortcutForChord(chord);
+          if (key) {
+            const preview = useAppStore.getState().settings?.tab_open_mode !== 'persistent';
+            useWorkbenchStore.getState().setActiveKind(clusterId, key, { preview });
+            e.preventDefault();
+          }
+        }
       }
     };
     window.addEventListener('keydown', onCapture, true);

@@ -1,6 +1,8 @@
 import type { ComponentType } from 'react';
+import { policyReportKindOf } from '@/lib/kube/policyreports';
 import { trivyKindOf } from '@/lib/kube/trivy';
 import type { KubeObject } from '@/types';
+import { PolicyReportSections } from './PolicyReportSections';
 import {
   CheckReportSections,
   ComplianceReportSections,
@@ -11,10 +13,11 @@ import {
 import type { SectionProps } from './types';
 
 /**
- * Details sections for Trivy Operator reports, matched by API group
- * (`aquasecurity.github.io`) and kind.
+ * Details sections for security report objects, matched by API group
+ * (`aquasecurity.github.io`, `wgpolicyk8s.io`) and kind.
  */
 export function securitySectionsFor(obj: KubeObject): ComponentType<SectionProps> | null {
+  if (policyReportKindOf(obj)) return PolicyReportSections;
   switch (trivyKindOf(obj)) {
     case 'VulnerabilityReport':
     case 'ClusterVulnerabilityReport':

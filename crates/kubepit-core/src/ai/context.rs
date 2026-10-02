@@ -235,6 +235,7 @@ fn kind_name(kind: AiSectionKind) -> &'static str {
         AiSectionKind::Schema => "schema",
         AiSectionKind::Query => "query",
         AiSectionKind::Editor => "editor",
+        AiSectionKind::Vulnerabilities => "vulnerabilities",
     }
 }
 
@@ -600,8 +601,19 @@ status:
     fn kind_attributes_use_the_contract_spelling() {
         use AiSectionKind::*;
         for kind in [
-            Scope, Object, Containers, Events, Logs, Health, Changes, Alerts, Metrics, Schema,
-            Query, Editor,
+            Scope,
+            Object,
+            Containers,
+            Events,
+            Logs,
+            Health,
+            Changes,
+            Alerts,
+            Metrics,
+            Schema,
+            Query,
+            Editor,
+            Vulnerabilities,
         ] {
             assert_eq!(serde_json::to_value(kind).unwrap(), kind_name(kind));
         }

@@ -16,7 +16,7 @@
   <a href="CONTRIBUTING.md">Contribute</a>
 </p>
 
-<p align="center"><strong>v0.0.5 · Experimental · MIT licensed · English & Turkish</strong></p>
+<p align="center"><strong>v0.0.6 · Experimental · MIT licensed · English & Turkish</strong></p>
 
 Kubepit brings live resource tables, logs, terminals, topology, change history,
 Helm, GitOps and fleet operations into one desktop workspace. Follow an incident
@@ -110,7 +110,7 @@ pnpm install --frozen-lockfile
 pnpm dev:ui
 ```
 
-**New in 0.0.5:** Overview shows up to five PVCs with the highest current usage when Prometheus volume metrics are available, including capacity, warning colors and direct access to PVC details. Read the complete [release notes](CHANGELOG.md) in the app or on the [website](https://erdembas.github.io/kubepit/changelog/).
+**New in 0.0.6:** the Security view gains a Policy reports tab reading `wgpolicyk8s.io` reports from Kyverno and other policy engines, the Changes tab reconstructs an object's state at any past time and diffs it with the live object, and cluster navigators add preview tabs, per-kind keyboard shortcuts and a context menu, plus assistant-backed CVE risk analysis. Read the complete [release notes](CHANGELOG.md) in the app or on the [website](https://erdembas.github.io/kubepit/changelog/).
 
 ## Built around the work, from investigation to review
 

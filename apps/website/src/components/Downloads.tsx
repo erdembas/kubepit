@@ -17,6 +17,7 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import * as i18n from '@/i18n';
+import { Select } from '@/components/ui/Select';
 import { demo, repository } from '@/lib/links';
 import snapshotData from '@/lib/releases/snapshot.json';
 import {
@@ -188,20 +189,19 @@ export function Downloads() {
             {publishedDate && <time dateTime={release?.publishedAt}>{publishedDate}</time>}
           </div>
           {hasStable && hasPreview && (
-            <label className={styles.channelPicker}>
-              <span>{t('Release channel')}</span>
-              <select
-                value={channel}
-                onChange={(event) => {
-                  setChannel(event.target.value as ReleaseChannel);
-                  setChannelChosen(true);
-                }}
-              >
-                <option value="stable">{t('Stable release')}</option>
-                <option value="prerelease">{t('Pre-release')}</option>
-              </select>
-              <ChevronDown size={12} aria-hidden="true" />
-            </label>
+            <Select
+              caption={t('Release channel')}
+              ariaLabel={t('Release channel')}
+              value={channel}
+              onChange={(value) => {
+                setChannel(value);
+                setChannelChosen(true);
+              }}
+              options={[
+                { value: 'stable', label: t('Stable release') },
+                { value: 'prerelease', label: t('Pre-release') },
+              ]}
+            />
           )}
         </div>
         <div className={styles.statusBar}>

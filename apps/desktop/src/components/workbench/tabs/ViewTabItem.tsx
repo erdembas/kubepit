@@ -16,10 +16,14 @@ interface Props {
   /** The tab's pane is the focused one (bright vs muted active tier). */
   focused: boolean;
   pinned: boolean;
+  /** The cluster's ephemeral tab (italic label, VS Code preview tab). */
+  preview: boolean;
   closable: boolean;
   /** A tab from another pane is being dragged (show the insert marker). */
   foreignDrag: boolean;
   onActivate: (key: string) => void;
+  /** Double click: make the ephemeral tab permanent (ignored otherwise). */
+  onKeep: (key: string) => void;
   onClose: (key: string) => void;
   onTogglePin: (key: string) => void;
   onStep: (key: string, step: -1 | 1) => void;
@@ -35,9 +39,11 @@ export const ViewTabItem = memo(function ViewTabItem({
   active,
   focused,
   pinned,
+  preview,
   closable,
   foreignDrag,
   onActivate,
+  onKeep,
   onClose,
   onTogglePin,
   onStep,
@@ -67,6 +73,7 @@ export const ViewTabItem = memo(function ViewTabItem({
       aria-selected={active}
       tabIndex={active ? 0 : -1}
       onClick={() => onActivate(viewKey)}
+      onDoubleClick={() => onKeep(viewKey)}
       onMouseDown={(e) => {
         // Middle button: suppress autoscroll so onAuxClick can close cleanly.
         if (e.button === 1) e.preventDefault();
@@ -97,7 +104,7 @@ export const ViewTabItem = memo(function ViewTabItem({
           onMenu(viewKey, rect.left, rect.bottom);
         }
       }}
-      title={label}
+      title={preview ? i18n.t('{label} (preview — double-click to keep)', { label }) : label}
       className={cn(
         'group relative flex shrink-0 cursor-pointer items-center gap-1.5 text-[12px] whitespace-nowrap transition-colors select-none',
         pill
@@ -133,7 +140,11 @@ export const ViewTabItem = memo(function ViewTabItem({
         )}
       />
       <span
-        className={cn('max-w-48 truncate', pinned && 'hidden min-w-0 @min-[640px]/view-tabs:block')}
+        className={cn(
+          'max-w-48 truncate',
+          pinned && 'hidden min-w-0 @min-[640px]/view-tabs:block',
+          preview && 'italic',
+        )}
       >
         {label}
       </span>

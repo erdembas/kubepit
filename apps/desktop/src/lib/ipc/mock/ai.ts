@@ -397,8 +397,19 @@ function answerTarget(request: AiRequest, context: string): AnswerTarget {
     container: crashingContainer(context) ?? workload,
     query:
       request.sections.find((s) => s.kind === 'query')?.content.trim() ?? request.message.trim(),
+    cve: cveOf(request, context),
     now: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
   };
+}
+
+/** The CVE id a risk-analysis request is about, from its sections or message. */
+function cveOf(request: AiRequest, context: string): string | null {
+  const section = request.sections.find((s) => s.kind === 'vulnerabilities');
+  if (section) {
+    const m = /\b(CVE-\d{4}-\d{4,})\b/.exec(section.label) ?? /\bcve:\s*(CVE-\d{4}-\d{4,})/.exec(section.content);
+    if (m) return m[1]!;
+  }
+  return /\b(CVE-\d{4}-\d{4,})\b/.exec(request.message)?.[1] ?? /\b(CVE-\d{4}-\d{4,})\b/.exec(context)?.[1] ?? null;
 }
 
 async function preview(request: AiRequest): Promise<AiPreview> {

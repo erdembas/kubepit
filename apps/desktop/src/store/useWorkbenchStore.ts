@@ -60,6 +60,12 @@ interface WorkbenchState {
   activeKind: Record<ClusterId, ViewKey>;
   /** Pinned view tabs per cluster (separate from the navigator's favourite kinds). */
   pinnedTabKeys: Record<ClusterId, ViewKey[]>;
+  /**
+   * The ephemeral tab per cluster: a single click in the navigator replaces
+   * it instead of opening another tab (VS Code's preview tab). Null while
+   * the cluster has none; a double click (or pin) makes it permanent.
+   */
+  previewTabKeys: Record<ClusterId, ViewKey | null>;
   /** Selected object per cluster and view tab (the tab's details panel). */
   selection: Record<ClusterId, Record<ViewKey, ObjectSelection>>;
   /**
@@ -89,8 +95,18 @@ interface WorkbenchState {
   detailsWidth: number;
 
   setNamespaces: (clusterId: ClusterId, namespaces: string[]) => void;
-  /** Focus a view's tab, opening it in the focused pane when needed. */
-  setActiveKind: (clusterId: ClusterId, key: ViewKey) => void;
+  /**
+   * Focus a view's tab, opening it in the focused pane when needed.
+   * `preview` opens it as the cluster's ephemeral tab (replacing the
+   * previous one); `keep` makes the current ephemeral tab permanent.
+   */
+  setActiveKind: (
+    clusterId: ClusterId,
+    key: ViewKey,
+    mode?: { preview?: boolean; keep?: boolean },
+  ) => void;
+  /** Make the cluster's ephemeral tab permanent (double click, tab pin). */
+  keepPreviewTab: (clusterId: ClusterId) => void;
   closeTab: (clusterId: ClusterId, key: ViewKey) => void;
   closeOtherTabs: (clusterId: ClusterId, key: ViewKey) => void;
   closeTabsToRight: (clusterId: ClusterId, key: ViewKey) => void;
@@ -147,14 +163,27 @@ function layoutOf(s: WorkbenchState, clusterId: ClusterId): ViewLayout {
   return s.layouts[clusterId] ?? layouts.singleLayout(s.activeKind[clusterId]);
 }
 
-/** A pin never gets pulled into an empty focused pane by navigator navigation. */
-function openTab(s: WorkbenchState, clusterId: ClusterId, key: ViewKey): ViewLayout {
+/**
+ * A pin never gets pulled into an empty focused pane by navigator navigation.
+ * `replace` swaps the cluster's ephemeral tab for the new key in its own pane
+ * (VS Code's preview tab) instead of opening another tab.
+ */
+function openTab(
+  s: WorkbenchState,
+  clusterId: ClusterId,
+  key: ViewKey,
+  replace: ViewKey | null = null,
+): ViewLayout {
   let layout = layoutOf(s, clusterId);
   if (s.pinnedTabKeys[clusterId]?.includes(key)) {
     const owner = layouts.groupOf(layout, key);
     if (owner) layout = layouts.focusPane(layout, owner.id);
   }
-  return layouts.openView(layout, key);
+  if (replace != null && replace !== key) {
+    const owner = layouts.groupOf(layout, replace);
+    layout = owner ? layouts.replaceView(layout, replace, key) : layouts.openView(layout, key);
+  } else layout = layouts.openView(layout, key);
+  return layout;
 }
 
 function revealTab(s: WorkbenchState, clusterId: ClusterId, key: ViewKey) {
@@ -205,6 +234,12 @@ function commit(
     patch.selection = { ...s.selection, [clusterId]: selection };
     patch.filters = filters;
     patch.viewRevealRevision = viewRevealRevision;
+    const preview = s.previewTabKeys[clusterId];
+    if (preview != null && !open.has(preview)) {
+      const previewTabKeys = { ...s.previewTabKeys };
+      delete previewTabKeys[clusterId];
+      patch.previewTabKeys = previewTabKeys;
+    }
   }
   return patch;
 }
@@ -252,6 +287,7 @@ export const useWorkbenchStore = create<WorkbenchState>()(
       layouts: {},
       activeKind: {},
       pinnedTabKeys: {},
+      previewTabKeys: {},
       selection: {},
       navRevision: {},
       viewRevealRevision: {},
@@ -273,11 +309,33 @@ export const useWorkbenchStore = create<WorkbenchState>()(
         set((s) => ({
           namespaces: { ...s.namespaces, [clusterId]: [...new Set(namespaces)].sort() },
         })),
-      setActiveKind: (clusterId, key) =>
-        set((s) => ({
-          ...commit(s, clusterId, openTab(s, clusterId, key)),
-          viewRevealRevision: revealTab(s, clusterId, key),
-        })),
+      setActiveKind: (clusterId, key, mode) =>
+        set((s) => {
+          // `preview` (navigator, preview mode) replaces the ephemeral tab;
+          // a persistent open (navigator, persistent mode) promotes it, like
+          // VS Code locking its preview on a non-preview open. Focusing an
+          // already open tab (tab strip) changes no tab's permanence, and an
+          // explicit `keep` (double click) promotes it.
+          const explicit = mode != null;
+          const preview = mode?.preview ?? false;
+          const previous = s.previewTabKeys[clusterId] ?? null;
+          const keep = !!mode?.keep || (explicit && !preview);
+          const replaced = preview ? previous : null;
+          const open = replaced === key ? null : replaced;
+          return {
+            ...commit(s, clusterId, openTab(s, clusterId, key, open), open ? [open] : []),
+            previewTabKeys: keep
+              ? { ...s.previewTabKeys, [clusterId]: null }
+              : { ...s.previewTabKeys, [clusterId]: preview ? key : previous },
+            viewRevealRevision: revealTab(s, clusterId, key),
+          };
+        }),
+      keepPreviewTab: (clusterId) =>
+        set((s) => {
+          const preview = s.previewTabKeys[clusterId];
+          if (preview == null) return {};
+          return { previewTabKeys: { ...s.previewTabKeys, [clusterId]: null } };
+        }),
       closeTab: (clusterId, key) => set((s) => closeIn(s, clusterId, key, (k) => k === key)),
       closeOtherTabs: (clusterId, key) =>
         set((s) => closeIn(s, clusterId, key, (k) => k !== key, true)),
@@ -301,7 +359,13 @@ export const useWorkbenchStore = create<WorkbenchState>()(
           const rest = pane.tabs.filter((k) => k !== key);
           const at = layouts.pinBoundary(rest, new Set(next));
           const tabs = [...rest.slice(0, at), key, ...rest.slice(at)];
-          return commit(s, clusterId, layouts.withPaneTabs(layout, pane.id, tabs), [], next);
+          // A pinned tab is never ephemeral.
+          const previewTabKeys = { ...s.previewTabKeys };
+          if (previewTabKeys[clusterId] === key) previewTabKeys[clusterId] = null;
+          return {
+            ...commit(s, clusterId, layouts.withPaneTabs(layout, pane.id, tabs), [], next),
+            previewTabKeys,
+          };
         }),
       moveTabLeft: (clusterId, key) => set((s) => swapTab(s, clusterId, key, -1)),
       moveTabRight: (clusterId, key) => set((s) => swapTab(s, clusterId, key, 1)),
@@ -316,14 +380,27 @@ export const useWorkbenchStore = create<WorkbenchState>()(
             layouts.pinBoundary(rest, pinned),
             Math.min(index ?? rest.length, rest.length),
           );
-          return commit(s, clusterId, layouts.moveView(layout, key, paneId, at));
+          // Dragging an ephemeral tab out of its pane makes it permanent.
+          const previewTabKeys = { ...s.previewTabKeys };
+          const movedPreview = previewTabKeys[clusterId] === key;
+          if (movedPreview) previewTabKeys[clusterId] = null;
+          return {
+            ...commit(s, clusterId, layouts.moveView(layout, key, paneId, at)),
+            ...(movedPreview && { previewTabKeys }),
+          };
         }),
       splitPane: (clusterId, paneId, side, key = null) =>
-        set((s) =>
-          key && s.pinnedTabKeys[clusterId]?.includes(key)
-            ? {}
-            : commit(s, clusterId, layouts.splitView(layoutOf(s, clusterId), paneId, side, key)),
-        ),
+        set((s) => {
+          if (key && s.pinnedTabKeys[clusterId]?.includes(key)) return {};
+          // Splitting an ephemeral tab into its own pane makes it permanent.
+          const previewTabKeys = { ...s.previewTabKeys };
+          const splitPreview = key != null && previewTabKeys[clusterId] === key;
+          if (splitPreview) previewTabKeys[clusterId] = null;
+          return {
+            ...commit(s, clusterId, layouts.splitView(layoutOf(s, clusterId), paneId, side, key)),
+            ...(splitPreview && { previewTabKeys }),
+          };
+        }),
       closePane: (clusterId, paneId) =>
         set((s) => {
           let layout = layoutOf(s, clusterId);
@@ -433,11 +510,13 @@ export const useWorkbenchStore = create<WorkbenchState>()(
           const selection = { ...s.selection };
           const apiResources = { ...s.apiResources };
           const viewRevealRevision = { ...s.viewRevealRevision };
+          const previewTabKeys = { ...s.previewTabKeys };
           delete selection[clusterId];
           delete apiResources[clusterId];
+          delete previewTabKeys[clusterId];
           for (const key of Object.keys(viewRevealRevision))
             if (key.startsWith(`${clusterId}|`)) delete viewRevealRevision[key];
-          return { selection, apiResources, viewRevealRevision };
+          return { selection, apiResources, viewRevealRevision, previewTabKeys };
         }),
     }),
     {
@@ -538,21 +617,26 @@ export function navigateTo(
   const store = useWorkbenchStore.getState();
   if (!gvkForKey(key, store.apiResources[clusterId])) store.registerKind(clusterId, gvk);
   const revision = `${clusterId}|${key}`;
-  // Without a name the tab keeps whatever it had selected.
-  useWorkbenchStore.setState((s) => ({
-    ...commit(s, clusterId, openTab(s, clusterId, key)),
-    ...(name && {
-      selection: {
-        ...s.selection,
-        [clusterId]: {
-          ...s.selection[clusterId],
-          [key]: { key, namespace: gvk.namespaced ? namespace : null, name },
+  // Without a name the tab keeps whatever it had selected. Links and other
+  // programmatic navigation open a permanent tab, never an ephemeral one.
+  useWorkbenchStore.setState((s) => {
+    const previous = s.previewTabKeys[clusterId] ?? null;
+    return {
+      ...commit(s, clusterId, openTab(s, clusterId, key)),
+      ...(previous != null && { previewTabKeys: { ...s.previewTabKeys, [clusterId]: null } }),
+      ...(name && {
+        selection: {
+          ...s.selection,
+          [clusterId]: {
+            ...s.selection[clusterId],
+            [key]: { key, namespace: gvk.namespaced ? namespace : null, name },
+          },
         },
-      },
-    }),
-    navRevision: { ...s.navRevision, [revision]: (s.navRevision[revision] ?? 0) + 1 },
-    viewRevealRevision: revealTab(s, clusterId, key),
-  }));
+      }),
+      navRevision: { ...s.navRevision, [revision]: (s.navRevision[revision] ?? 0) + 1 },
+      viewRevealRevision: revealTab(s, clusterId, key),
+    };
+  });
   const app = useAppStore.getState();
   if (app.activeMainTabKey !== `cluster:${clusterId}`) app.openCluster(clusterId);
 }

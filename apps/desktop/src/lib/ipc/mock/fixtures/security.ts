@@ -2,6 +2,7 @@ import { buildDeployment } from './builders';
 import { syncReplicaSet } from './controllers';
 import { drop, find, list, ownedBy, put, type ClusterDb } from './db';
 import { makePod } from './pods';
+import { buildPolicyReports } from './policyReports';
 import { tpl } from './template';
 import { buildTrivy } from './trivy';
 import { DAY, HOUR, meta, obj } from './util';
@@ -9,8 +10,8 @@ import { DAY, HOUR, meta, obj } from './util';
 /**
  * Security demo data: Pod Security labels on namespaces (with workloads
  * that violate them), a few risky RBAC grants for the health checks and
- * "who can", and the Trivy Operator reports (built last, so they cover
- * everything above).
+ * "who can", the Trivy Operator reports and the policy reports (both
+ * built last, so they cover everything above).
  */
 
 const PSS = 'pod-security.kubernetes.io/';
@@ -260,4 +261,5 @@ export function buildSecurityDemo(db: ClusterDb) {
     riskyRbac(db);
   }
   buildTrivy(db);
+  buildPolicyReports(db);
 }

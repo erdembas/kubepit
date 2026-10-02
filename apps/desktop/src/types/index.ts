@@ -1307,6 +1307,17 @@ export interface Settings {
   log_tail_lines: number;
   /** Ask before delete/scale/drain on every cluster, not only production ones. */
   confirm_destructive: boolean;
+  /**
+   * How a navigator click opens a cluster view tab: `preview` reuses one
+   * ephemeral tab until it is double-clicked or pinned (default);
+   * `persistent` opens a permanent tab every time.
+   */
+  tab_open_mode: 'preview' | 'persistent';
+  /**
+   * Close the open details panel when clicking the empty workspace area of
+   * its pane, like Esc (default).
+   */
+  details_click_close: boolean;
   /** Image used by node shells. */
   node_shell_image: string;
   /** Default image for ephemeral debug containers. */
@@ -2911,7 +2922,15 @@ export interface AiModelInfo {
 }
 
 export type AiIntent =
-  'explain' | 'fix' | 'chat' | 'kubectl' | 'promql' | 'logql' | 'explain-query' | 'yaml';
+  | 'explain'
+  | 'fix'
+  | 'chat'
+  | 'kubectl'
+  | 'promql'
+  | 'logql'
+  | 'explain-query'
+  | 'yaml'
+  | 'risk-analysis';
 
 /** Assistant answer language; the interface still supports its own EN/TR locales. */
 export type AiLocale =
@@ -2941,7 +2960,8 @@ export type AiSectionKind =
   | 'metrics'
   | 'schema'
   | 'query'
-  | 'editor';
+  | 'editor'
+  | 'vulnerabilities';
 
 /** `yaml` / `json` are redacted as manifests; `log` is trimmed in the middle. */
 export type AiSectionFormat = 'yaml' | 'json' | 'text' | 'log';

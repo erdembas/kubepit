@@ -198,7 +198,7 @@ export function buildNav(apiResources: readonly ApiResourceInfo[] | null): NavGr
         viewItem(
           VIEW_KEYS.security,
           i18n.t('Security'),
-          'security trivy vulnerabilities cve images compliance exposed secrets pod security standards pss',
+          'security trivy vulnerabilities cve images compliance exposed secrets pod security standards pss policy reports kyverno wgpolicyk8s',
         ),
         viewItem(
           VIEW_KEYS.changes,

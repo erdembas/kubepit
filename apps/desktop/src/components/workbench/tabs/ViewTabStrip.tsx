@@ -67,6 +67,7 @@ export function ViewTabStrip({
   const store = useWorkbenchStore.getState;
   const { tabs, active } = group;
   const pinnedTabKeys = useWorkbenchStore((s) => s.pinnedTabKeys[clusterId]);
+  const previewTabKey = useWorkbenchStore((s) => s.previewTabKeys[clusterId] ?? null);
   const pinned = useMemo(() => new Set(pinnedTabKeys), [pinnedTabKeys]);
   const movableTabs = useMemo(() => tabs.filter((key) => !pinned.has(key)), [tabs, pinned]);
   const revealRevision = useWorkbenchStore((s) =>
@@ -117,6 +118,13 @@ export function ViewTabStrip({
 
   const activate = useCallback(
     (key: string) => store().setActiveKind(clusterId, key),
+    [clusterId, store],
+  );
+  const keep = useCallback(
+    (key: string) => {
+      // Double click on the ephemeral tab makes it permanent.
+      if (store().previewTabKeys[clusterId] === key) store().keepPreviewTab(clusterId);
+    },
     [clusterId, store],
   );
   const close = useCallback((key: string) => store().closeTab(clusterId, key), [clusterId, store]);
@@ -240,9 +248,11 @@ export function ViewTabStrip({
       active={item.key === active}
       focused={focused}
       pinned={pinned.has(item.key)}
+      preview={previewTabKey === item.key}
       closable={!onlyOverview && !pinned.has(item.key)}
       foreignDrag={foreignDrag}
       onActivate={activate}
+      onKeep={keep}
       onClose={close}
       onTogglePin={togglePin}
       onStep={step}

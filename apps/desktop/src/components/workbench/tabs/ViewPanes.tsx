@@ -156,6 +156,7 @@ const ViewPane = memo(function ViewPane({
 
   return (
     <section
+      data-pane-root
       aria-label={i18n.t('View pane')}
       className="flex min-h-0 min-w-0 flex-1 flex-col"
       onPointerDownCapture={focus}

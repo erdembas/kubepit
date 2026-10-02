@@ -33,6 +33,12 @@ import { buildCrds } from './fixtures/crds';
 import { getDb, helmKey, list, type ClusterDb, type HelmRecord } from './fixtures/db';
 import { syncHelmSecrets } from './fixtures/helm';
 import { applyYaml } from './fixtures/ops';
+import {
+  POLICY_CLUSTERS,
+  buildPolicyReports,
+  hasPolicyReports,
+  policyReportCrds,
+} from './fixtures/policyReports';
 import { scalePresetOf } from './fixtures/scale';
 import { TRIVY_CLUSTERS, buildTrivy, hasTrivy, trivyCrds } from './fixtures/trivy';
 import { mergePatch, nowIso } from './fixtures/util';
@@ -224,14 +230,23 @@ function deployObjects(db: ClusterDb, manifest: string, namespace: string) {
   }
 }
 
-/** Trivy Operator (the Security view's one-click install) serves its CRDs; reports follow the first scans. */
+/**
+ * The Security view's one-click installs serve their CRDs; reports follow
+ * the first scans (Trivy) or the first policy evaluations (Kyverno).
+ */
 function installOperators(db: ClusterDb, chart: ChartDef) {
-  if (chart.repo !== 'aqua' || chart.chart !== 'trivy-operator' || hasTrivy(db)) return;
   // Scale-preset clusters serve only their generated CRDs (./fixtures/crds.ts).
   if (scalePresetOf(db.id)) return;
-  TRIVY_CLUSTERS.add(db.profile.id);
-  buildCrds(db, trivyCrds(db));
-  window.setTimeout(() => buildTrivy(db), 6000);
+  if (chart.repo === 'aqua' && chart.chart === 'trivy-operator' && !hasTrivy(db)) {
+    TRIVY_CLUSTERS.add(db.profile.id);
+    buildCrds(db, trivyCrds(db));
+    window.setTimeout(() => buildTrivy(db), 6000);
+  }
+  if (chart.repo === 'kyverno' && chart.chart === 'kyverno' && !hasPolicyReports(db)) {
+    POLICY_CLUSTERS.add(db.profile.id);
+    buildCrds(db, policyReportCrds(db));
+    window.setTimeout(() => buildPolicyReports(db), 6000);
+  }
 }
 
 function failIfTimedOut(

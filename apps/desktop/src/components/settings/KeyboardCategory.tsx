@@ -5,6 +5,7 @@ import { conflictText, KeymapTables } from '@/components/workbench/keyboard/Keym
 import { formatChord, shortcutConflicts } from '@/lib/keymap';
 import { useAppStore } from '@/store/useAppStore';
 import { useCustomActionsStore } from '@/store/useCustomActionsStore';
+import { NavigatorShortcutsSection } from './NavigatorShortcuts';
 import { useSettingsDraft } from './categories';
 import { SettingsPageShell, SettingsSection } from './SettingsView';
 
@@ -73,6 +74,14 @@ export function KeyboardCategory({ description }: { description: string }) {
         }
       >
         <KeymapTables actions={actions} />
+      </SettingsSection>
+      <SettingsSection
+        title={i18n.t('Navigator shortcuts')}
+        description={i18n.t(
+          'Keyboard shortcuts for the cluster navigator’s left menu. Only the most-used kinds have a default; assign any other kind you reach often.',
+        )}
+      >
+        <NavigatorShortcutsSection />
       </SettingsSection>
     </SettingsPageShell>
   );

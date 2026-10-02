@@ -26,6 +26,8 @@ export function sectionKindLabel(kind: AiSectionKind): string {
       return i18n.t('Query');
     case 'editor':
       return i18n.t('Editor');
+    case 'vulnerabilities':
+      return i18n.t('Vulnerabilities');
   }
 }
 export function redactionSummary(c: RedactionCounts): string | null {

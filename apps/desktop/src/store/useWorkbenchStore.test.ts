@@ -55,6 +55,91 @@ describe('view tab reveal requests', () => {
   });
 });
 
+describe('ephemeral preview tabs', () => {
+  const svc: Gvk = { group: '', version: 'v1', kind: 'Service', plural: 'services', namespaced: true };
+  const svcKey = kindKey(svc);
+
+  it('reuses one preview tab while browsing and drops the replaced tab state', () => {
+    state().setActiveKind(cluster, podKey, { preview: true });
+    state().select(cluster, podKey, { key: podKey, namespace: 'demo', name: 'a' });
+    state().setActiveKind(cluster, svcKey, { preview: true });
+
+    expect(tabs()).toEqual([VIEW.clusterOverview, svcKey]);
+    expect(state().previewTabKeys[cluster]).toBe(svcKey);
+    expect(state().selection[cluster]?.[podKey]).toBeUndefined();
+    expect(state().activeKind[cluster]).toBe(svcKey);
+  });
+
+  it('keeps the preview tab when the same kind is previewed again', () => {
+    state().setActiveKind(cluster, podKey, { preview: true });
+    state().select(cluster, podKey, { key: podKey, namespace: 'demo', name: 'a' });
+    state().setActiveKind(cluster, podKey, { preview: true });
+
+    expect(tabs()).toEqual([VIEW.clusterOverview, podKey]);
+    expect(state().selection[cluster]?.[podKey]?.name).toBe('a');
+    expect(state().previewTabKeys[cluster]).toBe(podKey);
+  });
+
+  it('promotes the preview tab on keep, pin, split, drag and persistent open', () => {
+    state().setActiveKind(cluster, podKey, { preview: true });
+    state().keepPreviewTab(cluster);
+    expect(state().previewTabKeys[cluster]).toBeNull();
+
+    state().setActiveKind(cluster, svcKey, { preview: true });
+    state().toggleTabPin(cluster, svcKey);
+    expect(state().previewTabKeys[cluster]).toBeNull();
+
+    state().toggleTabPin(cluster, svcKey);
+    state().setActiveKind(cluster, svcKey, { preview: true });
+    state().splitPane(cluster, 'main', 'right', svcKey);
+    expect(state().previewTabKeys[cluster]).toBeNull();
+
+    state().closePane(cluster, layouts.focusedGroup(viewLayoutOf(cluster)).id);
+    state().setActiveKind(cluster, svcKey, { preview: true });
+    state().moveTab(cluster, svcKey, 'main', 0);
+    expect(state().previewTabKeys[cluster]).toBeNull();
+
+    state().setActiveKind(cluster, podKey, { preview: true });
+    state().setActiveKind(cluster, svcKey, { preview: false });
+    expect(state().previewTabKeys[cluster]).toBeNull();
+    expect(tabs()).toEqual([svcKey, VIEW.clusterOverview, podKey]);
+  });
+
+  it('leaves the preview tab ephemeral when another open tab is focused', () => {
+    state().setActiveKind(cluster, podKey, { preview: true });
+    state().setActiveKind(cluster, svcKey, { preview: false });
+    // podKey became permanent above; open a fresh preview and focus svcKey.
+    state().setActiveKind(cluster, podKey, { preview: true });
+    state().setActiveKind(cluster, svcKey);
+
+    expect(state().previewTabKeys[cluster]).toBe(podKey);
+  });
+
+  it('clears the preview mark when the tab closes', () => {
+    state().setActiveKind(cluster, podKey, { preview: true });
+    state().closeTab(cluster, podKey);
+
+    expect(state().previewTabKeys[cluster]).toBeUndefined();
+  });
+
+  it('never persists the preview tab state', () => {
+    state().setActiveKind(cluster, podKey, { preview: true });
+    const saved = JSON.parse(localStorage.getItem('kubepit.workbench.v1')!);
+
+    expect(saved.state.previewTabKeys).toBeUndefined();
+  });
+
+  it('keeps preview tabs per cluster', () => {
+    state().setActiveKind(cluster, podKey, { preview: true });
+    state().setActiveKind('another-cluster', svcKey, { preview: true });
+
+    expect(state().previewTabKeys).toEqual({
+      [cluster]: podKey,
+      'another-cluster': svcKey,
+    });
+  });
+});
+
 describe('view tab pins and ordering', () => {
   it('pins at the end of the pinned group and unpins at the start of unpinned tabs', () => {
     start(['a', 'b', 'c', 'd'], 'd');

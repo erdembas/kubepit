@@ -310,6 +310,7 @@ pub enum AiIntent {
     Logql,
     ExplainQuery,
     Yaml,
+    RiskAnalysis,
 }
 
 /// Answer language, independent of the application's UI locale.
@@ -347,6 +348,7 @@ pub enum AiSectionKind {
     Schema,
     Query,
     Editor,
+    Vulnerabilities,
 }
 
 /// How a section's content is redacted and trimmed (`yaml`/`json` as
@@ -620,6 +622,7 @@ mod tests {
             AiIntent::Logql,
             AiIntent::ExplainQuery,
             AiIntent::Yaml,
+            AiIntent::RiskAnalysis,
         ];
         assert_eq!(
             wire(intents),
@@ -631,7 +634,8 @@ mod tests {
                 "promql",
                 "logql",
                 "explain-query",
-                "yaml"
+                "yaml",
+                "risk-analysis"
             ])
         );
         let locales = [
@@ -669,6 +673,7 @@ mod tests {
             AiSectionKind::Schema,
             AiSectionKind::Query,
             AiSectionKind::Editor,
+            AiSectionKind::Vulnerabilities,
         ];
         assert_eq!(
             wire(kinds),
@@ -684,7 +689,8 @@ mod tests {
                 "metrics",
                 "schema",
                 "query",
-                "editor"
+                "editor",
+                "vulnerabilities"
             ])
         );
         let formats = [
