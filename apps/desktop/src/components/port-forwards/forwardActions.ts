@@ -1,9 +1,10 @@
 import * as i18n from '@/i18n/core';
+import { openExternal } from '@/components/workbench/actions/openExternal';
 import { ipc } from '@/lib/ipc';
-import { forwardTitle, type ForwardRow } from '@/lib/portForwards';
+import { forwardTitle, forwardUrl, sameTarget, type ForwardRow } from '@/lib/portForwards';
 import { useAppStore } from '@/store/useAppStore';
 import { useConnectivityStore } from '@/store/useConnectivityStore';
-import type { PortForward, SavedPortForward } from '@/types';
+import type { PortForward, PortForwardRequest, SavedPortForward } from '@/types';
 
 /**
  * Port-forward actions shared by the cluster page, the global table and the
@@ -54,6 +55,52 @@ export async function restartForward(forward: PortForward) {
     upsertLive(await ipc.portForwardRestart(forward.id));
   } catch (error) {
     fail(error);
+  }
+}
+
+/**
+ * Start a forward immediately on an automatically picked free local port
+ * (a click on a port in the details panel) and open it in the browser; the
+ * backend binds the listener before it answers, so the page is reachable
+ * at once. A forward that already runs for the same target is reused:
+ * its local port is reported (and opened) instead.
+ */
+export async function startInstantForward(
+  target: Pick<
+    PortForwardRequest,
+    'cluster_id' | 'namespace' | 'kind' | 'name' | 'remote_port'
+  >,
+): Promise<PortForward | null> {
+  const running = useAppStore
+    .getState()
+    .portForwards.find(
+      (f) => sameTarget(f, target) && (f.state === 'starting' || f.state === 'active'),
+    );
+  if (running) {
+    useAppStore
+      .getState()
+      .pushToast(
+        'info',
+        i18n.t('Already forwarding on localhost:{port}', { port: running.local_port }),
+      );
+    await openExternal(forwardUrl(running.local_port));
+    return running;
+  }
+  try {
+    const forward = await ipc.portForwardStart({ ...target, local_port: null });
+    upsertLive(forward);
+    useAppStore.getState().pushToast(
+      'success',
+      i18n.t('Forwarding localhost:{port} to {name}', {
+        port: forward.local_port,
+        name: `${forward.kind}/${forward.name}`,
+      }),
+    );
+    await openExternal(forwardUrl(forward.local_port));
+    return forward;
+  } catch (error) {
+    fail(error);
+    return null;
   }
 }
 

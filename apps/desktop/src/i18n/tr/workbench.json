@@ -729,6 +729,7 @@
   "Clear spec.suspend so the controller reconciles again.": "Denetleyicinin yeniden uzlaştırması için spec.suspend alanını temizle.",
   "Clear the filters or widen the time range.": "Filtreleri temizleyin veya zaman aralığını genişletin.",
   "Click to copy": "Kopyalamak için tıklayın",
+  "Click to forward on a free local port and open it in the browser": "Boş bir yerel port üzerinden yönlendirip tarayıcıda açmak için tıklayın",
   "Click to open it.": "Açmak için tıklayın.",
   "Client certificate expired {count} day ago": "İstemci sertifikasının süresi {count} gün önce doldu",
   "Client certificate expired {count} days ago": "İstemci sertifikasının süresi {count} gün önce doldu",

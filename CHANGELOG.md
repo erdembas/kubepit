@@ -14,6 +14,18 @@ No changes yet.
 
 Henüz değişiklik yok.
 
+## [0.0.8] - 2026-10-05 — Cluster DNS suffixes and instant service port forwards / Küme DNS ekleri ve anında port yönlendirme
+
+### English
+
+- **Every cluster DNS suffix in Service details:** the Service DNS name now reads the cluster's actual CoreDNS configuration (`kube-system/coredns` ConfigMap) instead of assuming `cluster.local`. Clusters that serve several zones — say `cluster.local` and `etraforsformation.cluster.local` — show each `name.namespace.svc.<suffix>` variant as its own click-to-copy badge under "DNS names", so you pick the one your workload resolves with. A single zone keeps the familiar one-value row; when the Corefile cannot be read (missing, forbidden or no `kubernetes` plugin) the standard `cluster.local` stays. The browser demo's prod-eu-west-1 cluster serves a second domain to try it.
+- **Instant port forward from Service details:** in a Service's Ports list, click the port itself (for example `80/TCP`) to start forwarding immediately on an automatically picked free local port and open it in your browser — no dialog. A toast reports the local address (`localhost:…`), a running forward for the same service and port is reused instead of duplicated, and errors surface as toasts. The "Forward" button beside it still opens the dialog for choosing a local port, saving the forward or starting on connect; non-TCP ports and ExternalName services keep their plain text.
+
+### Türkçe
+
+- **Service ayrıntılarında tüm küme DNS ekleri:** Service DNS adı artık `cluster.local` varsaymak yerine kümenin gerçek CoreDNS yapılandırmasını (`kube-system/coredns` ConfigMap) okuyor. Birden fazla zone hizmet veren kümeler — örneğin `cluster.local` ve `etraforsformation.cluster.local` — her bir `ad.namespace.svc.<ek>` varyantını "DNS adları" altında kendi kopyalanabilir rozeti olarak gösterir; iş yükünüzün çözdüğü eki siz seçersiniz. Tek zone bilinen tek değerli satır olarak kalır; Corefile okunamadığında (eksik, izinsiz veya `kubernetes` eklentisi yokken) standart `cluster.local` geçerlidir. Tarayıcı demosunun prod-eu-west-1 kümesi denemek için ikinci bir domain hizmet verir.
+- **Service ayrıntılarından anında port yönlendirme:** bir Service'in Portlar listesinde port'un kendisine (örneğin `80/TCP`) tıklayın; yönlendirme otomatik seçilen boş bir yerel portta hemen başlar ve tarayıcınızda açılır — iletişim kutusu açılmaz. Bir bildirim yerel adresi (`localhost:…`) bildirir, aynı service ve port için çalışmakta olan yönlendirme yinelenmek yerine yeniden kullanılır, hatalar bildirim olarak görünür. Yanındaki "Yönlendir" düğmesi yerel port seçmek, yönlendirmeyi kaydetmek veya bağlanınca başlatmak için iletişim kutusunu açmaya devam eder; TCP olmayan portlar ve ExternalName servisleri düz metin olarak kalır.
+
 ## [0.0.7] - 2026-10-05 — Copyable details, per-view namespaces and Secret copying / Kopyalanabilir ayrıntılar, görünüm namespace'leri ve Secret kopyalama
 
 ### English

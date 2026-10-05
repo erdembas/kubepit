@@ -1,7 +1,7 @@
 {
   "name": "kubepit",
   "private": true,
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "A local-first Kubernetes IDE for many clusters.",
   "type": "module",
   "license": "MIT",

@@ -222,6 +222,7 @@
   "All quiet": "Her şey sakin",
   "Allow assistant access for each cluster you want to use. Production clusters require you to type their name to confirm.": "Kullanmak istediğiniz her küme için asistan erişimine izin verin. Üretim kümelerinde onaylamak için küme adını yazmanız gerekir.",
   "Already added": "Zaten ekli",
+  "Already forwarding on localhost:{port}": "Zaten localhost:{port} üzerinden yönlendiriliyor",
   "Always expanded": "Her zaman açık",
   "Always scanned": "Her zaman taranır",
   "An annotation value": "Bir ek açıklama değeri",

@@ -76,12 +76,18 @@ export function buildConfig(db: ClusterDb) {
     );
   }
 
+  // c-prod-eu (prod-eu-west-1) serves a second cluster domain, so its Service
+  // details show every `name.ns.svc.<suffix>` variant as its own badge.
+  const zones =
+    p.id === 'c-prod-eu'
+      ? 'cluster.local etraforsformation.cluster.local in-addr.arpa ip6.arpa'
+      : 'cluster.local in-addr.arpa ip6.arpa';
   cm(
     db,
     'kube-system',
     'coredns',
     {
-      Corefile: `.:53 {\n    errors\n    health {\n       lameduck 5s\n    }\n    ready\n    kubernetes cluster.local in-addr.arpa ip6.arpa {\n       pods insecure\n       fallthrough in-addr.arpa ip6.arpa\n       ttl 30\n    }\n    prometheus :9153\n    forward . /etc/resolv.conf {\n       max_concurrent 1000\n    }\n    cache 30\n    loop\n    reload\n    loadbalance\n}\n`,
+      Corefile: `.:53 {\n    errors\n    health {\n       lameduck 5s\n    }\n    ready\n    kubernetes ${zones} {\n       pods insecure\n       fallthrough in-addr.arpa ip6.arpa\n       ttl 30\n    }\n    prometheus :9153\n    forward . /etc/resolv.conf {\n       max_concurrent 1000\n    }\n    cache 30\n    loop\n    reload\n    loadbalance\n}\n`,
     },
     200 * DAY,
   );

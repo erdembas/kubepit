@@ -222,6 +222,7 @@
   "All quiet": "All quiet",
   "Allow assistant access for each cluster you want to use. Production clusters require you to type their name to confirm.": "Allow assistant access for each cluster you want to use. Production clusters require you to type their name to confirm.",
   "Already added": "Already added",
+  "Already forwarding on localhost:{port}": "Already forwarding on localhost:{port}",
   "Always expanded": "Always expanded",
   "Always scanned": "Always scanned",
   "An annotation value": "An annotation value",

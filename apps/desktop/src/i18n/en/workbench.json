@@ -729,6 +729,7 @@
   "Clear spec.suspend so the controller reconciles again.": "Clear spec.suspend so the controller reconciles again.",
   "Clear the filters or widen the time range.": "Clear the filters or widen the time range.",
   "Click to copy": "Click to copy",
+  "Click to forward on a free local port and open it in the browser": "Click to forward on a free local port and open it in the browser",
   "Click to open it.": "Click to open it.",
   "Client certificate expired {count} day ago": "Client certificate expired {count} day ago",
   "Client certificate expired {count} days ago": "Client certificate expired {count} days ago",

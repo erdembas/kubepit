@@ -1,21 +1,27 @@
 import * as i18n from '@/i18n';
-import { ArrowRightLeft, ExternalLink } from 'lucide-react';
-import { asArray, asObject, asString, field, isObject, spec } from '@/lib/kube/accessors';
+import { useState } from 'react';
+import { ArrowRightLeft, ExternalLink, Loader2 } from 'lucide-react';
+import { asArray, asObject, asString, field, get, isObject, spec } from '@/lib/kube/accessors';
 import { BUILTIN, toGvk } from '@/lib/kube/catalog';
+import { clusterDnsSuffixes, serviceDnsNames } from '@/lib/kube/clusterDns';
 import { RefLink } from '@/lib/kube/columns/cells';
 import { externalIps, ingressLoadBalancers, ingressRules } from '@/lib/kube/columns/network';
 import { matchesSelector, parseSelector, selectorText } from '@/lib/kube/selectors';
 import type { ColumnContext } from '@/lib/kube/columns';
 import type { KubeObject } from '@/types';
+import { ipc } from '@/lib/ipc';
+import { startInstantForward } from '../../../port-forwards/forwardActions';
 import { useActionDialogs } from '../../actions/dialogStore';
 import { openExternal } from '../../actions/openExternal';
 import { servicePortOptions } from '../../actions/resourceActions';
+import { usePolled } from '../../data/polled';
 import { useWatch } from '../../data/watchCache';
 import { ChipList, CopyValue, MiniTable, MonoText, Row, Rows, Section } from '../primitives';
 import { PodsMiniTable } from '../PodsMiniTable';
 import type { SectionProps } from './types';
 
 const EP_GVK = toGvk(BUILTIN.Endpoints);
+const CM_GVK = toGvk(BUILTIN.ConfigMap);
 
 function subsetRows(ep: KubeObject) {
   const rows: Array<{ ip: string; ready: boolean; target: string; node: string; ports: string }> =
@@ -92,6 +98,36 @@ export function ServiceSections({ obj, ctx, isActive }: SectionProps) {
   const eps = useWatch(ctx.clusterId, EP_GVK, [ns], isActive);
   const ep = eps.items.find((e) => e.metadata.name === obj.metadata.name);
   const selector = parseSelector(s.selector);
+  // Cluster DNS suffixes come from the CoreDNS Corefile; unreadable (missing,
+  // forbidden, no kubernetes plugin) falls back to the standard cluster.local.
+  const coredns = usePolled<KubeObject>(
+    isActive ? `${ctx.clusterId}|coredns-corefile` : null,
+    () => ipc.resourceGet(ctx.clusterId, CM_GVK, 'kube-system', 'coredns'),
+    60_000,
+    isActive,
+  );
+  const dnsNames = serviceDnsNames(
+    obj.metadata.name,
+    ns,
+    clusterDnsSuffixes(asString(get(coredns.data, 'data.Corefile'))),
+  );
+  // A click on a port value starts a forward at once on a free local port;
+  // this tracks the port being started so its cell can show progress.
+  const [busyPort, setBusyPort] = useState<number | null>(null);
+  const forwardNow = async (remote: number) => {
+    setBusyPort(remote);
+    try {
+      await startInstantForward({
+        cluster_id: ctx.clusterId,
+        namespace: ns,
+        kind: 'service',
+        name: obj.metadata.name,
+        remote_port: remote,
+      });
+    } finally {
+      setBusyPort(null);
+    }
+  };
   return (
     <>
       <Section title={i18n.t('Service')}>
@@ -108,9 +144,15 @@ export function ServiceSections({ obj, ctx, isActive }: SectionProps) {
               />
             )}
           </Row>
-          <Row label={i18n.t('DNS name')}>
-            <CopyValue text={`${obj.metadata.name}.${ns}.svc.cluster.local`} />
-          </Row>
+          {dnsNames.length > 1 ? (
+            <Row label={i18n.t('DNS names')}>
+              <ChipList entries={dnsNames} />
+            </Row>
+          ) : dnsNames[0] ? (
+            <Row label={i18n.t('DNS name')}>
+              <CopyValue text={dnsNames[0]} />
+            </Row>
+          ) : null}
           {asString(s.type) === 'ExternalName' && asString(s.externalName) && (
             <Row label={i18n.t('External name')}>
               <CopyValue text={asString(s.externalName)} />
@@ -144,7 +186,28 @@ export function ServiceSections({ obj, ctx, isActive }: SectionProps) {
                 label: i18n.t('Port'),
                 lang: 'en',
                 className: 'font-mono',
-                cell: (p) => `${asString(p.port)}/${asString(p.protocol) || 'TCP'}`,
+                cell: (p) => {
+                  const remote = Number(asString(p.port));
+                  const forwardable =
+                    asString(s.type) !== 'ExternalName' &&
+                    (asString(p.protocol) || 'TCP') === 'TCP' &&
+                    Number.isInteger(remote) &&
+                    remote > 0;
+                  if (!forwardable)
+                    return `${asString(p.port)}/${asString(p.protocol) || 'TCP'}`;
+                  return (
+                    <button
+                      type="button"
+                      disabled={busyPort !== null}
+                      onClick={() => void forwardNow(remote)}
+                      title={i18n.t('Click to forward on a free local port and open it in the browser')}
+                      className="text-accent hover:text-accent-hover inline-flex items-center gap-1 tabular-nums hover:underline disabled:opacity-60"
+                    >
+                      {busyPort === remote && <Loader2 className="h-3 w-3 animate-spin" />}
+                      {asString(p.port)}/{asString(p.protocol) || 'TCP'}
+                    </button>
+                  );
+                },
               },
               {
                 label: i18n.t('Target'),
