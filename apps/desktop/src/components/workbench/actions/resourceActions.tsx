@@ -7,6 +7,7 @@ import {
   Bug,
   CalendarSearch,
   ClipboardCheck,
+  CopyPlus,
   FolderTree,
   Copy,
   Link2,
@@ -351,6 +352,15 @@ export function resourceActions({
     mutating: false,
     run: () => void copyText(name, name),
   });
+  // Secrets: duplicate the object into other namespaces (same name, same data).
+  if (kind === 'Secret' && ns)
+    add({
+      id: 'copy-secret',
+      label: i18n.t('Copy to namespaces…'),
+      icon: CopyPlus,
+      mutating: true,
+      run: () => useActionDialogs.getState().open({ kind: 'copy-secret', clusterId, gvk, obj }),
+    });
   // Fleet: cross-cluster compare / drift (read-only, opens a dock tab).
   add({
     id: 'compare',

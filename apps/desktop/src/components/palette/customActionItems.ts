@@ -10,7 +10,7 @@ import { runCustomAction } from '@/components/workbench/actions/custom/runCustom
 import { useTableKeyboard } from '@/components/workbench/keyboard/tableKeyboard';
 import { formatChord } from '@/lib/keymap';
 import { useAppStore } from '@/store/useAppStore';
-import { useWorkbenchStore } from '@/store/useWorkbenchStore';
+import { sharedNamespacesOf } from '@/store/useWorkbenchStore';
 import type { CustomAction } from '@/types';
 import type { PaletteFilter, PaletteItem } from './paletteItems';
 
@@ -66,7 +66,7 @@ export function customActionItems(query: string, filter: PaletteFilter): Palette
             ),
           );
     }
-    const namespaces = useWorkbenchStore.getState().namespaces[clusterId];
+    const namespaces = sharedNamespacesOf(clusterId);
     const namespace =
       namespaces?.length === 1 ? namespaces[0]! : (cluster?.default_namespace ?? null);
     for (const action of clusterCustomActions(cluster))

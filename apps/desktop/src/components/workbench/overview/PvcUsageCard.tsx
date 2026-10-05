@@ -28,7 +28,7 @@ export function PvcUsageCard({ clusterId, isActive }: { clusterId: string; isAct
           <button
             type="button"
             onClick={() => {
-              useWorkbenchStore.getState().setNamespaces(clusterId, []);
+              useWorkbenchStore.getState().setNamespaces(clusterId, [], PVC_GVK.plural);
               navigateTo(clusterId, PVC_GVK);
             }}
             className="text-fg-dim hover:text-accent flex items-center gap-1 text-[11px]"

@@ -23,6 +23,8 @@ import { cn } from '@/lib/cn';
 import { useAppStore } from '@/store/useAppStore';
 import { VIEW, useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { HelmChartSummary, HelmHubChart, HelmRepo } from '@/types';
+import { useSelectedNamespaces } from '../data/hooks';
+import { NamespacePicker } from '../header/NamespacePicker';
 import { usePolled } from '../data/polled';
 import { TableSkeleton } from '../table/TableStates';
 import { errorText } from '../util';
@@ -45,14 +47,15 @@ const HUB_PREFIX = 'hub:';
 /** Browse the charts of the configured repositories and Artifact Hub; install into this cluster. */
 export function HelmChartsPage({
   clusterId,
-  namespaces,
+  viewKey,
   isActive,
 }: {
   clusterId: string;
-  namespaces: string[];
+  viewKey: string;
   isActive: boolean;
 }) {
   i18n.useLocale();
+  const namespaces = useSelectedNamespaces(clusterId, viewKey);
   const missing = useHelmMissing();
   const { source, repo, query, hubQuery, set } = useChartsUi();
   const repos = usePolled(
@@ -285,6 +288,7 @@ export function HelmChartsPage({
             ]}
           />
           <div className="ml-auto flex min-w-0 shrink items-center justify-end gap-1.5">
+            <NamespacePicker clusterId={clusterId} viewKey={viewKey} isActive={isActive} />
             {source === 'repos' && (repos.data?.length ?? 0) > 1 && (
               <span className="hidden min-w-0 shrink @3xl:block">
                 <Select

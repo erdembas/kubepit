@@ -7,7 +7,9 @@ import { kindIcon } from '@/lib/kube/icons';
 import { nodeId, TOPOLOGY_SOURCE_COUNT, type SlotScope, type TopoNode } from '@/lib/kube/topology';
 import { useWorkbenchStore, VIEW } from '@/store/useWorkbenchStore';
 import type { ApiResourceInfo } from '@/types';
+import { useSelectedNamespaces } from '../data/hooks';
 import { DetailsPanel } from '../details/DetailsPanel';
+import { NamespacePicker } from '../header/NamespacePicker';
 import { useMapFocus } from './mapNavigation';
 import { TopologyMap } from './TopologyMap';
 import { useTopologyData } from './useTopologyData';
@@ -22,16 +24,17 @@ import { useNetpolViewState } from '../netpol/netpolStore';
  */
 export function ResourceMapPage({
   clusterId,
-  namespaces,
+  viewKey,
   isActive,
   apiResources,
 }: {
   clusterId: string;
-  namespaces: string[];
+  viewKey: string;
   isActive: boolean;
   apiResources: ApiResourceInfo[] | null;
 }) {
   i18n.useLocale();
+  const namespaces = useSelectedNamespaces(clusterId, viewKey);
   // Every slot watches the selected namespaces.
   const slotScopes = useMemo(
     () => Array<SlotScope>(TOPOLOGY_SOURCE_COUNT).fill(namespaces),
@@ -88,6 +91,7 @@ export function ResourceMapPage({
             <Loader2 className="text-fg-dim h-3 w-3 animate-spin" aria-label={i18n.t('Syncing')} />
           )}
           <span className="ml-auto" />
+          <NamespacePicker clusterId={clusterId} viewKey={viewKey} isActive={isActive} />
           <MapReachabilityToggle reach={reach} />
         </div>
         <TopologyMap

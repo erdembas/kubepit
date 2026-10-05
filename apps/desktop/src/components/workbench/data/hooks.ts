@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { ipc } from '@/lib/ipc';
 import { useAppStore } from '@/store/useAppStore';
-import { useWorkbenchStore } from '@/store/useWorkbenchStore';
+import { ANY_VIEW, useWorkbenchStore, type ViewKey } from '@/store/useWorkbenchStore';
 import type { ApiResourceInfo, ClusterId, NodeMetric, PodMetric } from '@/types';
 import { usePolled } from './polled';
 
@@ -30,13 +30,22 @@ export function useNamespaceNames(clusterId: ClusterId, enabled: boolean) {
   );
 }
 
-/** The namespaces a view should scope to ([] = all namespaces). */
-export function useSelectedNamespaces(clusterId: ClusterId): string[] {
-  const stored = useWorkbenchStore((s) => s.namespaces[clusterId]);
+/**
+ * The namespaces a view should scope to ([] = all namespaces). Each view tab
+ * keeps its own selection; a view never scoped itself falls back to the
+ * shared scope (`ANY_VIEW`, the last explicit selection), then the cluster
+ * default. See `useWorkbenchStore` for the state shape.
+ */
+export function useSelectedNamespaces(clusterId: ClusterId, viewKey: ViewKey = ANY_VIEW) {
+  const stored = useWorkbenchStore((s) => s.namespaces[clusterId]?.[viewKey]);
+  const shared = useWorkbenchStore((s) => s.namespaces[clusterId]?.[ANY_VIEW]);
   const fallback = useAppStore(
     (s) => s.clusters.find((c) => c.id === clusterId)?.default_namespace ?? null,
   );
-  return useMemo(() => stored ?? (fallback ? [fallback] : []), [stored, fallback]);
+  return useMemo(
+    () => stored ?? shared ?? (fallback ? [fallback] : []),
+    [stored, shared, fallback],
+  );
 }
 
 export interface MetricsMap<T> {

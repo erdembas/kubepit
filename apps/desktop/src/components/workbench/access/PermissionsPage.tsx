@@ -8,7 +8,7 @@ import { formatAge } from '@/lib/format';
 import type { SearchableOption } from '@/lib/selectSearch';
 import { refreshAccess, useAccessRules } from '@/store/useAccessStore';
 import type { ApiResourceInfo } from '@/types';
-import { useCluster, useNamespaceNames } from '../data/hooks';
+import { useCluster, useNamespaceNames, useSelectedNamespaces } from '../data/hooks';
 import { refreshPolledPrefix } from '../data/polled';
 import { useNow } from '../util';
 import { CanIForm } from './CanIForm';
@@ -16,7 +16,7 @@ import { IdentityCard } from './IdentityCard';
 import { PermissionMatrix } from './PermissionMatrix';
 import { RbacExplorer } from './RbacExplorer';
 
-/** Namespace picked on the page per cluster, valid while the workbench scope is unchanged. */
+/** Namespace picked on the page per cluster, valid while the view scope is unchanged. */
 const picked = new Map<string, { scope: string; namespace: string }>();
 
 function initialNamespace(clusterId: string, scope: string) {
@@ -27,18 +27,18 @@ function initialNamespace(clusterId: string, scope: string) {
 /** "My Permissions" (`@access`): identity, a can-i form and the permission matrix. */
 export function PermissionsPage({
   clusterId,
-  namespaces,
+  viewKey,
   isActive,
   apiResources,
 }: {
   clusterId: string;
-  /** Workbench namespace scope ([] = all). */
-  namespaces: string[];
+  viewKey: string;
   isActive: boolean;
   apiResources: ApiResourceInfo[] | null;
 }) {
   i18n.useLocale();
   const { cluster } = useCluster(clusterId);
+  const namespaces = useSelectedNamespaces(clusterId, viewKey);
   const names = useNamespaceNames(clusterId, isActive);
   const scope =
     namespaces.length === 1

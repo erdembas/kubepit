@@ -1,7 +1,7 @@
 {
   "name": "@kubepit/desktop",
   "private": true,
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "Kubepit desktop application (React UI + Tauri shell).",
   "type": "module",
   "license": "MIT",

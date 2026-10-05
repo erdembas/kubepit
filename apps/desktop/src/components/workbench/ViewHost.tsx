@@ -29,19 +29,18 @@ import { NetworkDiagnosticsPage } from './network-diagnostics/NetworkDiagnostics
 /**
  * Renders the page of one view tab. Hidden tabs stay mounted with
  * `isActive` false, so their watches and polls pause but scroll position,
- * checked rows and the details panel survive tab switches.
+ * checked rows and the details panel survive tab switches. Each page reads
+ * its own namespace scope through `useSelectedNamespaces(clusterId, viewKey)`.
  */
 export const ViewHost = memo(function ViewHost({
   clusterId,
   viewKey: activeKind,
   isActive,
-  namespaces,
   apiResources,
 }: {
   clusterId: string;
   viewKey: string;
   isActive: boolean;
-  namespaces: string[];
   apiResources: ApiResourceInfo[] | null;
 }) {
   i18n.useLocale();
@@ -59,7 +58,7 @@ export const ViewHost = memo(function ViewHost({
     return (
       <WorkloadsOverviewPage
         clusterId={clusterId}
-        namespaces={namespaces}
+        viewKey={activeKind}
         isActive={isActive}
         apiResources={apiResources}
       />
@@ -68,7 +67,7 @@ export const ViewHost = memo(function ViewHost({
     return (
       <ResourceMapPage
         clusterId={clusterId}
-        namespaces={namespaces}
+        viewKey={activeKind}
         isActive={isActive}
         apiResources={apiResources}
       />
@@ -83,29 +82,29 @@ export const ViewHost = memo(function ViewHost({
     return (
       <NetworkDiagnosticsPage
         clusterId={clusterId}
-        namespaces={namespaces}
+        viewKey={activeKind}
         isActive={isActive}
         apiResources={apiResources}
       />
     );
   if (activeKind === VIEW.helmReleases)
-    return <HelmPage clusterId={clusterId} namespaces={namespaces} isActive={isActive} />;
+    return <HelmPage clusterId={clusterId} viewKey={activeKind} isActive={isActive} />;
   if (activeKind === VIEW.myPermissions)
     return (
       <PermissionsPage
         clusterId={clusterId}
-        namespaces={namespaces}
+        viewKey={activeKind}
         isActive={isActive}
         apiResources={apiResources}
       />
     );
   if (activeKind === VIEW.helmCharts)
-    return <HelmChartsPage clusterId={clusterId} namespaces={namespaces} isActive={isActive} />;
+    return <HelmChartsPage clusterId={clusterId} viewKey={activeKind} isActive={isActive} />;
   if (activeKind === VIEW.clusterHealth)
     return (
       <HealthPage
         clusterId={clusterId}
-        namespaces={namespaces}
+        viewKey={activeKind}
         isActive={isActive}
         apiResources={apiResources}
       />
@@ -114,7 +113,7 @@ export const ViewHost = memo(function ViewHost({
     return (
       <ChangesPage
         clusterId={clusterId}
-        namespaces={namespaces}
+        viewKey={activeKind}
         isActive={isActive}
         apiResources={apiResources}
       />
@@ -123,7 +122,7 @@ export const ViewHost = memo(function ViewHost({
     return (
       <NetpolPage
         clusterId={clusterId}
-        namespaces={namespaces}
+        viewKey={activeKind}
         isActive={isActive}
         apiResources={apiResources}
       />
@@ -133,16 +132,16 @@ export const ViewHost = memo(function ViewHost({
       <UpgradeReadinessPage clusterId={clusterId} isActive={isActive} apiResources={apiResources} />
     );
   if (activeKind === VIEW.cost)
-    return <CostPage clusterId={clusterId} namespaces={namespaces} isActive={isActive} />;
+    return <CostPage clusterId={clusterId} viewKey={activeKind} isActive={isActive} />;
   if (activeKind === VIEW.recommendations)
     return (
-      <RecommendationsPage clusterId={clusterId} namespaces={namespaces} isActive={isActive} />
+      <RecommendationsPage clusterId={clusterId} viewKey={activeKind} isActive={isActive} />
     );
   if (activeKind === VIEW.gitops)
     return (
       <GitOpsPage
         clusterId={clusterId}
-        namespaces={namespaces}
+        viewKey={activeKind}
         isActive={isActive}
         apiResources={apiResources}
       />
@@ -151,7 +150,7 @@ export const ViewHost = memo(function ViewHost({
     return (
       <SecurityPage
         clusterId={clusterId}
-        namespaces={namespaces}
+        viewKey={activeKind}
         isActive={isActive}
         apiResources={apiResources}
       />
@@ -196,7 +195,6 @@ export const ViewHost = memo(function ViewHost({
       clusterId={clusterId}
       kindKey={activeKind}
       gvk={gvk}
-      namespaces={namespaces}
       isActive={isActive}
       apiResources={apiResources}
     />

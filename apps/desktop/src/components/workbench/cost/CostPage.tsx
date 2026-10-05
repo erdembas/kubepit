@@ -25,6 +25,8 @@ import { cn } from '@/lib/cn';
 import { efficiencyTone, share } from '@/lib/kube/cost/breakdown';
 import { seriesColor } from '@/lib/prometheus';
 import type { CostReport, CostUsageSource, CostWindow } from '@/types';
+import { useSelectedNamespaces } from '../data/hooks';
+import { NamespacePicker } from '../header/NamespacePicker';
 import { ProxyForbiddenNotice } from '../common/ProxyForbiddenNotice';
 import { MultiSeriesChart } from '../overview/MultiSeriesChart';
 import { Card, Legend, SegmentBar, StatTile, type Segment } from '../overview/charts';
@@ -258,14 +260,15 @@ function TrendCard({ report }: { report: CostReport }) {
 /** The `@cost` view: monthly cost, breakdown, trend and the right-sizing summary. */
 export function CostPage({
   clusterId,
-  namespaces,
+  viewKey,
   isActive,
 }: {
   clusterId: string;
-  namespaces: string[];
+  viewKey: string;
   isActive: boolean;
 }) {
   i18n.useLocale();
+  const namespaces = useSelectedNamespaces(clusterId, viewKey);
   const window = useCostPrefs((s) => s.window);
   const aggregate = useCostPrefs((s) => s.aggregate);
   const label = useCostPrefs((s) => s.label);
@@ -304,6 +307,7 @@ export function CostPage({
         )}
         {query.loading && <Loader2 className="text-fg-dim h-3 w-3 animate-spin" />}
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          <NamespacePicker clusterId={clusterId} viewKey={viewKey} isActive={isActive} />
           <div className="bg-fg/4 inline-flex gap-0.5 rounded-lg p-0.5">
             {(['7d', '30d'] as const).map((w) => (
               <button

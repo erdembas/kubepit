@@ -12,7 +12,17 @@ import { RefLink } from '@/lib/kube/columns/cells';
 import { podContainers, podStatus, podStatusTone } from '@/lib/kube/pods';
 import { formatAge, formatBytes, formatCpu } from '@/lib/format';
 import { PodMetricsHistory } from '../MetricsHistoryCard';
-import { ChipList, MiniTable, MonoText, Row, Rows, Section, ToneText } from '../primitives';
+import {
+  ChipList,
+  CopyButton,
+  CopyValue,
+  MiniTable,
+  MonoText,
+  Row,
+  Rows,
+  Section,
+  ToneText,
+} from '../primitives';
 import { ContainerCard } from './ContainerCard';
 import { EphemeralContainersSection } from './EphemeralContainers';
 import type { SectionProps } from './types';
@@ -68,22 +78,27 @@ export function PodSections({ obj, ctx, readOnly, isActive }: SectionProps) {
           </Row>
           <Row label={i18n.t('Node')}>
             {node ? (
-              <RefLink target={{ apiVersion: 'v1', kind: 'Node', name: node }} ctx={ctx} />
+              <span className="flex min-w-0 items-center gap-0.5">
+                <RefLink target={{ apiVersion: 'v1', kind: 'Node', name: node }} ctx={ctx} />
+                <CopyButton text={node} label={i18n.t('Copy node name')} />
+              </span>
             ) : (
               <span className="text-fg-dim">{i18n.t('Not scheduled')}</span>
             )}
           </Row>
           <Row label={i18n.t('Pod IP')}>
             {asString(st.podIP) && (
-              <MonoText>
-                {asArray(st.podIPs)
-                  .map((p) => asString(asObject(p).ip))
-                  .join(', ') || asString(st.podIP)}
-              </MonoText>
+              <CopyValue
+                text={
+                  asArray(st.podIPs)
+                    .map((p) => asString(asObject(p).ip))
+                    .join(', ') || asString(st.podIP)
+                }
+              />
             )}
           </Row>
           <Row label={i18n.t('Host IP')}>
-            {asString(st.hostIP) && <MonoText>{asString(st.hostIP)}</MonoText>}
+            {asString(st.hostIP) && <CopyValue text={asString(st.hostIP)} />}
           </Row>
           <Row label={i18n.t('QoS class')}>{asString(st.qosClass)}</Row>
           <Row label={i18n.t('Service account')}>

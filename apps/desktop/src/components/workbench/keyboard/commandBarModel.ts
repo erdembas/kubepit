@@ -4,7 +4,7 @@ import { openAndConnect } from '@/lib/clusterActions';
 import { BUILTIN_KINDS, kindKey, resolveKindName } from '@/lib/kube/catalog';
 import { VIEW_KEYS } from '@/lib/kube/nav';
 import { useAppStore } from '@/store/useAppStore';
-import { navigateTo, useWorkbenchStore } from '@/store/useWorkbenchStore';
+import { ANY_VIEW, navigateTo, useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { ApiResourceInfo, ClusterDef } from '@/types';
 
 /**
@@ -185,8 +185,13 @@ export function execute(input: string, ctx: BarContext): string | null {
     if (active) wb.closeTab(clusterId, active);
     return null;
   }
-  const setNamespace = (value: string) =>
-    wb.setNamespaces(clusterId, ALL_NAMESPACES.has(value.toLowerCase()) ? [] : [value]);
+  // `:ns` scopes the focused view tab; `:kind <ns>` scopes the view it opens.
+  const setNamespace = (value: string, viewKey?: string) =>
+    wb.setNamespaces(
+      clusterId,
+      ALL_NAMESPACES.has(value.toLowerCase()) ? [] : [value],
+      viewKey ?? wb.activeKind[clusterId] ?? ANY_VIEW,
+    );
   if (NS.has(first)) {
     if (arg) setNamespace(arg);
     else {
@@ -197,12 +202,13 @@ export function execute(input: string, ctx: BarContext): string | null {
   }
   const view = VIEW_COMMANDS[first];
   if (view) {
+    if (arg && view !== VIEW_KEYS.clusterOverview) setNamespace(arg, view);
     wb.setActiveKind(clusterId, view);
     return null;
   }
   const gvk = resolveKindName(head, ctx.apiResources);
   if (!gvk) return i18n.t('Unknown command or kind “{name}”', { name: head });
-  if (arg && gvk.namespaced) setNamespace(arg);
+  if (arg && gvk.namespaced) setNamespace(arg, kindKey(gvk));
   navigateTo(clusterId, gvk);
   return null;
 }

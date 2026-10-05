@@ -8,6 +8,8 @@ import { cn } from '@/lib/cn';
 import { formatAge } from '@/lib/format';
 import { VIEW, useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { HelmRelease } from '@/types';
+import { useSelectedNamespaces } from '../data/hooks';
+import { NamespacePicker } from '../header/NamespacePicker';
 import { usePolled } from '../data/polled';
 import { TableError, TableSkeleton } from '../table/TableStates';
 import { useNow } from '../util';
@@ -22,14 +24,15 @@ const TEMPLATE =
 
 export function HelmPage({
   clusterId,
-  namespaces,
+  viewKey,
   isActive,
 }: {
   clusterId: string;
-  namespaces: string[];
+  viewKey: string;
   isActive: boolean;
 }) {
   i18n.useLocale();
+  const namespaces = useSelectedNamespaces(clusterId, viewKey);
   const single = namespaces.length === 1 ? namespaces[0]! : null;
   const releases = usePolled(
     helmListKey(clusterId, namespaces),
@@ -69,6 +72,7 @@ export function HelmPage({
             {rows.length}
           </span>
           <div className="ml-auto flex items-center gap-1.5">
+            <NamespacePicker clusterId={clusterId} viewKey={viewKey} isActive={isActive} />
             <div className="bg-surface border-border focus-within:border-accent/50 flex h-8 w-56 items-center gap-2 rounded-lg border px-2.5">
               <Search className="text-fg-dim h-3.5 w-3.5 shrink-0" />
               <input

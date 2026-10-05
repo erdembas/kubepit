@@ -36,13 +36,11 @@ const MIN_PANE = { row: 280, column: 150 } as const;
 export function ViewPanes({
   clusterId,
   isActive,
-  namespaces,
   apiResources,
   tabSlot,
 }: {
   clusterId: string;
   isActive: boolean;
-  namespaces: string[];
   apiResources: ApiResourceInfo[] | null;
   tabSlot: HTMLElement | null;
 }) {
@@ -84,7 +82,6 @@ export function ViewPanes({
             group={group}
             focused={!multi || group.id === layout.focused}
             clusterActive={isActive}
-            namespaces={namespaces}
             apiResources={apiResources}
             dragKey={drag.dragKey}
             dropZone={drag.drop?.pane === group.id ? drag.drop.zone : null}
@@ -116,7 +113,6 @@ const ViewPane = memo(function ViewPane({
   group,
   focused,
   clusterActive,
-  namespaces,
   apiResources,
   dragKey,
   dropZone,
@@ -127,7 +123,6 @@ const ViewPane = memo(function ViewPane({
   group: ViewGroup;
   focused: boolean;
   clusterActive: boolean;
-  namespaces: string[];
   apiResources: ApiResourceInfo[] | null;
   dragKey: string | null;
   dropZone: DropZone | null;
@@ -177,7 +172,6 @@ const ViewPane = memo(function ViewPane({
                   clusterId={clusterId}
                   viewKey={key}
                   isActive={clusterActive && key === group.active}
-                  namespaces={namespaces}
                   apiResources={apiResources}
                 />
               </div>

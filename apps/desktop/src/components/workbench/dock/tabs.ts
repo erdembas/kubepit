@@ -1,7 +1,7 @@
 import * as i18n from '@/i18n/core';
 import { useAppStore } from '@/store/useAppStore';
 import { useDockStore, type DockTab } from '@/store/useDockStore';
-import { useWorkbenchStore } from '@/store/useWorkbenchStore';
+import { sharedNamespacesOf } from '@/store/useWorkbenchStore';
 import type { ClusterId } from '@/types';
 
 /**
@@ -168,7 +168,7 @@ export function requestCloseTabs(clusterId: ClusterId, tabIds: string[]): void {
 
 /** Namespace the workbench is scoped to (single selection), else the cluster default. */
 export function scopeNamespace(clusterId: ClusterId): string | null {
-  const selected = useWorkbenchStore.getState().namespaces[clusterId] ?? [];
+  const selected = sharedNamespacesOf(clusterId) ?? [];
   if (selected.length === 1) return selected[0]!;
   return useAppStore.getState().clusters.find((c) => c.id === clusterId)?.default_namespace ?? null;
 }

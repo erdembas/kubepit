@@ -1,6 +1,11 @@
 import { apiVersionOf } from '@/lib/kube/catalog';
 import { useAppStore } from '@/store/useAppStore';
-import { gvkForCluster, useWorkbenchStore } from '@/store/useWorkbenchStore';
+import {
+  ANY_VIEW,
+  gvkForCluster,
+  selectedNamespacesOf,
+  useWorkbenchStore,
+} from '@/store/useWorkbenchStore';
 import type { AiScope, ClusterId, Gvk } from '@/types';
 
 /**
@@ -53,7 +58,7 @@ export function currentScopeParts(): ScopeParts {
   const gvk = selected ? gvkForCluster(clusterId, selected.key) : null;
   return {
     clusterId,
-    namespaces: wb.namespaces[clusterId],
+    namespaces: selectedNamespacesOf(clusterId, kind ?? ANY_VIEW) ?? [],
     defaultNamespace: app.clusters.find((c) => c.id === clusterId)?.default_namespace ?? null,
     selection: selected && gvk ? { gvk, namespace: selected.namespace, name: selected.name } : null,
   };

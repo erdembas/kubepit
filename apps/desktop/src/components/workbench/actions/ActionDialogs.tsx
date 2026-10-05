@@ -25,6 +25,7 @@ import { useActionDialogs, type ActionDialog } from './dialogStore';
 import { runMutation } from './guard';
 import { openExternal } from './openExternal';
 import { SetImageDialog } from './SetImageDialog';
+import { CopySecretDialog } from './CopySecretDialog';
 import { NodeMaintenanceDialog } from '../node-maintenance/NodeMaintenanceDialog';
 
 /** Renders the open action dialog for this cluster (scale, port-forward, pickers). */
@@ -45,6 +46,7 @@ export function ActionDialogs({ clusterId }: { clusterId: string }) {
   if (dialog.kind === 'argo-sync') return <ArgoSyncDialog dialog={dialog} onClose={close} />;
   if (dialog.kind === 'flux-reconcile')
     return <FluxReconcileDialog dialog={dialog} onClose={close} />;
+  if (dialog.kind === 'copy-secret') return <CopySecretDialog dialog={dialog} onClose={close} />;
   return <PortForwardDialog dialog={dialog} onClose={close} />;
 }
 

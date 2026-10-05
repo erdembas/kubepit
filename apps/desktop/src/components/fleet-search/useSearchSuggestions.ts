@@ -9,7 +9,7 @@ import {
   useFleetSearchStore,
   type ClusterResult,
 } from '@/store/useFleetSearchStore';
-import { useWorkbenchStore } from '@/store/useWorkbenchStore';
+import { ANY_VIEW, useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { ApiResourceInfo } from '@/types';
 import { cachedResourceMetadata } from '../workbench/data/watchCache';
 import {
@@ -113,7 +113,7 @@ export function useSearchSuggestionContext(visible: boolean): SearchSuggestionCo
     for (const cluster of targets) {
       for (const namespace of [
         ...cluster.accessible_namespaces,
-        ...(selectedNamespaces[cluster.id] ?? []),
+        ...(selectedNamespaces[cluster.id]?.[ANY_VIEW] ?? []),
         cluster.default_namespace,
       ]) {
         if (namespace && namespaces.size < 512) namespaces.add(namespace);

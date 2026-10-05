@@ -3,20 +3,20 @@ import { create } from 'zustand';
 import { resolveDefault, type SavedView, type TableState } from '@/lib/savedViews';
 import { useAppStore } from '@/store/useAppStore';
 import { useSavedViewsStore } from '@/store/useSavedViewsStore';
-import { useWorkbenchStore } from '@/store/useWorkbenchStore';
+import { ANY_VIEW, selectedNamespacesOf, useWorkbenchStore } from '@/store/useWorkbenchStore';
 
 /**
  * Saved views on top of the workbench store: read a kind's table state,
  * apply a view, apply a kind's default view once per session. Every piece
  * of table state already lives in stores (filter per cluster+kind, column
- * prefs and sort per kind, namespaces per cluster), so views can be applied
- * from anywhere, including the command palette.
+ * prefs and sort per kind, namespaces per cluster and view), so views can
+ * be applied from anywhere, including the command palette.
  */
 
 const NONE: readonly string[] = [];
 
-function effectiveNamespaces(clusterId: string): string[] {
-  const stored = useWorkbenchStore.getState().namespaces[clusterId];
+function effectiveNamespaces(clusterId: string, viewKey: string = ANY_VIEW): string[] {
+  const stored = selectedNamespacesOf(clusterId, viewKey);
   if (stored) return stored;
   const fallback = useAppStore
     .getState()
@@ -33,7 +33,7 @@ export function currentTableState(
   const s = useWorkbenchStore.getState();
   return {
     filter: s.filters[`${clusterId}|${kindKey}`] ?? '',
-    namespaces: withNamespaces ? [...effectiveNamespaces(clusterId)] : null,
+    namespaces: withNamespaces ? [...effectiveNamespaces(clusterId, kindKey)] : null,
     hiddenColumns: [...(s.hiddenColumns[kindKey] ?? [])],
     columnOrder: [...(s.columnOrder[kindKey] ?? [])],
     columnWidths: { ...s.columnWidths[kindKey] },
@@ -44,7 +44,8 @@ export function currentTableState(
 /** Live table state of a kind, for "modified" markers. */
 export function useTableState(clusterId: string, kindKey: string): TableState {
   const filter = useWorkbenchStore((s) => s.filters[`${clusterId}|${kindKey}`] ?? '');
-  const stored = useWorkbenchStore((s) => s.namespaces[clusterId]);
+  const stored = useWorkbenchStore((s) => s.namespaces[clusterId]?.[kindKey]);
+  const shared = useWorkbenchStore((s) => s.namespaces[clusterId]?.[ANY_VIEW]);
   const fallback = useAppStore(
     (s) => s.clusters.find((c) => c.id === clusterId)?.default_namespace ?? null,
   );
@@ -55,13 +56,13 @@ export function useTableState(clusterId: string, kindKey: string): TableState {
   return useMemo(
     () => ({
       filter,
-      namespaces: stored ?? (fallback ? [fallback] : []),
+      namespaces: stored ?? shared ?? (fallback ? [fallback] : []),
       hiddenColumns: [...hidden],
       columnOrder: [...order],
       columnWidths: { ...widths },
       sort,
     }),
-    [filter, stored, fallback, hidden, order, widths, sort],
+    [filter, stored, shared, fallback, hidden, order, widths, sort],
   );
 }
 
@@ -78,7 +79,13 @@ export function applySavedView(clusterId: string, view: SavedView, open = false)
   useWorkbenchStore.setState((s) => ({
     filters: { ...s.filters, [`${clusterId}|${k}`]: view.filter },
     namespaces: view.namespaces
-      ? { ...s.namespaces, [clusterId]: [...new Set(view.namespaces)].sort() }
+      ? {
+          ...s.namespaces,
+          [clusterId]: {
+            ...s.namespaces[clusterId],
+            [k]: [...new Set(view.namespaces)].sort(),
+          },
+        }
       : s.namespaces,
     hiddenColumns: withEntry(
       s.hiddenColumns,

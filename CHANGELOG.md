@@ -14,6 +14,36 @@ No changes yet.
 
 Henüz değişiklik yok.
 
+## [0.0.7] - 2026-10-05 — Copyable details, per-view namespaces and Secret copying / Kopyalanabilir ayrıntılar, görünüm namespace'leri ve Secret kopyalama
+
+### English
+
+#### Added
+
+- **Copy key fields in the details panel:** the values you most often need elsewhere are now click-to-copy in the details panel. Click an object's name, UID, a Pod's Pod IP or Host IP, or a Service's Cluster IP and external IPs to copy it straight to the clipboard; the namespace and a Pod's node get a small copy button beside their links. A toast confirms what was copied.
+- **Service DNS name:** every Service's details now show its in-cluster DNS name — `name.namespace.svc.cluster.local`, built from the standard cluster DNS suffix — as a click-to-copy field. ExternalName services also show their `externalName` target, copyable the same way.
+- **Copy Secrets to other namespaces:** every Secret's context menu and details "More" menu has a new "Copy to namespaces…" action. Pick one or more target namespaces (searchable, with select-all) and the Secret is re-created under its own name in each of them — same data, type, labels and annotations. A Secret that already exists in a target is never overwritten: that target fails with the API server's message while the rest of the copies proceed, and the summary toast reports what succeeded and what failed. The usual guards apply: read-only clusters block it, production clusters ask for the typed-name confirmation, and each copy is recorded in the change journal.
+- **Per-view namespace scope:** each view tab now remembers its own namespace selection. Scoping Pods to `einvoice` no longer drags Ingresses, Helm releases or any other tab along — switch tabs and each one keeps the scope you left it on. A view you never scoped yourself follows the last explicit selection, and views that were never scoped at all fall back to the cluster's default namespace. The `:ns` command and `:kind <namespace>` now scope the view they open (the focused tab for `:ns`), and saved views keep restoring their namespaces into their own kind's tab.
+- **Namespace picker moved into the view toolbar:** the multi-select namespace picker left the workbench header and now sits at the top of each view, left of its search field — Pods, Ingresses and every other resource list, plus GitOps, Health, Security, Cost, Helm releases and charts, the resource map, workloads overview, the network policy simulator, Changes, Recommendations, network diagnostics and My Permissions. The header keeps its terminal and create actions on the shared scope.
+
+#### Changed
+
+- The workbench header no longer shows the namespace picker; the terminal and "Create resource" buttons there use the last explicitly selected namespace (or the cluster default), not any one view's scope.
+
+### Türkçe
+
+#### Eklenenler
+
+- **Ayrıntılar panelinde kritik alanları kopyalama:** başka yerlerde en çok ihtiyaç duyduğunuz değerler artık ayrıntılar panelinde tıklayınca panoya kopyalanıyor. Nesnenin adına, UID'sine, bir Pod'un Pod IP'sine veya Host IP'sine ya da bir Service'in Cluster IP'sine ve harici IP'lerine tıklayın; doğrudan panoya kopyalanır. Namespace ve Pod'un node'u için bağlantılarının yanında küçük bir kopyala düğmesi var. Bir bildirim neyin kopyalandığını gösterir.
+- **Service DNS adı:** her Service'in ayrıntılarında artık küme içi DNS adı — standart küme DNS ekiyle kurulan `ad.namespace.svc.cluster.local` — tıklayarak kopyalanabilen bir alan olarak görünüyor. ExternalName servisleri de aynı şekilde kopyalanabilen `externalName` hedefini gösterir.
+- **Secret'ları başka namespace'lere kopyalama:** her Secret'ın bağlam menüsünde ve ayrıntılardaki "Daha fazla" menüsünde yeni bir "Namespace'lere kopyala…" eylemi var. Bir veya daha fazla hedef namespace seçin (aranabilir, tümünü seç ile) ve Secret, her birinde kendi adıyla yeniden oluşturulur — aynı veri, tür, etiket ve ek açıklamalarla. Bir hedefte zaten var olan Secret asla üzerine yazılmaz: o hedef API sunucusunun iletisiyle başarısız olurken diğer kopyalar sürer; özet bildirimi neyin başarılı neyin başarısız olduğunu rapor eder. Alışılmış korumalar geçerlidir: salt-okunur kümeler eylemi engeller, production kümeleri adını yazma onayı ister ve her kopya değişiklik günlüğüne kaydedilir.
+- **Görünüm başına namespace kapsamı:** her görünüm sekmesi artık kendi namespace seçimini anımsıyor. Pod'ları `einvoice` kapsamına almak artık Ingress'leri, Helm release'lerini veya diğer sekmeleri sürüklemez — sekmeler arasında geçiş yaptığınızda her biri, bıraktığınız kapsamda kalır. Kendi başına kapsam seçmediğiniz bir görünüm son açık seçimi izler; hiç kapsam seçilmemiş görünümler kümenin varsayılan namespace'ine düşer. `:ns` komutu ve `:kind <namespace>` artık açtıkları görünümü kapsar (`:ns` için odaktaki sekme), kayıtlı görünümler de namespace'lerini kendi türlerinin sekmesine geri yüklemeyi sürdürür.
+- **Namespace seçici görünüm araç çubuğuna taşındı:** çoklu seçimli namespace seçici çalışma alanı başlığından çıktı ve artık her görünümün üstünde, arama alanının solunda duruyor — Pod'lar, Ingress'ler ve diğer tüm kaynak listeleri; ayrıca GitOps, Sağlık, Güvenlik, Maliyet, Helm release'leri ve chart'ları, kaynak haritası, iş yükleri genel görünümü, ağ politikası simülatörü, Değişiklikler, Öneriler, ağ tanılama ve Yetkilerim. Başlık, terminal ve oluşturma eylemlerini paylaşılan kapsamda tutar.
+
+#### Değişiklikler
+
+- Çalışma alanı başlığı artık namespace seçiciyi göstermiyor; oradaki terminal ve "Kaynak oluştur" düğmeleri son açıkça seçilen namespace'i (veya küme varsayılanını) kullanır, herhangi bir görünümün kapsamını değil.
+
 ## [0.0.6] - 2026-10-02 — Policy reports, time travel and preview tabs / Politika raporları, zaman yolculuğu ve önizleme sekmeleri
 
 ### English

@@ -59,6 +59,24 @@ export function MonoText({ children, title }: { children: ReactNode; title?: str
   );
 }
 
+/**
+ * Monospace value that is copied to the clipboard on click (name, UID, IP,
+ * DNS name, …); a toast confirms what was copied.
+ */
+export function CopyValue({ text, children }: { text: string; children?: ReactNode }) {
+  i18n.useLocale();
+  return (
+    <button
+      type="button"
+      onClick={() => void copyText(text, text.length > 40 ? `${text.slice(0, 40)}…` : text)}
+      title={i18n.t('Click to copy')}
+      className="hover:bg-fg/5 hover:text-fg -mx-1 block max-w-full rounded-md px-1 py-0.5 text-left font-mono text-[11.5px] break-all transition"
+    >
+      {children ?? text}
+    </button>
+  );
+}
+
 export function ToneText({
   tone,
   children,

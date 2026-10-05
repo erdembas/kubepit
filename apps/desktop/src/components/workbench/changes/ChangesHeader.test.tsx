@@ -8,6 +8,7 @@ describe('ChangesHeader', () => {
       count={3}
       recording={<i />}
       ranges={<b />}
+      scope={<span />}
       search={<input />}
       refresh={<button />}
     />,

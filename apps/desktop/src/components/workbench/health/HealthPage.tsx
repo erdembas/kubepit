@@ -31,6 +31,8 @@ import { formatAge } from '@/lib/format';
 import { useHealthIgnores, useHealthOptIns, useHealthStore } from '@/store/useHealthStore';
 import { VIEW, useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { ApiResourceInfo } from '@/types';
+import { useSelectedNamespaces } from '../data/hooks';
+import { NamespacePicker } from '../header/NamespacePicker';
 import { Card, StatTile } from '../overview/charts';
 import { useNow } from '../util';
 import { FindingGroup } from './FindingGroup';
@@ -80,16 +82,17 @@ function filterGroups(
 
 export function HealthPage({
   clusterId,
-  namespaces,
+  viewKey,
   isActive,
   apiResources,
 }: {
   clusterId: string;
-  namespaces: string[];
+  viewKey: string;
   isActive: boolean;
   apiResources: ApiResourceInfo[] | null;
 }) {
   i18n.useLocale();
+  const namespaces = useSelectedNamespaces(clusterId, viewKey);
   const health = useHealthScan(clusterId, namespaces, isActive, apiResources);
   const ignores = useHealthIgnores(clusterId);
   const optIns = useHealthOptIns(clusterId);
@@ -131,6 +134,7 @@ export function HealthPage({
           <Loader2 className="text-fg-dim h-3 w-3 animate-spin" aria-label={i18n.t('Scanning')} />
         )}
         <div className="ml-auto flex min-w-0 shrink items-center justify-end gap-1.5">
+          <NamespacePicker clusterId={clusterId} viewKey={viewKey} isActive={isActive} />
           <div className="bg-surface border-border focus-within:border-accent/50 flex h-8 w-56 min-w-24 shrink items-center gap-2 rounded-lg border px-2.5 transition-colors">
             <Search className="text-fg-dim h-3.5 w-3.5 shrink-0" />
             <input

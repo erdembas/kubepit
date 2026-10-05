@@ -7,7 +7,9 @@ import { kindIcon } from '@/lib/kube/icons';
 import type { NpPod, NpPolicy } from '@/lib/kube/netpol';
 import { useWorkbenchStore, VIEW } from '@/store/useWorkbenchStore';
 import type { ApiResourceInfo } from '@/types';
+import { useSelectedNamespaces } from '../data/hooks';
 import { DetailsPanel } from '../details/DetailsPanel';
+import { NamespacePicker } from '../header/NamespacePicker';
 import { CaveatBanners, EnforcementChip } from './Caveats';
 import type { ExplainLinks } from './Explanation';
 import { MatrixPanel } from './MatrixPanel';
@@ -27,16 +29,17 @@ const POD_KEY = kindKey(BUILTIN.Pod);
 
 export function NetpolPage({
   clusterId,
-  namespaces,
+  viewKey,
   isActive,
   apiResources,
 }: {
   clusterId: string;
-  namespaces: string[];
+  viewKey: string;
   isActive: boolean;
   apiResources: ApiResourceInfo[] | null;
 }) {
   i18n.useLocale();
+  const namespaces = useSelectedNamespaces(clusterId, viewKey);
   const data = useNetpolData(clusterId, namespaces, isActive, apiResources);
   const state = useNetpolViewState(clusterId);
   const selection = useWorkbenchStore(
@@ -103,10 +106,12 @@ export function NetpolPage({
               aria-label={i18n.t('Syncing')}
             />
           )}
+          <span className="ml-auto" />
+          <NamespacePicker clusterId={clusterId} viewKey={viewKey} isActive={isActive} />
           <div
             role="tablist"
             aria-label={i18n.t('Simulator mode')}
-            className="bg-fg/5 ml-auto flex h-7 shrink-0 items-center gap-0.5 rounded-lg p-0.5"
+            className="bg-fg/5 flex h-7 shrink-0 items-center gap-0.5 rounded-lg p-0.5"
           >
             {modes.map(([id, label]) => (
               <button

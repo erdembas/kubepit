@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useWorkbenchStore, VIEW } from '@/store/useWorkbenchStore';
 import { ActionDialogs } from './actions/ActionDialogs';
 import { ConnectScreen } from './ConnectScreen';
-import { useApiResources, useCluster, useSelectedNamespaces } from './data/hooks';
+import { useApiResources, useCluster } from './data/hooks';
 import { dropPolledPrefix } from './data/polled';
 import { dropClusterWatches } from './data/watchCache';
 import { ClusterDock } from './dock/ClusterDock';
@@ -39,7 +39,6 @@ export function ClusterWorkbench({
   const [offlineInvestigations, setOfflineInvestigations] = useState(false);
   const apiResources = useApiResources(clusterId, isActive && connected);
   const activeKind = useWorkbenchStore((s) => s.activeKind[clusterId] ?? VIEW.clusterOverview);
-  const namespaces = useSelectedNamespaces(clusterId);
 
   // Forget cached lists and discovery once a cluster disconnects.
   useEffect(() => {
@@ -66,7 +65,6 @@ export function ClusterWorkbench({
         <WorkbenchHeader
           cluster={cluster}
           status={status}
-          isActive={isActive}
           activeKind={activeKind}
           apiResources={apiResources}
           tabSlotRef={setTabSlot}
@@ -86,7 +84,6 @@ export function ClusterWorkbench({
               <ViewPanes
                 clusterId={clusterId}
                 isActive={isActive}
-                namespaces={namespaces}
                 apiResources={apiResources}
                 tabSlot={tabSlot}
               />

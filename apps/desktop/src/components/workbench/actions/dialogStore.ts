@@ -28,7 +28,9 @@ export type ActionDialog =
   | { kind: 'debug'; clusterId: string; pod: KubeObject; target?: string | null }
   // GitOps: Argo CD sync options, Flux reconcile options.
   | { kind: 'argo-sync'; clusterId: string; gvk: Gvk; obj: KubeObject; revision?: string }
-  | { kind: 'flux-reconcile'; clusterId: string; gvk: Gvk; obj: KubeObject };
+  | { kind: 'flux-reconcile'; clusterId: string; gvk: Gvk; obj: KubeObject }
+  // Secrets: copy the object into other namespaces.
+  | { kind: 'copy-secret'; clusterId: string; gvk: Gvk; obj: KubeObject };
 
 interface DialogState {
   dialog: ActionDialog | null;

@@ -109,14 +109,14 @@ export function createPerfDriver(): PerfDriver {
 
     openKind(clusterId, kindKey, namespaces) {
       current = clusterId;
-      if (namespaces) workbench().setNamespaces(clusterId, namespaces);
+      if (namespaces) workbench().setNamespaces(clusterId, namespaces, kindKey);
       perfTableNavigate(kindKey);
       workbench().setActiveKind(clusterId, kindKey);
     },
 
     openView(clusterId, viewKey, namespaces) {
       current = clusterId;
-      if (namespaces) workbench().setNamespaces(clusterId, namespaces);
+      if (namespaces) workbench().setNamespaces(clusterId, namespaces, viewKey);
       perfMark('view:open');
       workbench().setActiveKind(clusterId, viewKey);
     },

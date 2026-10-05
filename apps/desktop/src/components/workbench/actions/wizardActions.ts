@@ -3,7 +3,7 @@ import { Network, Route, ShieldCheck } from 'lucide-react';
 import { asString, spec } from '@/lib/kube/accessors';
 import { isExposable } from '@/lib/kube/wizards/expose';
 import { servicePorts } from '@/lib/kube/wizards/ingress';
-import { useWorkbenchStore } from '@/store/useWorkbenchStore';
+import { sharedNamespacesOf } from '@/store/useWorkbenchStore';
 import type { ClusterDef, KubeObject } from '@/types';
 import { openWizard } from '../wizards/wizardStore';
 import type { ResourceAction } from './resourceActions';
@@ -67,8 +67,7 @@ export function wizardActions({
   if (obj.kind === 'Role' || obj.kind === 'ClusterRole') {
     // A ClusterRole is bound in the namespace the workbench shows (or the cluster default),
     // so the permission check asks about that namespace, not cluster-wide.
-    const selected = useWorkbenchStore.getState().namespaces[clusterId];
-    const namespace = roleBindingNamespace(ns, selected, cluster);
+    const namespace = roleBindingNamespace(ns, sharedNamespacesOf(clusterId) ?? undefined, cluster);
     out.push({
       id: 'add-rolebinding',
       label: i18n.t('Add RoleBinding…'),

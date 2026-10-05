@@ -7,21 +7,32 @@ import { Checkbox } from '@/components/ui/Choice';
 import { BUILTIN, toGvk } from '@/lib/kube/catalog';
 import { cn } from '@/lib/cn';
 import { useAppStore } from '@/store/useAppStore';
-import { useWorkbenchStore } from '@/store/useWorkbenchStore';
+import { useWorkbenchStore, type ViewKey } from '@/store/useWorkbenchStore';
 import { useNamespaceNames, useSelectedNamespaces } from '../data/hooks';
 import { useWatch } from '../data/watchCache';
 
 const NS_GVK = toGvk(BUILTIN.Namespace);
 
-/** Multi-select namespace scope for the whole workbench (persisted per cluster). */
-export function NamespacePicker({ clusterId, isActive }: { clusterId: string; isActive: boolean }) {
+/**
+ * Multi-select namespace scope of one view tab (persisted per cluster and
+ * view). Sits in the view's toolbar, left of its search input.
+ */
+export function NamespacePicker({
+  clusterId,
+  viewKey,
+  isActive,
+}: {
+  clusterId: string;
+  viewKey: ViewKey;
+  isActive: boolean;
+}) {
   i18n.useLocale();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
-  const selected = useSelectedNamespaces(clusterId);
+  const selected = useSelectedNamespaces(clusterId, viewKey);
   const accessible = useAppStore(
     (s) => s.clusters.find((c) => c.id === clusterId)?.accessible_namespaces ?? [],
   );
@@ -36,7 +47,8 @@ export function NamespacePicker({ clusterId, isActive }: { clusterId: string; is
   }, [accessible, names.data, live.items, selected]);
   const filtered = options.filter((n) => n.toLowerCase().includes(query.trim().toLowerCase()));
 
-  const set = (next: string[]) => useWorkbenchStore.getState().setNamespaces(clusterId, next);
+  const set = (next: string[]) =>
+    useWorkbenchStore.getState().setNamespaces(clusterId, next, viewKey);
   const toggle = (ns: string) =>
     set(selected.includes(ns) ? selected.filter((x) => x !== ns) : [...selected, ns]);
 

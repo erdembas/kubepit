@@ -11,7 +11,7 @@ import { useActionDialogs } from '../../actions/dialogStore';
 import { openExternal } from '../../actions/openExternal';
 import { servicePortOptions } from '../../actions/resourceActions';
 import { useWatch } from '../../data/watchCache';
-import { ChipList, MiniTable, MonoText, Row, Rows, Section } from '../primitives';
+import { ChipList, CopyValue, MiniTable, MonoText, Row, Rows, Section } from '../primitives';
 import { PodsMiniTable } from '../PodsMiniTable';
 import type { SectionProps } from './types';
 
@@ -99,15 +99,25 @@ export function ServiceSections({ obj, ctx, isActive }: SectionProps) {
           <Row label={i18n.t('Type')}>{asString(s.type) || 'ClusterIP'}</Row>
           <Row label={i18n.t('Cluster IP')}>
             {asString(s.clusterIP) && (
-              <MonoText>
-                {asArray(s.clusterIPs)
-                  .map((x) => asString(x))
-                  .join(', ') || asString(s.clusterIP)}
-              </MonoText>
+              <CopyValue
+                text={
+                  asArray(s.clusterIPs)
+                    .map((x) => asString(x))
+                    .join(', ') || asString(s.clusterIP)
+                }
+              />
             )}
           </Row>
+          <Row label={i18n.t('DNS name')}>
+            <CopyValue text={`${obj.metadata.name}.${ns}.svc.cluster.local`} />
+          </Row>
+          {asString(s.type) === 'ExternalName' && asString(s.externalName) && (
+            <Row label={i18n.t('External name')}>
+              <CopyValue text={asString(s.externalName)} />
+            </Row>
+          )}
           <Row label={i18n.t('External')}>
-            {externalIps(obj).length > 0 && <MonoText>{externalIps(obj).join(', ')}</MonoText>}
+            {externalIps(obj).length > 0 && <CopyValue text={externalIps(obj).join(', ')} />}
           </Row>
           <Row label={i18n.t('Session affinity')}>{asString(s.sessionAffinity)}</Row>
           <Row label={i18n.t('Traffic policy')}>

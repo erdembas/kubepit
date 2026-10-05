@@ -42,7 +42,9 @@ import {
 } from '@/lib/kube/changes/timeline';
 import { navigateTo, useWorkbenchStore, VIEW } from '@/store/useWorkbenchStore';
 import type { ApiResourceInfo, ChangeJournalStatus } from '@/types';
+import { useSelectedNamespaces } from '../data/hooks';
 import { openRolloutHistory } from '../details/detailsTabs';
+import { NamespacePicker } from '../header/NamespacePicker';
 import { useNow } from '../util';
 import { ChangesHeader } from './ChangesHeader';
 import { ChangeRow, HelmRow, RolloutRow, WarningRow } from './TimelineRows';
@@ -120,16 +122,17 @@ function rangeTitle(range: TimeRange) {
  */
 export function ChangesPage({
   clusterId,
-  namespaces,
+  viewKey,
   isActive,
   apiResources,
 }: {
   clusterId: string;
-  namespaces: string[];
+  viewKey: string;
   isActive: boolean;
   apiResources: ApiResourceInfo[] | null;
 }) {
   i18n.useLocale();
+  const namespaces = useSelectedNamespaces(clusterId, viewKey);
   const [range, setRange] = useState<TimeRange>('1h');
   const [text, setText] = useState('');
   const query = useDebounced(text.trim(), 250);
@@ -281,6 +284,7 @@ export function ChangesPage({
             ))}
           </div>
         }
+        scope={<NamespacePicker clusterId={clusterId} viewKey={viewKey} isActive={isActive} />}
         search={
           <>
             <Search className="text-fg-dim h-3.5 w-3.5 shrink-0" />

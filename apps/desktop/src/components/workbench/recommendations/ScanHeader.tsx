@@ -29,6 +29,7 @@ import type {
   RecommendationScanView,
 } from '@/types';
 import { useNow } from '../util';
+import { NamespacePicker } from '../header/NamespacePicker';
 import { saveRecommendationSettings } from './saveSettings';
 
 const LATEST = 'latest';
@@ -175,6 +176,8 @@ function ScanState({
  */
 export function ScanHeader({
   clusterId,
+  viewKey,
+  isActive,
   namespaces,
   latest,
   scan,
@@ -184,6 +187,9 @@ export function ScanHeader({
   exportAction,
 }: {
   clusterId: ClusterId;
+  /** The view tab this header belongs to (its namespace picker). */
+  viewKey: string;
+  isActive: boolean;
   namespaces: readonly string[];
   /** The latest scan's answer (its last failure). */
   latest: RecommendationLatest | null;
@@ -254,6 +260,7 @@ export function ScanHeader({
           <Loader2 className="text-fg-dim h-3 w-3 shrink-0 animate-spin" aria-hidden="true" />
         )}
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          <NamespacePicker clusterId={clusterId} viewKey={viewKey} isActive={isActive} />
           {exportAction}
           {settingsAction}
           <ScanNowButton clusterId={clusterId} status={status} />

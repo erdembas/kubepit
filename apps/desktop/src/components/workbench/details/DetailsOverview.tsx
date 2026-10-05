@@ -4,7 +4,7 @@ import { RefLink } from '@/lib/kube/columns/cells';
 import type { ColumnContext } from '@/lib/kube/columns';
 import { formatAge } from '@/lib/format';
 import type { Gvk, KubeObject } from '@/types';
-import { ChipList, MonoText, Row, Rows, Section } from './primitives';
+import { ChipList, CopyButton, CopyValue, Row, Rows, Section } from './primitives';
 import { ConfigMapSections, SecretSections } from './sections/ConfigSections';
 import { CertificateKindSections } from './sections/CertificateSections';
 import { CrdSections, GenericSections } from './sections/GenericSections';
@@ -81,18 +81,21 @@ function MetaSection({ obj, ctx }: { obj: KubeObject; ctx: ColumnContext }) {
           ) : null}
         </Row>
         <Row label={i18n.t('Name')}>
-          <MonoText>{m.name}</MonoText>
+          <CopyValue text={m.name} />
         </Row>
         {m.namespace && (
           <Row label={i18n.t('Namespace')}>
-            <RefLink
-              target={{ apiVersion: 'v1', kind: 'Namespace', name: m.namespace }}
-              ctx={ctx}
-            />
+            <span className="flex min-w-0 items-center gap-0.5">
+              <RefLink
+                target={{ apiVersion: 'v1', kind: 'Namespace', name: m.namespace }}
+                ctx={ctx}
+              />
+              <CopyButton text={m.namespace} label={i18n.t('Copy namespace')} />
+            </span>
           </Row>
         )}
         <Row label="UID">
-          <MonoText>{m.uid}</MonoText>
+          <CopyValue text={m.uid} />
         </Row>
         {m.deletionTimestamp && (
           <Row label={i18n.t('Deleting')}>

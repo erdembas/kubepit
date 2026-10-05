@@ -35,7 +35,8 @@ export const isMainWindow = windowLabel === MAIN_WINDOW;
 export interface WorkbenchSession {
   layouts: Record<string, SplitLayout>;
   activeKind: Record<string, string>;
-  namespaces: Record<string, string[]>;
+  /** Per-view namespace scopes, keyed by view (and `*`, the shared scope). */
+  namespaces: Record<string, Partial<Record<string, string[]>>>;
   pinnedTabKeys: Record<string, string[]>;
 }
 

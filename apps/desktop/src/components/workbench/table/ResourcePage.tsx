@@ -29,9 +29,10 @@ import { deniedMessage, OPEN_GATE, useActionGates } from '../access/gates';
 import { PermissionExplainer } from '../access/PermissionExplainer';
 import { bulkActions } from '../actions/bulkActions';
 import { resourceActions } from '../actions/resourceActions';
-import { useCluster } from '../data/hooks';
+import { useCluster, useSelectedNamespaces } from '../data/hooks';
 import { restartWatch } from '../data/watchCache';
 import { DetailsPanel } from '../details/DetailsPanel';
+import { NamespacePicker } from '../header/NamespacePicker';
 import { toggleObjectBookmark } from '../nav/bookmarkActions';
 import { useEvent } from '../util';
 import { ColumnMenu } from './ColumnMenu';
@@ -53,19 +54,18 @@ export function ResourcePage({
   clusterId,
   kindKey,
   gvk,
-  namespaces,
   isActive,
   apiResources,
 }: {
   clusterId: string;
   kindKey: string;
   gvk: Gvk;
-  namespaces: string[];
   isActive: boolean;
   apiResources: ApiResourceInfo[] | null;
 }) {
   i18n.useLocale();
   const { cluster, readOnly } = useCluster(clusterId);
+  const namespaces = useSelectedNamespaces(clusterId, kindKey);
   const t = useKindTable({ clusterId, kindKey, gvk, namespaces, active: isActive, apiResources });
   const selection = useWorkbenchStore((s) => s.selection[clusterId]?.[kindKey] ?? null);
   const revealKey = useWorkbenchStore((s) => s.navRevision[`${clusterId}|${kindKey}`] ?? 0);
@@ -281,6 +281,9 @@ export function ResourcePage({
             <Loader2 className="text-fg-dim h-3 w-3 animate-spin" aria-label={i18n.t('Syncing')} />
           )}
           <div className="ml-auto flex min-w-0 shrink items-center justify-end gap-1.5">
+            {gvk.namespaced && (
+              <NamespacePicker clusterId={clusterId} viewKey={kindKey} isActive={isActive} />
+            )}
             <div className="bg-surface border-border focus-within:border-accent/50 flex h-8 w-56 min-w-24 shrink items-center gap-2 rounded-lg border px-2.5 transition-colors">
               <Search className="text-fg-dim h-3.5 w-3.5 shrink-0" />
               <input

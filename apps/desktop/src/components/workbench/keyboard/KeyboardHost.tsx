@@ -8,7 +8,7 @@ import { chordFromEvent, globalShortcutFor, keymapCommandFor, type KeyBinding } 
 import { useAppStore } from '@/store/useAppStore';
 import { enabledCustomActions, useCustomActionsStore } from '@/store/useCustomActionsStore';
 import { shortcutForChord } from '@/store/useNavShortcutsStore';
-import { useWorkbenchStore } from '@/store/useWorkbenchStore';
+import { sharedNamespacesOf, useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { CustomAction } from '@/types';
 import { useActionDialogs } from '../actions/dialogStore';
 import { runCustomAction } from '../actions/custom/runCustomAction';
@@ -209,7 +209,7 @@ function runShortcut(
       isClusterLevel(action) &&
       actionApplies(action, { cluster, kind: null, group: '', namespace: null })
     ) {
-      const namespaces = useWorkbenchStore.getState().namespaces[clusterId];
+      const namespaces = sharedNamespacesOf(clusterId);
       runCustomAction({
         action,
         clusterId,

@@ -21,7 +21,9 @@ import { useAppStore } from '@/store/useAppStore';
 import { useWorkbenchStore, VIEW } from '@/store/useWorkbenchStore';
 import type { ApiResourceInfo } from '@/types';
 import type { NetworkDiagnosticsReport, NetworkProbeProtocol } from '@/types/networkDiagnostics';
+import { useSelectedNamespaces } from '../data/hooks';
 import { useWatch } from '../data/watchCache';
+import { NamespacePicker } from '../header/NamespacePicker';
 import {
   networkDiagnosticsError,
   objectKey,
@@ -37,15 +39,16 @@ const SERVICES = toGvk(BUILTIN.Service);
 
 export function NetworkDiagnosticsPage({
   clusterId,
-  namespaces,
+  viewKey,
   isActive,
 }: {
   clusterId: string;
-  namespaces: string[];
+  viewKey: string;
   isActive: boolean;
   apiResources: ApiResourceInfo[] | null;
 }) {
   i18n.useLocale();
+  const namespaces = useSelectedNamespaces(clusterId, viewKey);
   const podWatch = useWatch(clusterId, PODS, namespaces, isActive);
   const serviceWatch = useWatch(clusterId, SERVICES, namespaces, isActive);
   const cluster = useAppStore((s) => s.clusters.find((c) => c.id === clusterId));
@@ -133,9 +136,10 @@ export function NetworkDiagnosticsPage({
           <Activity className="h-3.5 w-3.5" />
         </span>
         <h2 className="text-fg text-[13px] font-semibold">{i18n.t('Live network diagnostics')}</h2>
+        <span className="ml-auto" />
+        <NamespacePicker clusterId={clusterId} viewKey={viewKey} isActive={isActive} />
         <Button
           size="xs"
-          className="ml-auto"
           leftIcon={<Shield className="h-3 w-3" />}
           onClick={() =>
             useWorkbenchStore.getState().setActiveKind(clusterId, VIEW.netpolSimulator)

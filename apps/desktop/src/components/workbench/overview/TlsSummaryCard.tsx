@@ -51,7 +51,7 @@ function NamespaceTags({ group, clusterId }: { group: TlsCertificateGroup; clust
                 );
               } else {
                 const store = useWorkbenchStore.getState();
-                store.setNamespaces(clusterId, namespace ? [namespace] : []);
+                store.setNamespaces(clusterId, namespace ? [namespace] : [], 'secrets');
                 store.select(clusterId, 'secrets', null);
                 navigateTo(clusterId, SECRET_GVK);
               }
@@ -127,7 +127,7 @@ export function TlsSummaryCard({ clusterId, isActive }: { clusterId: string; isA
           <button
             type="button"
             onClick={() => {
-              useWorkbenchStore.getState().setNamespaces(clusterId, []);
+              useWorkbenchStore.getState().setNamespaces(clusterId, [], 'secrets');
               navigateTo(clusterId, SECRET_GVK);
             }}
             className="text-fg-dim hover:text-accent flex items-center gap-1 text-[11px]"

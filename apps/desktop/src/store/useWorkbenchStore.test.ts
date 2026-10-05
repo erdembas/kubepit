@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { kindKey } from '@/lib/kube/catalog';
 import type { Gvk } from '@/types';
-import { navigateTo, useWorkbenchStore, VIEW, viewLayoutOf } from './useWorkbenchStore';
+import {
+  ANY_VIEW,
+  navigateTo,
+  selectedNamespacesOf,
+  useWorkbenchStore,
+  VIEW,
+  viewLayoutOf,
+} from './useWorkbenchStore';
 import * as layouts from './viewLayout';
 
 const cluster = 'test-cluster';
@@ -137,6 +144,34 @@ describe('ephemeral preview tabs', () => {
       [cluster]: podKey,
       'another-cluster': svcKey,
     });
+  });
+});
+
+describe('per-view namespace scopes', () => {
+  const svc: Gvk = { group: '', version: 'v1', kind: 'Service', plural: 'services', namespaced: true };
+  const svcKey = kindKey(svc);
+
+  it('keeps each view tab on its own scope and unscoped views on the shared one', () => {
+    state().setNamespaces(cluster, ['einvoice']);
+    state().setNamespaces(cluster, ['default'], svcKey);
+
+    expect(selectedNamespacesOf(cluster, podKey)).toEqual(['einvoice']);
+    expect(selectedNamespacesOf(cluster, svcKey)).toEqual(['default']);
+    // A view that was never scoped itself follows the shared scope.
+    expect(selectedNamespacesOf(cluster, 'ingresses')).toEqual(['einvoice']);
+  });
+
+  it('falls back to the cluster default when nothing was ever selected', () => {
+    expect(selectedNamespacesOf(cluster, podKey)).toBeNull();
+  });
+
+  it('scopes the shared scope again without touching a view that has its own', () => {
+    state().setNamespaces(cluster, ['einvoice']);
+    state().setNamespaces(cluster, ['default'], svcKey);
+    state().setNamespaces(cluster, ['team-a']);
+
+    expect(selectedNamespacesOf(cluster, svcKey)).toEqual(['default']);
+    expect(selectedNamespacesOf(cluster, podKey)).toEqual(['team-a']);
   });
 });
 
@@ -334,7 +369,8 @@ describe('view tab session persistence', () => {
 
       expect(restored.layouts[cluster]?.groups[0]?.tabs).toEqual(['a', 'b']);
       expect(restored.activeKind[cluster]).toBe('b');
-      expect(restored.namespaces[cluster]).toEqual(['demo']);
+      // v4 kept one scope per cluster; it becomes the shared `*` scope.
+      expect(restored.namespaces[cluster]).toEqual({ [ANY_VIEW]: ['demo'] });
       expect(restored.pinnedTabKeys).toEqual({});
     },
   );
@@ -401,7 +437,7 @@ describe('view tab session persistence', () => {
     state().select(cluster, VIEW.upgradeReadiness, { key: 'test', namespace: null, name: 'test' });
     const saved = JSON.parse(localStorage.getItem('kubepit.workbench.v1')!);
 
-    expect(saved.version).toBe(4);
+    expect(saved.version).toBe(5);
     expect(saved.state.pinnedTabKeys).toEqual({ [cluster]: [VIEW.upgradeReadiness] });
     expect(saved.state.viewRevealRevision).toBeUndefined();
     expect(saved.state.selection).toBeUndefined();

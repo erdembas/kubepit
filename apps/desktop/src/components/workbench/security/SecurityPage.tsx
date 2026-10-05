@@ -18,7 +18,9 @@ import { useAppStore } from '@/store/useAppStore';
 import { VIEW, navigateTo, useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { ApiResourceInfo, KubeObject } from '@/types';
 import { analyzeCveRisk } from '../actions/aiActions';
+import { useSelectedNamespaces } from '../data/hooks';
 import { DetailsPanel } from '../details/DetailsPanel';
+import { NamespacePicker } from '../header/NamespacePicker';
 import { useTrivyOperatorMissing, useTrivyReports, usePolicyReports } from './hooks';
 import { PodSecurityOverview } from './PodSecurityOverview';
 import {
@@ -49,16 +51,17 @@ function scopeLabel(namespaces: string[]) {
 
 export function SecurityPage({
   clusterId,
-  namespaces,
+  viewKey,
   isActive,
   apiResources,
 }: {
   clusterId: string;
-  namespaces: string[];
+  viewKey: string;
   isActive: boolean;
   apiResources: ApiResourceInfo[] | null;
 }) {
   i18n.useLocale();
+  const namespaces = useSelectedNamespaces(clusterId, viewKey);
   const [tab, setTabState] = useState<Tab>(() => pickedTab.get(clusterId) ?? 'trivy');
   const setTab = (t: Tab) => {
     pickedTab.set(clusterId, t);
@@ -174,6 +177,7 @@ export function SecurityPage({
             {scopeLabel(namespaces)}
           </span>
           <div className="ml-auto flex min-w-0 shrink items-center justify-end gap-1.5">
+            <NamespacePicker clusterId={clusterId} viewKey={viewKey} isActive={isActive} />
             <div className="bg-surface border-border focus-within:border-accent/50 flex h-8 w-60 min-w-24 shrink items-center gap-2 rounded-lg border px-2.5">
               <Search className="text-fg-dim h-3.5 w-3.5 shrink-0" />
               <input

@@ -25,12 +25,22 @@ import { syncPreferences, windowStorage } from './windowStorage';
  * pane's active tab ('' while that pane is empty). Other surfaces (command
  * palette, shell links) drive the workbench through
  * `setActiveKind(clusterId, kindKey)` and `navigateTo(clusterId, gvk, ns, name)`.
+ *
+ * Namespaces are selected per view tab: switching from Pods to Ingress keeps
+ * each tab's own scope. `ANY_VIEW` holds the last explicit selection, used
+ * by views that were never scoped (and by surfaces outside the views).
  */
 
 /** Pseudo kind keys for the non-resource pages of the navigator. */
 export const VIEW = VIEW_KEYS;
 
 export type ViewKey = string;
+
+/**
+ * The namespace scope shared by views the user never scoped themselves
+ * (the last explicit selection). Per-view scopes live under their view key.
+ */
+export const ANY_VIEW = '*';
 
 export interface ObjectSelection {
   key: string;
@@ -53,8 +63,12 @@ export const NAV_WIDTH = { min: 180, max: 360, default: 220 };
 export const DETAILS_WIDTH = { min: 380, max: 1100, default: 560 };
 
 interface WorkbenchState {
-  /** Selected namespaces per cluster; missing = cluster default, [] = all namespaces. */
-  namespaces: Record<ClusterId, string[]>;
+  /**
+   * Selected namespaces per cluster and view tab (`[]` = all namespaces,
+   * missing = cluster default). `ANY_VIEW` is the last explicit selection,
+   * the scope of views that were never scoped themselves.
+   */
+  namespaces: Record<ClusterId, Partial<Record<ViewKey, string[]>>>;
   /** Split panes and their tabs per cluster; read through `useViewLayout`. */
   layouts: Record<ClusterId, ViewLayout>;
   activeKind: Record<ClusterId, ViewKey>;
@@ -94,7 +108,7 @@ interface WorkbenchState {
   sort: Record<string, SortPref>;
   detailsWidth: number;
 
-  setNamespaces: (clusterId: ClusterId, namespaces: string[]) => void;
+  setNamespaces: (clusterId: ClusterId, namespaces: string[], viewKey?: ViewKey) => void;
   /**
    * Focus a view's tab, opening it in the focused pane when needed.
    * `preview` opens it as the cluster's ephemeral tab (replacing the
@@ -141,7 +155,7 @@ interface WorkbenchState {
 }
 
 const STORAGE_KEY = 'kubepit.workbench.v1';
-const STORAGE_VERSION = 4;
+const STORAGE_VERSION = 5;
 /** Persisted per window; the rest of the persisted state is shared layout prefs. */
 const SESSION_KEYS = ['namespaces', 'layouts', 'activeKind', 'pinnedTabKeys'] as const;
 const PREF_KEYS = [
@@ -305,9 +319,15 @@ export const useWorkbenchStore = create<WorkbenchState>()(
       sort: {},
       detailsWidth: DETAILS_WIDTH.default,
 
-      setNamespaces: (clusterId, namespaces) =>
+      setNamespaces: (clusterId, namespaces, viewKey = ANY_VIEW) =>
         set((s) => ({
-          namespaces: { ...s.namespaces, [clusterId]: [...new Set(namespaces)].sort() },
+          namespaces: {
+            ...s.namespaces,
+            [clusterId]: {
+              ...s.namespaces[clusterId],
+              [viewKey]: [...new Set(namespaces)].sort(),
+            },
+          },
         })),
       setActiveKind: (clusterId, key, mode) =>
         set((s) => {
@@ -530,6 +550,7 @@ export const useWorkbenchStore = create<WorkbenchState>()(
       // v1 kept one flat tab list per cluster (`tabs`); it becomes a single pane.
       // v2 laid panes out on one axis; they become one split of the tree.
       // v3 had no pinned view tabs.
+      // v4 kept one namespace scope per cluster; it becomes the shared `ANY_VIEW` scope.
       migrate: (persisted, version) => {
         const state = (persisted ?? {}) as Partial<WorkbenchState> & {
           tabs?: Record<ClusterId, ViewKey[]>;
@@ -550,6 +571,13 @@ export const useWorkbenchStore = create<WorkbenchState>()(
         // An older secondary-window session may have picked up main's newer
         // pins while windowStorage combined it with the shared preferences.
         if (version < 4) state.pinnedTabKeys = {};
+        if (version < 5) {
+          const flat = (state.namespaces ?? {}) as unknown as Record<ClusterId, string[]>;
+          const next: Record<ClusterId, Partial<Record<ViewKey, string[]>>> = {};
+          for (const [clusterId, namespaces] of Object.entries(flat))
+            if (Array.isArray(namespaces)) next[clusterId] = { [ANY_VIEW]: [...namespaces] };
+          state.namespaces = next;
+        }
         return state as WorkbenchState;
       },
       merge: (persisted, current) => {
@@ -588,6 +616,23 @@ syncPreferences<WorkbenchState>(STORAGE_KEY, PREF_KEYS, useWorkbenchStore);
 export function gvkForCluster(clusterId: ClusterId, key: string): Gvk | null {
   const s = useWorkbenchStore.getState();
   return gvkForKey(key, s.apiResources[clusterId]) ?? s.customKinds[clusterId]?.[key] ?? null;
+}
+
+/**
+ * The namespaces a view is scoped to, outside React. A view the user never
+ * scoped itself falls back to the last explicit selection (`ANY_VIEW`):
+ * switching tabs never changes a scoped view, and an unscoped view follows
+ * the shared scope. Missing entirely = the cluster default (`[]` = all).
+ */
+export function selectedNamespacesOf(clusterId: ClusterId, viewKey: ViewKey): string[] | null {
+  const perCluster = useWorkbenchStore.getState().namespaces[clusterId];
+  if (!perCluster) return null;
+  return perCluster[viewKey] ?? perCluster[ANY_VIEW] ?? null;
+}
+
+/** The shared workbench scope, outside React (surfaces with no view of their own). */
+export function sharedNamespacesOf(clusterId: ClusterId): string[] | null {
+  return useWorkbenchStore.getState().namespaces[clusterId]?.[ANY_VIEW] ?? null;
 }
 
 /** A cluster's split layout (a single overview pane until something opens). */

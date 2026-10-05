@@ -9,6 +9,8 @@ import { cronActive, cronSuspended, jobBucket, workloadBucket } from '@/lib/kube
 import { useAppStore } from '@/store/useAppStore';
 import { useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { ApiResourceInfo, KubeObject } from '@/types';
+import { useSelectedNamespaces } from '../data/hooks';
+import { NamespacePicker } from '../header/NamespacePicker';
 import { useWatch } from '../data/watchCache';
 import { useNow } from '../util';
 import { Card, Legend, Ring, type Segment } from './charts';
@@ -151,16 +153,17 @@ function WorkloadTile({
 
 export function WorkloadsOverviewPage({
   clusterId,
-  namespaces,
+  viewKey,
   isActive,
   apiResources,
 }: {
   clusterId: string;
-  namespaces: string[];
+  viewKey: string;
   isActive: boolean;
   apiResources: ApiResourceInfo[] | null;
 }) {
   i18n.useLocale();
+  const namespaces = useSelectedNamespaces(clusterId, viewKey);
   const overview = useAppStore((s) => s.overviews[clusterId]);
   const now = useNow(30_000, isActive);
   useEffect(() => {
@@ -172,15 +175,18 @@ export function WorkloadsOverviewPage({
   return (
     <div className="overlay-scroll min-h-0 flex-1 overflow-auto">
       <div className="mx-auto max-w-6xl space-y-4 p-5">
-        <div>
-          <h2 className="text-fg text-[16px] font-semibold tracking-tight">
-            {i18n.t('Workloads')}
-          </h2>
-          <p className="text-fg-dim mt-0.5 text-[11.5px]">
-            {namespaces.length
-              ? i18n.t('Namespaces: {list}', { list: namespaces.join(', ') })
-              : i18n.t('All namespaces')}
-          </p>
+        <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-fg text-[16px] font-semibold tracking-tight">
+              {i18n.t('Workloads')}
+            </h2>
+            <p className="text-fg-dim mt-0.5 text-[11.5px]">
+              {namespaces.length
+                ? i18n.t('Namespaces: {list}', { list: namespaces.join(', ') })
+                : i18n.t('All namespaces')}
+            </p>
+          </div>
+          <NamespacePicker clusterId={clusterId} viewKey={viewKey} isActive={isActive} />
         </div>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {TILES.map((t) => (

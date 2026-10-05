@@ -100,6 +100,7 @@ export function ResourceNavigator({
   const allGroups = useMemo(() => buildNav(apiResources), [apiResources]);
   const all = useMemo(() => flattenNav(allGroups), [allGroups]);
   // RBAC: kinds the user cannot list in the current scope are dimmed (or hidden).
+  // The navigator spans every view, so it checks the shared scope.
   const namespaces = useSelectedNamespaces(clusterId);
   const access = useKindAccess(clusterId, all, namespaces);
   const hideLocked = useAccessStore((s) => s.hideInaccessible);

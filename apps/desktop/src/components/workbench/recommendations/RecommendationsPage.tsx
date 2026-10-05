@@ -7,6 +7,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { useRecommendationsStore, useShownRecommendations } from '@/store/useRecommendationsStore';
 import { filterRecommendations } from '@/lib/kube/rightsizing/model';
 import type { RightsizingSettings, WorkloadRecommendation } from '@/types';
+import { useSelectedNamespaces } from '../data/hooks';
 import { DrawerSection } from './DrawerSection';
 import { ExportMenu } from './ExportMenu';
 import { ListSection } from './ListSection';
@@ -69,14 +70,15 @@ function EmptyState({
  */
 export function RecommendationsPage({
   clusterId,
-  namespaces,
+  viewKey,
   isActive,
 }: {
   clusterId: string;
-  namespaces: string[];
+  viewKey: string;
   isActive: boolean;
 }) {
   i18n.useLocale();
+  const namespaces = useSelectedNamespaces(clusterId, viewKey);
   const shown = useShownRecommendations(clusterId, isActive);
   const connected = useAppStore((s) => s.statuses[clusterId]?.state === 'connected');
   const recSettings = useAppStore((s) => s.settings?.recommendations ?? null);
@@ -189,6 +191,8 @@ export function RecommendationsPage({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <ScanHeader
         clusterId={clusterId}
+        viewKey={viewKey}
+        isActive={isActive}
         namespaces={scope}
         latest={latest}
         scan={scan}

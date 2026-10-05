@@ -39,10 +39,11 @@ import { VIEW, useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { ApiResourceInfo, ClusterId, Gvk } from '@/types';
 import { OPEN_GATE, useActionGates } from '../access/gates';
 import { resourceActions } from '../actions/resourceActions';
-import { useCluster } from '../data/hooks';
+import { useCluster, useSelectedNamespaces } from '../data/hooks';
 import { hasListError } from '../data/listState';
 import { restartWatch, useWatch, type WatchSnapshot } from '../data/watchCache';
 import { DetailsPanel } from '../details/DetailsPanel';
+import { NamespacePicker } from '../header/NamespacePicker';
 import { TableSkeleton } from '../table/TableStates';
 import { useNow } from '../util';
 
@@ -132,17 +133,18 @@ function Chip({
 
 export function GitOpsPage({
   clusterId,
-  namespaces,
+  viewKey,
   isActive,
   apiResources,
 }: {
   clusterId: string;
-  namespaces: string[];
+  viewKey: string;
   isActive: boolean;
   apiResources: ApiResourceInfo[] | null;
 }) {
   i18n.useLocale();
   const { cluster, readOnly } = useCluster(clusterId);
+  const namespaces = useSelectedNamespaces(clusterId, viewKey);
   const appGvk = useMemo(() => servedGvk(GITOPS_KEYS.application, apiResources), [apiResources]);
   const ksGvk = useMemo(() => servedGvk(GITOPS_KEYS.kustomization, apiResources), [apiResources]);
   const hrGvk = useMemo(() => servedGvk(GITOPS_KEYS.helmRelease, apiResources), [apiResources]);
@@ -286,6 +288,7 @@ export function GitOpsPage({
                 : i18n.t('{count} namespaces', { count: namespaces.length })}
           </span>
           <div className="ml-auto flex min-w-0 shrink items-center justify-end gap-1.5">
+            <NamespacePicker clusterId={clusterId} viewKey={viewKey} isActive={isActive} />
             <div className="bg-surface border-border focus-within:border-accent/50 flex h-8 w-56 min-w-24 shrink items-center gap-2 rounded-lg border px-2.5">
               <Search className="text-fg-dim h-3.5 w-3.5 shrink-0" />
               <input

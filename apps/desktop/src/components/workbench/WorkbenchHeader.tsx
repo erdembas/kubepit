@@ -6,26 +6,22 @@ import { disconnectCluster, refreshOverview } from '@/lib/clusterActions';
 import { templateFor } from '@/lib/kube/templates';
 import { useAppStore } from '@/store/useAppStore';
 import { dock } from '@/store/useDockStore';
-import { gvkForCluster } from '@/store/useWorkbenchStore';
+import { gvkForCluster, sharedNamespacesOf } from '@/store/useWorkbenchStore';
 import type { ApiResourceInfo, ClusterDef, ClusterStatus } from '@/types';
 import { ClusterAvatar, EnvPill, ReadOnlyBadge } from './ClusterAvatar';
-import { useSelectedNamespaces } from './data/hooks';
 import { refreshPolledPrefix } from './data/polled';
 import { restartClusterWatches } from './data/watchCache';
 import { KindJump } from './header/KindJump';
-import { NamespacePicker } from './header/NamespacePicker';
 
 export function WorkbenchHeader({
   cluster,
   status,
-  isActive,
   activeKind,
   apiResources,
   tabSlotRef,
 }: {
   cluster: ClusterDef;
   status: ClusterStatus | undefined;
-  isActive: boolean;
   activeKind: string;
   apiResources: ApiResourceInfo[] | null;
   /** Receives the slot an unsplit workbench's view tabs render into (see `ViewPanes`). */
@@ -36,8 +32,11 @@ export function WorkbenchHeader({
   const [headerRef, width] = useElementWidth<HTMLElement>();
   const showVersion = width >= 960;
   const showKindJump = width >= 760;
-  const namespaces = useSelectedNamespaces(cluster.id);
-  const scopeNs = namespaces.length === 1 ? namespaces[0]! : (cluster.default_namespace ?? null);
+  // The header's create button and terminal share the workbench scope
+  // (the last explicit namespace selection), not any one view's own scope.
+  const namespaces = sharedNamespacesOf(cluster.id);
+  const scopeNs =
+    namespaces?.length === 1 ? namespaces[0]! : (cluster.default_namespace ?? null);
   const version = status?.version?.replace(/^v?(\d+\.\d+\.\d+).*/, 'v$1');
 
   const refresh = () => {
@@ -82,7 +81,6 @@ export function WorkbenchHeader({
         ref={tabSlotRef}
         className="flex min-w-0 flex-auto shrink-[16] self-stretch has-[*]:min-w-24 has-[[data-view-tab-pinned]]:min-w-60"
       />
-      <NamespacePicker clusterId={cluster.id} isActive={isActive} />
       {showKindJump && <KindJump clusterId={cluster.id} apiResources={apiResources} />}
       <span className="bg-border/80 mx-1 h-5 w-px shrink-0" aria-hidden />
       <div className="flex shrink-0 items-center gap-0.5">

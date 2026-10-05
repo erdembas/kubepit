@@ -12,12 +12,15 @@ export function ChangesHeader({
   count,
   recording,
   ranges,
+  scope,
   search,
   refresh,
 }: {
   count: number;
   recording: ReactNode;
   ranges: ReactNode;
+  /** Namespace picker of this view tab, left of the search field. */
+  scope: ReactNode;
   /** Contents of the search field (icon, input, clear button). */
   search: ReactNode;
   refresh: ReactNode;
@@ -36,6 +39,7 @@ export function ChangesHeader({
         {recording}
         <div className="ml-auto flex w-full min-w-0 shrink items-center justify-end gap-1.5 @lg:w-auto">
           {ranges}
+          {scope}
           <div className="bg-surface border-border focus-within:border-accent/50 flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border px-2.5 @lg:w-56">
             {search}
           </div>
