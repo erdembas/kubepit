@@ -1,11 +1,15 @@
 import * as i18n from '@/i18n';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, Info } from 'lucide-react';
+import { AlertTriangle, Check, Copy, Info, Keyboard } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/cn';
 
 export type ConfirmTone = 'danger' | 'warning' | 'info';
+
+export function confirmWordMatches(typed: string, expected: string): boolean {
+  return typed.trim() === expected;
+}
 
 interface Props {
   /** Short title for the dialog. Optional — plain message-only usage
@@ -44,7 +48,24 @@ export function ConfirmDialog({
   const confirmRef = useRef<HTMLButtonElement>(null);
   const wordInputRef = useRef<HTMLInputElement>(null);
   const [typed, setTyped] = useState('');
+  const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<number>(0);
   const confirmedRef = useRef(false);
+  const wordInputId = useId();
+
+  useEffect(() => () => window.clearTimeout(copyTimerRef.current), []);
+
+  const copyConfirmWord = async () => {
+    if (!confirmWord) return;
+    try {
+      await navigator.clipboard.writeText(confirmWord);
+      setCopied(true);
+      window.clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = window.setTimeout(() => setCopied(false), 1500);
+    } catch (err) {
+      console.warn('confirm dialog: copy failed', err);
+    }
+  };
 
   // Focus strategy:
   // - When a confirmWord gate is present, focus the input so the user can
@@ -64,7 +85,7 @@ export function ConfirmDialog({
     return () => window.removeEventListener('keydown', handler);
   }, [onCancel]);
 
-  const gateSatisfied = !confirmWord || typed.trim() === confirmWord;
+  const gateSatisfied = !confirmWord || confirmWordMatches(typed, confirmWord);
 
   // Auto-confirm: the gate is an exact-match check, so the moment the typed
   // text equals the word there is nothing left to decide — confirming right
@@ -116,29 +137,54 @@ export function ConfirmDialog({
             )}
             {confirmWord && (
               <div className="mt-3">
-                <label className="text-fg-dim text-[11px]">
-                  {i18n.rich('Type {value1} to confirm', {
-                    value1: (
-                      <span className="text-fg bg-surface-muted rounded px-1 font-mono text-[11px]">
-                        {confirmWord}
-                      </span>
-                    ),
-                  })}
+                <label
+                  htmlFor={wordInputId}
+                  className="text-fg-dim block text-[11px] font-semibold tracking-[0.14em] uppercase"
+                >
+                  {i18n.t('Type the name to confirm')}
                 </label>
-                <div className="mt-1 flex items-center gap-1.5">
-                  <input
-                    ref={wordInputRef}
-                    value={typed}
-                    onChange={(e) => setTyped(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && gateSatisfied) onConfirm();
-                    }}
-                    className="border-border bg-surface-muted/60 text-fg focus:border-accent/60 focus:bg-surface h-8 min-w-0 flex-1 rounded border px-2 font-mono text-[12px] transition focus:outline-none"
-                    spellCheck={false}
-                    autoCapitalize="off"
-                    autoCorrect="off"
-                  />
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => void copyConfirmWord()}
+                    title={i18n.t('Copy')}
+                    aria-label={i18n.t('Copy')}
+                    className="border-border bg-surface-muted/50 text-fg hover:border-border-strong flex min-w-0 flex-1 items-center gap-2 rounded-app-sm border px-2 py-1.5 text-left transition"
+                  >
+                    <span className="min-w-0 flex-1 font-mono text-[11.5px] break-all select-text">
+                      {confirmWord}
+                    </span>
+                    {copied ? (
+                      <Check className="text-status-running h-3.5 w-3.5 shrink-0" />
+                    ) : (
+                      <Copy className="text-fg-dim h-3.5 w-3.5 shrink-0" />
+                    )}
+                  </button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="shrink-0"
+                    leftIcon={<Keyboard className="h-3.5 w-3.5" />}
+                    title={i18n.t('Fills the name and confirms')}
+                    onClick={() => setTyped(confirmWord)}
+                  >
+                    {i18n.t('Type for me')}
+                  </Button>
                 </div>
+                <input
+                  id={wordInputId}
+                  ref={wordInputRef}
+                  value={typed}
+                  onChange={(e) => setTyped(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && gateSatisfied) onConfirm();
+                  }}
+                  className="border-border bg-surface-raised text-fg focus:border-accent mt-1.5 h-8 w-full rounded-app-sm border px-2.5 font-mono text-[12px] transition focus:outline-none"
+                  spellCheck={false}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  autoComplete="off"
+                />
                 <p className="text-fg-dim mt-1.5 text-[11px]">
                   {i18n.t('It confirms on its own once the text matches.')}
                 </p>

@@ -27,6 +27,7 @@ import { openExternal } from './openExternal';
 import { SetImageDialog } from './SetImageDialog';
 import { CopySecretDialog } from './CopySecretDialog';
 import { NodeMaintenanceDialog } from '../node-maintenance/NodeMaintenanceDialog';
+import { NamespaceCleanupDialog } from '../namespace-cleanup/NamespaceCleanupDialog';
 
 /** Renders the open action dialog for this cluster (scale, port-forward, pickers). */
 export function ActionDialogs({ clusterId }: { clusterId: string }) {
@@ -37,6 +38,14 @@ export function ActionDialogs({ clusterId }: { clusterId: string }) {
   if (dialog.kind === 'node-maintenance')
     return (
       <NodeMaintenanceDialog clusterId={dialog.clusterId} name={dialog.name} onClose={close} />
+    );
+  if (dialog.kind === 'namespace-cleanup')
+    return (
+      <NamespaceCleanupDialog
+        clusterId={dialog.clusterId}
+        namespace={dialog.namespace}
+        onClose={close}
+      />
     );
   if (dialog.kind === 'menu')
     return <FileContextMenu x={dialog.x} y={dialog.y} items={dialog.items} onClose={close} />;

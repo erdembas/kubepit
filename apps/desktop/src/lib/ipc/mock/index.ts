@@ -43,6 +43,8 @@ import './connectionDoctor';
 import './investigations';
 import './networkDiagnostics';
 import './nodeMaintenance';
+// Namespace cleanup: preview + reviewed purge over the fixture store.
+import './namespaceCleanup';
 // Registered last: it wraps every mutating command to derive the demo audit log.
 import './history';
 

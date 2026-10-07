@@ -57,6 +57,7 @@ export const AUDIT_ACTIONS: readonly AuditAction[] = [
   'rightsize',
   'custom-action',
   'network-diagnostics',
+  'namespace-cleanup',
 ];
 
 export function actionLabel(action: AuditAction): string {
@@ -109,6 +110,8 @@ export function actionLabel(action: AuditAction): string {
       return i18n.t('Custom action');
     case 'network-diagnostics':
       return i18n.t('Network diagnostics');
+    case 'namespace-cleanup':
+      return i18n.t('Namespace cleanup');
   }
 }
 
@@ -121,7 +124,8 @@ export function actionTone(action: AuditAction): ActionTone {
     action === 'delete' ||
     action === 'drain' ||
     action === 'helm-uninstall' ||
-    action === 'node-shell'
+    action === 'node-shell' ||
+    action === 'namespace-cleanup'
   )
     return 'danger';
   if (action === 'restart' || action === 'cordon' || action === 'uncordon') return 'neutral';

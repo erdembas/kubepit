@@ -104,6 +104,9 @@ pub fn run() {
             ipc::node_maintenance_preflight,
             ipc::node_maintenance_drain,
             ipc::node_maintenance_progress,
+            // Reviewed namespace purge (preview is read-only)
+            ipc::namespace_cleanup_preview,
+            ipc::namespace_cleanup_run,
             ipc::investigations_list,
             ipc::investigation_get,
             ipc::investigation_capture,

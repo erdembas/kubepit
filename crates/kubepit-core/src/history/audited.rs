@@ -22,6 +22,7 @@ use crate::custom_actions::{
     CustomAction, CustomActionMode, CustomActionResult, CustomActionTarget,
 };
 use crate::manifests::apply::parse_single;
+use crate::namespace_cleanup::{validate_cleanup, NamespaceCleanupRequest, NamespaceCleanupResult};
 use crate::network_diagnostics::{NetworkDiagnosticsReport, NetworkDiagnosticsRequest};
 use crate::node_shell::NodeShellPod;
 use crate::nodes::{NodeMaintenanceDrainRequest, NodeMaintenanceReceipt};
@@ -445,6 +446,56 @@ impl Kubepit {
             Err(error) => Err(anyhow::anyhow!("{error:#}")),
         };
         audit.finish(self, &outcome);
+        result
+    }
+
+    /// `namespace_cleanup_run`, audited: one entry, one target per kind.
+    /// Refusals (read-only, system namespace, confirmation mismatch) and a
+    /// failed inventory never reach the cluster and are not recorded.
+    pub async fn namespace_cleanup_run(
+        &self,
+        cluster_id: &str,
+        request: &NamespaceCleanupRequest,
+    ) -> Result<NamespaceCleanupResult> {
+        self.ensure_writable(cluster_id, "purge a namespace")?;
+        let namespace = validate_cleanup(&request.namespace, Some(&request.confirm_name))?;
+        // The targets must exist before anything is deleted; when the
+        // inventory cannot be read the run fails before a single request.
+        let inventory = self
+            .namespace_cleanup_inventory(cluster_id, &namespace)
+            .await?;
+        let targets: Vec<AuditTarget> = inventory
+            .kinds
+            .iter()
+            .take(MAX_CAPTURED_OBJECTS)
+            .map(|kind| AuditTarget::object(&kind.gvk, Some(&namespace), "(all)"))
+            .collect();
+        let Some(mut audit) = self.audit(cluster_id, AuditAction::NamespaceCleanup, false, targets)
+        else {
+            return self
+                .namespace_cleanup_run_unaudited(cluster_id, &namespace, inventory)
+                .await;
+        };
+        audit.request(json!({
+            "namespace": namespace,
+            "confirm": request.confirm_name.trim(),
+            "objects": inventory.kinds.iter().map(|k| k.names.len()).sum::<usize>(),
+        }));
+        let result = self
+            .namespace_cleanup_run_unaudited(cluster_id, &namespace, inventory)
+            .await;
+        if let Ok(done) = &result {
+            audit.result(format!(
+                "deleted {} objects in {} kinds ({} already gone)",
+                done.deleted,
+                done.kinds.len(),
+                done.already_gone
+            ));
+            if done.failed > 0 {
+                audit.fail(format!("{} objects could not be deleted", done.failed));
+            }
+        }
+        audit.finish(self, &result);
         result
     }
 

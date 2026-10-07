@@ -798,7 +798,8 @@ export type AuditAction =
   | 'node-shell'
   | 'rightsize'
   | 'custom-action'
-  | 'network-diagnostics';
+  | 'network-diagnostics'
+  | 'namespace-cleanup';
 
 export type AuditOutcome = 'ok' | 'error';
 
@@ -3164,4 +3165,5 @@ export interface AiLogPage {
 export * from './connectionDoctor';
 export * from './investigations';
 export * from './nodeMaintenance';
+export * from './namespaceCleanup';
 export * from './networkDiagnostics';

@@ -16,6 +16,7 @@
 //! | [`discovery`]   | served API resources, namespaces                        |
 //! | [`resources`]   | generic list / get / apply / patch / delete / scale     |
 //! | [`nodes`]       | cordon and drain                                        |
+//! | [`namespace_cleanup`] | empty a namespace: preview + reviewed bulk delete |
 //! | [`watch`]       | batched watches (`WatchBatch`)                          |
 //! | [`logs`]        | pod log streaming (`LogChunk`)                          |
 //! | [`metrics`]     | metrics-server usage                                    |
@@ -78,6 +79,7 @@ pub mod kubeconfig;
 pub mod logs;
 pub mod metrics;
 pub mod metrics_history;
+pub mod namespace_cleanup;
 pub mod network_diagnostics;
 pub mod node_shell;
 pub mod nodes;

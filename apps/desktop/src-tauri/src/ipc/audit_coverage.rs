@@ -36,6 +36,10 @@ const NODE_MAINTENANCE: Source = (
     "ipc/node_maintenance.rs",
     include_str!("node_maintenance.rs"),
 );
+const NAMESPACE_CLEANUP: Source = (
+    "ipc/namespace_cleanup.rs",
+    include_str!("namespace_cleanup.rs"),
+);
 
 /// Mutating IPC commands: (command, its source). Each command's body must
 /// call the core method of the same name, defined in `history/audited.rs`.
@@ -62,6 +66,7 @@ const MUTATING: &[(&str, Source)] = &[
     ("custom_action_run", CUSTOM_ACTIONS),
     ("network_diagnostics_run", NETWORK_DIAGNOSTICS),
     ("node_maintenance_drain", NODE_MAINTENANCE),
+    ("namespace_cleanup_run", NAMESPACE_CLEANUP),
 ];
 
 /// Mutating commands that reach the core through another function:
@@ -129,6 +134,7 @@ const NOT_MUTATING: &[&str] = &[
     "investigations_list",
     "node_maintenance_preflight",
     "node_maintenance_progress",
+    "namespace_cleanup_preview",
     "investigation_get",
     "investigation_capture",
     "investigation_update",

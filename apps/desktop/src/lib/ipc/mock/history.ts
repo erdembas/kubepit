@@ -34,6 +34,7 @@ import type {
 } from '@/types';
 import { changedPaths, MAX_PATHS, normalize, seedHistory } from './fixtures/changes';
 import { find, getDb, list } from './fixtures/db';
+import { namespaceCleanupKinds } from './namespaceCleanup';
 import { BOOT, DAY, HOUR, MIN, hashString, iso } from './fixtures/util';
 import { handlers, register, type MockArgs } from './registry';
 
@@ -448,6 +449,28 @@ wrap('node_maintenance_drain', (args) => ({
   request: { reviewed: true, node_uid: args.request.node_uid },
   failure: (result) => (result as import('@/types/nodeMaintenance').NodeMaintenanceReceipt).evictions.some((item) => !['accepted','already-gone'].includes(item.status)) ? 'node-maintenance:evictions-incomplete' : null,
 }));
+wrap('namespace_cleanup_run', (args) => {
+  const request = args.request as Json;
+  const clusterId = String(args.clusterId);
+  const namespace = String(request.namespace ?? '');
+  const targets = namespaceCleanupKinds(clusterId, namespace)
+    .slice(0, 20)
+    .map((kind) => objectTarget(kind.gvk, namespace, '(all)'));
+  return {
+    clusterId,
+    action: 'namespace-cleanup',
+    targets,
+    request: { namespace, confirm: String(request.confirm_name ?? '') },
+    result: (result) => {
+      const done = result as import('@/types/namespaceCleanup').NamespaceCleanupResult;
+      return `deleted ${done.deleted} objects in ${done.kinds.length} kinds (${done.already_gone} already gone)`;
+    },
+    failure: (result) => {
+      const done = result as import('@/types/namespaceCleanup').NamespaceCleanupResult;
+      return done.failed > 0 ? `${done.failed} objects could not be deleted` : null;
+    },
+  };
+});
 wrap('helm_rollback', (args) => ({
   clusterId: String(args.clusterId),
   action: 'helm-rollback',

@@ -95,6 +95,8 @@ pub enum AuditAction {
     CustomAction,
     /// Explicit bounded DNS/TCP/HTTP probes executed in an existing pod.
     NetworkDiagnostics,
+    /// `namespace_cleanup_run`: every resource of one namespace deleted.
+    NamespaceCleanup,
 }
 
 impl AuditAction {
@@ -123,6 +125,7 @@ impl AuditAction {
         Self::Rightsize,
         Self::CustomAction,
         Self::NetworkDiagnostics,
+        Self::NamespaceCleanup,
     ];
 
     /// The wire name (`set-image`), also stored in the database.
@@ -152,6 +155,7 @@ impl AuditAction {
             Self::Rightsize => "rightsize",
             Self::CustomAction => "custom-action",
             Self::NetworkDiagnostics => "network-diagnostics",
+            Self::NamespaceCleanup => "namespace-cleanup",
         }
     }
 

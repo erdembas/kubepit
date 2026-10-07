@@ -2,6 +2,7 @@ import { call, callWithChannel, listenEvent } from './ipc/invoke';
 import { terminalIpc } from './ipc/terminalIpc';
 import { connectionDoctorIpc } from './ipc/connectionDoctorIpc';
 import { investigationsIpc } from './ipc/investigationsIpc';
+import { namespaceCleanupIpc } from './ipc/namespaceCleanupIpc';
 import { networkDiagnosticsIpc } from './ipc/networkDiagnosticsIpc';
 import { nodeMaintenanceIpc } from './ipc/nodeMaintenanceIpc';
 import type {
@@ -155,6 +156,7 @@ export { isTauri } from './ipc/invoke';
 export const ipc = {
   ...connectionDoctorIpc,
   ...investigationsIpc,
+  ...namespaceCleanupIpc,
   ...networkDiagnosticsIpc,
   ...nodeMaintenanceIpc,
   // -- App ------------------------------------------------------------------

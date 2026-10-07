@@ -4,6 +4,7 @@ import * as i18n from '@/i18n/core';
 import {
   ArrowRightLeft,
   Ban,
+  Bomb,
   Bug,
   CalendarSearch,
   ClipboardCheck,
@@ -378,6 +379,17 @@ export function resourceActions({
   });
   // Custom actions that apply to this object (never primary: they live in "More").
   customResourceActions({ clusterId, cluster, gvk, obj }).forEach(add);
+  // Namespace contents: the reviewed bulk delete (multi-step dialog).
+  if (kind === 'Namespace' && !gvk.group)
+    add({
+      id: 'purge-namespace',
+      label: i18n.t('Delete all contents…'),
+      icon: Bomb,
+      tone: 'danger',
+      mutating: true,
+      run: () =>
+        useActionDialogs.getState().open({ kind: 'namespace-cleanup', clusterId, namespace: name }),
+    });
   add({
     id: 'delete',
     label: i18n.t('Delete'),
