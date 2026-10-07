@@ -273,7 +273,9 @@ impl Kubepit {
     }
 
     /// [`Self::start_kubeconfig_watch`] with injectable roots (tests use temp
-    /// dirs). `roots` runs on the watcher thread.
+    /// dirs). The watches and the baseline are armed on the calling thread
+    /// before the call returns: a change made after the call can never be
+    /// missed and swallowed by a late baseline.
     pub fn start_kubeconfig_watch_with(
         self: &Arc<Self>,
         roots: impl FnOnce() -> DiscoveryRoots + Send + 'static,
@@ -285,9 +287,33 @@ impl Kubepit {
         let (tx, rx) = mpsc::channel::<Option<notify::Result<notify::Event>>>();
         let weak = Arc::downgrade(self);
         let events = tx.clone();
+        // Arming here and not on the watcher thread: a change between this
+        // call and a later thread start would produce no event (nothing is
+        // watched yet) and then vanish into the baseline snapshot.
+        let armed = (|| {
+            let mut watcher = notify::recommended_watcher(move |event| {
+                let _ = events.send(Some(event));
+            })
+            .map_err(|e| {
+                tracing::warn!("kubeconfig watching is unavailable: {e}");
+                e
+            })
+            .ok()?;
+            let mut state = WatchState {
+                roots: roots(),
+                targets: Targets::default(),
+                watched: HashSet::new(),
+                baseline: Snapshot::new(),
+            };
+            state.rearm(self, &mut watcher);
+            Some((watcher, state))
+        })();
+        let Some((watcher, state)) = armed else {
+            return;
+        };
         let spawned = std::thread::Builder::new()
             .name("kubeconfig-watch".into())
-            .spawn(move || watch_loop(weak, roots(), events, rx));
+            .spawn(move || watch_loop(weak, watcher, state, rx));
         match spawned {
             Ok(thread) => *slot = Some(WatchHandle { tx, thread }),
             Err(e) => tracing::warn!("could not start the kubeconfig watcher: {e}"),
@@ -390,31 +416,13 @@ impl WatchState {
 
 fn watch_loop(
     app: Weak<Kubepit>,
-    roots: DiscoveryRoots,
-    events: mpsc::Sender<Option<notify::Result<notify::Event>>>,
+    mut watcher: RecommendedWatcher,
+    mut state: WatchState,
     rx: mpsc::Receiver<Option<notify::Result<notify::Event>>>,
 ) {
-    let mut watcher = match notify::recommended_watcher(move |event| {
-        let _ = events.send(Some(event));
-    }) {
-        Ok(watcher) => watcher,
-        Err(e) => {
-            tracing::warn!("kubeconfig watching is unavailable: {e}");
-            return;
-        }
-    };
-    let mut state = WatchState {
-        roots,
-        targets: Targets::default(),
-        watched: HashSet::new(),
-        baseline: Snapshot::new(),
-    };
-    {
-        let Some(app) = app.upgrade() else {
-            return;
-        };
-        state.rearm(&app, &mut watcher);
-    }
+    // The watcher, its targets and the baseline were armed by
+    // `start_kubeconfig_watch_with` before this thread began, so nothing can
+    // change between the start call and here without being seen.
     let mut pending: HashSet<PathBuf> = HashSet::new();
     let mut deadline: Option<Instant> = None;
     let mut next_rearm = Instant::now() + REARM_EVERY;

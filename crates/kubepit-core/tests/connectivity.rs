@@ -300,9 +300,10 @@ async fn watching_reports_new_contexts_and_rotated_credentials() {
         home: Some(roots_home),
         kubeconfig_env: None,
     });
-    tokio::time::sleep(Duration::from_millis(800)).await;
 
-    // A new kubeconfig with an unregistered context appears in ~/.kube.
+    // A new kubeconfig with an unregistered context appears in ~/.kube. It is
+    // written right after the start call: arming is synchronous, so a change
+    // at this point must be seen (never swallowed by the baseline).
     let extra = kubeconfig_for("https://staging.example.test:6443")
         .replace("name: fake", "name: staging")
         .replace("cluster: fake", "cluster: staging")

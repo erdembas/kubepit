@@ -14,6 +14,24 @@ No changes yet.
 
 Henüz değişiklik yok.
 
+## [0.0.9] - 2026-10-07 — Reviewed namespace cleanup / İncelenmiş namespace temizleme
+
+### English
+
+- **Empty a namespace with a reviewed bulk delete:** every Namespace's menu now offers "Delete all contents…". The dialog first reads a read-only inventory — every kind it will touch, with counts and the first object names, in the order they are deleted: controllers first (their workloads terminate with them), ordinary and custom resources next, unmanaged Pods after them, PersistentVolumeClaims and their data last, and churning Events at the very end. Three explicit acknowledgements and the typed namespace name arm the "Delete everything" button; a final confirmation asks once more (typed on production clusters), and the backend re-checks the confirmation itself, so the UI cannot bypass it. Read-only clusters refuse the run, the system namespaces (default, kube-system, kube-public, kube-node-lease) are rejected outright, and the namespace itself is kept. Kinds that cannot be listed mark the plan partial instead of failing silently; the final report tells deleted, already gone and failed objects apart, with each kind's first errors. The run is recorded in the change journal like every audited operation, and the browser demo supports the whole flow against fixture data.
+
+#### Fixed
+
+- **No startup blind spot in kubeconfig watching:** a kubeconfig that appeared or rotated in the short window between the watcher starting and its file watches becoming active was missed, and then treated as if it had always existed — the new context was never announced. The watches and the first snapshot are now armed before the watcher starts, so a change made right after launch is reported like any other.
+
+### Türkçe
+
+- **İncelenmiş toplu silme ile namespace boşaltma:** her Namespace'in menüsünde artık "Tüm içeriği sil…" eylemi var. İletişim kutusu önce salt-okunur bir envanter okur — silineceği sırayla değeceği her tür; denetleyiciler önce (iş yükleri onlarla birlikte kapanır), sonra sıradan ve özel kaynaklar, ardından yönetimsiz Pod'lar, en son verileriyle birlikte PersistentVolumeClaim'ler ve en sonda değişken Event'ler — her tür için adet ve ilk nesne adlarıyla. Üç açık onay ve namespace adının yazılması "Her şeyi sil" düğmesini hazırlar; son bir onay bir kez daha sorar (production kümelerde ad yazılır) ve arka uç onayı kendisi yeniden denetler, arayüz atlatılamaz. Salt-okunur kümeler çalıştırmayı reddeder, sistem namespace'leri (default, kube-system, kube-public, kube-node-lease) baştan reddedilir ve namespace'in kendisi korunur. Listelenemeyen türler planı sessizce başarısız etmek yerine eksik işaretler; son rapor silinen, çoktan gitmiş ve başarısız nesneleri ayırır ve her türün ilk hatalarını gösterir. Çalıştırma, her denetlenen işlem gibi değişiklik günlüğüne kaydedilir; tarayıcı demosu tüm akışı örnek veri üzerinde destekler.
+
+#### Düzeltmeler
+
+- **Kubeconfig izlemede açılış kör noktası yok:** izleyicinin başlamasıyla dosya izlemelerinin etkin olması arasındaki kısa pencerede beliren veya dönen bir kubeconfig kaçıyor, sonra da her zaman varmış gibi ele alınıyordu — yeni bağlam hiç duyurulmuyordu. İzlemeler ve ilk anlık görüntü artık izleyici başlamadan hazırlanıyor; açılıştan hemen sonra yapılan değişiklik de diğerleri gibi bildiriliyor.
+
 ## [0.0.8] - 2026-10-05 — Cluster DNS suffixes and instant service port forwards / Küme DNS ekleri ve anında port yönlendirme
 
 ### English
