@@ -2158,6 +2158,47 @@ export interface PodSecurityDryRun {
   notes: string[];
 }
 
+// -- Gateway API (CRD install manifest, Envoy admin inspection) ---------------
+
+/** Release channel of the Gateway API CRDs. */
+export type GatewayApiChannel = 'standard' | 'experimental';
+
+/**
+ * The official release install manifest (`{channel}-install.yaml`),
+ * downloaded and checked by the backend: only Gateway API
+ * CustomResourceDefinitions and their ValidatingAdmissionPolicies. Applying
+ * it goes through `resource_apply_yaml` (audited, read-only guarded).
+ */
+export interface GatewayApiCrdsManifest {
+  /** `v1.7.0`. */
+  version: string;
+  channel: GatewayApiChannel;
+  /** The release asset that was fetched. */
+  url: string;
+  yaml: string;
+  bytes: number;
+  /** CRD names in document order. */
+  crds: string[];
+  /** Other documents as `Kind name` (ValidatingAdmissionPolicy, …). */
+  others: string[];
+}
+
+/** Read-only Envoy admin endpoints (fixed GET paths; mutating ones are unreachable). */
+export type EnvoyAdminEndpoint =
+  'server_info' | 'config_dump' | 'clusters' | 'listeners' | 'stats' | 'ready' | 'certs';
+
+/** One Envoy admin GET over an in-process port-forward to a proxy pod. */
+export interface EnvoyAdminResponse {
+  endpoint: EnvoyAdminEndpoint;
+  namespace: string;
+  pod: string;
+  port: number;
+  /** HTTP status; a non-2xx status is an answer, not an error. */
+  status: number;
+  body: string;
+  bytes: number;
+}
+
 // -- Cost insight and right-sizing (`cost/`, `rightsizing/` in the core) ------
 //
 // Money in a CostReport is a monthly run rate (730 h) in `currency`, except
@@ -2935,19 +2976,7 @@ export type AiIntent =
 
 /** Assistant answer language; the interface still supports its own EN/TR locales. */
 export type AiLocale =
-  | 'en'
-  | 'tr'
-  | 'de'
-  | 'fr'
-  | 'es'
-  | 'it'
-  | 'pt'
-  | 'ru'
-  | 'ar'
-  | 'hi'
-  | 'ja'
-  | 'ko'
-  | 'zh';
+  'en' | 'tr' | 'de' | 'fr' | 'es' | 'it' | 'pt' | 'ru' | 'ar' | 'hi' | 'ja' | 'ko' | 'zh';
 
 export type AiSectionKind =
   | 'scope'

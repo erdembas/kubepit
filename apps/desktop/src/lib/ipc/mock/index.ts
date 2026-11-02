@@ -45,6 +45,8 @@ import './networkDiagnostics';
 import './nodeMaintenance';
 // Namespace cleanup: preview + reviewed purge over the fixture store.
 import './namespaceCleanup';
+// Gateway API: CRD manifest + install (wraps `resource_apply_yaml`), Envoy admin.
+import './gatewayApi';
 // Registered last: it wraps every mutating command to derive the demo audit log.
 import './history';
 

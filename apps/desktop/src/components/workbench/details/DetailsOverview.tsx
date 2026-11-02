@@ -22,6 +22,7 @@ import { hasRollout } from '@/lib/kube/rollout';
 import { RolloutSection } from './sections/RolloutSection';
 import { HealthBanner } from '../health/HealthBanner';
 import { gitopsSectionsFor } from './sections/gitopsSections';
+import { gatewaySectionsFor } from './sections/gatewayApiSections';
 import { NetworkPolicySections } from '../netpol/PolicySections';
 // Security: Trivy report sections; Trivy, Pod Security and RBAC extras on built-in kinds.
 import { securitySectionsFor } from './sections/securitySections';
@@ -160,7 +161,11 @@ export function DetailsOverview({
 }) {
   i18n.useLocale();
   const Kind =
-    securitySectionsFor(obj) ?? gitopsSectionsFor(obj) ?? BY_KIND[obj.kind] ?? GenericSections;
+    securitySectionsFor(obj) ??
+    gitopsSectionsFor(obj) ??
+    gatewaySectionsFor(obj) ??
+    BY_KIND[obj.kind] ??
+    GenericSections;
   return (
     <>
       {hasRollout(obj) && <RolloutSection {...{ obj, gvk, ctx, isActive, readOnly }} />}

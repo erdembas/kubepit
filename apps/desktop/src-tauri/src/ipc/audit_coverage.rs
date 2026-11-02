@@ -234,6 +234,11 @@ const NOT_MUTATING: &[&str] = &[
     "port_forward_saved_start",
     "port_forward_restart",
     "port_forward_local_port",
+    // Read-only Envoy admin GETs over an in-process port-forward.
+    "envoy_admin",
+    // Gateway API: downloads a public release manifest; applying it goes
+    // through resource_apply_yaml.
+    "gateway_api_crds_manifest",
     // Persistent history and alerts (local state).
     "history_status",
     "history_audit_list",

@@ -11,6 +11,7 @@ import {
   type KindDef,
   type NavSectionId,
 } from './catalog';
+import { gatewayNavResources, isGatewayNavResource } from './gateway/kinds';
 import { gitopsResources, isGitOpsResource } from './gitops/kinds';
 import { kindIcon, SECTION_ICONS } from './icons';
 
@@ -27,6 +28,7 @@ export const VIEW_KEYS = {
   clusterHealth: '@health',
   apiExplorer: '@explain',
   gitops: '@gitops',
+  gatewayApi: '@gateway-api',
   changes: '@changes',
   netpolSimulator: '@netpol',
   upgradeReadiness: '@upgrade',
@@ -79,6 +81,8 @@ function sectionLabel(id: NavSectionId): string {
       return i18n.t('Helm');
     case 'gitops':
       return i18n.t('GitOps');
+    case 'gateway':
+      return i18n.t('Gateway API');
     default:
       return i18n.t('Custom Resources');
   }
@@ -110,6 +114,7 @@ export function viewLabel(key: string, apiResources?: readonly ApiResourceInfo[]
   if (key === VIEW_KEYS.clusterHealth) return i18n.t('Cluster Health');
   if (key === VIEW_KEYS.apiExplorer) return i18n.t('API Explorer');
   if (key === VIEW_KEYS.gitops) return i18n.t('GitOps Overview');
+  if (key === VIEW_KEYS.gatewayApi) return i18n.t('Gateway API');
   if (key === VIEW_KEYS.changes) return i18n.t('Changes');
   if (key === VIEW_KEYS.netpolSimulator) return i18n.t('Network Policy Simulator');
   if (key === VIEW_KEYS.upgradeReadiness) return i18n.t('Upgrade Readiness');
@@ -166,6 +171,36 @@ function gitopsGroup(apiResources: readonly ApiResourceInfo[] | null): NavGroup 
     subgroups: [...subgroups.entries()].map(([group, list]) => ({
       id: `gitops:${group}`,
       label: group,
+      items: list,
+    })),
+  };
+}
+
+const GATEWAY_TERMS =
+  'gateway api gateways routes httproute grpcroute listeners referencegrant envoy topology traffic ingress';
+
+/**
+ * Gateway API (+ Envoy Gateway): only when discovery serves its kinds; the
+ * experimental group and Envoy Gateway's kinds are subgroups.
+ */
+function gatewayGroup(apiResources: readonly ApiResourceInfo[] | null): NavGroup | null {
+  const served = gatewayNavResources(apiResources);
+  if (!served.length) return null;
+  const main = served.filter((r) => r.group === 'gateway.networking.k8s.io');
+  const subgroups = new Map<string, NavItem[]>();
+  for (const r of served.filter((x) => x.group !== 'gateway.networking.k8s.io'))
+    subgroups.set(r.group, [...(subgroups.get(r.group) ?? []), resourceItem(r)]);
+  return {
+    id: 'gateway',
+    label: sectionLabel('gateway'),
+    icon: SECTION_ICONS.gateway,
+    items: [
+      viewItem(VIEW_KEYS.gatewayApi, i18n.t('Overview'), GATEWAY_TERMS),
+      ...main.map(resourceItem),
+    ],
+    subgroups: [...subgroups.entries()].map(([group, list]) => ({
+      id: `gateway:${group}`,
+      label: group === 'gateway.envoyproxy.io' ? 'Envoy Gateway' : group,
       items: list,
     })),
   };
@@ -267,6 +302,10 @@ export function buildNav(apiResources: readonly ApiResourceInfo[] | null): NavGr
           i18n.t('Policy Simulator'),
           'network policy policies netpol simulator reachability can talk connectivity isolation',
         ),
+        // Without the CRDs the overview offers their install; with them it lives in its own section.
+        ...(gatewayNavResources(apiResources).length
+          ? []
+          : [viewItem(VIEW_KEYS.gatewayApi, i18n.t('Gateway API'), GATEWAY_TERMS)]),
         viewItem(VIEW_KEYS.portForwards, i18n.t('Port Forwarding'), 'port forward pf'),
         viewItem(
           VIEW_KEYS.networkDiagnostics,
@@ -308,13 +347,21 @@ export function buildNav(apiResources: readonly ApiResourceInfo[] | null): NavGr
       subgroups: [],
     },
   ];
+  const gateway = gatewayGroup(apiResources);
+  if (gateway) groups.push(gateway);
   const gitops = gitopsGroup(apiResources);
   if (gitops) groups.push(gitops);
 
   const byGroup = new Map<string, NavItem[]>();
   const seen = new Set<string>();
   for (const r of apiResources ?? []) {
-    if (!isCustomResource(r) || r.group === 'metrics.k8s.io' || isGitOpsResource(r)) continue;
+    if (
+      !isCustomResource(r) ||
+      r.group === 'metrics.k8s.io' ||
+      isGitOpsResource(r) ||
+      isGatewayNavResource(r)
+    )
+      continue;
     const key = kindKey(r);
     if (seen.has(key)) continue;
     seen.add(key);

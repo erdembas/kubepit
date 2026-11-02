@@ -62,6 +62,8 @@ mod security;
 mod cost;
 // Recommendations: stored, scheduled right-sizing scans.
 mod recommendations;
+// Gateway API: release CRD manifest download, read-only Envoy admin.
+mod gateway;
 // Guard: every mutating command goes through the audit log.
 #[cfg(test)]
 mod audit_coverage;
@@ -78,6 +80,7 @@ pub use cost::*;
 pub use custom_actions::*;
 pub use files::*;
 pub use fleet::*;
+pub use gateway::*;
 pub use helm::*;
 pub use helm_charts::*;
 pub use helm_preview::*;

@@ -62,6 +62,21 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { NavSectionId } from './catalog';
+// Gateway API and Envoy Gateway kinds.
+import {
+  ArrowDownToLine,
+  Cable,
+  DoorOpen,
+  FileDiff,
+  Funnel,
+  Handshake,
+  ListTree,
+  Route,
+  Router,
+  Settings2,
+  Shapes,
+  Waves,
+} from 'lucide-react';
 // Security view and Trivy Operator reports.
 import {
   BadgeCheck,
@@ -86,6 +101,7 @@ export const SECTION_ICONS: Record<NavSectionId | 'pinned', LucideIcon> = {
   access: Lock,
   helm: Anchor,
   gitops: GitBranch,
+  gateway: Router,
   custom: Puzzle,
   pinned: Layers,
 };
@@ -101,6 +117,7 @@ const KIND_ICONS: Record<string, LucideIcon> = {
   '@health': HeartPulse,
   '@explain': BookOpenText,
   '@gitops': GitBranch,
+  '@gateway-api': Router,
   '@changes': History,
   '@netpol': Radar,
   '@upgrade': CircleArrowUp,
@@ -177,6 +194,26 @@ const KIND_ICONS: Record<string, LucideIcon> = {
   'clustercompliancereports.aquasecurity.github.io': BadgeCheck,
   'sbomreports.aquasecurity.github.io': PackageSearch,
   'clustersbomreports.aquasecurity.github.io': PackageSearch,
+  // Gateway API.
+  'gatewayclasses.gateway.networking.k8s.io': Shapes,
+  'gateways.gateway.networking.k8s.io': DoorOpen,
+  'listenersets.gateway.networking.k8s.io': ListTree,
+  'httproutes.gateway.networking.k8s.io': Route,
+  'grpcroutes.gateway.networking.k8s.io': Route,
+  'tlsroutes.gateway.networking.k8s.io': Lock,
+  'tcproutes.gateway.networking.k8s.io': Cable,
+  'udproutes.gateway.networking.k8s.io': Waves,
+  'referencegrants.gateway.networking.k8s.io': Handshake,
+  'backendtlspolicies.gateway.networking.k8s.io': ShieldCheck,
+  // Envoy Gateway.
+  'envoyproxies.gateway.envoyproxy.io': Settings2,
+  'backendtrafficpolicies.gateway.envoyproxy.io': Gauge,
+  'clienttrafficpolicies.gateway.envoyproxy.io': ArrowDownToLine,
+  'securitypolicies.gateway.envoyproxy.io': ShieldHalf,
+  'envoyextensionpolicies.gateway.envoyproxy.io': Puzzle,
+  'envoypatchpolicies.gateway.envoyproxy.io': FileDiff,
+  'backends.gateway.envoyproxy.io': Server,
+  'httproutefilters.gateway.envoyproxy.io': Funnel,
   // Security: policy reports (wgpolicyk8s.io).
   'policyreports.wgpolicyk8s.io': ScrollText,
   'clusterpolicyreports.wgpolicyk8s.io': ScrollText,

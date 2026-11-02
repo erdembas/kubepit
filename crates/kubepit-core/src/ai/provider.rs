@@ -643,7 +643,10 @@ pub(crate) fn provider_client(
     Ok((base_url, client))
 }
 
-fn tls_config() -> rustls::ClientConfig {
+/// The rustls settings of the app's HTTPS clients (ring provider, system
+/// roots, HTTP/1.1): the assistant providers and the Gateway API manifest
+/// download (`gateway_api/crds.rs`).
+pub(crate) fn tls_config() -> rustls::ClientConfig {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let mut config = rustls::ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()

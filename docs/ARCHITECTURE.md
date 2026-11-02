@@ -1568,7 +1568,8 @@ backend command. Everything under `lib/kube/topology/` is pure and
 deterministic:
 
 - `sources.ts` — the kinds read (a fixed list of built-ins plus Gateway API
-  `Gateway`/`HTTPRoute`/`GRPCRoute` when served), one watch slot each.
+  `Gateway`/`HTTPRoute`/`GRPCRoute` when served), one watch slot each. (The
+  Gateway API view draws its own traffic topology, see Gateway API.)
 - `scope.ts` — one watch scope per slot (`SlotScope`: a namespace list, `[]`
   for cluster-wide, `null` for not watched). The Resource Map and the Map tab
   of namespaced objects, Namespaces and bound PersistentVolumes use one list
@@ -1755,6 +1756,127 @@ the selected pod can reach. The demo backend (`mock/fixtures/netpol.ts`)
 adds default-deny namespaces, label/namespace/ipBlock/named-port rules and
 DNS egress allowances, and Cilium with two Cilium policies on the AKS
 cluster.
+
+## Gateway API (and Envoy Gateway)
+
+Gateway API support is UI-side on top of the generic watches, like GitOps;
+the backend adds two read-only commands (`gateway_api/` in the core,
+`ipc/gateway.rs`): the CRD release manifest download and Envoy admin reads.
+
+- **Kinds and navigation** (`lib/kube/gateway/kinds.ts`): discovery-driven.
+  `gateway.networking.k8s.io` (GatewayClass, Gateway, ListenerSet, HTTP /
+  GRPC / TLS / TCP / UDP routes, ReferenceGrant, BackendTLSPolicy, with
+  their served versions), the experimental `gateway.networking.x-k8s.io`
+  group and Envoy Gateway's `gateway.envoyproxy.io` kinds get their own
+  navigator section (moved out of Custom Resources; the two other groups
+  are subgroups). Without the CRDs the Network section offers the
+  `@gateway-api` view (`VIEW_KEYS.gatewayApi`, command `:gatewayapi`) so
+  the install is reachable.
+- **Model and references** (`model.ts`, `refs.ts`, pure): readers apply the
+  API's defaulting (parentRefs → a Gateway in the route's namespace,
+  backendRefs → a core Service with weight 1, `allowedRoutes.namespaces.from`
+  → `Same`, RequestMirror backends included). Attachment follows the spec:
+  sectionName / port narrow the candidate listeners, then each is checked
+  for `allowedRoutes` namespaces (`Same`, `All`, a label selector evaluated
+  against the namespace; an empty selector matches all) and kinds (the
+  listener's `supportedKinds` status, else `allowedRoutes.kinds`, else the
+  protocol's defaults), and hostname intersection (exact names, `*.suffix`
+  wildcards matching one or more labels, wildcard pairs). Backends resolve
+  to the Service and its ports; a cross-namespace backend or certificate
+  reference needs a ReferenceGrant in the referent's namespace whose `from`
+  and `to` (any name when `to.name` is empty) match. A list that is not
+  complete (`data/listState.ts`, or watched only in the selected namespaces
+  after a forbidden cluster-wide list) makes the answers "unknown" instead
+  of "missing". Non-Gateway parents (GAMMA Services, ListenerSets) are
+  judged by their status only.
+- **Diagnosis** (`diagnosis.ts`): "why isn't this route attached /
+  accepted?" per object, from the controller's conditions (Accepted,
+  ResolvedRefs, Programmed, Conflicted, SupportedVersion, Overridden) with a
+  hint per documented reason, plus the spec checks above, which also
+  explain objects no controller has reported on (an unclaimed class, a
+  route whose Gateway's controller is not running). Gateways get missing or
+  rejected classes, listener conflicts and duplicates, HTTPS/TLS without
+  certificates and cross-namespace certificates without a grant; policies
+  get missing targets and their ancestors' status. Sentences are
+  translated; names, reasons and messages stay verbatim.
+- **Implementations** (`implementations.ts`): detected from
+  `GatewayClass.spec.controllerName` domains (Envoy Gateway, Istio, Cilium,
+  NGINX Gateway Fabric, Kong, Traefik, Contour, kgateway, Gloo, agentgateway,
+  GKE, both AWS controllers, Azure Application Gateway for Containers,
+  Consul, APISIX, HAProxy; unknown controllers show their domain), each with
+  its policy / extension API groups (some limited to the relevant kinds),
+  listed only when served. Product names are never translated.
+- **Topology** (`topology.ts`, pure, deterministic): GatewayClass → Gateway
+  → route → backend in four columns, rows following the column to the left;
+  edges coloured by acceptance and resolution, dashed for mirrors and
+  parents the spec checks reject, placeholder nodes for missing objects; a
+  focus id keeps only one object's upstream and downstream.
+  `gateway/GatewayTopology.tsx` draws it with SVG and theme tokens.
+- **View** (`components/workbench/gateway/`): `useGatewayData` watches
+  every kind cluster-wide (falling back to the selected namespaces when
+  forbidden), Services and Namespaces, and builds the index; the details
+  sections share the same watches. Tabs: overview (implementation cards
+  with classes, gateway and route counts and the served extension kinds;
+  Gateways and routes with status and problem counts), topology, diagnosis
+  (severity filter) and policies (BackendTLSPolicy and Envoy Gateway
+  policies with targets, configured features and status). The header shows
+  the installed CRD bundle (`gateway.networking.k8s.io/bundle-version`
+  annotations). Objects open in the docked details panel
+  (`details/sections/GatewaySections.tsx`, chosen by API group in
+  `gatewayApiSections.ts`): listeners with TLS, allowed routes, attached
+  counts and conditions; attached routes; parents with the listeners that
+  accept them; rules with matches, filters and resolved backends
+  ("no ReferenceGrant", "port not exposed"…); the focused topology;
+  attached policies; ReferenceGrants with the references they permit.
+  Table columns live in `lib/kube/columns/gateway.tsx`.
+- **Envoy Gateway**: Gateways of an Envoy Gateway class link to their proxy
+  fleet through Envoy Gateway's labels
+  (`gateway.envoyproxy.io/owning-gateway-name|namespace`, or
+  `owning-gatewayclass` when the EnvoyProxy merges Gateways), listed with
+  `resource_list` label selectors (polled every 15 s while visible).
+  **Inspect** (`EnvoyInspector.tsx`) calls `envoy_admin`: one HTTP/1.1 GET
+  of a fixed admin path (`/server_info`, `/config_dump`,
+  `/clusters?format=json`, `/listeners?format=json`,
+  `/stats?format=json[&filter=]`, `/ready`, `/certs`) over an in-process
+  `pods/portforward` stream to the pod's 127.0.0.1:19000 (no local
+  listener), 30 s timeout, 32 MiB body cap. Envoy's mutating admin endpoints
+  cannot be reached. Like port forwards it reads only, so read-only
+  clusters allow it; the button is gated on `create pods/portforward`.
+  `envoyAdmin.ts` summarises the JSON (listeners and filter chains, virtual
+  hosts and routes, clusters with endpoint health and request counts, stat
+  highlights; secrets by name only) and `xdsOrigin` maps Envoy Gateway's
+  generated names (`httproute/<ns>/<name>/rule/<i>…`, `<ns>/<gw>/<listener>`)
+  back to the objects. Policy kinds (Backend/Client traffic, Security,
+  Extension, Patch policies, EnvoyProxy) get columns and details: targets,
+  selectors, per-ancestor status, JSON patches.
+- **CRD install** (`gateway/crdInstall.ts`, `GatewayCrdsInstall.tsx`,
+  `lib/kube/gateway/install.ts`): the missing state and the header's
+  upgrade dialog pick a channel (standard / experimental) and a version
+  (default `GATEWAY_API_VERSION`; any `vX.Y.Z` ≥ v1.1.0). The backend's
+  `gateway_api_crds_manifest` downloads
+  `https://github.com/kubernetes-sigs/gateway-api/releases/download/<v>/<channel>-install.yaml`
+  (redirects limited to GitHub's release hosts, 8 MiB cap) and refuses any
+  document that is not a Gateway API CRD or its ValidatingAdmissionPolicy
+  (binding). The UI then applies it with server-side apply through
+  `resource_apply_yaml` — audited and refused on read-only clusters, the
+  same as `kubectl apply --server-side -f <url>` — and refreshes discovery
+  until Gateways are served (like the operator installs). Production
+  clusters ask for the typed version; the button is gated on CRD
+  create/patch RBAC. State lives per cluster outside the components.
+- **Demo**: `mock/fixtures/gateway.ts` serves the standard channel on
+  prod-eu, prod-us and dev and the experimental one on staging; the kind
+  cluster has no Gateway API, so its view offers the install, which the demo
+  completes (`mock/gatewayApi.ts` builds the manifest and flips discovery
+  when it is applied). Envoy Gateway (controller, EnvoyProxy, generated
+  proxy Deployments / Services / pods and every policy kind) runs on
+  prod-eu, staging and dev; prod-us has Istio and an unclaimed NGINX class,
+  dev also Cilium. Staging breaks routes in the documented ways (missing
+  ReferenceGrant, unknown sectionName, hostname mismatch, a namespace the
+  listener does not allow, a policy targeting a missing route) and dev has
+  a canary with a missing backend. The demo `envoy_admin` derives the config
+  dump, clusters (endpoint health from the backing pods) and stats from the
+  same objects; staging's viewer cannot port-forward into
+  `envoy-gateway-system`, which shows the gated path.
 
 ## Diffs
 
@@ -1971,7 +2093,7 @@ dry run is UI-side on top of the generic watches.
   image once (deduplicated by digest), images and workloads ranked worst
   first, CVE search (id, package, title), failed checks grouped by check id,
   exposed secrets and compliance summaries, all with a fixable-only switch.
-  Exposed-secret reports are read as metadata only: the   `match` field is
+  Exposed-secret reports are read as metadata only: the `match` field is
   never read. Reports open in a docked details panel with per-kind sections
   (`details/sections/TrivySections.tsx`: CVE list with installed → fixed
   version and advisory links (https only), checks with remediation,

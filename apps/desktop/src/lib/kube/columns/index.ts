@@ -3,6 +3,7 @@ import { asArray, asString, isObject, spec } from '../accessors';
 import { BUILTIN } from '../catalog';
 import { eventColumns, namespaceColumns, nodeColumns } from './cluster';
 import { customColumns, crdDefinitionColumns } from './custom';
+import { GATEWAY_COLUMNS } from './gateway';
 import { GITOPS_COLUMNS } from './gitops';
 import { POLICY_REPORT_COLUMNS } from './policyreports';
 import { TRIVY_COLUMNS } from './trivy';
@@ -88,6 +89,8 @@ const REGISTRY: Record<string, KindColumns> = {
   [BUILTIN.CustomResourceDefinition.key]: crdDefinitionColumns,
   // GitOps (Argo CD, Flux) kinds.
   ...GITOPS_COLUMNS,
+  // Gateway API and Envoy Gateway kinds.
+  ...GATEWAY_COLUMNS,
   // Security: Trivy Operator reports.
   ...TRIVY_COLUMNS,
   // Security: policy reports (wgpolicyk8s.io).

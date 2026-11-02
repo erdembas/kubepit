@@ -1,5 +1,6 @@
+import type { KubeObject } from '@/types';
 import { put, type ClusterDb } from './db';
-import { GATEWAY_CRDS } from './gateway';
+import { gatewayCrds } from './gateway';
 import { gitopsCrds } from './gitops';
 import { buildInstances } from './instances';
 import { netpolCrds } from './netpol';
@@ -29,6 +30,7 @@ export interface CrdInput {
   columns?: Column[];
   categories?: string[];
   age: number;
+  annotations?: Record<string, string>;
 }
 
 const readyCol = (priority?: number): Column => ({
@@ -152,7 +154,6 @@ export const CRDS: CrdInput[] = [
     categories: ['prometheus-operator'],
     age: 120 * DAY,
   },
-  ...GATEWAY_CRDS,
 ];
 
 /** The `widgets.scale{i}.example.com` CRDs of a scaled demo cluster (`./scale.ts`). */
@@ -178,83 +179,87 @@ export function crdsFor(db: ClusterDb) {
     ...netpolCrds(db),
     ...trivyCrds(db),
     ...policyReportCrds(db),
+    ...gatewayCrds(db),
   ].filter((c) => db.profile.argocd || c.group !== 'argoproj.io');
 }
 
-export function buildCrds(db: ClusterDb, crds: readonly CrdInput[] = crdsFor(db)) {
-  for (const c of crds) {
-    put(
-      db,
-      obj(
-        'apiextensions.k8s.io/v1',
-        'CustomResourceDefinition',
-        meta({
-          name: `${c.plural}.${c.group}`,
-          age: c.age,
-          labels: { 'app.kubernetes.io/name': c.group.split('.')[0]! },
-          annotations: { 'controller-gen.kubebuilder.io/version': 'v0.16.5' },
-        }),
-        {
-          spec: {
-            group: c.group,
-            names: {
-              kind: c.kind,
-              listKind: `${c.kind}List`,
-              plural: c.plural,
-              singular: c.singular,
-              ...(c.shortNames ? { shortNames: c.shortNames } : {}),
-              ...(c.categories ? { categories: c.categories } : {}),
-            },
-            scope: c.scope,
-            conversion: { strategy: 'None' },
-            versions: c.versions.map((name, i) => ({
-              name,
-              served: true,
-              storage: i === c.versions.length - 1,
-              subresources: { status: {} },
-              ...(c.columns ? { additionalPrinterColumns: c.columns } : {}),
-              schema: {
-                openAPIV3Schema: {
-                  type: 'object',
-                  properties: {
-                    apiVersion: { type: 'string' },
-                    kind: { type: 'string' },
-                    metadata: { type: 'object' },
-                    spec: { type: 'object', 'x-kubernetes-preserve-unknown-fields': true },
-                    status: { type: 'object', 'x-kubernetes-preserve-unknown-fields': true },
-                  },
-                },
-              },
-            })),
-          },
-          status: {
-            acceptedNames: {
-              kind: c.kind,
-              plural: c.plural,
-              singular: c.singular,
-              listKind: `${c.kind}List`,
-            },
-            conditions: [
-              {
-                type: 'NamesAccepted',
-                status: 'True',
-                reason: 'NoConflicts',
-                message: 'no conflicts found',
-                lastTransitionTime: new Date(Date.now() - c.age).toISOString(),
-              },
-              {
-                type: 'Established',
-                status: 'True',
-                reason: 'InitialNamesAccepted',
-                message: 'the initial names have been accepted',
-                lastTransitionTime: new Date(Date.now() - c.age).toISOString(),
-              },
-            ],
-            storedVersions: [c.versions[c.versions.length - 1]],
-          },
+/** The CustomResourceDefinition object of a demo CRD. */
+export function crdObject(c: CrdInput): KubeObject {
+  return obj(
+    'apiextensions.k8s.io/v1',
+    'CustomResourceDefinition',
+    meta({
+      name: `${c.plural}.${c.group}`,
+      age: c.age,
+      labels: { 'app.kubernetes.io/name': c.group.split('.')[0]! },
+      annotations: {
+        'controller-gen.kubebuilder.io/version': 'v0.16.5',
+        ...c.annotations,
+      },
+    }),
+    {
+      spec: {
+        group: c.group,
+        names: {
+          kind: c.kind,
+          listKind: `${c.kind}List`,
+          plural: c.plural,
+          singular: c.singular,
+          ...(c.shortNames ? { shortNames: c.shortNames } : {}),
+          ...(c.categories ? { categories: c.categories } : {}),
         },
-      ),
-    );
-  }
+        scope: c.scope,
+        conversion: { strategy: 'None' },
+        versions: c.versions.map((name, i) => ({
+          name,
+          served: true,
+          storage: i === c.versions.length - 1,
+          subresources: { status: {} },
+          ...(c.columns ? { additionalPrinterColumns: c.columns } : {}),
+          schema: {
+            openAPIV3Schema: {
+              type: 'object',
+              properties: {
+                apiVersion: { type: 'string' },
+                kind: { type: 'string' },
+                metadata: { type: 'object' },
+                spec: { type: 'object', 'x-kubernetes-preserve-unknown-fields': true },
+                status: { type: 'object', 'x-kubernetes-preserve-unknown-fields': true },
+              },
+            },
+          },
+        })),
+      },
+      status: {
+        acceptedNames: {
+          kind: c.kind,
+          plural: c.plural,
+          singular: c.singular,
+          listKind: `${c.kind}List`,
+        },
+        conditions: [
+          {
+            type: 'NamesAccepted',
+            status: 'True',
+            reason: 'NoConflicts',
+            message: 'no conflicts found',
+            lastTransitionTime: new Date(Date.now() - c.age).toISOString(),
+          },
+          {
+            type: 'Established',
+            status: 'True',
+            reason: 'InitialNamesAccepted',
+            message: 'the initial names have been accepted',
+            lastTransitionTime: new Date(Date.now() - c.age).toISOString(),
+          },
+        ],
+        storedVersions: [c.versions[c.versions.length - 1]],
+      },
+    },
+  );
+}
+
+export function buildCrds(db: ClusterDb, crds: readonly CrdInput[] = crdsFor(db)) {
+  for (const c of crds) put(db, crdObject(c));
   buildInstances(db);
 }

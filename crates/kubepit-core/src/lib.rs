@@ -58,6 +58,7 @@
 //! | [`rightsizing`] | request recommendations and their patches              |
 //! | [`recommendations`] | recommendation settings, stored and scheduled scans |
 //! | [`ai`]          | assistant: providers, redaction, tools, sessions        |
+//! | [`gateway_api`] | Gateway API CRD manifests, read-only Envoy admin        |
 //!
 //! Push notifications to the UI go through [`EventSink`]; streams take plain
 //! `Fn(T) -> bool` callbacks (return `false` to stop) that the desktop shell
@@ -147,6 +148,8 @@ pub mod rightsizing;
 pub mod recommendations;
 // AI assistant (opt-in): providers, redaction, read-only tools, sessions.
 pub mod ai;
+// Gateway API: release CRD manifests, read-only Envoy admin over a port-forward.
+pub mod gateway_api;
 
 pub use app::Kubepit;
 pub use events::{EventSink, NullSink};

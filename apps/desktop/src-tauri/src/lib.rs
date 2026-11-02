@@ -192,6 +192,9 @@ pub fn run() {
             ipc::access_whoami,
             // Security: Pod Security enforce dry run
             ipc::pod_security_dry_run,
+            // Gateway API: CRD manifest download, read-only Envoy admin
+            ipc::gateway_api_crds_manifest,
+            ipc::envoy_admin,
             // Fleet: metrics history, fleet search
             ipc::metrics_history,
             ipc::metrics_history_fleet,

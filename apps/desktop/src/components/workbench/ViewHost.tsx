@@ -9,6 +9,7 @@ import { PermissionsPage } from './access/PermissionsPage';
 import { HealthPage } from './health/HealthPage';
 import { ApiExplorerPage } from './explain/ApiExplorerPage';
 import { GitOpsPage } from './gitops/GitOpsPage';
+import { GatewayApiPage } from './gateway/GatewayApiPage';
 import { ChangesPage } from './changes/ChangesPage';
 import { CostPage } from './cost/CostPage';
 import { HelmChartsPage } from './helm/HelmChartsPage';
@@ -134,12 +135,19 @@ export const ViewHost = memo(function ViewHost({
   if (activeKind === VIEW.cost)
     return <CostPage clusterId={clusterId} viewKey={activeKind} isActive={isActive} />;
   if (activeKind === VIEW.recommendations)
-    return (
-      <RecommendationsPage clusterId={clusterId} viewKey={activeKind} isActive={isActive} />
-    );
+    return <RecommendationsPage clusterId={clusterId} viewKey={activeKind} isActive={isActive} />;
   if (activeKind === VIEW.gitops)
     return (
       <GitOpsPage
+        clusterId={clusterId}
+        viewKey={activeKind}
+        isActive={isActive}
+        apiResources={apiResources}
+      />
+    );
+  if (activeKind === VIEW.gatewayApi)
+    return (
+      <GatewayApiPage
         clusterId={clusterId}
         viewKey={activeKind}
         isActive={isActive}

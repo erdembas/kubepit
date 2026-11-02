@@ -11,6 +11,7 @@ export type NavSectionId =
   | 'access'
   | 'helm'
   | 'gitops'
+  | 'gateway'
   | 'custom';
 
 export interface KindDef extends Gvk {

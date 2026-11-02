@@ -169,10 +169,18 @@ const CLUSTER_READER = rules([
   [['apiextensions.k8s.io'], ['customresourcedefinitions'], READ],
 ]);
 
+/** Gateway API and Envoy Gateway kinds (read through an aggregated `gateway-api-view` role). */
+const GATEWAY_GROUPS = [
+  'gateway.networking.k8s.io',
+  'gateway.networking.x-k8s.io',
+  'gateway.envoyproxy.io',
+];
+
 const CRD_READER = rules([
   [['cert-manager.io', 'argoproj.io', 'monitoring.coreos.com'], ['*'], READ],
   // Trivy Operator reports (Security view).
   [['aquasecurity.github.io'], ['*'], READ],
+  [GATEWAY_GROUPS, ['*'], READ],
 ]);
 
 const CLUSTER_ADMIN = rules([[['*'], ['*'], ['*']]]);
@@ -219,7 +227,10 @@ const IDENTITIES: Record<string, Identity> = {
         via: 'ClusterRoleBinding "acme-developers-readonly" of ClusterRole "acme:developer-readonly" to Group "acme:developers"',
         rules: [
           ...VIEW.filter((r) => !r.resources.includes('namespaces')),
-          ...rules([[[''], ['namespaces', 'nodes'], READ]]),
+          ...rules([
+            [[''], ['namespaces', 'nodes'], READ],
+            [GATEWAY_GROUPS, ['*'], READ],
+          ]),
         ],
       },
     ],

@@ -106,6 +106,10 @@ import type {
   PodFsTransfer,
   PodMetric,
   PodSecurityDryRun,
+  EnvoyAdminEndpoint,
+  EnvoyAdminResponse,
+  GatewayApiChannel,
+  GatewayApiCrdsManifest,
   PortForward,
   PortForwardRequest,
   PrometheusMetric,
@@ -557,6 +561,35 @@ export const ipc = {
   /** What enforcing `level` at `version` on `namespace` would report about its existing pods. */
   podSecurityDryRun: (clusterId: ClusterId, namespace: string, level: PssLevel, version: string) =>
     call<PodSecurityDryRun>('pod_security_dry_run', { clusterId, namespace, level, version }),
+  // -- Gateway API (read-only; the CRD install applies through resourceApplyYaml) --
+  /**
+   * Downloads the official `{channel}-install.yaml` of a Gateway API release
+   * and checks it holds only Gateway API CRDs (and their admission policies).
+   * Touches no cluster.
+   */
+  gatewayApiCrdsManifest: (channel: GatewayApiChannel, version: string) =>
+    call<GatewayApiCrdsManifest>('gateway_api_crds_manifest', { channel, version }),
+  /**
+   * One read-only Envoy admin GET (`port` defaults to 19000) over an
+   * in-process port-forward to `pod`; `filter` only applies to `stats`.
+   * Allowed on read-only clusters, like port forwards.
+   */
+  envoyAdmin: (
+    clusterId: ClusterId,
+    namespace: string,
+    pod: string,
+    port: number | null,
+    endpoint: EnvoyAdminEndpoint,
+    filter: string | null = null,
+  ) =>
+    call<EnvoyAdminResponse>('envoy_admin', {
+      clusterId,
+      namespace,
+      pod,
+      port,
+      endpoint,
+      filter,
+    }),
   // -- Fleet: metrics history & fleet search -------------------------------
   /** Last 60 minutes sampled in the background while the cluster is connected. */
   metricsHistory: (clusterId: ClusterId, query: MetricsHistoryQuery) =>

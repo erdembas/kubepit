@@ -42,6 +42,7 @@ export const VIEW_COMMANDS: Record<string, string> = {
   health: VIEW_KEYS.clusterHealth,
   explain: VIEW_KEYS.apiExplorer,
   gitops: VIEW_KEYS.gitops,
+  gatewayapi: VIEW_KEYS.gatewayApi,
   changes: VIEW_KEYS.changes,
   recommendations: VIEW_KEYS.recommendations,
   investigations: VIEW_KEYS.investigations,
