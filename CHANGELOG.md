@@ -8,6 +8,16 @@ Bu dosya, Kubepit'in kullanıcıya yönelik sürüm notlarının kaynağıdır; 
 
 ### English
 
+No changes yet.
+
+### Türkçe
+
+Henüz değişiklik yok.
+
+## [0.0.10] - 2026-11-03 — Gateway API and Envoy Gateway tooling / Gateway API ve Envoy Gateway araçları
+
+### English
+
 - **Gateway API, first class:** a new Gateway API section (and `@gateway-api` view) appears when the cluster serves the Gateway API. It lists GatewayClasses, Gateways, HTTP/gRPC/TLS/TCP/UDP routes, ReferenceGrants and BackendTLSPolicies with their own columns, and detects the implementation behind every class from its controller — Envoy Gateway, Istio, Cilium, NGINX Gateway Fabric, Kong, Traefik, Contour, kgateway and more — with links to that implementation's policy and extension resources. The view's tabs show Gateways and routes with their status, a GatewayClass → Gateway → route → Service topology, the attached policies and a diagnosis.
 - **"Why isn't this route working?":** every route, Gateway, class and policy explains its problems from the controller's conditions (with a hint per reason) and Kubepit's own checks of the spec: a parent Gateway or listener that does not exist, a listener that does not allow the route's namespace or kind, hostnames that do not intersect, a missing backend Service or port, a cross-namespace backend or certificate without a ReferenceGrant, rules without backends, listener conflicts, and classes no controller has claimed. Route details resolve each parent to the listeners that accept it and each backend to its Service; ReferenceGrants list the references they permit.
 - **Envoy Gateway tooling:** Gateways served by Envoy Gateway link to their generated proxy Deployment, Service and pods, and **Inspect** reads a proxy's Envoy admin interface (server info, listeners, routes, clusters with endpoint health, stats and the config dump) through a read-only port-forward — generated names link back to the routes they came from. EnvoyProxy, BackendTrafficPolicy, ClientTrafficPolicy, SecurityPolicy, EnvoyExtensionPolicy and EnvoyPatchPolicy get columns and details with their targets and per-Gateway status.
