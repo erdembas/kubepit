@@ -1,13 +1,21 @@
 import * as i18n from '@/i18n';
-import { useCallback, useRef, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Check, Copy, FileTerminal, FolderOpen, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
+import { IconButton } from '@/components/ui/IconButton';
 import { Switch } from '@/components/ui/Switch';
 import { saveCluster } from '@/lib/clusterActions';
 import { guessEnvironment, prettyContextName } from '@/lib/clusterMeta';
 import { kubeconfigErrorMessage } from '@/lib/kubeconfigImport';
-import { ipc } from '@/lib/ipc';
+import {
+  copyKubeconfigExport,
+  copyKubeconfigPath,
+  kubeconfigOnDisk,
+  revealKubeconfig,
+} from '@/lib/kubeconfigClipboard';
+import { credentialStoreName } from '@/lib/credentialStore';
+import { ipc, isTauri } from '@/lib/ipc';
 import { accessDraft, accessFromDraft, withoutCredentials } from '@/lib/prometheusAccess';
 import { useAppStore, type ClusterEditorState } from '@/store/useAppStore';
 import type { ClusterDef, ClusterInput } from '@/types';
@@ -52,6 +60,71 @@ function splitList(value: string) {
     .split(/[\s,]+/)
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+/**
+ * `context · kubeconfig path` (selectable) with copy-path, copy-KUBECONFIG and
+ * reveal buttons. A managed copy kept in the keychain has no file: the line
+ * names the store instead and only the KUBECONFIG button stays.
+ */
+function ConnectionSubtitle({ cluster }: { cluster: ClusterDef }) {
+  i18n.useLocale();
+  const keychain = useAppStore((s) => s.settings?.keychain_kubeconfigs ?? false);
+  const platform = useAppStore((s) => s.appInfo?.platform ?? null);
+  const onDisk = kubeconfigOnDisk(cluster, keychain);
+  const [copied, setCopied] = useState<'path' | 'export' | null>(null);
+
+  useEffect(() => {
+    if (!copied) return;
+    const id = window.setTimeout(() => setCopied(null), 1500);
+    return () => window.clearTimeout(id);
+  }, [copied]);
+
+  const location = onDisk
+    ? cluster.kubeconfig_path
+    : i18n.t('Stored in {keychain}', { keychain: credentialStoreName(platform) });
+  const copiedIcon = <Check className="text-status-running" />;
+
+  return (
+    <div className="flex min-w-0 items-center gap-1">
+      <span className="min-w-0 truncate select-text" title={`${cluster.context} · ${location}`}>
+        {cluster.context} · {location}
+      </span>
+      {onDisk && (
+        <IconButton
+          size="xs"
+          className="-my-1 shrink-0"
+          label={copied === 'path' ? i18n.t('Copied') : i18n.t('Copy kubeconfig path')}
+          icon={copied === 'path' ? copiedIcon : <Copy />}
+          onClick={() =>
+            void copyKubeconfigPath(cluster, false).then((ok) => ok && setCopied('path'))
+          }
+        />
+      )}
+      <IconButton
+        size="xs"
+        className="-my-1 shrink-0"
+        label={copied === 'export' ? i18n.t('Copied') : i18n.t('Copy KUBECONFIG command')}
+        icon={copied === 'export' ? copiedIcon : <FileTerminal />}
+        onClick={() => void copyKubeconfigExport(cluster).then((ok) => ok && setCopied('export'))}
+      />
+      {onDisk && isTauri && (
+        <IconButton
+          size="xs"
+          className="-my-1 shrink-0"
+          label={
+            platform === 'macos'
+              ? i18n.t('Show in Finder')
+              : platform === 'windows'
+                ? i18n.t('Show in Explorer')
+                : i18n.t('Show in file manager')
+          }
+          icon={<FolderOpen />}
+          onClick={() => void revealKubeconfig(cluster)}
+        />
+      )}
+    </div>
+  );
 }
 
 export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState> }) {
@@ -193,7 +266,7 @@ export function ClusterEditor({ state }: { state: NonNullable<ClusterEditorState
   return (
     <Dialog
       title={editing ? i18n.t('Edit cluster') : i18n.t('Add cluster')}
-      subtitle={editing ? `${editing.context} · ${editing.kubeconfig_path}` : undefined}
+      subtitle={editing ? <ConnectionSubtitle cluster={editing} /> : undefined}
       onClose={close}
       size="lg"
       footer={

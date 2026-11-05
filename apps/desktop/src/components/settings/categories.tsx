@@ -10,6 +10,7 @@ import { setSidebarMode, sidebarModeOf, type SidebarMode } from '@/components/si
 import { ipc, isTauri } from '@/lib/ipc';
 import { modChord } from '@/lib/platform';
 import { rebaseDraft } from '@/lib/settingsSync';
+import { credentialStoreName } from '@/lib/credentialStore';
 import { useAppStore } from '@/store/useAppStore';
 import type { Settings } from '@/types';
 import { SettingsPageShell, SettingsSection } from './SettingsView';
@@ -322,12 +323,7 @@ function CredentialStorageSection() {
   const platform = useAppStore((s) => s.appInfo?.platform);
   const managed = useAppStore((s) => s.clusters.filter((c) => c.managed).length);
   const [busy, setBusy] = useState(false);
-  const storeName =
-    platform === 'macos'
-      ? i18n.t('macOS Keychain')
-      : platform === 'windows'
-        ? i18n.t('Windows Credential Manager')
-        : i18n.t('Secret Service (GNOME Keyring, KWallet)');
+  const storeName = credentialStoreName(platform);
   const toggle = async (next: boolean) => {
     setBusy(true);
     try {

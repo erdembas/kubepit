@@ -2,6 +2,7 @@ import * as i18n from '@/i18n';
 import { useRef, useState } from 'react';
 import {
   Copy,
+  FileTerminal,
   FolderInput,
   LayoutDashboard,
   Lock,
@@ -18,6 +19,11 @@ import { FileContextMenu, type FileContextMenuEntry } from '@/components/ui/File
 import { IconButton } from '@/components/ui/IconButton';
 import { connectCluster, disconnectCluster, openAndConnect } from '@/lib/clusterActions';
 import { connState, environmentMeta, isLive } from '@/lib/clusterMeta';
+import {
+  copyKubeconfigExport,
+  copyKubeconfigPath,
+  kubeconfigOnDisk,
+} from '@/lib/kubeconfigClipboard';
 import { cn } from '@/lib/cn';
 import { formatPercent } from '@/lib/format';
 import { usageBarClass } from '@/lib/resourceTone';
@@ -53,6 +59,7 @@ export function ClusterRow({
 }) {
   i18n.useLocale();
   const overview = useAppStore((s) => s.overviews[cluster.id]);
+  const keychain = useAppStore((s) => s.settings?.keychain_kubeconfigs ?? false);
   const state = connState(status);
   const live = isLive(state);
   const env = environmentMeta(cluster.environment);
@@ -107,6 +114,22 @@ export function ClusterRow({
       label: i18n.t('Copy context name'),
       icon: <Copy size={12} />,
       onClick: () => void copyText(cluster.context, cluster.context),
+    },
+    ...(kubeconfigOnDisk(cluster, keychain)
+      ? [
+          {
+            id: 'copy-kubeconfig',
+            label: i18n.t('Copy kubeconfig path'),
+            icon: <Copy size={12} />,
+            onClick: () => void copyKubeconfigPath(cluster),
+          },
+        ]
+      : []),
+    {
+      id: 'copy-kubeconfig-export',
+      label: i18n.t('Copy KUBECONFIG command'),
+      icon: <FileTerminal size={12} />,
+      onClick: () => void copyKubeconfigExport(cluster),
     },
     {
       id: 'move',

@@ -8,6 +8,7 @@ import {
   ChartSpline,
   Copy,
   FileSearch,
+  FileTerminal,
   FolderGit2,
   FolderPlus,
   History,
@@ -27,6 +28,11 @@ import {
 } from 'lucide-react';
 import { connectCluster, disconnectCluster, openAndConnect } from '@/lib/clusterActions';
 import { connState, isLive } from '@/lib/clusterMeta';
+import {
+  copyKubeconfigExport,
+  copyKubeconfigPath,
+  kubeconfigOnDisk,
+} from '@/lib/kubeconfigClipboard';
 import { openObject } from '@/lib/navigation';
 import { applyTheme, effectiveTheme } from '@/lib/theme';
 import { duplicateWindow } from '@/lib/windowing';
@@ -197,6 +203,27 @@ export function clusterActions(cluster: ClusterDef): PaletteItem[] {
       icon: Copy,
       group: 'cluster',
       run: () => void copyText(cluster.context),
+    },
+    ...(kubeconfigOnDisk(cluster)
+      ? [
+          {
+            type: 'action' as const,
+            id: `copy-kubeconfig:${cluster.id}`,
+            label: i18n.t('Copy kubeconfig path'),
+            hint: cluster.kubeconfig_path,
+            icon: Copy,
+            group: 'cluster' as const,
+            run: () => void copyKubeconfigPath(cluster),
+          },
+        ]
+      : []),
+    {
+      type: 'action',
+      id: `copy-kubeconfig-export:${cluster.id}`,
+      label: i18n.t('Copy KUBECONFIG command'),
+      icon: FileTerminal,
+      group: 'cluster',
+      run: () => void copyKubeconfigExport(cluster),
     },
   ];
   items.push({ type: 'header', id: `hdr-go:${cluster.id}`, label: i18n.t('Go to') });

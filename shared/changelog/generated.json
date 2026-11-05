@@ -11,8 +11,8 @@
         "tr": "Gelecek değişiklikler"
       },
       "body": {
-        "en": "No changes yet.",
-        "tr": "Henüz değişiklik yok."
+        "en": "- **Copy and open a cluster's kubeconfig:** in the Edit cluster dialog, buttons next to the kubeconfig path copy the path, copy a ready-to-paste `export KUBECONFIG=…` line (`$env:KUBECONFIG = …` for PowerShell on Windows) and show the file in Finder, Explorer or your file manager; the path itself can now be selected too. The KUBECONFIG line points at the single-context file Kubepit's own terminals use, so it includes the cluster's proxy override. A cluster's menu in the sidebar and its actions in the command palette offer the same \"Copy kubeconfig path\" and \"Copy KUBECONFIG command\". When imported kubeconfigs are kept in the system keychain, the dialog names the keychain instead of a path that does not exist on disk, and the file behind a copied KUBECONFIG line is removed again when the cluster disconnects or Kubepit quits.",
+        "tr": "- **Kümenin kubeconfig'ini kopyalama ve açma:** \"Cluster'ı düzenle\" iletişim kutusunda kubeconfig yolunun yanındaki düğmeler yolu kopyalar, yapıştırmaya hazır bir `export KUBECONFIG=…` satırı (Windows'ta PowerShell için `$env:KUBECONFIG = …`) kopyalar ve dosyayı Finder'da, Dosya Gezgini'nde ya da dosya yöneticisinde gösterir; yolun kendisi de artık seçilebiliyor. KUBECONFIG satırı Kubepit'in kendi terminallerinin kullandığı tek context'li dosyayı gösterir, bu yüzden kümenin proxy ayarını da içerir. Kenar çubuğundaki küme menüsü ve komut paletindeki küme eylemleri de aynı \"Kubeconfig yolunu kopyala\" ve \"KUBECONFIG komutunu kopyala\" seçeneklerini sunar. İçe aktarılan kubeconfig'ler sistem anahtar zincirinde tutulduğunda iletişim kutusu, diskte olmayan bir yol yerine anahtar zincirinin adını gösterir; kopyalanan KUBECONFIG satırının işaret ettiği dosya da küme bağlantısı kesildiğinde ya da Kubepit kapandığında yeniden silinir."
       },
       "actions": []
     },

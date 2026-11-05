@@ -222,7 +222,9 @@ export function KubeconfigFields({
         </div>
       )}
       {mode === 'current' && editing && (
-        <p className="text-fg-dim font-mono text-[11px] break-all">{editing.kubeconfig_path}</p>
+        <p className="text-fg-dim font-mono text-[11px] break-all select-text">
+          {editing.kubeconfig_path}
+        </p>
       )}
       {mode === 'paste' && (
         <Field label={i18n.t('Kubeconfig YAML')}>

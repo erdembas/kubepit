@@ -6,7 +6,8 @@ import { IconButton } from './IconButton';
 
 interface Props {
   title: string;
-  subtitle?: string;
+  /** A string is truncated with a tooltip; a node renders as is (e.g. with a copy button). */
+  subtitle?: ReactNode;
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
@@ -58,11 +59,15 @@ export function Dialog({
         <header className="border-border flex shrink-0 items-start justify-between gap-4 border-b px-4 py-3">
           <div className="min-w-0">
             <h3 className="text-fg truncate text-[13px] font-semibold">{title}</h3>
-            {subtitle && (
-              <p className="text-fg-dim mt-0.5 truncate font-mono text-[11px]" title={subtitle}>
-                {subtitle}
-              </p>
-            )}
+            {typeof subtitle === 'string'
+              ? subtitle && (
+                  <p className="text-fg-dim mt-0.5 truncate font-mono text-[11px]" title={subtitle}>
+                    {subtitle}
+                  </p>
+                )
+              : subtitle && (
+                  <div className="text-fg-dim mt-0.5 min-w-0 font-mono text-[11px]">{subtitle}</div>
+                )}
           </div>
           <IconButton label={i18n.t('Close')} icon={<X />} onClick={onClose} size="md" />
         </header>
