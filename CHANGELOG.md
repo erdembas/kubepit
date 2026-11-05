@@ -8,6 +8,16 @@ Bu dosya, Kubepit'in kullanıcıya yönelik sürüm notlarının kaynağıdır; 
 
 ### English
 
+No changes yet.
+
+### Türkçe
+
+Henüz değişiklik yok.
+
+## [0.0.11] - 2026-11-05 — Copyable kubeconfig paths and KUBECONFIG commands / Kopyalanabilir kubeconfig yolları ve KUBECONFIG komutları
+
+### English
+
 - **Copy and open a cluster's kubeconfig:** in the Edit cluster dialog, buttons next to the kubeconfig path copy the path, copy a ready-to-paste `export KUBECONFIG=…` line (`$env:KUBECONFIG = …` for PowerShell on Windows) and show the file in Finder, Explorer or your file manager; the path itself can now be selected too. The KUBECONFIG line points at the single-context file Kubepit's own terminals use, so it includes the cluster's proxy override. A cluster's menu in the sidebar and its actions in the command palette offer the same "Copy kubeconfig path" and "Copy KUBECONFIG command". When imported kubeconfigs are kept in the system keychain, the dialog names the keychain instead of a path that does not exist on disk, and the file behind a copied KUBECONFIG line is removed again when the cluster disconnects or Kubepit quits.
 
 ### Türkçe
