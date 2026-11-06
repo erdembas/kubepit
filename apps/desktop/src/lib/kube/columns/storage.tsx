@@ -74,6 +74,7 @@ export const pvcColumns: KindColumns = {
       width: '96px',
       cell: (o) => <Tone tone={phaseTone(phase(o))}>{phase(o)}</Tone>,
       sort: phase,
+      facet: phase,
     },
   ]),
 };
@@ -130,6 +131,7 @@ export const pvColumns: KindColumns = {
       width: '96px',
       cell: (o) => <Tone tone={phaseTone(phase(o))}>{phase(o)}</Tone>,
       sort: phase,
+      facet: phase,
     },
   ]),
 };

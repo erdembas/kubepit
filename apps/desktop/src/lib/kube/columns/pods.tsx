@@ -204,6 +204,7 @@ export const podColumns: KindColumns = {
         return <Tone tone={podStatusTone(s)}>{s}</Tone>;
       },
       sort: podStatus,
+      facet: podStatus,
     },
   ],
 };

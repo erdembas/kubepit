@@ -24,6 +24,7 @@ import { sameObject, useBookmarksStore } from '@/store/useBookmarksStore';
 import { dock } from '@/store/useDockStore';
 import { openExplain } from '@/store/useExplainStore';
 import { useWorkbenchStore } from '@/store/useWorkbenchStore';
+import type { ColumnDef } from '@/lib/kube/columns';
 import type { AccessCheck, ApiResourceInfo, Gvk, KubeObject } from '@/types';
 import { deniedMessage, OPEN_GATE, useActionGates } from '../access/gates';
 import { PermissionExplainer } from '../access/PermissionExplainer';
@@ -35,6 +36,7 @@ import { DetailsPanel } from '../details/DetailsPanel';
 import { NamespacePicker } from '../header/NamespacePicker';
 import { toggleObjectBookmark } from '../nav/bookmarkActions';
 import { useEvent } from '../util';
+import { ColumnFilterMenu } from './ColumnFilterMenu';
 import { ColumnMenu } from './ColumnMenu';
 import { ExportDialog } from './ExportDialog';
 import { requestExport, useTableExport } from './exportStore';
@@ -156,6 +158,25 @@ export function ResourcePage({
     (column: string, width: number | null) => store().setColumnWidth(kindKey, column, width),
     [kindKey, store],
   );
+  const onFilter = useCallback(
+    (text: string) => store().setFilter(clusterId, kindKey, text),
+    [clusterId, kindKey, store],
+  );
+  // Facet columns (Status…) pick values from their header; the pick is filter text.
+  const headerAction = useCallback(
+    (column: ColumnDef) =>
+      column.facet ? (
+        <ColumnFilterMenu
+          column={column}
+          kind={t.kind}
+          items={t.snapshot.items}
+          filter={t.filter}
+          onChange={onFilter}
+        />
+      ) : null,
+    [t.kind, t.snapshot.items, t.filter, onFilter],
+  );
+  const facetExample = t.kind.columns.find((c) => c.facet)?.id;
 
   const menuActions = useMemo(
     () => (menu ? resourceActions({ clusterId, cluster, gvk, obj: menu.obj }) : []),
@@ -289,11 +310,18 @@ export function ResourcePage({
               <input
                 ref={keys.filterRef}
                 value={t.filter}
-                onChange={(e) => store().setFilter(clusterId, kindKey, e.target.value)}
-                onKeyDown={(e) => e.key === 'Escape' && store().setFilter(clusterId, kindKey, '')}
+                onChange={(e) => onFilter(e.target.value)}
+                onKeyDown={(e) => e.key === 'Escape' && onFilter('')}
                 placeholder={i18n.t('Filter {kind}…', { kind: label })}
                 aria-label={i18n.t('Filter {kind}', { kind: label })}
-                title={i18n.t('Matches name, namespace and labels (key=value)')}
+                title={
+                  facetExample
+                    ? i18n.t(
+                        'Matches name, namespace and labels (key=value); {example} filters by column value',
+                        { example: `${facetExample}:value,value` },
+                      )
+                    : i18n.t('Matches name, namespace and labels (key=value)')
+                }
                 className="text-fg placeholder:text-fg-dim min-w-0 flex-1 bg-transparent text-[12px] outline-none"
               />
               {t.filter && (
@@ -383,6 +411,7 @@ export function ResourcePage({
             revealKey={revealKey}
             bottomInset={targets.length ? SELECTION_BAR_INSET : 0}
             onResizeColumn={onResizeColumn}
+            headerAction={headerAction}
           />
         )}
         {targets.length > 0 && (

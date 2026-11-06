@@ -41,6 +41,12 @@ export interface ColumnDef {
   text?: (obj: KubeObject, ctx: ColumnContext) => string;
   /** Raw value for JSON exports; defaults to `text` with numbers parsed. */
   value?: (obj: KubeObject, ctx: ColumnContext) => unknown;
+  /**
+   * Categorical value(s) the table can filter by: the header offers a value
+   * picker and the filter box accepts `<id>:<value>,<value>`. Kubernetes data,
+   * never translated text, so filters stay valid across languages.
+   */
+  facet?: (obj: KubeObject) => string | readonly string[];
 }
 
 export interface KindColumns {

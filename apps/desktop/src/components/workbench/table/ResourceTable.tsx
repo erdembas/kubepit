@@ -1,5 +1,5 @@
 import * as i18n from '@/i18n';
-import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { Checkbox } from '@/components/ui/Choice';
 import type { ColumnContext, ColumnDef } from '@/lib/kube/columns';
@@ -116,6 +116,8 @@ export interface ResourceTableProps {
   label: string;
   /** Enables header resize grips; `null` resets a column to its default width. */
   onResizeColumn?: (column: string, width: number | null) => void;
+  /** Extra header control after a column's label (e.g. its value filter). */
+  headerAction?: (column: ColumnDef) => ReactNode;
 }
 
 /** Fixed-row-height windowed table: renders only visible rows, handles 5k+ items. */
@@ -267,6 +269,7 @@ export function ResourceTable(p: ResourceTableProps) {
                   ) : (
                     <span className={cn('truncate', c.compact && 'sr-only')}>{c.label()}</span>
                   )}
+                  {p.headerAction?.(c)}
                 </div>
               );
             })}

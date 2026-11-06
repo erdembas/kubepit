@@ -136,9 +136,13 @@ export const nodeColumns: KindColumns = {
         nodeConditions(o)
           .map((c) => c.label)
           .join(','),
+      facet: (o) => nodeConditions(o).map((c) => c.label),
     },
   ],
 };
+
+const namespacePhase = (o: KubeObject) =>
+  o.metadata.deletionTimestamp ? 'Terminating' : asString(status(o).phase) || 'Active';
 
 export const namespaceColumns: KindColumns = {
   columns: [
@@ -150,12 +154,11 @@ export const namespaceColumns: KindColumns = {
       label: () => i18n.t('Status'),
       width: '96px',
       cell: (o) => {
-        const phase = o.metadata.deletionTimestamp
-          ? 'Terminating'
-          : asString(status(o).phase) || 'Active';
+        const phase = namespacePhase(o);
         return <Tone tone={phaseTone(phase)}>{phase}</Tone>;
       },
       sort: (o) => asString(status(o).phase),
+      facet: namespacePhase,
     },
   ],
 };

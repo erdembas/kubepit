@@ -4,14 +4,123 @@ import type { KubeObject } from '@/types';
 
 /** Pure filter + sort for resource tables (runs on every watch flush). */
 
+/** Whitespace-separated tokens; a double-quoted run (`"a b"`) stays in one token. */
+const TOKEN = /(?:[^\s"]+|"[^"]*"?)+/g;
+/** `<column id>:<values>` (the values may be empty while typing). */
+const FACET_TOKEN = /^([a-z][\w-]*):(.*)$/i;
+
+const tokenize = (text: string): string[] => text.match(TOKEN) ?? [];
+
+/** The facet column a token key names (`status` in `status:Running`), if any. */
+function facetColumn(kind: KindColumns, key: string): ColumnDef | undefined {
+  const id = key.toLowerCase();
+  return kind.columns.find((c) => c.facet && c.id.toLowerCase() === id);
+}
+
+/** `a,"b c",d` → `['a', 'b c', 'd']`. */
+export function splitFacetValues(raw: string): string[] {
+  const out: string[] = [];
+  for (const m of raw.matchAll(/"([^"]*)"?|([^,]+)/g)) {
+    const value = (m[1] ?? m[2] ?? '').trim();
+    if (value) out.push(value);
+  }
+  return out;
+}
+
+/** Quotes a value that would otherwise split the token. */
+export function quoteFacetValue(value: string): string {
+  return /[\s,"]/.test(value) ? `"${value.replace(/"/g, '')}"` : value;
+}
+
+const facetList = (value: string | readonly string[]): readonly string[] =>
+  typeof value === 'string' ? [value] : value;
+
+interface FacetFilter {
+  column: ColumnDef;
+  /** Lower-cased; any one of them matches. */
+  values: Set<string>;
+}
+
+/**
+ * Splits filter text into facet filters (tokens naming a facet column; repeats
+ * of one column are merged) and plain lower-cased terms.
+ */
+export function parseFilter(
+  text: string,
+  kind: KindColumns,
+): { facets: FacetFilter[]; terms: string[] } {
+  const facets = new Map<string, FacetFilter>();
+  const terms: string[] = [];
+  for (const token of tokenize(text)) {
+    const m = FACET_TOKEN.exec(token);
+    const column = m ? facetColumn(kind, m[1]!) : undefined;
+    if (m && column) {
+      const entry = facets.get(column.id) ?? { column, values: new Set<string>() };
+      for (const value of splitFacetValues(m[2]!)) entry.values.add(value.toLowerCase());
+      facets.set(column.id, entry);
+      continue;
+    }
+    const term = token.replace(/"/g, '').toLowerCase();
+    if (term) terms.push(term);
+  }
+  // `status:` with nothing picked yet filters nothing.
+  return { facets: [...facets.values()].filter((f) => f.values.size), terms };
+}
+
+/** The values `text` picks for `columnId`, as written (first spelling wins). */
+export function facetSelection(text: string, kind: KindColumns, columnId: string): string[] {
+  const seen = new Map<string, string>();
+  for (const token of tokenize(text)) {
+    const m = FACET_TOKEN.exec(token);
+    if (!m || facetColumn(kind, m[1]!)?.id !== columnId) continue;
+    for (const value of splitFacetValues(m[2]!))
+      if (!seen.has(value.toLowerCase())) seen.set(value.toLowerCase(), value);
+  }
+  return [...seen.values()];
+}
+
+/** `text` with `columnId`'s facet token replaced by one picking `values` (none removes it). */
+export function withFacet(
+  text: string,
+  kind: KindColumns,
+  columnId: string,
+  values: readonly string[],
+): string {
+  const kept = tokenize(text).filter((token) => {
+    const m = FACET_TOKEN.exec(token);
+    return !(m && facetColumn(kind, m[1]!)?.id === columnId);
+  });
+  if (values.length) kept.push(`${columnId}:${values.map(quoteFacetValue).join(',')}`);
+  return kept.join(' ');
+}
+
+/** Distinct values of a facet column and how many items carry each, most common first. */
+export function facetCounts(
+  items: readonly KubeObject[],
+  column: ColumnDef,
+): Array<{ value: string; count: number }> {
+  const counts = new Map<string, number>();
+  if (!column.facet) return [];
+  for (const o of items) {
+    for (const value of new Set(facetList(column.facet(o))))
+      if (value) counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+  return [...counts]
+    .map(([value, count]) => ({ value, count }))
+    .sort((a, b) => b.count - a.count || collator.compare(a.value, b.value));
+}
+
 export function filterItems(
   items: readonly KubeObject[],
   text: string,
   kind: KindColumns,
 ): KubeObject[] {
-  const tokens = text.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  if (!tokens.length) return items as KubeObject[];
+  const { facets, terms: tokens } = parseFilter(text, kind);
+  if (!tokens.length && !facets.length) return items as KubeObject[];
   return items.filter((o) => {
+    for (const f of facets) {
+      if (!facetList(f.column.facet!(o)).some((v) => f.values.has(v.toLowerCase()))) return false;
+    }
     const labels = o.metadata.labels ?? {};
     let haystack: string | null = null;
     return tokens.every((token) => {
