@@ -8,6 +8,16 @@ Bu dosya, Kubepit'in kullanıcıya yönelik sürüm notlarının kaynağıdır; 
 
 ### English
 
+No changes yet.
+
+### Türkçe
+
+Henüz değişiklik yok.
+
+## [0.0.12] - 2026-11-06 — Filter tables by status / Tabloları duruma göre filtreleme
+
+### English
+
 - **Filter tables by status:** a filter button now sits in the header of the Status column on Pods, PersistentVolumes, PersistentVolumeClaims and Namespaces, and of the Conditions column on Nodes. It lists every value in the table with how many objects have it (CrashLoopBackOff, Pending, Completed…) and shows only the ones you tick; "Only" picks a single value and "Show all" clears the pick. The pick is written into the filter box as `status:CrashLoopBackOff,Error`, so you can also type it, combine it with names and labels (`status:Running app=api`), and keep it in saved views and exports; the count next to the title shows how many rows match.
 
 ### Türkçe
