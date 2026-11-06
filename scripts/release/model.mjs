@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 export const targets = [
   {
     id: 'macos-arm64',
-    runner: 'macos-14',
+    runner: 'macos-15',
     target: 'aarch64-apple-darwin',
     platform: 'macos',
     arch: 'arm64',
@@ -11,7 +11,7 @@ export const targets = [
   },
   {
     id: 'macos-x64',
-    runner: 'macos-14',
+    runner: 'macos-15',
     target: 'x86_64-apple-darwin',
     platform: 'macos',
     arch: 'x64',

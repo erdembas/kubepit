@@ -148,8 +148,8 @@ source separately, verifies all version entries, and records both commits. Use
 
 | Build target  | Runner                        | Packages           |
 | ------------- | ----------------------------- | ------------------ |
-| macOS ARM64   | macos-14                      | DMG                |
-| macOS x64     | macos-14, Rust cross-target   | DMG                |
+| macOS ARM64   | macos-15                      | DMG                |
+| macOS x64     | macos-15, Rust cross-target   | DMG                |
 | Linux x64     | ubuntu-22.04                  | AppImage, DEB, RPM |
 | Linux ARM64   | ubuntu-22.04-arm              | AppImage, DEB, RPM |
 | Windows x64   | windows-2022                  | NSIS EXE, MSI      |
@@ -421,8 +421,8 @@ ve her iki commit'i kaydeder. Yalnızca derleme doğrulaması için `publish=fal
 
 | Derleme hedefi | Runner                           | Paketler           |
 | -------------- | -------------------------------- | ------------------ |
-| macOS ARM64    | macos-14                         | DMG                |
-| macOS x64      | macos-14, Rust çapraz hedefi     | DMG                |
+| macOS ARM64    | macos-15                         | DMG                |
+| macOS x64      | macos-15, Rust çapraz hedefi     | DMG                |
 | Linux x64      | ubuntu-22.04                     | AppImage, DEB, RPM |
 | Linux ARM64    | ubuntu-22.04-arm                 | AppImage, DEB, RPM |
 | Windows x64    | windows-2022                     | NSIS EXE, MSI      |
